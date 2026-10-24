@@ -860,7 +860,8 @@ pub struct LayoutSet {
 /// so the ADR 0007 cross-references are checked over the whole set at
 /// once: a Fluent id listed in `commands.yaml` must appear in at
 /// least one of the two v1 layouts. [`Self::get`] is the runtime
-/// layout switch: it borrows one set by its [`LayoutKind`].
+/// layout switch for the v1 widgets: it borrows one set by its
+/// [`LayoutKind`], when the kind has v1 data.
 #[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct LayoutSets {
     /// Panel Modern: the curated 2013 data (ADR 0061).
@@ -880,18 +881,21 @@ pub struct LayoutSets {
 /// carry their v1 layout plus the [`v2::from_v1`] conversion (ADR
 /// 0061). The borrow keeps every set usable.
 impl LayoutSets {
-    /// The set for `kind` (borrowed, so the caller keeps all four).
+    /// The set for `kind`, when the kind has v1 data (borrowed, so
+    /// the caller keeps all four).
     ///
-    /// A loaded set answers for every kind; the `Option` is kept from
-    /// the pre-P7-03 signature so the callers in `crates/ui` compile
-    /// unchanged (task P7-09 drops it).
+    /// The shell gates every v1 widget on this `Option` (ADR 0032):
+    /// Panel Modern and Panel Classic must draw no v1 widgets, so
+    /// they answer `None` here (task P7-00) and their sets are read
+    /// from the [`Self::panel_modern`] and [`Self::panel_classic`]
+    /// fields. Task P7-09 draws those kinds from [`crate::v2`] and
+    /// drops the `Option`.
     pub fn get(&self, kind: LayoutKind) -> Option<&LayoutSet> {
-        Some(match kind {
-            LayoutKind::PanelModern => &self.panel_modern,
-            LayoutKind::PanelClassic => &self.panel_classic,
-            LayoutKind::Panel2016 => &self.panel_2016,
-            LayoutKind::Panel365 => &self.panel_365,
-        })
+        match kind {
+            LayoutKind::Panel2016 => Some(&self.panel_2016),
+            LayoutKind::Panel365 => Some(&self.panel_365),
+            LayoutKind::PanelModern | LayoutKind::PanelClassic => None,
+        }
     }
 }
 
@@ -1078,17 +1082,17 @@ mod tests {
     }
 
     #[test]
-    fn layout_sets_get_answers_for_every_kind() {
-        // All four kinds have a set (ADR 0061, task P7-03).
+    fn layout_sets_get_answers_only_for_the_v1_data_kinds() {
+        // The shell gates every v1 widget on this `Option` (ADR 0032):
+        // Panel Modern and Panel Classic draw no v1 widgets (task
+        // P7-00), so `get` answers `None` for them until P7-09 draws
+        // those kinds from `v2`. All four sets stay wired: the loader
+        // fills the fields and `tests/v2_layouts.rs` pins them.
         let sets = LayoutSets::default();
-        for kind in [
-            LayoutKind::PanelModern,
-            LayoutKind::PanelClassic,
-            LayoutKind::Panel2016,
-            LayoutKind::Panel365,
-        ] {
-            assert!(sets.get(kind).is_some(), "{kind:?}");
-        }
+        assert!(sets.get(LayoutKind::Panel2016).is_some());
+        assert!(sets.get(LayoutKind::Panel365).is_some());
+        assert_eq!(sets.get(LayoutKind::PanelModern), None);
+        assert_eq!(sets.get(LayoutKind::PanelClassic), None);
     }
 
     #[test]

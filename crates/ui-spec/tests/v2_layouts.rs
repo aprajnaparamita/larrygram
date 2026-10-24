@@ -96,7 +96,15 @@ fn all_four_kinds_load_from_embedded_and_match_disk() {
         let from_disk = loader
             .load(kind)
             .unwrap_or_else(|e| panic!("{kind:?}: {e}"));
-        let embedded = sets.get(kind).expect("the set");
+        // `LayoutSets::get` is the shell's v1-widget seam and answers
+        // `None` for the v2-only kinds (task P7-00), so read the
+        // fields here.
+        let embedded = match kind {
+            LayoutKind::PanelModern => &sets.panel_modern,
+            LayoutKind::PanelClassic => &sets.panel_classic,
+            LayoutKind::Panel2016 => &sets.panel_2016,
+            LayoutKind::Panel365 => &sets.panel_365,
+        };
         assert_eq!(embedded.v2, from_disk.v2, "{kind:?} v2 matches");
         assert_eq!(embedded.theme, from_disk.theme, "{kind:?} theme matches");
         assert_eq!(embedded.icons, from_disk.icons, "{kind:?} icons match");
