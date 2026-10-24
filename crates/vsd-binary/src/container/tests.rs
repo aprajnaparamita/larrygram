@@ -737,6 +737,10 @@ fn the_corpus_files_open_and_carry_the_visio_magic() {
     let files = corpus_files();
     if files.is_empty() {
         eprintln!("skipping: corpus/vsd is absent; run `cargo xtask corpus`");
+        assert!(
+            std::env::var_os("LARRYGRAM_REQUIRE_CORPUS").is_none(),
+            "corpus/vsd is missing and LARRYGRAM_REQUIRE_CORPUS=1 is set"
+        );
         return;
     }
     for path in files {
@@ -759,6 +763,10 @@ fn the_corpus_files_carry_their_summary_streams() {
     let files = corpus_files();
     if files.is_empty() {
         eprintln!("skipping: corpus/vsd is absent; run `cargo xtask corpus`");
+        assert!(
+            std::env::var_os("LARRYGRAM_REQUIRE_CORPUS").is_none(),
+            "corpus/vsd is missing and LARRYGRAM_REQUIRE_CORPUS=1 is set"
+        );
         return;
     }
     for path in files {
