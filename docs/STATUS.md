@@ -15,7 +15,7 @@ Task board. Only the master agent edits this file, on `main`.
 
 - Gate queue: `tools/gate-queue/gateq` (AGENTS.md section 7). Merge gates are `main --quick --corpus`; the idle full check is `main-full` in `/Volumes/Dara/larrygram/worktrees/main-full`.
 - Merged today: P8-04, P8-02, P8-05, P7-02 (merge gate green at `d156f9c`). P7-08 started; P7-06 and P7-07 resumed.
-- P7-03, P7-06, P7-07 and P8-07 merged (`5e6259f`, `d9c7490`, `5fe8f19`, `cb66c6c`). P7-16 merged. Running: P8-08. P7-09 ready (large). Next: P8-10 when P8-08 merges.
+- P7-03, P7-06, P7-07 and P8-07 merged (`5e6259f`, `d9c7490`, `5fe8f19`, `cb66c6c`). P7-16 and P8-08 merged. P7-09 and P8-10 ready.
 - Merged since the restart: P8-06, P7-05, P7-15, P8-03, P7-04, P7-08; P8-07 ready; P7-09 waits for P7-06 and P7-07; P8-03 RED at `51ce31e7`, resubmitted at `fc3fec7b`. Queued (paused for the iTerm2 restart): P7-06, P7-05, P7-03, P7-07, P7-08, P8-03, P7-04, then `main-full` at `13942e0`.
 - Queued, not started: P7-16, P8-08.
 - Master items: the parity matrix's one column per layout (P7-02 open issue); `UiRequest::ShowWelcome` in the shell (P7-09); P8-02/P8-04/P8-05 open issues for P8-03, P8-07, P8-08, P8-10 (in their Result sections); the remote still holds the pre-R4 history until the user force-pushes, and the three backup files wait for that.
@@ -58,10 +58,10 @@ Phase 8: binary `.vsd`, `.vss` and `.vst` import, read-only, in `crates/vsd-bina
 | [P8-04](tasks/P8-04.md) | implementer | P8-01, boundary | A | merged (shapes, transforms, geometry; `collect_with` beside the frozen `collect`; open issues for P8-03, P8-07, P8-08, P8-10) | 13d6641 |
 | [P8-05](tasks/P8-05.md) | implementer | P8-01, boundary | A | merged (text, runs, fields, Character/Paragraph/Tabs rows; P8-11 note: `for` over `Option` with `allow(for_loops_over_fallibles)` in `text.rs` to dodge an untaken branch) | 55d3d00 |
 | [P8-06](tasks/P8-06.md) | implementer | P8-01, boundary | A | merged (styles, colour table, fills, lines; open: the version 6 style names and the style Font cell, for P8-07) | 509c176 |
-| [P8-08](tasks/P8-08.md) | implementer | P8-01, boundary | A | ready, starts second (oracle harness, census) | — |
+| [P8-08](tasks/P8-08.md) | implementer | P8-01, boundary | A | merged (libvisio parity harness, first run 68.7%; census of 15 candidates; open: style resolution on instances, group geometry, field spellings, creation date) | c0ad967 |
 | [P8-07](tasks/P8-07.md) | implementer | P8-02..P8-06 | B | merged (pages, masters, kind, properties, the `import` pipeline; all five corpus files import; open: connects unmapped, template marker, page-size field order for P8-10, summary code page and custom properties, style Font cell, pointer index on `Chunk`) | cb66c6c |
 | [P8-09](tasks/P8-09.md) | implementer | P8-07, P7-09 | C | waiting (open path) | — |
-| [P8-10](tasks/P8-10.md) | test-engineer | P8-07, P8-08 | D | waiting (tests, fuzz, goldens, first parity report) | — |
+| [P8-10](tasks/P8-10.md) | test-engineer | P8-07, P8-08 | D | ready (tests, fuzz, goldens, parity report; master notes on the census and the shared corpus) | — |
 | [P8-11](tasks/P8-11.md) | reviewer | P8-10 | E | waiting | — |
 | [P8-12](tasks/P8-12.md) | coverage-auditor | P8-10 | E | waiting | — |
 | [P8-13](tasks/P8-13.md) | cleanroom-auditor | P8-10 | E | waiting | — |
