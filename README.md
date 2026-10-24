@@ -2,11 +2,11 @@
 
 A clean-room, open-source diagramming app in pure Rust that aims to read and write Microsoft Visio files (.vsdx, with read-only .vsd import).
 
-> **Status: pre-alpha, Phase 6 of 9 done.** The app opens, renders, edits and saves `.vsdx` files: you can draw, move, connect and type into shapes across pages, undo it, save, reopen and keep editing. ShapeSheet formulas are evaluated: edits recalculate dependent cells, and resizing a master-based shape recomputes its geometry. It is not ready for real work: `.vsd` import and the control channel are not built, and visual fidelity is approximate.
+> **Status: pre-alpha, Phase 6 of 9 done; Phases 7 and 8 in progress.** The app opens, renders, edits and saves `.vsdx` files: you can draw, move, connect and type into shapes across pages, undo it, save, reopen and keep editing. ShapeSheet formulas are evaluated: edits recalculate dependent cells, and resizing a master-based shape recomputes its geometry. The Panel Modern and Panel Classic layouts are built and tested but not yet drawn by the app, and the `.vsd` importer reads the corpus files but the app cannot open them yet. It is not ready for real work: visual fidelity is approximate and the control channel is not built.
 
 ## Build status
 
-Last full gate on `main`: **green, 2026-10-24** (Phase 6 closed, commit `cd993df`, 3110 tests). There is no public CI yet; the gate runs locally.
+Last full gate on `main`: **green, 2026-10-24** (commit `6ff5611`, mid Phase 7 and 8). Every merge batch since then passed the quick gate with the corpus tests (latest `51b9889`, 2026-10-25). The gate runs locally, on one machine, through a queue (`tools/gate-queue/`); there is no hosted CI.
 
 | Step | Result |
 |---|---|
@@ -20,14 +20,15 @@ Line coverage per crate (`cargo xtask coverage`):
 
 | Crate | Coverage | Crate | Coverage |
 |---|---:|---|---:|
-| geom | 100.0% | text | 98.9% |
+| geom | 100.0% | text | 99.3% |
 | shapesheet | 97.0% | commands | 98.4% |
 | model | 99.7% | vsdx | 98.2% |
-| ui-spec | 99.4% | larrygram-cli | 96.8% |
-| render | 98.5% | ui | 97.0% |
-| larrygram (desktop) | 80.0% | larrygram-web | 77.9% |
+| ui-spec | 99.4% | larrygram-cli | 97.8% |
+| render | 98.5% | ui | 97.2% |
+| vsd-binary | 100.0% | larrygram-web | 77.9% |
+| larrygram (desktop) | 80.5% | | |
 
-`control` has no code yet (Phase 9). `vsd-binary` holds the Phase 8 skeleton, all stubs with tests (100%).
+These are the numbers from the `6ff5611` full gate. `control` has no code yet (Phase 9).
 
 ## What works today
 
@@ -54,16 +55,27 @@ Line coverage per crate (`cargo xtask coverage`):
   - every edit recalculates inside its undo step, missing values are filled in on open, and the Shape Data pane edits values (`data.set.property`).
 
   Against the values Visio saved in the 15 corpus files, the engine agrees on all 5 184 cells it can compute (100.0%). Resizing a master-based shape recomputes its geometry. Phase report: [docs/progress/phase-6.md](docs/progress/phase-6.md).
+- **Panel layouts and the welcome wizard** (Phase 7, in progress). The app is renamed to Larrygram. Built and tested, waiting for the shell integration (task P7-09):
+  - the layout format v2 loader with its cross-checks, the curated Panel Modern and Panel Classic layouts, and an adapter that converts the 2016 and 365 layouts;
+  - the Panel Modern widgets: tabs, groups, every control kind, the quick access toolbar and the File view;
+  - the Panel Classic widgets: menu bar, toolbars and context menus;
+  - selection contexts that pick the right-click menu and the contextual tabs;
+  - theme tokens on egui, with Selawik as the UI font;
+  - the icon pipeline: an open-licensed icon set (Tabler), rasterised and cached;
+  - the two-page welcome wizard.
+
+  Until P7-09 lands, the app keeps the Panel (2016 data) layout as the default.
+- **Binary `.vsd` import** (Phase 8, in progress), in `crates/vsd-binary`: the compound file reader with its decompression, chunks, shapes and geometry, text, styles, pages, masters and the document properties. `import` reads all five corpus `.vsd` files into documents. Not yet done: opening a `.vsd` in the app (P8-09), connectors (the connect records are not mapped yet), and the libvisio parity report (P8-08, P8-10).
 
 ## Next
 
-The app is renamed to Larrygram, then Phase 7 (the Panel Modern and Panel Classic layouts and the welcome wizard) and Phase 8 (read-only `.vsd` import) run side by side.
+P7-09 builds the window from the active layout (Panel Modern becomes the default) and opens the welcome wizard on first launch. P8-09 then opens `.vsd` files in the app, and P8-10 compares the importer against libvisio.
 
 The live task board is [docs/STATUS.md](docs/STATUS.md). Phase reports are in [docs/progress/](docs/progress/). Command coverage against the command bar is in [docs/parity/controls.md](docs/parity/controls.md).
 
 ## What does not work yet
 
-Functions outside the core set (their cells keep the stored value), the document and master sheets in formulas, `.vsd` import, the MCP/control channel, and most command-bar commands (they are listed but stubbed).
+Functions outside the core set (their cells keep the stored value), the document and master sheets in formulas, opening `.vsd` files in the app, the Panel Modern and Panel Classic layouts in the app window, the MCP/control channel, and most command-bar commands (they are listed but stubbed).
 
 ## Plan (alpha MVP)
 
@@ -77,7 +89,7 @@ Functions outside the core set (their cells keep the stored value), the document
 | 5 | Editing core | done |
 | 6 | ShapeSheet engine (core subset) | done |
 | 7 | Panel Modern and Panel Classic layouts, the Larrygram rename, the welcome wizard | in progress |
-| 8 | Binary .vsd import (read-only) | planned |
+| 8 | Binary .vsd import (read-only) | in progress |
 | 9 | Control channel and MCP | paused |
 
 Out of scope for the alpha: visual fidelity, data linking, containers/lists beyond preservation, VBA/macros, coauthoring, printing, writing .vsd, large stencil libraries.
@@ -94,6 +106,7 @@ Visio and Microsoft 365 are trademarks of Microsoft Corporation. Larrygram is no
 cargo build --workspace
 cargo xtask gate          # full quality gate
 cargo xtask gate --quick  # skip coverage, wasm and fuzz
+tools/gate-queue/gateq submit <id> --skip wasm,fuzz   # agents: run the gate through the queue
 cargo xtask codegen       # regenerate the ShapeSheet table
 cargo xtask corpus        # fetch the test corpus (needs network)
 ```

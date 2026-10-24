@@ -15,7 +15,7 @@ Task board. Only the master agent edits this file, on `main`.
 
 - Gate queue: `tools/gate-queue/gateq` (AGENTS.md section 7). Merge gates are `main --quick --corpus`; the idle full check is `main-full` in `/Volumes/Dara/larrygram/worktrees/main-full`.
 - Merged today: P8-04, P8-02, P8-05, P7-02 (merge gate green at `d156f9c`). P7-08 started; P7-06 and P7-07 resumed.
-- P7-03 merged (`5e6259f`), P7-06 and P7-07 merged (`d9c7490`, `5fe8f19`). Running: P8-07; P7-16 and P8-08 launching. P7-09 waits for P7-16.
+- P7-03, P7-06, P7-07 and P8-07 merged (`5e6259f`, `d9c7490`, `5fe8f19`, `cb66c6c`). Running: P7-16, P8-08. Next: P7-09 when P7-16 merges; P8-10 when P8-08 merges.
 - Merged since the restart: P8-06, P7-05, P7-15, P8-03, P7-04, P7-08; P8-07 ready; P7-09 waits for P7-06 and P7-07; P8-03 RED at `51ce31e7`, resubmitted at `fc3fec7b`. Queued (paused for the iTerm2 restart): P7-06, P7-05, P7-03, P7-07, P7-08, P8-03, P7-04, then `main-full` at `13942e0`.
 - Queued, not started: P7-16, P8-08.
 - Master items: the parity matrix's one column per layout (P7-02 open issue); `UiRequest::ShowWelcome` in the shell (P7-09); P8-02/P8-04/P8-05 open issues for P8-03, P8-07, P8-08, P8-10 (in their Result sections); the remote still holds the pre-R4 history until the user force-pushes, and the three backup files wait for that.
@@ -32,7 +32,7 @@ Phase 7: Panel and Classic layouts, the Larrygram rename and the welcome wizard.
 | [P7-03](tasks/P7-03.md) | implementer | boundary | 1 | merged (v2 loader, cross-checks, adapter; `LayoutSets::get` answers `None` for the curated kinds until P7-09; open: the File view page model, the unmapped contextual tab sets) | 5e6259f |
 | [P7-04](tasks/P7-04.md) | implementer | boundary | 1 | merged (Tabler icon rasteriser, bounded cache, tint; review round removed seven `rustfmt::skip`) | 532ae78 |
 | [P7-05](tasks/P7-05.md) | implementer | boundary | 1 | merged (theme tokens on egui, Selawik, canvas colours from the theme; minor: Selawik embedded a second time from `crates/text/fonts`, for P7-09/P7-11) | 484ec1b |
-| [P7-06](tasks/P7-06.md) | implementer | boundary | 1 | merged (Panel Classic menu bar, toolbars, context menus, list providers; popup-click and split-recent fixes; open: window/page switch ids, toolbar visibility on `Settings`, checked state, dynamic labels, combo lists, count-pin format, for P7-09) | d9c7490 |
+| [P7-06](tasks/P7-06.md) | implementer | boundary | 1 | merged (Panel Classic menu bar, toolbars, context menus, list providers; popup-click and split-recent fixes; open: window/page switch ids, toolbar visibility on `Settings`, checked state, dynamic labels, combo lists, for P7-09; the count snapshot matches the P7-03 pin) | d9c7490 |
 | [P7-07](tasks/P7-07.md) | implementer | boundary | 1 | merged (Panel Modern tabs, groups, controls, File view, QAT; submenu fix; open: command descriptions for tooltips, access keys, theme colours, File view dialogs, for P7-09) | 5fe8f19 |
 | [P7-08](tasks/P7-08.md) | implementer | P7-02 | 1+ | merged (selection contexts, `menu_for`, predicate cross-check; Ungroup and Select All predicates fixed; open: window state, two contexts, 18 toggles, for P7-09) | 8b71f1e |
 | [P7-15](tasks/P7-15.md) | implementer | boundary | 1 | merged (welcome wizard, both pages, kittest flow tests) | 96dbcc1 |
@@ -59,7 +59,7 @@ Phase 8: binary `.vsd`, `.vss` and `.vst` import, read-only, in `crates/vsd-bina
 | [P8-05](tasks/P8-05.md) | implementer | P8-01, boundary | A | merged (text, runs, fields, Character/Paragraph/Tabs rows; P8-11 note: `for` over `Option` with `allow(for_loops_over_fallibles)` in `text.rs` to dodge an untaken branch) | 55d3d00 |
 | [P8-06](tasks/P8-06.md) | implementer | P8-01, boundary | A | merged (styles, colour table, fills, lines; open: the version 6 style names and the style Font cell, for P8-07) | 509c176 |
 | [P8-08](tasks/P8-08.md) | implementer | P8-01, boundary | A | ready, starts second (oracle harness, census) | — |
-| [P8-07](tasks/P8-07.md) | implementer | P8-02..P8-06 | B | ready (pages, masters, pipeline) | — |
+| [P8-07](tasks/P8-07.md) | implementer | P8-02..P8-06 | B | merged (pages, masters, kind, properties, the `import` pipeline; all five corpus files import; open: connects unmapped, template marker, page-size field order for P8-10, summary code page and custom properties, style Font cell, pointer index on `Chunk`) | cb66c6c |
 | [P8-09](tasks/P8-09.md) | implementer | P8-07, P7-09 | C | waiting (open path) | — |
 | [P8-10](tasks/P8-10.md) | test-engineer | P8-07, P8-08 | D | waiting (tests, fuzz, goldens, first parity report) | — |
 | [P8-11](tasks/P8-11.md) | reviewer | P8-10 | E | waiting | — |
