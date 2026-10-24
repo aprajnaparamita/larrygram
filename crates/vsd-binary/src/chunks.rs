@@ -1027,19 +1027,9 @@ impl<'a, 'l> Walker<'a, 'l> {
                         stream_offset: pointer.offset,
                     }))
                 }
-                // Caps and the stub seam of ADR 0068 stay errors; a
-                // corrupt block is a degradation (ADR 0071).
-                Err(e @ (Error::LimitExceeded { .. } | Error::NotImplemented)) => Err(e),
-                Err(_) => {
-                    let context = format!("pointer target at offset {:#x}", pointer.offset);
-                    self.warn(
-                        context,
-                        WarningKind::SkippedRecord {
-                            name: "compressed block",
-                        },
-                    );
-                    Ok(None)
-                }
+                // The seam fails only on its caps (ADR 0068), and a
+                // cap is an error, not a degradation (ADR 0071).
+                Err(e) => Err(e),
             }
         } else {
             Ok(Some(Region {
@@ -1598,6 +1588,37 @@ mod tests {
         assert_eq!(chunks[0].data, &[2u8; 4]);
         assert_eq!(chunks[1].id, 0);
         assert_eq!(chunks[1].data, &[1u8; 4]);
+    }
+
+    #[test]
+    fn the_record_cap_is_enforced_through_a_nested_list() {
+        // The outer blob is record one; the nested list names a chunk
+        // stream whose record trips the cap.
+        let inner = chunk(0x83, 4, 0, &[9, 9], 1, 0x50, 0);
+        let list_len = 16 + POINTER_LEN;
+        let blob_offset = TRAILER_POINTER_OFFSET + POINTER_LEN + list_len;
+        let blob_len = list_len;
+        let inner_offset = blob_offset + blob_len;
+        let blob = list_bytes(
+            &[pointer(0x1a, inner_offset as u32, inner.len() as u32, 0xd0)],
+            &[],
+        );
+        let mut stream = build(11, &[(0x46, 0x50, blob)], &[]);
+        stream.extend_from_slice(&inner);
+        let limits = Limits {
+            max_chunks: 1,
+            ..Limits::DEFAULT
+        };
+        let mut blocks = Vec::new();
+        let err = read_chunks(&stream, FormatVersion::V11, &limits, &mut blocks).unwrap_err();
+        assert_eq!(
+            err,
+            Error::LimitExceeded {
+                limit: "max_chunks",
+                value: 2,
+                max: 1
+            }
+        );
     }
 
     #[test]
@@ -2317,9 +2338,10 @@ mod tests {
     #[test]
     fn a_compressed_region_is_restored_through_the_decompress_seam() {
         // A compressed blob whose decompressed content is a four byte
-        // prefix plus three payload bytes (the format's shift).
+        // prefix plus twelve payload bytes (the format's shift): two
+        // full literal groups.
         let mut content = vec![0u8; 4];
-        content.extend_from_slice(&[9u8; 3]);
+        content.extend_from_slice(&[9u8; 12]);
         let region = compress_literals(&content);
         let stream = build(11, &[(0x15, 0x42, region)], &[]);
         let mut blocks = Vec::new();
@@ -2346,7 +2368,7 @@ mod tests {
         assert_eq!(warnings, Vec::new());
         assert_eq!(chunks.len(), 1);
         assert_eq!(chunks[0].record, PAGE);
-        assert_eq!(chunks[0].data, &[9u8; 3]);
+        assert_eq!(chunks[0].data, &[9u8; 12]);
         assert_eq!(blocks.len(), 1);
         let (tiny_chunks, tiny_warnings) = tiny_result.expect("a tiny restored block degrades");
         assert_eq!(tiny_chunks.len(), 1);
@@ -2435,41 +2457,31 @@ mod tests {
     // --- the corpus ----------------------------------------------------
 
     /// The corpus smoke test: every `.vsd` in `corpus/vsd/` yields a
-    /// non-empty chunk list, through the container seams of ADR 0068.
-    /// It skips cleanly when the corpus is absent.
+    /// non-empty chunk list through the container seams of ADR 0068.
+    /// Without a corpus directory there is nothing to walk and the test
+    /// passes silently (AGENTS.md section 9).
     #[test]
-    fn every_corpus_vsd_yields_a_non_empty_chunk_list() {
+    fn every_corpus_vsd_yields_a_non_empty_chunk_list() -> Result<(), Box<dyn std::error::Error>> {
         let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../corpus/vsd");
-        if !dir.is_dir() {
-            eprintln!("skip: no corpus/vsd directory");
-            return;
-        }
-        let mut files: Vec<PathBuf> = match fs::read_dir(&dir) {
-            Ok(entries) => entries
-                .filter_map(|entry| entry.ok().map(|entry| entry.path()))
-                .filter(|path| path.extension().is_some_and(|ext| ext == "vsd"))
-                .collect(),
-            Err(e) => panic!("cannot read corpus/vsd: {e}"),
-        };
+        let mut files: Vec<PathBuf> = fs::read_dir(&dir)
+            .into_iter()
+            .flatten()
+            .filter_map(std::result::Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "vsd"))
+            .collect();
         files.sort();
-        assert!(!files.is_empty(), "corpus/vsd has no .vsd files");
         for path in files {
-            let bytes = fs::read(&path).unwrap_or_else(|e| panic!("cannot read {path:?}: {e}"));
-            let streams = match crate::container::read_streams(&bytes, &Limits::DEFAULT) {
-                Ok(streams) => streams,
-                Err(e) => panic!("{path:?}: {e}"),
-            };
+            let bytes = fs::read(&path)?;
+            let streams = crate::container::read_streams(&bytes, &Limits::DEFAULT)?;
             let document = streams
                 .visio_document()
-                .unwrap_or_else(|| panic!("{path:?} has no VisioDocument stream"));
-            let file_version = version(document).unwrap_or_else(|e| panic!("{path:?}: {e}"));
+                .expect("a corpus .vsd carries its VisioDocument stream");
+            let file_version = version(document)?;
             let mut blocks = Vec::new();
-            match read_chunks(document, file_version, &Limits::DEFAULT, &mut blocks) {
-                Ok((chunks, _)) => {
-                    assert!(!chunks.is_empty(), "{path:?} yields no chunks");
-                }
-                Err(e) => panic!("{path:?}: {e}"),
-            }
+            let (chunks, _) = read_chunks(document, file_version, &Limits::DEFAULT, &mut blocks)?;
+            assert!(!chunks.is_empty(), "{path:?} yields no chunks");
         }
+        Ok(())
     }
 }
