@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use larrygram_vsd_binary::model::{
     CellValue, Document, DocumentKind, MasterId, Sheet, TextContent, TextPart,
 };
-use larrygram_vsd_binary::{import, Error, Limits};
+use larrygram_vsd_binary::{Error, Limits, import};
 
 /// The corpus directory with the real `.vsd` files.
 fn corpus_dir() -> PathBuf {
