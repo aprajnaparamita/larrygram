@@ -25,10 +25,6 @@
 //! to the names the `.vsdx` reader uses, so a binary drawing and its
 //! `.vsdx` twin carry the same document property names.
 
-// The module has no caller until the pipeline (P8-07) is wired; the
-// allow is removed then.
-#![allow(dead_code)]
-
 use std::collections::HashSet;
 
 use crate::error::Error;
@@ -45,6 +41,7 @@ pub const SUMMARY_INFORMATION: &str = "\u{5}SummaryInformation";
 pub const DOCUMENT_SUMMARY_INFORMATION: &str = "\u{5}DocumentSummaryInformation";
 
 /// The Visio stream magic: the first bytes of a `VisioDocument` stream.
+#[allow(dead_code)] // the tests build streams that open with the magic
 const VISIO_MAGIC: &[u8] = b"Visio (TM) Drawing\r\n\0";
 
 /// The compound file signature (MS-CFB 2.2).
@@ -66,6 +63,7 @@ const DIFSECT: u32 = 0xFFFF_FFFC;
 const HEADER_DIFAT_ENTRIES: usize = 109;
 
 /// The number of bytes in the compound file header.
+#[allow(dead_code)] // the tests size their fixtures with it
 const HEADER_SIZE: usize = 512;
 
 /// The size of the sliding window the decompressor uses.

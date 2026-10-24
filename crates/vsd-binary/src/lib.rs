@@ -24,9 +24,10 @@
 //! `style`, `pages`, `shape` and `text` map the records into the model
 //! under `pipeline`.
 //!
-//! Alpha: task P8-01 defines the interface; the Phase 8 tasks
-//! implement the modules. Until then [`import`] and the module entry
-//! points return [`Error::NotImplemented`].
+//! The reader entry points of every layer are re-exported here (the
+//! container and chunk readers, the four domain collectors and the
+//! text options) so a test harness or a later phase can drive one layer
+//! on its own; [`import`] drives all of them.
 //!
 //! # Never crash
 //!
@@ -47,10 +48,19 @@ mod style;
 mod text;
 mod warning;
 
-pub use chunks::{Chunk, FormatVersion, Record, VERSION_OFFSET};
-pub use container::{Stream, Streams, VISIO_DOCUMENT};
+pub use chunks::{Chunk, FormatVersion, Record, VERSION_OFFSET, read_chunks, version};
+pub use container::{
+    DOCUMENT_SUMMARY_INFORMATION, SUMMARY_INFORMATION, Stream, Streams, SummaryProperty,
+    SummaryValue, VISIO_DOCUMENT, decompress, read_streams, read_summary_properties,
+};
 pub use error::Error;
 pub use limits::Limits;
+pub use pages::{
+    collect as collect_pages, collect_summary_properties, collect_with as collect_pages_with,
+};
+pub use shape::{collect as collect_shapes, collect_with as collect_shapes_with};
+pub use style::{collect as collect_styles, collect_with as collect_styles_with};
+pub use text::{CodePage, TextOptions, collect as collect_text, collect_with as collect_text_with};
 pub use warning::{ImportWarning, WarningKind};
 
 pub use larrygram_model as model;
@@ -83,12 +93,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn import_is_a_stub_returning_not_implemented() {
-        let err = import(&[], &Limits::DEFAULT).unwrap_err();
-        assert_eq!(err, Error::NotImplemented);
-    }
-
-    #[test]
     fn an_import_pairs_a_document_with_its_warnings() {
         let import = Import {
             document: model::Document::new(),
@@ -104,6 +108,17 @@ mod tests {
     #[test]
     fn the_reexports_name_the_layers() {
         assert_eq!(VISIO_DOCUMENT, "VisioDocument");
+        assert_eq!(SUMMARY_INFORMATION, "\u{5}SummaryInformation");
+        assert_eq!(
+            DOCUMENT_SUMMARY_INFORMATION,
+            "\u{5}DocumentSummaryInformation"
+        );
         assert_eq!(VERSION_OFFSET, 0x1a);
+    }
+
+    #[test]
+    fn empty_bytes_are_an_error_not_a_panic() {
+        let err = import(&[], &Limits::DEFAULT).unwrap_err();
+        assert!(matches!(err, Error::NotAVisioFile(_) | Error::Invalid(_)));
     }
 }
