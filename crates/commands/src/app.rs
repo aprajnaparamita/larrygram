@@ -5,6 +5,7 @@
 //! callers (the CLI today, the JSON control channel and MCP in Phase 8)
 //! share one state type with the UI. The egui crates never appear.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use larrygram_model::{Document, PageId};
@@ -278,16 +279,22 @@ impl DocumentSession {
 
 /// The persisted user settings (ADR 0029, ADR 0032).
 ///
-/// A missing field is corrupt, not a partial load (ADR 0032), with one
-/// exception: `ui_layout` has a serde default and carries the
-/// pre-rename spellings as aliases, so a settings store saved before
-/// the P7-00 rename still loads (task P7-00).
+/// A missing field is corrupt, not a partial load (ADR 0032), with
+/// two exceptions: `ui_layout` and `default_layout` carry the
+/// pre-rename spellings as aliases and the current default, so a
+/// settings store saved before the P7-00 rename still loads, and the
+/// Phase 7 fields (`welcome_seen`, the per-layout state) have serde
+/// defaults, so a Phase 6 store loads unchanged (task P7-09).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Settings {
     /// The Panel layout (ADR 0032).
     #[serde(default = "default_ui_layout")]
     pub ui_layout: LayoutKind,
+    /// The layout the welcome wizard chose (ADR 0066). The shell
+    /// keeps it in step with `ui_layout`.
+    #[serde(default = "default_ui_layout")]
+    pub default_layout: LayoutKind,
     /// Whether the grid is drawn by default.
     pub show_grid: bool,
     /// Whether the rulers are drawn by default.
@@ -296,23 +303,45 @@ pub struct Settings {
     pub units: DisplayUnits,
     /// Recently opened files, most recent first.
     pub recent_files: Vec<PathBuf>,
+    /// Whether the welcome wizard has been shown (ADR 0066). It opens
+    /// on launch only while this is `false`, and both Cancel and Start
+    /// set it.
+    #[serde(default)]
+    pub welcome_seen: bool,
+    /// Panel Classic toolbar visibility, per window mode:
+    /// `"<mode>/<toolbar id>"` to the user's choice (ADR 0061).
+    #[serde(default)]
+    pub panel_classic_toolbars: BTreeMap<String, bool>,
+    /// Whether the Panel Modern command bar is collapsed to the tab
+    /// strip.
+    #[serde(default)]
+    pub command_bar_collapsed: bool,
+    /// The last active core tab of the Panel Modern command bar (the
+    /// tab id).
+    #[serde(default)]
+    pub last_core_tab: Option<String>,
 }
 
-/// The serde default of [`Settings::ui_layout`]: the pre-rename
-/// default layout, for a settings store written before the field
-/// existed (task P7-00).
+/// The serde default of [`Settings::ui_layout`] and
+/// [`Settings::default_layout`]: Panel Modern, the default layout for
+/// new stores (ADR 0061, task P7-09).
 fn default_ui_layout() -> LayoutKind {
-    LayoutKind::Panel2016
+    LayoutKind::PanelModern
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            ui_layout: LayoutKind::Panel2016,
+            ui_layout: LayoutKind::PanelModern,
+            default_layout: LayoutKind::PanelModern,
             show_grid: true,
             show_rulers: true,
             units: DisplayUnits::Inches,
             recent_files: Vec::new(),
+            welcome_seen: false,
+            panel_classic_toolbars: BTreeMap::new(),
+            command_bar_collapsed: false,
+            last_core_tab: None,
         }
     }
 }
@@ -609,11 +638,69 @@ mod tests {
     }
 
     #[test]
-    fn settings_default_to_the_2016_layout() {
+    fn settings_default_to_panel_modern_and_first_run_state() {
+        // New stores default to Panel Modern (ADR 0061, task P7-09),
+        // and a fresh install has not seen the welcome wizard (ADR
+        // 0066).
         let settings = Settings::default();
-        assert_eq!(settings.ui_layout, LayoutKind::Panel2016);
+        assert_eq!(settings.ui_layout, LayoutKind::PanelModern);
+        assert_eq!(settings.default_layout, LayoutKind::PanelModern);
+        assert!(!settings.welcome_seen);
+        assert!(settings.panel_classic_toolbars.is_empty());
+        assert!(!settings.command_bar_collapsed);
+        assert_eq!(settings.last_core_tab, None);
         assert_eq!(settings.units, DisplayUnits::Inches);
         assert!(settings.recent_files.is_empty());
+    }
+
+    #[test]
+    fn a_phase_6_settings_store_loads_unchanged() {
+        // The exact JSON a Phase 6 build wrote: no Phase 7 fields.
+        let old = concat!(
+            r#"{"ui_layout":"Panel2016","show_grid":false,"show_rulers":true,"#,
+            r#""units":"Inches","recent_files":["/tmp/a.vsdx"]}"#
+        );
+        let settings: Settings = serde_json::from_str(old).expect("the Phase 6 store loads");
+        assert_eq!(settings.ui_layout, LayoutKind::Panel2016, "stored value kept");
+        assert_eq!(
+            settings.default_layout,
+            LayoutKind::PanelModern,
+            "the Phase 7 default fills in"
+        );
+        assert!(!settings.show_grid);
+        assert_eq!(
+            settings.recent_files,
+            vec![PathBuf::from("/tmp/a.vsdx")],
+            "stored value kept"
+        );
+        assert!(!settings.welcome_seen);
+        assert!(settings.panel_classic_toolbars.is_empty());
+        assert!(!settings.command_bar_collapsed);
+        assert_eq!(settings.last_core_tab, None);
+    }
+
+    #[test]
+    fn a_settings_store_written_before_the_rename_still_loads() {
+        let old = concat!(
+            r#"{"ui_layout":"Visio2016","show_grid":false,"show_rulers":true,"#,
+            r#""units":"Inches","recent_files":[]}"#
+        );
+        let settings: Settings = serde_json::from_str(old).expect("the old store loads");
+        assert_eq!(settings.ui_layout, LayoutKind::Panel2016);
+        assert_eq!(settings.default_layout, LayoutKind::PanelModern);
+    }
+
+    #[test]
+    fn the_per_layout_state_round_trips() {
+        let mut settings = Settings::default();
+        settings
+            .panel_classic_toolbars
+            .insert("drawing/standard".to_owned(), false);
+        settings.command_bar_collapsed = true;
+        settings.last_core_tab = Some("tab.insert".to_owned());
+        let text = serde_json::to_string(&settings).expect("serialize");
+        let back: Settings = serde_json::from_str(&text).expect("deserialize");
+        assert_eq!(back, settings);
     }
 
     #[test]
