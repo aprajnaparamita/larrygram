@@ -1089,10 +1089,40 @@ mod tests {
         // those kinds from `v2`. All four sets stay wired: the loader
         // fills the fields and `tests/v2_layouts.rs` pins them.
         let sets = LayoutSets::default();
-        assert!(sets.get(LayoutKind::Panel2016).is_some());
-        assert!(sets.get(LayoutKind::Panel365).is_some());
+        let cases = [
+            (LayoutKind::Panel2016, true),
+            (LayoutKind::Panel365, true),
+            (LayoutKind::PanelModern, false),
+            (LayoutKind::PanelClassic, false),
+        ];
+        for (kind, has_v1) in cases {
+            assert_eq!(sets.get(kind).is_some(), has_v1, "{kind:?}");
+        }
+        assert_eq!(
+            sets.get(LayoutKind::Panel2016).map(|s| &s.layout),
+            Some(&sets.panel_2016.layout)
+        );
         assert_eq!(sets.get(LayoutKind::PanelModern), None);
         assert_eq!(sets.get(LayoutKind::PanelClassic), None);
+    }
+
+    #[test]
+    fn the_thin_accessors_run_through_function_pointers() {
+        // The shell and the lookup users call these accessors
+        // directly; calling them through function pointers here too
+        // keeps the standalone instrumented copies exercised whatever
+        // the inliner decides, so the coverage of the seams stays
+        // stable across builds.
+        let sets = LayoutSets::default();
+        let get: fn(&LayoutSets, LayoutKind) -> Option<&LayoutSet> = LayoutSets::get;
+        assert!(get(&sets, LayoutKind::Panel2016).is_some());
+        assert_eq!(get(&sets, LayoutKind::PanelClassic), None);
+        let empty: fn() -> CommandLookup = CommandLookup::empty;
+        let lookup = empty();
+        let len: fn(&CommandLookup) -> usize = CommandLookup::len;
+        let is_empty: fn(&CommandLookup) -> bool = CommandLookup::is_empty;
+        assert_eq!(len(&lookup), 0);
+        assert!(is_empty(&lookup));
     }
 
     #[test]

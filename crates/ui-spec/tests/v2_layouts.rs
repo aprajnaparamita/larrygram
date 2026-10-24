@@ -105,6 +105,11 @@ fn all_four_kinds_load_from_embedded_and_match_disk() {
             LayoutKind::Panel2016 => &sets.panel_2016,
             LayoutKind::Panel365 => &sets.panel_365,
         };
+        // The two v1-data kinds also answer through the shell's
+        // `LayoutSets::get` seam.
+        if matches!(kind, LayoutKind::Panel2016 | LayoutKind::Panel365) {
+            assert_eq!(sets.get(kind), Some(embedded), "{kind:?} get matches");
+        }
         assert_eq!(embedded.v2, from_disk.v2, "{kind:?} v2 matches");
         assert_eq!(embedded.theme, from_disk.theme, "{kind:?} theme matches");
         assert_eq!(embedded.icons, from_disk.icons, "{kind:?} icons match");
