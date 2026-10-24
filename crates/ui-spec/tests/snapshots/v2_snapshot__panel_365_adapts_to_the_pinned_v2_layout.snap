@@ -50,9 +50,9 @@ group tab_home.group_font Some("Font") layout=Stack rows=None
   tab_home.group_font.font_color_gallery dropdown label="Font Color Gallery" cmd=text.font.color fluent=FontColorGallery icon=text.font.color
 group tab_home.group_paragraph Some("Paragraph") layout=Stack rows=None
   tab_home.group_paragraph.bullets toggle label="Bullets" cmd=text.bullets fluent=Bullets icon=text.bullets
-  tab_home.group_paragraph.align_left toggle label="Align Left" cmd=arrange.align.left fluent=AlignLeft icon=arrange.align.left
-  tab_home.group_paragraph.align_right toggle label="Align Right" cmd=arrange.align.right fluent=AlignRight icon=arrange.align.right
-  tab_home.group_paragraph.align_center toggle label="Align Center" cmd=arrange.align.center fluent=AlignCenter icon=arrange.align.center
+  tab_home.group_paragraph.align_left toggle label="Align Left" cmd=format.text.align_left fluent=AlignLeft icon=format.text.align_left
+  tab_home.group_paragraph.align_right toggle label="Align Right" cmd=format.text.align_right fluent=AlignRight icon=format.text.align_right
+  tab_home.group_paragraph.align_center toggle label="Align Center" cmd=format.text.align_center fluent=AlignCenter icon=format.text.align_center
   tab_home.group_paragraph.align_justify toggle label="Align Justify" cmd=format.text.align_justify fluent=AlignJustify icon=format.text.align_justify
   tab_home.group_paragraph.text_direction_left_to_right toggle label="Text Direction Left To Right" cmd=text.direction.left.to.right fluent=TextDirectionLeftToRight icon=text.direction.left.to.right
   tab_home.group_paragraph.text_direction_right_to_left toggle label="Text Direction Right To Left" cmd=text.direction.right.to.left fluent=TextDirectionRightToLeft icon=text.direction.right.to.left
@@ -112,9 +112,9 @@ group tab_home.group_arrange Some("Arrange") layout=Stack rows=None
   tab_home.group_arrange.object_send_to_back_menu split label="Object Send To Back Menu" cmd=arrange.send_to_back fluent=ObjectSendToBackMenu icon=arrange.send_to_back
     tab_home.group_arrange.object_send_to_back_menu.object_send_to_back button label="Object Send To Back" cmd=arrange.send_to_back fluent=ObjectSendToBack icon=arrange.send_to_back
     tab_home.group_arrange.object_send_to_back_menu.object_send_backward button label="Object Send Backward" cmd=arrange.send_backward fluent=ObjectSendBackward icon=arrange.send_backward
-  tab_home.group_arrange.objects_group_menu dropdown label="Objects Group Menu" cmd=arrange.size.objects fluent=ObjectsGroupMenu icon=arrange.size.objects
-    tab_home.group_arrange.objects_group_menu.objects_group button label="Objects Group" cmd=arrange.size.objects fluent=ObjectsGroup icon=arrange.size.objects
-    tab_home.group_arrange.objects_group_menu.objects_ungroup button label="Objects Ungroup" cmd=tools.objects.ungroup fluent=ObjectsUngroup icon=tools.objects.ungroup
+  tab_home.group_arrange.objects_group_menu dropdown label="Objects Group Menu" cmd=arrange.group fluent=ObjectsGroupMenu icon=arrange.group
+    tab_home.group_arrange.objects_group_menu.objects_group button label="Objects Group" cmd=arrange.group fluent=ObjectsGroup icon=arrange.group
+    tab_home.group_arrange.objects_group_menu.objects_ungroup button label="Objects Ungroup" cmd=arrange.ungroup fluent=ObjectsUngroup icon=arrange.ungroup
     tab_home.group_arrange.objects_group_menu.objects_add_to_group button label="Objects Add To Group" cmd=tools.objects.add.to fluent=ObjectsAddToGroup icon=tools.objects.add.to
     tab_home.group_arrange.objects_group_menu.objects_convert_to_group button label="Objects Convert To Group" cmd=tools.objects.convert.to fluent=ObjectsConvertToGroup icon=tools.objects.convert.to
     tab_home.group_arrange.objects_group_menu.objects_remove_from_group button label="Objects Remove From Group" cmd=tools.objects.remove.from fluent=ObjectsRemoveFromGroup icon=tools.objects.remove.from
@@ -152,7 +152,7 @@ group tab_insert.group_insert_illustrations Some("Insert Illustrations") layout=
     tab_insert.group_insert_illustrations.flyout_anchor_insert_pictures.clip_art_insert_dialog button label="Clip Art Insert Dialog" cmd=insert.clip.art fluent=ClipArtInsertDialog icon=insert.clip.art
     tab_insert.group_insert_illustrations.flyout_anchor_insert_pictures.insert_m365_picture button label="Insert M365 Picture" cmd=insert.m365.picture fluent=InsertM365Picture icon=insert.m365.picture
 group tab_insert.group_diagram_parts Some("Diagram Parts") layout=Stack rows=None
-  tab_insert.group_diagram_parts.container_gallery dropdown label="Container Gallery" cmd=arrange.disband.container fluent=ContainerGallery icon=arrange.disband.container
+  tab_insert.group_diagram_parts.container_gallery dropdown label="Container Gallery" cmd=insert.add.to.new.container fluent=ContainerGallery icon=insert.add.to.new.container
   tab_insert.group_diagram_parts.callout_gallery dropdown label="Callout Gallery" cmd=shape.associate.callout fluent=CalloutGallery icon=shape.associate.callout
   tab_insert.group_diagram_parts.quick_connector_tool toggle label="Quick Connector Tool" cmd=tools.quick.connector fluent=QuickConnectorTool icon=tools.quick.connector
 group tab_insert.group_insert_links Some("Insert Links") layout=Stack rows=None
@@ -163,7 +163,7 @@ group tab_insert.group_text_box_text Some("Text Box Text") layout=Stack rows=Non
   tab_insert.group_text_box_text.symbol_insert_gallery dropdown label="Symbol Insert Gallery" cmd=tools.mso.insert.symbol fluent=SymbolInsertGallery icon=tools.mso.insert.symbol
     tab_insert.group_text_box_text.symbol_insert_gallery.symbols_dialog button label="Symbols Dialog" cmd=tools.symbols.dialog fluent=SymbolsDialog icon=tools.symbols.dialog
   tab_insert.group_text_box_text.text_box_insert_menu split label="Text Box Insert Menu" cmd=insert.text.box fluent=TextBoxInsertMenu icon=insert.text.box
-    tab_insert.group_text_box_text.text_box_insert_menu.text_box_insert_vertical toggle label="Text Box Insert Vertical" cmd=insert.text.box fluent=TextBoxInsertVertical icon=insert.text.box
+    tab_insert.group_text_box_text.text_box_insert_menu.text_box_insert_vertical toggle label="Text Box Insert Vertical" cmd=insert.vert.text.box fluent=TextBoxInsertVertical icon=insert.vert.text.box
     tab_insert.group_text_box_text.text_box_insert_menu.text_box_insert_horizontal toggle label="Text Box Insert Horizontal" cmd=insert.text.box fluent=TextBoxInsertHorizontal icon=insert.text.box
   tab_insert.group_text_box_text.screen_tip button label="Screen Tip" cmd=tools.screen.tip fluent=ScreenTip icon=tools.screen.tip
 tab tab_draw_ink Some("Draw Ink")
@@ -212,7 +212,7 @@ group tab_design_visio.group_backgrounds Some("Backgrounds") layout=Stack rows=N
 group tab_design_visio.group_layout_routing Some("Layout Routing") layout=Stack rows=None
   tab_design_visio.group_layout_routing.page_relayout_gallery dropdown label="Page Relayout Gallery" cmd=page.relayout fluent=PageRelayoutGallery icon=page.relayout
     tab_design_visio.group_layout_routing.page_relayout_gallery.layout_more_options button label="Layout More Options" cmd=arrange.layout.more.options fluent=LayoutMoreOptions icon=arrange.layout.more.options
-  tab_design_visio.group_layout_routing.connectors_gallery dropdown label="Connectors Gallery" cmd=edit.delete.connectors fluent=ConnectorsGallery icon=edit.delete.connectors
+  tab_design_visio.group_layout_routing.connectors_gallery dropdown label="Connectors Gallery" cmd=connector.style fluent=ConnectorsGallery icon=connector.style
     tab_design_visio.group_layout_routing.connectors_gallery.connector_right_angle toggle label="Connector Right Angle" cmd=connector.right_angle fluent=ConnectorRightAngle icon=connector.right_angle
     tab_design_visio.group_layout_routing.connectors_gallery.connector_straight_lines toggle label="Connector Straight Lines" cmd=connector.straight.lines fluent=ConnectorStraightLines icon=connector.straight.lines
     tab_design_visio.group_layout_routing.connectors_gallery.connector_curved_lines toggle label="Connector Curved Lines" cmd=connector.curved.lines fluent=ConnectorCurvedLines icon=connector.curved.lines
@@ -280,7 +280,7 @@ group tab_process.group_flow Some("Flow") layout=Stack rows=None
 tab tab_review_word Some("Review Word")
 group tab_review_word.group_proofing Some("Proofing") layout=Stack rows=None
   tab_review_word.group_proofing.spelling button label="Spelling" cmd=review.spelling.change fluent=Spelling icon=review.spelling.change
-  tab_review_word.group_proofing.research_pane toggle label="Research Pane" cmd=help.research.thesaurus fluent=ResearchPane icon=help.research.thesaurus
+  tab_review_word.group_proofing.research_pane toggle label="Research Pane" cmd=view.task.pane.research fluent=ResearchPane icon=view.task.pane.research
   tab_review_word.group_proofing.thesaurus button label="Thesaurus" cmd=help.research.thesaurus fluent=Thesaurus icon=help.research.thesaurus
 group tab_review_word.group_insights Some("Insights") layout=Stack rows=None
   tab_review_word.group_insights.insights button label="Insights" cmd=tools.insights fluent=Insights icon=tools.insights
@@ -364,13 +364,13 @@ group tab_developer.group_shape_design Some("Shape Design") layout=Stack rows=No
     tab_developer.group_shape_design.developer_drawing_tools.arc_tool toggle label="Arc Tool" cmd=shape.arc fluent=ArcTool icon=shape.arc
     tab_developer.group_shape_design.developer_drawing_tools.freeform_tool toggle label="Freeform Tool" cmd=tools.freeform fluent=FreeformTool icon=tools.freeform
     tab_developer.group_shape_design.developer_drawing_tools.pencil_tool toggle label="Pencil Tool" cmd=tools.pencil fluent=PencilTool icon=tools.pencil
-  tab_developer.group_shape_design.show_shape_sheet split label="Show Shape Sheet" cmd=view.show.shape.sheet.shape fluent=ShowShapeSheet icon=view.show.shape.sheet.shape
+  tab_developer.group_shape_design.show_shape_sheet split label="Show Shape Sheet" cmd=view.window.show.shape.sheet fluent=ShowShapeSheet icon=view.window.show.shape.sheet
     tab_developer.group_shape_design.show_shape_sheet.show_shape_sheet_shape toggle label="Show Shape Sheet Shape" cmd=view.show.shape.sheet.shape fluent=ShowShapeSheetShape icon=view.show.shape.sheet.shape
     tab_developer.group_shape_design.show_shape_sheet.show_shape_sheet_page toggle label="Show Shape Sheet Page" cmd=view.show.shape.sheet.page fluent=ShowShapeSheetPage icon=view.show.shape.sheet.page
     tab_developer.group_shape_design.show_shape_sheet.show_shape_sheet_document toggle label="Show Shape Sheet Document" cmd=view.show.shape.sheet.document fluent=ShowShapeSheetDocument icon=view.show.shape.sheet.document
-  tab_developer.group_shape_design.objects_group_menu dropdown label="Objects Group Menu" cmd=arrange.size.objects fluent=ObjectsGroupMenu icon=arrange.size.objects
-    tab_developer.group_shape_design.objects_group_menu.objects_group button label="Objects Group" cmd=arrange.size.objects fluent=ObjectsGroup icon=arrange.size.objects
-    tab_developer.group_shape_design.objects_group_menu.objects_ungroup button label="Objects Ungroup" cmd=tools.objects.ungroup fluent=ObjectsUngroup icon=tools.objects.ungroup
+  tab_developer.group_shape_design.objects_group_menu dropdown label="Objects Group Menu" cmd=arrange.group fluent=ObjectsGroupMenu icon=arrange.group
+    tab_developer.group_shape_design.objects_group_menu.objects_group button label="Objects Group" cmd=arrange.group fluent=ObjectsGroup icon=arrange.group
+    tab_developer.group_shape_design.objects_group_menu.objects_ungroup button label="Objects Ungroup" cmd=arrange.ungroup fluent=ObjectsUngroup icon=arrange.ungroup
     tab_developer.group_shape_design.objects_group_menu.objects_add_to_group button label="Objects Add To Group" cmd=tools.objects.add.to fluent=ObjectsAddToGroup icon=tools.objects.add.to
     tab_developer.group_shape_design.objects_group_menu.objects_convert_to_group button label="Objects Convert To Group" cmd=tools.objects.convert.to fluent=ObjectsConvertToGroup icon=tools.objects.convert.to
     tab_developer.group_shape_design.objects_group_menu.objects_remove_from_group button label="Objects Remove From Group" cmd=tools.objects.remove.from fluent=ObjectsRemoveFromGroup icon=tools.objects.remove.from
@@ -552,9 +552,9 @@ group tab_ink_tools_pens.group_ink_close Some("Ink Close")
   tab_ink_tools_pens.group_ink_close.ink_tools_close button label="Ink Tools Close" cmd=file.close.ink.tools.tab fluent=InkToolsClose icon=file.close.ink.tools.tab
 contextual_tab tab_shape_sheet_design Some("Shape Sheet Design") tab_set=Some("Shape Sheet Tools") shown_in=Some("shapesheet_window")
 group tab_shape_sheet_design.group_shape_sheet_view Some("Shape Sheet View")
-  tab_shape_sheet_design.group_shape_sheet_view.shape_sheet_show_formulas toggle label="Shape Sheet Show Formulas" cmd=view.show.shape.sheet.shape fluent=ShapeSheetShowFormulas icon=view.show.shape.sheet.shape
-  tab_shape_sheet_design.group_shape_sheet_view.shape_sheet_show_sections button label="Shape Sheet Show Sections" cmd=view.show.shape.sheet.shape fluent=ShapeSheetShowSections icon=view.show.shape.sheet.shape
-  tab_shape_sheet_design.group_shape_sheet_view.shape_sheet_show_values toggle label="Shape Sheet Show Values" cmd=view.show.shape.sheet.shape fluent=ShapeSheetShowValues icon=view.show.shape.sheet.shape
+  tab_shape_sheet_design.group_shape_sheet_view.shape_sheet_show_formulas toggle label="Shape Sheet Show Formulas" cmd=edit.sw.show.formulas fluent=ShapeSheetShowFormulas icon=edit.sw.show.formulas
+  tab_shape_sheet_design.group_shape_sheet_view.shape_sheet_show_sections button label="Shape Sheet Show Sections" cmd=edit.sw.show.sections.dlg fluent=ShapeSheetShowSections icon=edit.sw.show.sections.dlg
+  tab_shape_sheet_design.group_shape_sheet_view.shape_sheet_show_values toggle label="Shape Sheet Show Values" cmd=edit.sw.show.values fluent=ShapeSheetShowValues icon=edit.sw.show.values
   tab_shape_sheet_design.group_shape_sheet_view.style_explorer check label="Style Explorer" cmd=format.style.explorer fluent=StyleExplorer icon=format.style.explorer
 group tab_shape_sheet_design.group_shape_sheet_sections Some("Shape Sheet Sections")
   tab_shape_sheet_design.group_shape_sheet_sections.shape_sheet_insert_section button label="Shape Sheet Insert Section" cmd=shape.sheet.insert.section fluent=ShapeSheetInsertSection icon=shape.sheet.insert.section
@@ -564,7 +564,7 @@ group tab_shape_sheet_design.group_shape_sheet_rows Some("Shape Sheet Rows")
   tab_shape_sheet_design.group_shape_sheet_rows.shape_sheet_insert_row button label="Shape Sheet Insert Row" cmd=shape.sheet.insert.row fluent=ShapeSheetInsertRow icon=shape.sheet.insert.row
 group tab_shape_sheet_design.group_shape_sheet_editing Some("Shape Sheet Editing")
   tab_shape_sheet_design.group_shape_sheet_editing.hyperlink_insert button label="Hyperlink Insert" cmd=tools.hyperlink.insert fluent=HyperlinkInsert icon=tools.hyperlink.insert
-  tab_shape_sheet_design.group_shape_sheet_editing.shape_data button label="Shape Data" cmd=data.unlink.shape fluent=ShapeData icon=data.unlink.shape
+  tab_shape_sheet_design.group_shape_sheet_editing.shape_data button label="Shape Data" cmd=format.cust.prop.edit fluent=ShapeData icon=format.cust.prop.edit
   tab_shape_sheet_design.group_shape_sheet_editing.shape_sheet_shape_action button label="Shape Sheet Shape Action" cmd=shape.sheet.shape.action fluent=ShapeSheetShapeAction icon=shape.sheet.shape.action
   tab_shape_sheet_design.group_shape_sheet_editing.shape_sheet_edit_formula button label="Shape Sheet Edit Formula" cmd=shape.sheet.edit.formula fluent=ShapeSheetEditFormula icon=shape.sheet.edit.formula
 group tab_shape_sheet_design.group_shape_sheet_formula_tracing Some("Shape Sheet Formula Tracing")
