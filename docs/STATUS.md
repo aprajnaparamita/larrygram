@@ -16,7 +16,7 @@ Task board. Only the master agent edits this file, on `main`.
 - Gate queue: `tools/gate-queue/gateq` (AGENTS.md section 7). Merge gates are `main --quick --corpus`; the idle full check is `main-full` in `/Volumes/Dara/larrygram/worktrees/main-full`.
 - Merged today: P8-04, P8-02, P8-05, P7-02 (merge gate green at `d156f9c`). P7-08 started; P7-06 and P7-07 resumed.
 - Sent back: P7-04 (remove its seven `#[rustfmt::skip]`, test the `currentColor` tint and non-blank icons). P7-03 must rebase on main (conflict in `crates/ui-spec/tests/panel_layouts.rs`) and resubmit.
-- Waiting for hand-offs: P7-05, P7-15, P8-03, P8-06 (gates queued or running).
+- Gate results waiting for their workers: P7-15 GREEN at `413de729`, P8-06 GREEN at `2991faf9` (hand-offs next); P8-03 RED at `51ce31e7`, resubmitted at `fc3fec7b`. Queued (paused for the iTerm2 restart): P7-06, P7-05, P7-03, P7-07, P7-08, P8-03, P7-04, then `main-full` at `13942e0`.
 - Queued, not started: P7-16, P8-08.
 - Master items: the parity matrix's one column per layout (P7-02 open issue); `UiRequest::ShowWelcome` in the shell (P7-09); P8-02/P8-04/P8-05 open issues for P8-03, P8-07, P8-08, P8-10 (in their Result sections); the remote still holds the pre-R4 history until the user force-pushes, and the three backup files wait for that.
 
