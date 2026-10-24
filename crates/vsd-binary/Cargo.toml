@@ -16,5 +16,10 @@ larrygram-geom = { path = "../geom" }
 # dependency the `.vsdx` reader uses, so both produce one model.
 larrygram-model = { path = "../model" }
 
+[dev-dependencies]
+# Unicode NFC for the ADR 0072 name normalisation in the parity
+# harness (`tests/parity/`). MIT OR Apache-2.0.
+unicode-normalization = "0.1.25"
+
 [lints]
 workspace = true
