@@ -2068,6 +2068,7 @@ dependencies = [
  "larrygram-render",
  "larrygram-ui",
  "larrygram-ui-spec",
+ "resvg",
  "winit",
 ]
 

@@ -30,6 +30,12 @@ winit = "0.30"
 larrygram-commands = { path = "../../crates/commands" }
 larrygram-ui = { path = "../../crates/ui" }
 larrygram-ui-spec = { path = "../../crates/ui-spec" }
+# The window-icon rasteriser (ADR 0067, task P7-16): the same resvg
+# 0.45 the ui crate rasterises its icons with (the `egui_extras` svg
+# pin). The brand `icon.svg` is outline paths and gradients only, so
+# no text or raster-image features. MIT OR Apache-2.0 (already in the
+# tree through egui_extras).
+resvg = { version = "0.45.1", default-features = false }
 
 [dev-dependencies]
 # Headless UI tests (ADR 0030, ADR 0037).

@@ -52,6 +52,9 @@ const SETTINGS_KEY: &str = "settings.json";
 /// The app id and window title (eframe's `run_native` name).
 const APP_NAME: &str = "larrygram";
 
+/// The window-icon raster size in pixels (ADR 0067).
+const ICON_PX: u32 = 128;
+
 /// What the command line asked for (ADR 0032: `--ui-layout` wins over
 /// the persisted setting).
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -110,6 +113,83 @@ fn help_text() -> &'static str {
     "usage: larrygram [--ui-layout panel-2016|panel-365] [--help]"
 }
 
+/// The app icon source: the single `icon.svg` brand asset (ADR 0067).
+///
+/// The web build serves the same file as the favicon
+/// (`apps/larrygram-web/index.html`); no raster copy is committed.
+fn window_icon_svg() -> &'static [u8] {
+    include_bytes!("../../../crates/ui/assets/brand/icon.svg")
+}
+
+/// Rasterises one SVG to the RGBA window icon (ADR 0067).
+///
+/// The pixels are unmultiplied alpha, as [`egui::IconData`] asks.
+/// A broken SVG is an error, never a panic (AGENTS.md section 6).
+fn rasterise_icon(svg: &str, size: u32) -> Result<egui::IconData, AppError> {
+    let tree = resvg::usvg::Tree::from_str(svg, &resvg::usvg::Options::default())
+        .map_err(|error| AppError::new(format!("window icon: cannot parse icon.svg: {error}")))?;
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(size, size).ok_or_else(|| {
+        AppError::new(format!(
+            "window icon: cannot allocate a {size}x{size} pixmap"
+        ))
+    })?;
+    let width = tree.size().width().max(1.0);
+    let height = tree.size().height().max(1.0);
+    resvg::render(
+        &tree,
+        resvg::tiny_skia::Transform::from_scale(size as f32 / width, size as f32 / height),
+        &mut pixmap.as_mut(),
+    );
+    Ok(egui::IconData {
+        rgba: unpremultiply(pixmap.data()),
+        width: size,
+        height: size,
+    })
+}
+
+/// Converts premultiplied RGBA pixels to unmultiplied alpha.
+fn unpremultiply(premultiplied: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(premultiplied.len());
+    for pixel in premultiplied.chunks_exact(4) {
+        if let [r, g, b, a] = pixel {
+            let (r, g, b, a) = (*r, *g, *b, *a);
+            let scale = |channel: u8| -> u8 {
+                if a == 0 {
+                    0
+                } else {
+                    u8::try_from((u32::from(channel) * 255 + u32::from(a) / 2) / u32::from(a))
+                        .unwrap_or(u8::MAX)
+                }
+            };
+            out.extend_from_slice(&[scale(r), scale(g), scale(b), a]);
+        }
+    }
+    out
+}
+
+/// The window icon from `icon.svg`, at [`ICON_PX`] (ADR 0067).
+fn window_icon() -> Result<egui::IconData, AppError> {
+    let svg = std::str::from_utf8(window_icon_svg())
+        .map_err(|error| AppError::new(format!("window icon: icon.svg is not UTF-8: {error}")))?;
+    rasterise_icon(svg, ICON_PX)
+}
+
+/// The eframe options with the app icon wired (ADR 0067).
+///
+/// A rasterisation failure is one warning line and the platform
+/// default icon: the app still starts (AGENTS.md section 6).
+fn native_options() -> eframe::NativeOptions {
+    let mut viewport = egui::ViewportBuilder::default();
+    match window_icon() {
+        Ok(icon) => viewport = viewport.with_icon(icon),
+        Err(error) => eprintln!("warning: {error}"),
+    }
+    eframe::NativeOptions {
+        viewport,
+        ..eframe::NativeOptions::default()
+    }
+}
+
 /// Builds the registry, loads both layouts and runs the eframe loop
 /// (ADR 0030, ADR 0031).
 fn run_with(args: &[String]) -> Result<(), AppError> {
@@ -122,7 +202,7 @@ fn run_with(args: &[String]) -> Result<(), AppError> {
         .map_err(|error| AppError::new(error.to_string()))?;
     let layouts = Loader::from_embedded().map_err(|error| AppError::new(error.to_string()))?;
     let cli_layout = options.ui_layout;
-    let native_options = eframe::NativeOptions::default();
+    let native_options = native_options();
     eframe::run_native(
         APP_NAME,
         native_options,
@@ -414,5 +494,101 @@ mod tests {
         app.shell.app.settings.show_grid = false;
         app.persist(&mut storage);
         assert!(storage.get_string(SETTINGS_KEY).is_some());
+    }
+
+    /// The `href="..."` value of one HTML line (test-side, no HTML
+    /// parser in the tree).
+    fn href_of(line: &str) -> Option<String> {
+        let rest = line.split_once("href=\"")?.1;
+        Some(rest.split_once('"')?.0.to_owned())
+    }
+
+    /// Reads the file `href` points at, relative to the web app's
+    /// `index.html` (the trunk copy source).
+    fn web_asset(href: &str) -> Vec<u8> {
+        let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let web_dir = manifest.join("..").join("larrygram-web");
+        std::fs::read(web_dir.join(href)).expect("the favicon source reads")
+    }
+
+    #[test]
+    fn the_window_icon_comes_from_the_brand_icon_svg() {
+        // The embedded bytes are the brand asset, unchanged.
+        let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let brand = std::fs::read(
+            manifest
+                .join("..")
+                .join("..")
+                .join("crates/ui/assets/brand/icon.svg"),
+        )
+        .expect("the brand icon.svg reads");
+        assert_eq!(window_icon_svg(), brand.as_slice());
+
+        // The window icon is a rasterisation of those bytes.
+        let icon = window_icon().expect("the icon rasterises");
+        assert_eq!(icon.width, ICON_PX);
+        assert_eq!(icon.height, ICON_PX);
+        assert_eq!(
+            icon.rgba.len(),
+            (ICON_PX * ICON_PX * 4) as usize,
+            "RGBA pixels, one per pixel"
+        );
+        assert!(
+            icon.rgba.chunks_exact(4).any(|pixel| pixel[3] > 0),
+            "the raster is not fully transparent"
+        );
+
+        let options = native_options();
+        let wired = options.viewport.icon.as_deref().expect("the icon is wired");
+        assert_eq!(wired, &icon);
+    }
+
+    #[test]
+    fn a_broken_icon_svg_is_an_error_not_a_panic() {
+        let error = rasterise_icon("this is not svg", 32).expect_err("a broken SVG is an error");
+        assert!(error.to_string().contains("icon.svg"), "{error}");
+    }
+
+    #[test]
+    fn the_favicon_is_the_brand_icon_svg() {
+        let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let html = std::fs::read_to_string(manifest.join("..").join("larrygram-web/index.html"))
+            .expect("the web page reads");
+
+        let icon_line = html
+            .lines()
+            .find(|line| line.contains("rel=\"icon\""))
+            .expect("the page has a favicon line");
+        assert!(
+            icon_line.contains("type=\"image/svg+xml\""),
+            "the favicon is an SVG: {icon_line}"
+        );
+        assert!(
+            !icon_line.contains(".png"),
+            "no raster favicon: {icon_line}"
+        );
+        let favicon = href_of(icon_line).expect("the favicon has an href");
+        assert_eq!(favicon, "icon.svg");
+
+        // Trunk copies that file from the one brand source.
+        let copy_line = html
+            .lines()
+            .find(|line| line.contains("rel=\"copy\"") && line.contains("icon.svg"))
+            .expect("the page copies icon.svg into the build");
+        let source = href_of(copy_line).expect("the copy has an href");
+        assert!(
+            source.ends_with("crates/ui/assets/brand/icon.svg"),
+            "the copy source is the brand asset: {source}"
+        );
+        assert_eq!(
+            source.rsplit('/').next().unwrap_or_default(),
+            favicon,
+            "the copied file keeps the favicon's name"
+        );
+        assert_eq!(
+            web_asset(&source),
+            window_icon_svg(),
+            "the favicon bytes are the brand icon.svg the window icon rasterises"
+        );
     }
 }
