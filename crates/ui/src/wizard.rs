@@ -32,11 +32,11 @@ pub enum Page {
 
 /// The transient state of one wizard run.
 ///
-/// The persisted parts live in
-/// [`WelcomeSettings`](crate::settings::WelcomeSettings): `welcome_seen`
-/// and the default layout. [`show`] reads neither; the caller passes
-/// the state in and applies the [`Outcome`] (task P7-15 wires the
-/// settings, task P7-09 persists them).
+/// The persisted parts live on
+/// [`Settings`](larrygram_commands::Settings): `welcome_seen` and the
+/// default layout. [`show`] reads neither; the caller passes the
+/// state in and applies the [`Outcome`] (task P7-09 writes both
+/// fields).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct State {
     page: Page,

@@ -11,12 +11,15 @@
 //! shows it.
 //!
 //! [`show_options`] draws the View/Options dialog body: the Panel
-//! layout radio choice (ADR 0032), the grid and rulers toggles and the
-//! display units. The dialog never mutates [`Settings`] (the ADR 0032
-//! amendment): it returns the [`Intent`]s for the rows the user
-//! changed and the shell dispatches them through the command registry
-//! (`view.ui_layout.*`, `view.toggle_grid`, `view.rulers`,
-//! `view.units`).
+//! layout radio choice over all four layouts (ADR 0032, task P7-09),
+//! the grid and rulers toggles, the display units and "Show the
+//! welcome wizard on next start" (ADR 0066). The dialog never mutates
+//! [`Settings`] (the ADR 0032 amendment): it returns the [`Intent`]s
+//! for the rows the user changed and the shell dispatches them
+//! through the command registry (`view.ui_layout.*`,
+//! `view.toggle_grid`, `view.rulers`, `view.units`); the welcome row
+//! has no command id and comes back as an [`OptionsChange`] flag the
+//! shell writes into `Settings::welcome_seen`.
 
 use egui::Ui;
 use larrygram_commands::{
@@ -101,34 +104,6 @@ const UNIT_CHOICES: &[(DisplayUnits, &str)] = &[
     (DisplayUnits::Feet, "Feet"),
 ];
 
-/// The first-run settings the welcome wizard owns (ADR 0066).
-///
-/// `welcome_seen` decides whether the wizard opens on launch, and
-/// `default_layout` is the layout the wizard chose. Task P7-01 defines
-/// the fields as an interface stub here, because the persisted
-/// [`Settings`] type lives in `crates/commands` and Phase 6 owns that
-/// crate; task P7-09 moves the two fields onto
-/// `larrygram_commands::Settings` (with serde defaults, so old stores
-/// still load) and deletes this type.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(default)]
-pub struct WelcomeSettings {
-    /// Whether the welcome wizard has been shown. It opens on launch
-    /// only while this is `false`, and both Cancel and Start set it.
-    pub welcome_seen: bool,
-    /// The layout the wizard chose as the default (ADR 0066).
-    pub default_layout: larrygram_ui_spec::v2::LayoutKind,
-}
-
-impl Default for WelcomeSettings {
-    fn default() -> Self {
-        Self {
-            welcome_seen: false,
-            default_layout: larrygram_ui_spec::v2::LayoutKind::PanelModern,
-        }
-    }
-}
-
 /// Loads settings through a [`SettingsStore`], falling back to
 /// [`Settings::default`] on any [`SettingsError`] (ADR 0032: a corrupt
 /// or missing store warns, never crashes).
@@ -152,30 +127,55 @@ pub fn save_settings(store: &mut dyn SettingsStore, settings: &Settings) -> Resu
     store.save(settings).map_err(settings_error)
 }
 
+/// What one Options dialog frame changed (ADR 0032 as amended).
+///
+/// The command rows come back as [`Intent`]s the shell dispatches;
+/// the "Show the welcome wizard on next start" row has no command id,
+/// so it comes back as a flag the shell writes into
+/// [`Settings::welcome_seen`](larrygram_commands::Settings) (task
+/// P7-09).
+#[derive(Debug, Clone, PartialEq)]
+pub struct OptionsChange {
+    /// One dispatch request per command-backed row the user changed.
+    pub intents: Vec<Intent>,
+    /// `Some(on)` when the welcome-wizard row changed this frame.
+    pub show_wizard_next_start: Option<bool>,
+}
+
+impl OptionsChange {
+    /// A dialog frame that changed nothing.
+    pub fn none() -> Self {
+        Self {
+            intents: Vec::new(),
+            show_wizard_next_start: None,
+        }
+    }
+}
+
 /// Draws the View/Options dialog body (ADR 0032 as amended): the
-/// Panel layout radio choice, grid and rulers toggles, display units.
+/// Panel layout radio choice over all four layouts, grid and rulers
+/// toggles, display units and the welcome-wizard row (ADR 0066).
 ///
 /// The dialog draws its rows over a draft copy of `settings` and
-/// returns one [`Intent`] per row the user changed
+/// returns one [`Intent`] per command-backed row the user changed
 /// ([`option_changes`]); the caller dispatches them through the
 /// registry, so every change is an ordinary command run (status
 /// message, undo, parity). The dialog itself writes nothing.
-pub fn show_options(ui: &mut Ui, settings: &Settings) -> Result<Vec<Intent>, UiError> {
+pub fn show_options(ui: &mut Ui, settings: &Settings) -> Result<OptionsChange, UiError> {
     let mut draft = settings.clone();
+    let mut show_wizard = !draft.welcome_seen;
 
     ui.heading("Options");
     ui.separator();
     ui.label("Panel layout");
-    ui.radio_value(
-        &mut draft.ui_layout,
+    for kind in [
+        LayoutKind::PanelModern,
+        LayoutKind::PanelClassic,
         LayoutKind::Panel2016,
-        "Panel (2016 data)",
-    );
-    ui.radio_value(
-        &mut draft.ui_layout,
         LayoutKind::Panel365,
-        "Panel (365 data)",
-    );
+    ] {
+        ui.radio_value(&mut draft.ui_layout, kind, kind.label());
+    }
     ui.separator();
     ui.checkbox(&mut draft.show_grid, "Show grid");
     ui.checkbox(&mut draft.show_rulers, "Show rulers");
@@ -192,8 +192,15 @@ pub fn show_options(ui: &mut Ui, settings: &Settings) -> Result<Vec<Intent>, UiE
         // documents `on_hover_text` as the fix (ADR 0031 rule).
         choice.response.on_hover_text("Display units");
     });
+    ui.separator();
+    ui.checkbox(&mut show_wizard, "Show the welcome wizard on next start");
 
-    option_changes(settings, &draft)
+    let intents = option_changes(settings, &draft)?;
+    let show_wizard_next_start = (show_wizard != !settings.welcome_seen).then_some(show_wizard);
+    Ok(OptionsChange {
+        intents,
+        show_wizard_next_start,
+    })
 }
 
 /// The dispatch requests for the Options rows `after` changed against
@@ -335,8 +342,9 @@ mod tests {
     fn a_quiet_options_dialog_produces_no_intents() {
         let settings = Settings::default();
         with_ui(|ui| {
-            let intents = show_options(ui, &settings).expect("the dialog draws");
-            assert!(intents.is_empty());
+            let changed = show_options(ui, &settings).expect("the dialog draws");
+            assert!(changed.intents.is_empty());
+            assert_eq!(changed.show_wizard_next_start, None);
         });
     }
 
@@ -353,7 +361,7 @@ mod tests {
             move |ui| {
                 let settings = settings.borrow();
                 let mut changed = show_options(ui, &settings).expect("the dialog draws");
-                intents.borrow_mut().append(&mut changed);
+                intents.borrow_mut().append(&mut changed.intents);
             }
         });
         harness.run();
@@ -378,7 +386,7 @@ mod tests {
         assert_eq!(intents[0].invocation.source, larrygram_commands::Source::Ui);
         // The dialog writes nothing itself: the settings still hold
         // the old layout until the shell dispatches the intent.
-        assert_eq!(settings.borrow().ui_layout, LayoutKind::Panel2016);
+        assert_eq!(settings.borrow().ui_layout, LayoutKind::PanelModern);
     }
 
     #[test]
@@ -415,7 +423,8 @@ mod tests {
     fn the_layout_radio_names_the_chosen_layout() {
         let mut before = Settings::default();
         before.ui_layout = LayoutKind::Panel365;
-        let after = Settings::default();
+        let mut after = Settings::default();
+        after.ui_layout = LayoutKind::Panel2016;
         let intents = option_changes(&before, &after).expect("intents");
         assert_eq!(intents.len(), 1);
         assert_eq!(intents[0].command.as_str(), "view.ui_layout.panel_2016");
@@ -472,17 +481,24 @@ mod tests {
     }
 
     #[test]
-    fn option_changes_cover_the_curated_layout_kinds_too() {
-        // The dialog offers only the two Fluent-data layouts, but the
-        // change rule names an id for every kind (task P7-00).
+    fn option_changes_cover_every_layout_kind() {
+        // The dialog offers all four layouts (task P7-09) and the
+        // change rule names an id for each one (task P7-00).
         for (kind, id) in [
             (LayoutKind::PanelModern, "view.ui_layout.panel_modern"),
             (LayoutKind::PanelClassic, "view.ui_layout.panel_classic"),
+            (LayoutKind::Panel2016, "view.ui_layout.panel_2016"),
+            (LayoutKind::Panel365, "view.ui_layout.panel_365"),
         ] {
-            let before = Settings::default();
+            let mut before = Settings::default();
+            before.ui_layout = LayoutKind::PanelModern;
             let mut after = Settings::default();
             after.ui_layout = kind;
             let intents = option_changes(&before, &after).expect("intents");
+            if kind == LayoutKind::PanelModern {
+                assert!(intents.is_empty(), "Panel Modern is the draft's start");
+                continue;
+            }
             assert_eq!(intents.len(), 1);
             assert_eq!(intents[0].command.as_str(), id);
         }
@@ -517,7 +533,11 @@ mod tests {
                 .to_owned(),
         ));
         let settings = older.load().expect("the older store loads");
-        assert_eq!(settings.ui_layout, LayoutKind::Panel2016, "the default");
+        assert_eq!(
+            settings.ui_layout,
+            LayoutKind::PanelModern,
+            "a store with no `ui_layout` gets the current default"
+        );
         assert!(!settings.show_grid);
     }
 
@@ -531,22 +551,85 @@ mod tests {
 }
 
 #[cfg(test)]
-mod welcome_settings_tests {
+mod welcome_row_tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
     use super::*;
 
     #[test]
     fn defaults_are_first_run_and_panel_modern() {
-        let settings = WelcomeSettings::default();
+        let settings = Settings::default();
         assert!(!settings.welcome_seen);
-        assert_eq!(
-            settings.default_layout,
-            larrygram_ui_spec::v2::LayoutKind::PanelModern
-        );
+        assert_eq!(settings.default_layout, LayoutKind::PanelModern);
     }
 
     #[test]
-    fn a_missing_store_slot_reads_as_the_defaults() {
-        let settings: WelcomeSettings = serde_json::from_str("{}").expect("defaults fill in");
-        assert_eq!(settings, WelcomeSettings::default());
+    fn the_welcome_row_clears_welcome_seen() {
+        use egui::accesskit::Role;
+        use egui_kittest::{Harness, kittest::Queryable};
+
+        let settings = Rc::new(RefCell::new(Settings::default()));
+        {
+            settings.borrow_mut().welcome_seen = true;
+        }
+        let changes = Rc::new(RefCell::new(Vec::new()));
+        let mut harness = Harness::builder().build_ui({
+            let settings = Rc::clone(&settings);
+            let changes = Rc::clone(&changes);
+            move |ui| {
+                let settings = settings.borrow();
+                let changed = show_options(ui, &settings).expect("the dialog draws");
+                if let Some(show) = changed.show_wizard_next_start {
+                    changes.borrow_mut().push(show);
+                }
+            }
+        });
+        harness.run();
+        {
+            let root = harness.root();
+            let node = root
+                .query_all_by_role_and_label(
+                    Role::CheckBox,
+                    "Show the welcome wizard on next start",
+                )
+                .next()
+                .expect("the welcome row");
+            node.click();
+        }
+        harness.run();
+        assert_eq!(
+            changes.borrow().as_slice(),
+            &[true],
+            "checking the row asks for the wizard on the next start"
+        );
+        // The dialog writes nothing itself: the shell writes
+        // `welcome_seen = !show` (task P7-09).
+        assert!(settings.borrow().welcome_seen);
+    }
+
+    #[test]
+    fn a_store_without_the_phase_7_fields_loads_with_the_defaults() {
+        let mut store = TextStore::new(Some(
+            r#"{"ui_layout":"Panel2016","show_grid":false,"show_rulers":true,"#.to_owned(),
+        ));
+        // The truncated JSON above is corrupt; the real Phase 6 shape
+        // is the next assertion.
+        let _ = store.load().expect_err("corrupt");
+        let mut store = TextStore::new(Some(
+            concat!(
+                r#"{"ui_layout":"Panel2016","show_grid":false,"show_rulers":true,"#,
+                r#""units":"Inches","recent_files":[]}"#
+            )
+            .to_owned(),
+        ));
+        let settings = load_settings(&mut store).expect("the Phase 6 store loads");
+        assert_eq!(settings.ui_layout, LayoutKind::Panel2016, "stored value kept");
+        assert_eq!(settings.default_layout, LayoutKind::PanelModern);
+        assert!(!settings.welcome_seen);
+        assert!(
+            store.take_warning().is_none(),
+            "a Phase 6 store is not corrupt"
+        );
     }
 }

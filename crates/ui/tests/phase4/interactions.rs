@@ -43,7 +43,7 @@ use crate::{ShellRig, sets};
 fn tab_labels(kind: LayoutKind) -> BTreeSet<String> {
     sets()
         .get(kind)
-        .expect("the committed set")
+        
         .layout
         .tabs
         .iter()
@@ -201,7 +201,7 @@ fn the_close_confirmation_dialog_closes_the_document_on_confirm() {
 fn the_file_button_opens_the_backstage_with_its_entries() {
     let entries: Vec<String> = sets()
         .get(LayoutKind::Panel2016)
-        .expect("the committed set")
+        
         .layout
         .backstage
         .tabs

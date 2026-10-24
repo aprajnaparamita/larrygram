@@ -294,7 +294,11 @@ fn paint_icon(ui: &mut Ui, rect: Rect, key: &str, enabled: bool) {
             .layout(egui::Layout::left_to_right(egui::Align::Center)),
     );
     if enabled {
-        let _ = crate::icons::placeholder(&mut child, key, ICON);
+        if let Some(theme) = crate::theme::current(child.ctx()) {
+            let _ = crate::icons::draw(&mut child, cell, key, ICON, &theme, true);
+        } else {
+            let _ = crate::icons::placeholder(&mut child, key, ICON);
+        }
     } else {
         let faded = child.visuals().widgets.noninteractive.fg_stroke.color;
         child.painter().rect_filled(rect, 0.0, faded);
