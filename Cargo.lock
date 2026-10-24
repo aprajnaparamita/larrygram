@@ -2175,6 +2175,7 @@ dependencies = [
  "proptest",
  "rfd",
  "serde",
+ "serde-saphyr",
  "serde_json",
  "wasm-bindgen",
  "wasm-bindgen-futures",
