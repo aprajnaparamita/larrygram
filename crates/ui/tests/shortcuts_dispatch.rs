@@ -19,7 +19,6 @@ use larrygram_ui_spec::{
 fn committed_shortcuts() -> Shortcuts {
     let sets = Loader::from_embedded().expect("the embedded ui-spec loads");
     sets.get(LayoutKind::Panel2016)
-        .expect("the set")
         .shortcuts
         .clone()
 }

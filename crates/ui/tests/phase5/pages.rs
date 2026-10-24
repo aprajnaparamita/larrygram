@@ -33,7 +33,7 @@ fn app_with_two_pages() -> AppCtx {
     let mut doc = Document::new();
     doc.add_page("Page-1").expect("page one");
     doc.add_page("Page-2").expect("page two");
-    let mut app = AppCtx::new(Settings::default());
+    let mut app = AppCtx::new(crate::phase5_settings());
     app.open_document(DocumentSession::new(doc, None));
     app
 }

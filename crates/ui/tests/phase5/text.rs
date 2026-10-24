@@ -38,7 +38,7 @@ fn fixture() -> (AppCtx, ShapeId) {
         ],
     };
     doc.set_shape_text(shape, old).expect("text");
-    let mut app = AppCtx::new(Settings::default());
+    let mut app = AppCtx::new(crate::phase5_settings());
     app.open_document(DocumentSession::new(doc, None));
     app.selection.shapes = vec![shape];
     app.selection.anchor = Some(shape);
