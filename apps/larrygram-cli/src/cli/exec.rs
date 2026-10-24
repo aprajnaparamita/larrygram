@@ -782,4 +782,18 @@ mod tests {
             "#VALUE!"
         );
     }
+
+    #[test]
+    fn classify_maps_unprefixed_and_non_failed_errors_to_render() {
+        // A `Failed` message without a known prefix keeps its text.
+        assert_eq!(
+            classify(&CommandError::failed("plain cause")),
+            Error::Render("plain cause".to_owned())
+        );
+        // Any other variant is a render failure carrying its display text.
+        assert_eq!(
+            classify(&CommandError::invalid_args("no page")),
+            Error::Render("bad arguments: no page".to_owned())
+        );
+    }
 }

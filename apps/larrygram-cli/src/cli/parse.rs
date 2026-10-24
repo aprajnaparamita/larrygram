@@ -328,6 +328,27 @@ mod tests {
         }
     }
 
+    fn as_inspect(command: Command) -> Inspect {
+        match command {
+            Command::Inspect(i) => i,
+            other => panic!("expected inspect, got {other:?}"),
+        }
+    }
+
+    fn as_render(command: Command) -> Render {
+        match command {
+            Command::Render(r) => r,
+            other => panic!("expected render, got {other:?}"),
+        }
+    }
+
+    fn as_export(command: Command) -> Export {
+        match command {
+            Command::Export(e) => e,
+            other => panic!("expected export, got {other:?}"),
+        }
+    }
+
     fn error(args: &[&str]) -> String {
         match parse(args) {
             Err(usage) => usage.message,
@@ -338,38 +359,28 @@ mod tests {
     #[test]
     fn inspect_parses_its_arguments() {
         let first = command(&["inspect", "a.vsdx"]);
-        match first {
-            Command::Inspect(i) => {
-                assert_eq!(i.file, PathBuf::from("a.vsdx"));
-                assert!(!i.json);
-                assert_eq!(i.page, None);
-            }
-            other => panic!("expected inspect, got {other:?}"),
-        }
+        let i = as_inspect(first);
+        assert_eq!(i.file, PathBuf::from("a.vsdx"));
+        assert!(!i.json);
+        assert_eq!(i.page, None);
+
         let second = command(&["inspect", "a.vsdx", "--json", "--page", "2"]);
-        match second {
-            Command::Inspect(i) => {
-                assert!(i.json);
-                assert_eq!(i.page, Some(2));
-            }
-            other => panic!("expected inspect, got {other:?}"),
-        }
+        let i = as_inspect(second);
+        assert!(i.json);
+        assert_eq!(i.page, Some(2));
     }
 
     #[test]
     fn render_parses_its_arguments() {
         let first = command(&["render", "a.vsdx", "--out", "a.png"]);
-        match first {
-            Command::Render(r) => {
-                assert_eq!(r.out, PathBuf::from("a.png"));
-                assert_eq!(r.page, None);
-                assert_eq!(r.format, OutputFormat::Png);
-                assert_eq!(r.scale, crate::cli::exec::DEFAULT_SCALE);
-                assert_eq!(r.background, None);
-                assert!(!r.strict);
-            }
-            other => panic!("expected render, got {other:?}"),
-        }
+        let r = as_render(first);
+        assert_eq!(r.out, PathBuf::from("a.png"));
+        assert_eq!(r.page, None);
+        assert_eq!(r.format, OutputFormat::Png);
+        assert_eq!(r.scale, crate::cli::exec::DEFAULT_SCALE);
+        assert_eq!(r.background, None);
+        assert!(!r.strict);
+
         let second = command(&[
             "render",
             "a.vsdx",
@@ -385,62 +396,47 @@ mod tests {
             "#102030",
             "--strict",
         ]);
-        match second {
-            Command::Render(r) => {
-                assert_eq!(r.page, Some(3));
-                assert_eq!(r.format, OutputFormat::Png);
-                assert_eq!(r.scale, 300.0);
-                assert_eq!(
-                    r.background,
-                    Some(Background::Color(Rgba::opaque(0x10, 0x20, 0x30)))
-                );
-                assert!(r.strict);
-            }
-            other => panic!("expected render, got {other:?}"),
-        }
+        let r = as_render(second);
+        assert_eq!(r.page, Some(3));
+        assert_eq!(r.format, OutputFormat::Png);
+        assert_eq!(r.scale, 300.0);
+        assert_eq!(
+            r.background,
+            Some(Background::Color(Rgba::opaque(0x10, 0x20, 0x30)))
+        );
+        assert!(r.strict);
     }
 
     #[test]
     fn background_none_is_transparent() {
         let transparent = command(&["render", "a.vsdx", "--out", "a.png", "--background", "none"]);
-        match transparent {
-            Command::Render(r) => assert_eq!(r.background, Some(Background::Transparent)),
-            other => panic!("expected render, got {other:?}"),
-        }
+        let r = as_render(transparent);
+        assert_eq!(r.background, Some(Background::Transparent));
     }
 
     #[test]
     fn export_parses_its_arguments() {
         let first = command(&["export", "a.vsdx", "--out", "out"]);
-        match first {
-            Command::Export(e) => {
-                assert_eq!(e.out, PathBuf::from("out"));
-                assert_eq!(e.format, OutputFormat::Png);
-                assert_eq!(e.scale, crate::cli::exec::DEFAULT_SCALE);
-                assert!(!e.strict);
-            }
-            other => panic!("expected export, got {other:?}"),
-        }
+        let e = as_export(first);
+        assert_eq!(e.out, PathBuf::from("out"));
+        assert_eq!(e.format, OutputFormat::Png);
+        assert_eq!(e.scale, crate::cli::exec::DEFAULT_SCALE);
+        assert!(!e.strict);
+
         let second = command(&[
             "export", "a.vsdx", "--out", "out", "--format", "svg", "--scale", "200", "--strict",
         ]);
-        match second {
-            Command::Export(e) => {
-                assert_eq!(e.format, OutputFormat::Svg);
-                assert_eq!(e.scale, 200.0);
-                assert!(e.strict);
-            }
-            other => panic!("expected export, got {other:?}"),
-        }
+        let e = as_export(second);
+        assert_eq!(e.format, OutputFormat::Svg);
+        assert_eq!(e.scale, 200.0);
+        assert!(e.strict);
     }
 
     #[test]
     fn format_comes_from_the_extension() {
         let uppercase = command(&["render", "a.vsdx", "--out", "dir/a.SVG"]);
-        match uppercase {
-            Command::Render(r) => assert_eq!(r.format, OutputFormat::Svg),
-            other => panic!("expected render, got {other:?}"),
-        }
+        let r = as_render(uppercase);
+        assert_eq!(r.format, OutputFormat::Svg);
     }
 
     #[test]
@@ -541,10 +537,8 @@ mod tests {
     fn page_numbers_stay_in_their_bounds() {
         // The largest page number parses; one past it does not.
         let max = command(&["inspect", "a.vsdx", "--page", "4294967295"]);
-        match max {
-            Command::Inspect(i) => assert_eq!(i.page, Some(u32::MAX)),
-            other => panic!("expected inspect, got {other:?}"),
-        }
+        let i = as_inspect(max);
+        assert_eq!(i.page, Some(u32::MAX));
         assert_eq!(
             error(&["inspect", "a.vsdx", "--page", "4294967296"]),
             "invalid page number: 4294967296"
@@ -562,10 +556,8 @@ mod tests {
             "invalid page number:  2"
         );
         // A leading plus is accepted by the integer parser; pinned.
-        match command(&["inspect", "a.vsdx", "--page", "+2"]) {
-            Command::Inspect(i) => assert_eq!(i.page, Some(2)),
-            other => panic!("expected inspect, got {other:?}"),
-        }
+        let i = as_inspect(command(&["inspect", "a.vsdx", "--page", "+2"]));
+        assert_eq!(i.page, Some(2));
     }
 
     #[test]
@@ -586,10 +578,10 @@ mod tests {
             );
         }
         for good in ["1", "0.5", "1e-300", "300.5"] {
-            match command(&["render", "a.vsdx", "--out", "a.png", "--scale", good]) {
-                Command::Render(r) => assert!(r.scale.is_finite() && r.scale > 0.0, "{good}"),
-                other => panic!("expected render, got {other:?}"),
-            }
+            let r = as_render(command(&[
+                "render", "a.vsdx", "--out", "a.png", "--scale", good,
+            ]));
+            assert!(r.scale.is_finite() && r.scale > 0.0, "{good}");
         }
     }
 
@@ -621,16 +613,19 @@ mod tests {
         );
         // Uppercase hex is fine, with or without the hash.
         for good in ["#ABCDEF", "abcdef"] {
-            match command(&["render", "a.vsdx", "--out", "a.png", "--background", good]) {
-                Command::Render(r) => {
-                    assert_eq!(
-                        r.background,
-                        Some(Background::Color(Rgba::opaque(0xAB, 0xCD, 0xEF))),
-                        "{good}"
-                    );
-                }
-                other => panic!("expected render, got {other:?}"),
-            }
+            let r = as_render(command(&[
+                "render",
+                "a.vsdx",
+                "--out",
+                "a.png",
+                "--background",
+                good,
+            ]));
+            assert_eq!(
+                r.background,
+                Some(Background::Color(Rgba::opaque(0xAB, 0xCD, 0xEF))),
+                "{good}"
+            );
         }
     }
 
@@ -668,10 +663,8 @@ mod tests {
             "cannot tell the output format from a; use --format"
         );
         let with_format = command(&["render", "a.vsdx", "--out", "a", "--format", "svg"]);
-        match with_format {
-            Command::Render(r) => assert_eq!(r.format, OutputFormat::Svg),
-            other => panic!("expected render, got {other:?}"),
-        }
+        let r = as_render(with_format);
+        assert_eq!(r.format, OutputFormat::Svg);
     }
 
     #[test]
@@ -688,10 +681,8 @@ mod tests {
     #[test]
     fn options_may_follow_a_double_dash_value() {
         let dashed = command(&["inspect", "--", "--odd-name.vsdx"]);
-        match dashed {
-            Command::Inspect(i) => assert_eq!(i.file, PathBuf::from("--odd-name.vsdx")),
-            other => panic!("expected inspect, got {other:?}"),
-        }
+        let i = as_inspect(dashed);
+        assert_eq!(i.file, PathBuf::from("--odd-name.vsdx"));
     }
 
     #[test]
