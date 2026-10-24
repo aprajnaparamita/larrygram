@@ -16,6 +16,7 @@ pub mod about;
 pub mod canvas;
 pub mod contexts;
 pub mod dialogs;
+pub mod file_view;
 pub mod handles;
 pub mod icons;
 pub mod panel_classic;
