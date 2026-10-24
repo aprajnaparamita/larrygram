@@ -623,6 +623,38 @@ fn the_stub_entry_point_renders_without_a_registry() {
 }
 
 #[test]
+fn the_stub_entry_point_keeps_its_state_across_frames() {
+    let layout = Rc::new(layout());
+    let mut harness = Harness::builder()
+        .with_size(Vec2::new(1600.0, 900.0))
+        .build_ui({
+            let layout = Rc::clone(&layout);
+            move |ui| {
+                show(ui, &layout).expect("the chrome renders");
+            }
+        });
+    harness.run();
+    {
+        let root = harness.root();
+        let title = root
+            .query_all_by_role_and_label(Role::Button, "File")
+            .next()
+            .expect("the File title");
+        title.click();
+    }
+    harness.run();
+    harness.run();
+    assert!(
+        harness
+            .root()
+            .query_all_by_role_and_label(Role::MenuItem, "Open...")
+            .next()
+            .is_some(),
+        "the open menu survives the frame: the state lives in the egui memory"
+    );
+}
+
+#[test]
 fn context_menus_open_through_the_explicit_api() {
     let layout = layout();
     let registry = registry(&[]);

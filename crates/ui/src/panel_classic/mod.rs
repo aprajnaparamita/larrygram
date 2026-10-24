@@ -17,7 +17,7 @@
 //! theme tokens.
 
 pub mod menu;
-pub mod rows;
+pub(crate) mod rows;
 pub mod toolbar;
 
 #[cfg(test)]
@@ -984,16 +984,18 @@ fn key_char(key: egui::Key) -> Option<char> {
 ///
 /// The shell (task P7-09) calls [`PanelClassic::show`] with a real
 /// [`PanelInput`]; this wrapper keeps the stub signature for callers
-/// that have no registry yet and stores the state in the egui memory.
+/// that have no registry yet and stores the state in the egui memory
+/// (temporary data: [`PanelClassic`] is not serializable, so the
+/// state lives for the run, not in the persisted memory).
 pub fn show(ui: &mut Ui, layout: &LayoutV2) -> Result<Vec<Intent>, UiError> {
     let id = Id::unique("larrygram.panel_classic");
     let mut state = ui
-        .data_mut(|data| data.get_persisted::<PanelClassic>(id))
+        .data_mut(|data| data.get_temp::<PanelClassic>(id))
         .unwrap_or_default();
     let registry = Registry::default();
     let app = AppCtx::new(Settings::default());
     let input = PanelInput::new(layout, &registry, &app);
     let produced = state.show(ui, &input);
-    ui.data_mut(|data| data.insert_persisted(id, state));
+    ui.data_mut(|data| data.insert_temp(id, state));
     produced
 }

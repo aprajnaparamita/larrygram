@@ -3,7 +3,7 @@
 //!
 //! A layout item with a `list` name is filled at run time from live
 //! data: File > recent files, Window > open windows, Edit > Go To >
-//! pages and the rest. [`ListProvider`] is the seam: [`LiveLists`
+//! pages and the rest. [`ListProvider`] is the seam: [`LiveLists`]
 //! answers the three lists that come from the application state today
 //! and returns an empty list for every other name, so a caller that
 //! needs more fills it in with its own provider (task P7-07 adds its
@@ -27,7 +27,8 @@ pub struct ListEntry {
     /// Registry id dispatched on activation; `None` renders the row
     /// disabled (the list has no command for it yet).
     pub command: Option<CommandId>,
-    /// Arguments merged into the activation's [`Invocation`].
+    /// Arguments merged into the activation's
+    /// [`Invocation`](larrygram_commands::Invocation).
     pub args: Args,
     /// The entry is the active one (Window > the active window).
     pub checked: bool,
