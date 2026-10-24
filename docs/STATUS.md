@@ -16,7 +16,7 @@ Task board. Only the master agent edits this file, on `main`.
 - Gate queue: `tools/gate-queue/gateq` (AGENTS.md section 7). Merge gates are `main --quick --corpus`; the idle full check is `main-full` in `/Volumes/Dara/larrygram/worktrees/main-full`.
 - Merged today: P8-04, P8-02, P8-05, P7-02 (merge gate green at `d156f9c`). P7-08 started; P7-06 and P7-07 resumed.
 - Sent back: P7-04 (remove its seven `#[rustfmt::skip]`, test the `currentColor` tint and non-blank icons). P7-03 must rebase on main (conflict in `crates/ui-spec/tests/panel_layouts.rs`) and resubmit.
-- Merged since the restart: P8-06, P7-05, P7-15; P8-03 RED at `51ce31e7`, resubmitted at `fc3fec7b`. Queued (paused for the iTerm2 restart): P7-06, P7-05, P7-03, P7-07, P7-08, P8-03, P7-04, then `main-full` at `13942e0`.
+- Merged since the restart: P8-06, P7-05, P7-15, P8-03; P8-07 ready; P8-03 RED at `51ce31e7`, resubmitted at `fc3fec7b`. Queued (paused for the iTerm2 restart): P7-06, P7-05, P7-03, P7-07, P7-08, P8-03, P7-04, then `main-full` at `13942e0`.
 - Queued, not started: P7-16, P8-08.
 - Master items: the parity matrix's one column per layout (P7-02 open issue); `UiRequest::ShowWelcome` in the shell (P7-09); P8-02/P8-04/P8-05 open issues for P8-03, P8-07, P8-08, P8-10 (in their Result sections); the remote still holds the pre-R4 history until the user force-pushes, and the three backup files wait for that.
 
@@ -54,12 +54,12 @@ Phase 8: binary `.vsd`, `.vss` and `.vst` import, read-only, in `crates/vsd-bina
 |---|---|---|---|---|---|
 | [P8-01](tasks/P8-01.md) | architect | none | 0 | merged (plan, ADRs 0068–0072, `vsd-binary` skeleton, task files) | 00769a3 |
 | [P8-02](tasks/P8-02.md) | implementer | P8-01, boundary | A | merged (MS-CFB reader, LZ decompression, summary streams; `allow(dead_code)` until P8-07) | 83100dd |
-| [P8-03](tasks/P8-03.md) | implementer | P8-01, boundary | A | ready (chunks and pointers) | — |
+| [P8-03](tasks/P8-03.md) | implementer | P8-01, boundary | A | merged (chunk headers, pointer lists, list-record trailers; `read_chunks` returns its warnings and takes a block store, for P8-07) | ea520f2 |
 | [P8-04](tasks/P8-04.md) | implementer | P8-01, boundary | A | merged (shapes, transforms, geometry; `collect_with` beside the frozen `collect`; open issues for P8-03, P8-07, P8-08, P8-10) | 13d6641 |
 | [P8-05](tasks/P8-05.md) | implementer | P8-01, boundary | A | merged (text, runs, fields, Character/Paragraph/Tabs rows; P8-11 note: `for` over `Option` with `allow(for_loops_over_fallibles)` in `text.rs` to dodge an untaken branch) | 55d3d00 |
 | [P8-06](tasks/P8-06.md) | implementer | P8-01, boundary | A | merged (styles, colour table, fills, lines; open: the version 6 style names and the style Font cell, for P8-07) | 509c176 |
 | [P8-08](tasks/P8-08.md) | implementer | P8-01, boundary | A | ready, starts second (oracle harness, census) | — |
-| [P8-07](tasks/P8-07.md) | implementer | P8-02..P8-06 | B | waiting (pages, masters, pipeline) | — |
+| [P8-07](tasks/P8-07.md) | implementer | P8-02..P8-06 | B | ready (pages, masters, pipeline) | — |
 | [P8-09](tasks/P8-09.md) | implementer | P8-07, P7-09 | C | waiting (open path) | — |
 | [P8-10](tasks/P8-10.md) | test-engineer | P8-07, P8-08 | D | waiting (tests, fuzz, goldens, first parity report) | — |
 | [P8-11](tasks/P8-11.md) | reviewer | P8-10 | E | waiting | — |
