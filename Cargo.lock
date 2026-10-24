@@ -2128,6 +2128,7 @@ dependencies = [
  "larrygram-geom",
  "larrygram-model",
  "larrygram-text",
+ "larrygram-vsd-binary",
  "larrygram-vsdx",
  "png 0.18.1",
  "proptest",
