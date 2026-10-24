@@ -377,6 +377,7 @@ mod tests {
     /// A stack group of `controls`.
     fn stack(controls: Vec<Item>) -> Group {
         Group {
+            fluent: None,
             id: "group".to_owned(),
             label: Some("Group".to_owned()),
             layout: GroupLayout::Stack,

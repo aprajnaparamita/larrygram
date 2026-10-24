@@ -105,6 +105,7 @@ fn item(id: &str, kind: ItemKind, label: &str, command: Option<&str>) -> Item {
 /// A hand-built group.
 fn group(id: &str, controls: Vec<Item>) -> Group {
     Group {
+        fluent: None,
         id: id.to_owned(),
         label: Some("Group".to_owned()),
         layout: larrygram_ui_spec::v2::GroupLayout::Stack,
@@ -272,6 +273,7 @@ fn adapted_fluent_groups_flow_and_dedup_like_adr_0031() {
         items: Vec::new(),
     };
     let group = Group {
+        fluent: None,
         id: "tab.home.tools".to_owned(),
         label: Some("Tools".to_owned()),
         layout: larrygram_ui_spec::v2::GroupLayout::Stack,
@@ -849,6 +851,7 @@ fn placement_uses_the_real_control_sizes() {
         items: Vec::new(),
     };
     let group = Group {
+        fluent: None,
         id: "g".to_owned(),
         label: Some("G".to_owned()),
         layout: larrygram_ui_spec::v2::GroupLayout::Stack,
@@ -1467,6 +1470,7 @@ fn rows_groups_flow_left_to_right_in_their_half_row() {
         lower
     }];
     let group = Group {
+        fluent: None,
         id: "rows".to_owned(),
         label: Some("Rows".to_owned()),
         layout: larrygram_ui_spec::v2::GroupLayout::Rows,
