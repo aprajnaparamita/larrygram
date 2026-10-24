@@ -1070,7 +1070,12 @@ impl Edit for GeometryEdit {
 pub(crate) const TABLE: CommandTable = &[
     ("edit.delete", "Delete", has_selection, run_delete),
     ("edit.select", "Select", has_pages, run_select),
-    ("edit.select_all", "Select All", has_pages, run_select_all),
+    (
+        "edit.select_all",
+        "Select All",
+        can_select_all,
+        run_select_all,
+    ),
     ("edit.deselect", "Deselect", has_selection, run_deselect),
 ];
 
@@ -1326,6 +1331,35 @@ pub(super) fn run_select(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, 
         ctx.selection.entered = None;
     }
     Ok(outcome(count_label("Selected", count), Vec::new()))
+}
+
+/// Enabled when the active page (or the entered group) has a shape to
+/// select (task P7-08 cross-check).
+fn can_select_all(ctx: &AppCtx) -> crate::Enabled {
+    let Some(session) = ctx.active_document() else {
+        return crate::Enabled::no("no open document");
+    };
+    if session.document.pages.is_empty() {
+        return crate::Enabled::no("the document has no pages");
+    }
+    let Some(page) = session.active_page else {
+        return crate::Enabled::no("no active page");
+    };
+    let count = match ctx.selection.entered {
+        Some(group) if session.document.page_of(group).is_some() => session
+            .document
+            .shape(group)
+            .map_or(0, |shape| shape.children.len()),
+        _ => session
+            .document
+            .page(page)
+            .map_or(0, |entity| entity.shapes.len()),
+    };
+    if count == 0 {
+        crate::Enabled::no("the page has no shapes")
+    } else {
+        crate::Enabled::yes()
+    }
 }
 
 /// `edit.select_all`: selects every top-level shape of the active page,
