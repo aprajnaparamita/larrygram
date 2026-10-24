@@ -357,10 +357,14 @@ fn show_menu_entry(
         {
             let atoms = menu_row_atoms(item, &label);
             let button = Button::new(atoms).frame(false);
-            let (_response, popup) =
-                egui::menu::MenuButton::from_button(button).ui(ui, |ui| -> Result<(), UiError> {
+            // A submenu row opens its children on hover or click
+            // (`SubMenuButton`), like the Panel Modern menus do.
+            let (_response, popup) = egui::menu::SubMenuButton::from_button(button).ui(
+                ui,
+                |ui| -> Result<(), UiError> {
                     show_menu(ui, &item.items, draw, resolve, out, depth + 1)
-                });
+                },
+            );
             if let Some(popup) = popup {
                 popup.inner?;
             }
