@@ -18,6 +18,7 @@ pub mod contexts;
 pub mod dialogs;
 pub mod handles;
 pub mod icons;
+pub mod lists;
 pub mod panel_classic;
 pub mod panel_modern;
 pub mod panes;
