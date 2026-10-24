@@ -92,7 +92,7 @@ pub enum Outcome {
 /// Returns `Ok(None)` while the wizard is open, and an [`Outcome`]
 /// when the user closes it. Next and Back move between the pages
 /// inside `state`. **Why Larrygram?** opens the About window through
-/// [`about::show`](crate::about::show).
+/// [`about::show`].
 pub fn show(ui: &mut Ui, state: &mut State) -> Result<Option<Outcome>, UiError> {
     show_with_about(ui, state, about::show)
 }
@@ -100,7 +100,7 @@ pub fn show(ui: &mut Ui, state: &mut State) -> Result<Option<Outcome>, UiError> 
 /// Draws one frame of the welcome wizard with an injectable About
 /// window.
 ///
-/// [`show`] passes [`about::show`](crate::about::show); tests pass a
+/// [`show`] passes [`about::show`]; tests pass a
 /// fake so they can observe that **Why Larrygram?** opened the window
 /// without depending on the About task's implementation.
 pub fn show_with_about<F>(
