@@ -126,6 +126,7 @@ $G wait <task-id>                                # run again while it exits 3 (n
 - After each change, check only the crates you touched: `cargo test -p <crate>` and `cargo clippy -p <crate> --all-targets --all-features -- -D warnings`.
 - Submit `--quick` at milestones only (before a rebase, after a large change).
 - Submit the hand-off gate (`--skip wasm,fuzz`) **once**, after the last code commit and the rebase. Submit again only if code changes after that; a Result-only commit does not need it.
+- Submit and wait only on your own task id. The `main` and `main-full` jobs belong to the master: never wait on, cancel or resubmit them. When your task is handed off, stop; do not look for other work in the queue.
 - The master submits the merge gate as `gateq submit main --corpus --front --quick` and the full check as `gateq submit main-full --dir /Volumes/Dara/larrygram/worktrees/main-full --checkout main --corpus --idle`.
 
 Coverage thresholds: geom, model, vsdx, vsd-binary, shapesheet, commands, ui-spec ≥ 85%; render, text ≥ 75%; control, ui, apps ≥ 50% (UI via egui_kittest). No crate may drop below its previous-phase number (`[ratchet]` in `coverage.toml`; only the master updates it).
