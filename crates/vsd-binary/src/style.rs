@@ -492,9 +492,14 @@ fn map_style_sheet(
     let index = u32::try_from(document.stylesheet.styles.len()).unwrap_or(u32::MAX);
     let context = format!("style {}", chunk.id);
     let reader = Reader::new(chunk.data);
+    // The three style links sit at 0x22, 0x2a and 0x32 of the record
+    // payload: a u32 Visio style id followed by four unused bytes each
+    // (the offsets the reference reads; P8-10 regression test pins
+    // them). Reading the wrong offsets leaves a style's fill link
+    // dangling and the instance shapes resolve the hard default.
     let line_style = style_reference(&reader, 0x22, &context, warnings, "line style reference");
-    let fill_style = style_reference(&reader, 0x26, &context, warnings, "fill style reference");
-    let text_style = style_reference(&reader, 0x2a, &context, warnings, "text style reference");
+    let fill_style = style_reference(&reader, 0x2a, &context, warnings, "fill style reference");
+    let text_style = style_reference(&reader, 0x32, &context, warnings, "text style reference");
 
     let mut style = Style::new(StyleId { index });
     style.visio_id = chunk.id;
@@ -1084,10 +1089,10 @@ mod tests {
     }
 
     fn style_sheet(line: u32, fill: u32, text: u32) -> Vec<u8> {
-        let mut data = vec![0u8; 0x2e];
+        let mut data = vec![0u8; 0x36];
         data[0x22..0x26].copy_from_slice(&line.to_le_bytes());
-        data[0x26..0x2a].copy_from_slice(&fill.to_le_bytes());
-        data[0x2a..0x2e].copy_from_slice(&text.to_le_bytes());
+        data[0x2a..0x2e].copy_from_slice(&fill.to_le_bytes());
+        data[0x32..0x36].copy_from_slice(&text.to_le_bytes());
         data
     }
 
@@ -1237,6 +1242,26 @@ mod tests {
         assert!(document.stylesheet.styles.is_empty());
         assert!(document.color_table.is_empty());
         assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn a_style_sheet_reads_its_links_at_the_reference_offsets() {
+        // Regression (P8-10): the three links sit at 0x22, 0x2a and
+        // 0x32, four unused bytes apart. A reader that drops the gaps
+        // reads the decoy values below and the fill chain dangles.
+        let mut sheet = vec![0u8; 0x36];
+        sheet[0x22..0x26].copy_from_slice(&3u32.to_le_bytes());
+        sheet[0x26..0x2a].copy_from_slice(&0xaaaa_aaaau32.to_le_bytes());
+        sheet[0x2a..0x2e].copy_from_slice(&4u32.to_le_bytes());
+        sheet[0x2e..0x32].copy_from_slice(&0xbbbb_bbbbu32.to_le_bytes());
+        sheet[0x32..0x36].copy_from_slice(&6u32.to_le_bytes());
+        let chunks = style_chunks(&sheet, &[]);
+        let (document, warnings) = collect(&chunks);
+        let style = &document.stylesheet.styles[0];
+        assert_eq!(style.line_style, Some(3), "line link at 0x22");
+        assert_eq!(style.fill_style, Some(4), "fill link at 0x2a");
+        assert_eq!(style.text_style, Some(6), "text link at 0x32");
+        assert!(warnings.is_empty(), "{warnings:?}");
     }
 
     #[test]
