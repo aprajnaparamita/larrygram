@@ -447,7 +447,7 @@ fn draw_popup(
         state.open_popup = None;
         return;
     }
-    let mut clicked: Option<Activation> = None;
+    let mut clicked: Option<(String, Activation)> = None;
     if open == TOOLBAR_LIST {
         let rows = toolbar_list_rows(input, state);
         clicked = draw_popup_level(ui, &rows, state.popup_rect.left_bottom(), 0);
@@ -467,11 +467,17 @@ fn draw_popup(
         if let Some(item) = items {
             let rows = rows::rows(&item.items, input, state, Source::Ui, false, 0);
             clicked = draw_popup_level(ui, &rows, state.popup_rect.left_bottom(), 0);
+            // `split_recent`: the pick becomes the main button.
+            if let Some((row_id, _)) = &clicked
+                && item.kind == ItemKind::SplitRecent
+            {
+                state.split_recent.insert(item.id.clone(), row_id.clone());
+            }
         } else {
             state.open_popup = None;
         }
     }
-    if let Some(activation) = clicked {
+    if let Some((_, activation)) = clicked {
         match activation {
             Activation::Intent(intent) => {
                 intents.push(intent);
@@ -490,8 +496,7 @@ fn draw_popup(
     }
     if ui.input(|i| i.pointer.any_click())
         && let Some(pointer) = ui.input(|i| i.pointer.interact_pos())
-        && !Rect::from_min_size(state.popup_rect.left_bottom(), Vec2::new(220.0, 240.0))
-            .contains(pointer)
+        && !state.popup_hit_rect().contains(pointer)
         && !state.popup_rect.contains(pointer)
     {
         state.open_popup = None;
@@ -528,9 +533,14 @@ fn toolbar_list_rows(input: &PanelInput<'_>, state: &PanelClassic) -> Vec<Row> {
         .collect()
 }
 
-/// One popup level and its hovered submenus; returns the activation
-/// of the row the user clicked (submenus open on hover).
-fn draw_popup_level(ui: &mut Ui, rows: &[Row], pos: Pos2, depth: u32) -> Option<Activation> {
+/// One popup level and its hovered submenus; returns the id and the
+/// activation of the row the user clicked (submenus open on hover).
+fn draw_popup_level(
+    ui: &mut Ui,
+    rows: &[Row],
+    pos: Pos2,
+    depth: u32,
+) -> Option<(String, Activation)> {
     if depth >= MAX_DEPTH {
         return None;
     }
@@ -566,7 +576,7 @@ fn draw_popup_level(ui: &mut Ui, rows: &[Row], pos: Pos2, depth: u32) -> Option<
         && let Some(row) = rows.get(index)
         && !row.has_children()
     {
-        activated = Some(row.activation.clone());
+        activated = Some((row.id.clone(), row.activation.clone()));
     }
     activated
 }

@@ -25,7 +25,7 @@ mod tests;
 
 use std::collections::BTreeMap;
 
-use egui::{Id, Pos2, Rect, Ui};
+use egui::{Id, Pos2, Rect, Ui, Vec2};
 use larrygram_commands::app::{AppCtx, Settings};
 use larrygram_commands::{CommandId, Registry, Source};
 use larrygram_ui_spec::v2::{ContextId, Item, LayoutV2, Menu, MenuBar};
@@ -921,6 +921,14 @@ impl PanelClassic {
         }
     }
 
+    /// The toolbar popup's hit bounds: the drawn popup sits at
+    /// [`PanelClassic::popup_rect`]'s bottom left (see
+    /// `toolbar::draw_popup`), and a click inside these bounds is not
+    /// an outside click.
+    fn popup_hit_rect(&self) -> Rect {
+        Rect::from_min_size(self.popup_rect.left_bottom(), Vec2::new(220.0, 240.0))
+    }
+
     /// A click outside every open menu and title closes all.
     fn close_on_outside_click(&mut self, ui: &Ui) {
         let Some(pointer) = ui.input(|i| i.pointer.interact_pos()) else {
@@ -931,7 +939,9 @@ impl PanelClassic {
         }
         let on_title = self.title_rects.iter().any(|rect| rect.contains(pointer));
         let on_menu = self.level_rects.iter().any(|rect| rect.contains(pointer));
-        if !on_title && !on_menu {
+        let on_popup = self.open_popup.is_some()
+            && (self.popup_hit_rect().contains(pointer) || self.popup_rect.contains(pointer));
+        if !on_title && !on_menu && !on_popup {
             self.close_all();
         }
     }
