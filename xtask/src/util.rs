@@ -161,6 +161,36 @@ pub mod test_support {
         }
     }
 
+    /// Copies a directory tree (files and subdirectories) from `src`
+    /// into `dst`, creating `dst`. The fixture helper for the loader
+    /// tests that mirror the committed `ui-spec/` data (and its icon
+    /// set) in a temp workspace.
+    pub fn copy_tree(src: &Path, dst: &Path) {
+        std::fs::create_dir_all(dst).expect("copy_tree destination");
+        for entry in std::fs::read_dir(src).expect("copy_tree source") {
+            let entry = entry.expect("copy_tree entry");
+            let to = dst.join(entry.file_name());
+            if entry.file_type().expect("copy_tree type").is_dir() {
+                copy_tree(&entry.path(), &to);
+            } else {
+                std::fs::copy(entry.path(), &to).expect("copy_tree copy");
+            }
+        }
+    }
+
+    #[test]
+    fn copy_tree_copies_files_and_subdirectories() {
+        let src = TempDir::new("copy-tree-src");
+        let dst = TempDir::new("copy-tree-dst");
+        std::fs::create_dir_all(src.join("a/b")).unwrap();
+        std::fs::write(src.join("a/b/c.txt"), "x").unwrap();
+        copy_tree(src.path(), &dst.join("out"));
+        assert_eq!(
+            std::fs::read_to_string(dst.join("out/a/b/c.txt")).unwrap(),
+            "x"
+        );
+    }
+
     #[test]
     fn temp_dirs_are_unique_per_call() {
         let a = TempDir::new("uniq");
