@@ -27,7 +27,7 @@
 
 use egui::{
     Align2, Color32, ColorImage, Context, FontId, PointerButton, Pos2, Rect, Sense, Stroke,
-    TextureHandle, TextureId, TextureOptions, Ui,
+    StrokeKind, TextureHandle, TextureId, TextureOptions, Ui,
 };
 use larrygram_commands::{
     AppCtx, CommandId, DisplayUnits, DocumentSession, Invocation, SessionId, Source,
@@ -38,11 +38,12 @@ use larrygram_render::{
     BuildOptions, MAX_DEVICE_EXTENT, Overlay, OverlayMark, RasterImage, RasterOptions, build_scene,
     render_raster,
 };
+use larrygram_ui_spec::v2::Theme;
 
 use crate::handles::rotated_corners;
 use crate::text_edit::{self, EditorAction, TextEditor};
 use crate::tools::{Modifiers, ToolEvent};
-use crate::{Intent, UiError};
+use crate::{Intent, UiError, theme};
 
 /// Points per inch at zoom 1.0 (ADR 0025: 96 pixels per inch, 1:1).
 pub const POINTS_PER_INCH: f64 = 96.0;
@@ -87,12 +88,64 @@ const MIN_RASTER_SCALE: f64 = 0.01;
 /// section 6: bound input-derived work). Denser views draw no grid.
 const MAX_TICKS: i64 = 4096;
 
-const CANVAS_BACKDROP: Color32 = Color32::from_rgb(204, 204, 204);
 const GRID_MINOR: Color32 = Color32::from_rgb(190, 190, 190);
 const GRID_MAJOR: Color32 = Color32::from_rgb(160, 160, 160);
-const RULER_BG: Color32 = Color32::from_rgb(232, 232, 232);
-const RULER_TICK: Color32 = Color32::from_rgb(120, 120, 120);
-const RULER_TEXT: Color32 = Color32::from_rgb(80, 80, 80);
+
+/// The canvas colours read from the active theme (`docs/ui/themes.md`).
+///
+/// The defaults preserve the pre-theme look when no theme was applied
+/// yet: a grey backdrop, a white page, and a light ruler. The canvas
+/// reads `canvas.background`, `page.background`, `page.border`,
+/// `page.shadow`, `ruler.background` and `ruler.ticks`; the ruler labels
+/// use the tick colour.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CanvasColors {
+    /// The area around the page (`canvas.background`).
+    pub background: Color32,
+    /// The page fill behind the raster (`page.background`).
+    pub page_background: Color32,
+    /// The one-point outline around the page (`page.border`).
+    pub page_border: Color32,
+    /// The offset shadow under the page (`page.shadow`).
+    pub page_shadow: Color32,
+    /// The background of both ruler bands (`ruler.background`).
+    pub ruler_background: Color32,
+    /// The ruler ticks and labels (`ruler.ticks`).
+    pub ruler_ticks: Color32,
+}
+
+impl CanvasColors {
+    /// Reads the canvas tokens from `theme`, falling back per token.
+    pub fn from_theme(theme: &Theme) -> Self {
+        Self {
+            background: crate::theme::color(theme, "canvas.background"),
+            page_background: crate::theme::color(theme, "page.background"),
+            page_border: crate::theme::color(theme, "page.border"),
+            page_shadow: crate::theme::color(theme, "page.shadow"),
+            ruler_background: crate::theme::color(theme, "ruler.background"),
+            ruler_ticks: crate::theme::color(theme, "ruler.ticks"),
+        }
+    }
+
+    /// The active theme's colours, or [`CanvasColors::default`] before
+    /// the shell applies a theme.
+    fn active(ctx: &Context) -> Self {
+        theme::current(ctx).map_or_else(Self::default, |theme| Self::from_theme(&theme))
+    }
+}
+
+impl Default for CanvasColors {
+    fn default() -> Self {
+        Self {
+            background: Color32::from_rgb(204, 204, 204),
+            page_background: Color32::WHITE,
+            page_border: Color32::from_rgb(169, 176, 184),
+            page_shadow: Color32::from_rgb(234, 234, 234),
+            ruler_background: Color32::from_rgb(232, 232, 232),
+            ruler_ticks: Color32::from_rgb(120, 120, 120),
+        }
+    }
+}
 
 /// The raster texture cache of the canvas (ADR 0033).
 ///
@@ -365,9 +418,10 @@ pub fn show_with_overlay(
         cache.pointer_down = false;
     }
 
-    // Paint: backdrop, then the grid, then the texture, then the overlay.
+    // Paint: backdrop, then the grid, then the page, then the overlay.
+    let colors = CanvasColors::active(ui.ctx());
     let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, 0.0, CANVAS_BACKDROP);
+    painter.rect_filled(rect, 0.0, colors.background);
     let k = points_per_inch(zoom);
     if session.view.show_grid {
         draw_grid(&painter, viewport, session.view.pan, k);
@@ -383,8 +437,17 @@ pub fn show_with_overlay(
         );
         let dest = Rect::from_min_size(origin, size);
         if dest.is_positive() {
+            let shadow = Rect::from_min_size(dest.min + egui::vec2(3.0, 3.0), dest.size());
+            painter.rect_filled(shadow, 0.0, colors.page_shadow);
+            painter.rect_filled(dest, 0.0, colors.page_background);
             let uv = Rect::from_min_max(Pos2::ZERO, egui::pos2(1.0, 1.0));
             painter.image(texture, dest, uv, Color32::WHITE);
+            painter.rect_stroke(
+                dest,
+                0.0,
+                Stroke::new(1.0, colors.page_border),
+                StrokeKind::Inside,
+            );
         }
     }
     draw_overlay(
@@ -635,6 +698,7 @@ pub fn show_rulers(
         return Ok(());
     }
     let viewport = viewport_rect(rect, true);
+    let colors = CanvasColors::active(ui.ctx());
     let painter = ui.painter_at(rect);
     let zoom = safe_zoom(session.view.zoom);
     let k = points_per_inch(zoom);
@@ -642,8 +706,8 @@ pub fn show_rulers(
 
     let top = Rect::from_min_max(rect.min, egui::pos2(rect.max.x, viewport.min.y));
     let left = Rect::from_min_max(rect.min, egui::pos2(viewport.min.x, rect.max.y));
-    painter.rect_filled(top, 0.0, RULER_BG);
-    painter.rect_filled(left, 0.0, RULER_BG);
+    painter.rect_filled(top, 0.0, colors.ruler_background);
+    painter.rect_filled(left, 0.0, colors.ruler_background);
 
     for (x, major) in tick_positions(viewport.min.x, viewport.width(), pan.x, k) {
         let length = if major {
@@ -656,7 +720,7 @@ pub fn show_rulers(
                 egui::pos2(x, viewport.min.y),
                 egui::pos2(x, viewport.min.y - length),
             ],
-            Stroke::new(1.0, RULER_TICK),
+            Stroke::new(1.0, colors.ruler_ticks),
         );
         if major {
             let inches = (f64::from(x) - f64::from(viewport.min.x)) / k - pan.x;
@@ -665,7 +729,7 @@ pub fn show_rulers(
                 Align2::LEFT_TOP,
                 format_number(converted(inches, units)),
                 FontId::proportional(9.0),
-                RULER_TEXT,
+                colors.ruler_ticks,
             );
         }
     }
@@ -680,7 +744,7 @@ pub fn show_rulers(
                 egui::pos2(viewport.min.x, y),
                 egui::pos2(viewport.min.x - length, y),
             ],
-            Stroke::new(1.0, RULER_TICK),
+            Stroke::new(1.0, colors.ruler_ticks),
         );
         if major {
             let inches = (f64::from(y) - f64::from(viewport.min.y)) / k - pan.y;
@@ -689,7 +753,7 @@ pub fn show_rulers(
                 Align2::RIGHT_CENTER,
                 format_number(converted(inches, units)),
                 FontId::proportional(9.0),
-                RULER_TEXT,
+                colors.ruler_ticks,
             );
         }
     }
@@ -1624,5 +1688,73 @@ mod tests {
         // at the old key is reported again.
         session.active_page = Some(PageId { index: 42 });
         rasterize(&ctx, &session, &mut cache).expect_err("reported again");
+    }
+
+    /// A theme with the canvas tokens and their expected colours.
+    fn canvas_theme(id: &str, background: &str) -> Theme {
+        let mut colors = std::collections::BTreeMap::new();
+        for (token, value) in [
+            ("canvas.background", background),
+            ("page.background", "#fefefe"),
+            ("page.border", "#010203"),
+            ("page.shadow", "#040506"),
+            ("ruler.background", "#070809"),
+            ("ruler.ticks", "#0a0b0c"),
+        ] {
+            colors.insert(token.to_owned(), value.to_owned());
+        }
+        Theme {
+            schema_version: 1,
+            id: id.to_owned(),
+            name: id.to_owned(),
+            fonts: std::collections::BTreeMap::new(),
+            colors,
+            metrics: std::collections::BTreeMap::new(),
+            contextual_tab_sets: std::collections::BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn canvas_colours_are_read_from_the_theme() {
+        let theme = canvas_theme("canvas", "#101112");
+        let colors = CanvasColors::from_theme(&theme);
+        assert_eq!(colors.background, Color32::from_rgb(0x10, 0x11, 0x12));
+        assert_eq!(colors.page_background, Color32::from_rgb(0xfe, 0xfe, 0xfe));
+        assert_eq!(colors.page_border, Color32::from_rgb(0x01, 0x02, 0x03));
+        assert_eq!(colors.page_shadow, Color32::from_rgb(0x04, 0x05, 0x06));
+        assert_eq!(colors.ruler_background, Color32::from_rgb(0x07, 0x08, 0x09));
+        assert_eq!(colors.ruler_ticks, Color32::from_rgb(0x0a, 0x0b, 0x0c));
+    }
+
+    #[test]
+    fn canvas_colours_fall_back_before_a_theme_is_applied() {
+        let ctx = Context::default();
+        assert_eq!(CanvasColors::active(&ctx), CanvasColors::default());
+        assert_eq!(
+            CanvasColors::default().background,
+            Color32::from_rgb(204, 204, 204)
+        );
+    }
+
+    #[test]
+    fn applying_a_theme_changes_the_active_canvas_colours() {
+        let ctx = Context::default();
+        let modern = canvas_theme("panel-modern", "#fbfbfb");
+        theme::apply(&ctx, &modern).expect("the theme applies");
+        assert_eq!(
+            CanvasColors::active(&ctx),
+            CanvasColors::from_theme(&modern)
+        );
+
+        let classic = canvas_theme("panel-classic", "#9b9ab3");
+        theme::apply(&ctx, &classic).expect("the second theme applies");
+        assert_eq!(
+            CanvasColors::active(&ctx),
+            CanvasColors::from_theme(&classic)
+        );
+        assert_ne!(
+            CanvasColors::active(&ctx).background,
+            CanvasColors::from_theme(&modern).background
+        );
     }
 }
