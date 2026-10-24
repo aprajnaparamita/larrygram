@@ -44,10 +44,10 @@ Phase 8: binary `.vsd`, `.vss` and `.vst` import, read-only, in `crates/vsd-bina
 | Task | Role | Depends on | Group | State | Branch |
 |---|---|---|---|---|---|
 | [P8-01](tasks/P8-01.md) | architect | none | 0 | merged (plan, ADRs 0068–0072, `vsd-binary` skeleton, task files) | 00769a3 |
-| [P8-02](tasks/P8-02.md) | implementer | P8-01, boundary | A | ready (container and streams) | — |
+| [P8-02](tasks/P8-02.md) | implementer | P8-01, boundary | A | merged (MS-CFB reader, LZ decompression, summary streams; `allow(dead_code)` until P8-07) | 83100dd |
 | [P8-03](tasks/P8-03.md) | implementer | P8-01, boundary | A | ready (chunks and pointers) | — |
 | [P8-04](tasks/P8-04.md) | implementer | P8-01, boundary | A | merged (shapes, transforms, geometry; `collect_with` beside the frozen `collect`; open issues for P8-03, P8-07, P8-08, P8-10) | 13d6641 |
-| [P8-05](tasks/P8-05.md) | implementer | P8-01, boundary | A | ready (text and code pages) | — |
+| [P8-05](tasks/P8-05.md) | implementer | P8-01, boundary | A | merged (text, runs, fields, Character/Paragraph/Tabs rows; P8-11 note: `for` over `Option` with `allow(for_loops_over_fallibles)` in `text.rs` to dodge an untaken branch) | 55d3d00 |
 | [P8-06](tasks/P8-06.md) | implementer | P8-01, boundary | A | ready (styles and colours) | — |
 | [P8-08](tasks/P8-08.md) | implementer | P8-01, boundary | A | ready, starts second (oracle harness, census) | — |
 | [P8-07](tasks/P8-07.md) | implementer | P8-02..P8-06 | B | waiting (pages, masters, pipeline) | — |
