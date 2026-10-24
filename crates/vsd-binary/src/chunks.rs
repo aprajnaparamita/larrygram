@@ -448,8 +448,13 @@ pub struct Chunk<'a> {
     /// its id is the index of its pointer in the pointer list.
     pub id: u32,
     /// The record payload, after the record header: the declared payload
-    /// length plus the trailer the per-version framing rules add. Byte
-    /// order and field widths follow the file version (ADR 0069).
+    /// length plus the trailing region the per-version framing rules add
+    /// (ADR 0069). Byte order and field widths follow the file version.
+    ///
+    /// The trailing region is part of the record: the list records (the
+    /// geometry, shape, character and other lists) keep the end of their
+    /// child-id list there, past the declared payload length, so a
+    /// consumer that stops at the declared length loses rows.
     pub data: &'a [u8],
 }
 
@@ -600,6 +605,42 @@ fn trailer_len(version: FormatVersion, kind: u32, list: u32, level: u16, unknown
             trailer
         }
     }
+}
+
+/// The extent of a list record's child-id list (ADR 0069).
+///
+/// A list record (the `0x64..=0x76` family: scratch, shape, field,
+/// property, character, paragraph, tabs, geometry and the other lists)
+/// opens with a list header: the length of its sub-header and the byte
+/// count of its child-id list. The ids follow the sub-header and the
+/// last of them can sit past the declared payload length, in the
+/// trailing region. When the header names more than the framing rules
+/// cover, the record grows to hold the whole child list; a header that
+/// cannot be this record's is left to the framing rules alone. The
+/// layout is the one the reference's `readGeomList` and its siblings
+/// read.
+fn list_extent(kind: u32, buf: &[u8], at: usize, frame: u64) -> u64 {
+    if !matches!(kind, 0x64..=0x76) {
+        return frame;
+    }
+    let Some(sub_header) = read_u32(buf, at) else {
+        return frame;
+    };
+    let Some(bytes) = read_u32(buf, at.saturating_add(4)) else {
+        return frame;
+    };
+    if bytes == 0 || u64::from(sub_header) > 0x1000 || bytes % 4 != 0 {
+        return frame;
+    }
+    let need = 8u64
+        .saturating_add(u64::from(sub_header))
+        .saturating_add(u64::from(bytes));
+    // Only grow while the child list fits the region: a header naming
+    // more than the region holds is not this record's.
+    if need > buf.len().saturating_sub(at) as u64 {
+        return frame;
+    }
+    frame.max(need)
 }
 
 /// One pointer record of a pointer list.
@@ -846,7 +887,13 @@ fn parse_chunk_stream(
         let level = read_u16(buf, at.saturating_add(16)).unwrap_or(0);
         let unknown = buf.get(at.saturating_add(18)).copied().unwrap_or(0);
         let trailer = trailer_len(version, kind, list, level, unknown);
-        let total = u64::from(data_len).saturating_add(trailer);
+        let start = at.saturating_add(CHUNK_HEADER_LEN);
+        let total = list_extent(
+            kind,
+            buf,
+            start,
+            u64::from(data_len).saturating_add(trailer),
+        );
         if u64::try_from(at)
             .unwrap_or(u64::MAX)
             .saturating_add(CHUNK_HEADER_LEN as u64)
@@ -882,7 +929,6 @@ fn parse_chunk_stream(
                 max: u64::from(limits.max_chunks),
             });
         }
-        let start = at.saturating_add(CHUNK_HEADER_LEN);
         let len = usize::try_from(total).unwrap_or(usize::MAX);
         if kind > u32::from(u16::MAX) {
             warnings.push(ImportWarning {
@@ -1698,6 +1744,106 @@ mod tests {
             == WarningKind::BadValue {
                 what: "pointer list"
             }));
+    }
+
+    // --- list records and their child ids -------------------------------
+
+    /// Reads a child-id list the way the domain modules do: a sub-header
+    /// length, a byte count, the sub-header, then the ids.
+    fn child_ids(data: &[u8]) -> Option<Vec<u32>> {
+        let mut fields = data;
+        let sub_header = u32::from_le_bytes(fields.get(0..4)?.try_into().ok()?) as usize;
+        let bytes = u32::from_le_bytes(fields.get(4..8)?.try_into().ok()?) as usize;
+        fields = fields.get(8 + sub_header..)?;
+        let mut ids = Vec::new();
+        for _ in 0..bytes / 4 {
+            ids.push(u32::from_le_bytes(fields.get(0..4)?.try_into().ok()?));
+            fields = fields.get(4..)?;
+        }
+        Some(ids)
+    }
+
+    #[test]
+    fn a_list_records_child_ids_are_kept_in_the_record() {
+        // The corpus shape of a geometry list of six rows: the sub-header
+        // is 24 bytes, four ids sit in the declared payload (48 bytes)
+        // and two in the trailing region (12 bytes).
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&24u32.to_le_bytes());
+        payload.extend_from_slice(&24u32.to_le_bytes());
+        payload.extend_from_slice(&[0u8; 24]);
+        for id in [10u32, 11, 12, 13] {
+            payload.extend_from_slice(&id.to_le_bytes());
+        }
+        assert_eq!(payload.len(), 48);
+        let mut record = chunk_header(0x6c, 4, 6, 48, 2, 0x55);
+        record.extend_from_slice(&payload);
+        for id in [14u32, 15] {
+            record.extend_from_slice(&id.to_le_bytes());
+        }
+        record.extend_from_slice(&[0u8; 4]);
+        let stream = build(11, &[(0x1a, 0xd0, record)], &[]);
+        let mut blocks = Vec::new();
+        let (chunks, warnings) =
+            read_chunks(&stream, FormatVersion::V11, &Limits::DEFAULT, &mut blocks).unwrap();
+        assert_eq!(warnings, Vec::new());
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].record, GEOM_LIST);
+        assert_eq!(chunks[0].data.len(), 60);
+        assert_eq!(
+            child_ids(chunks[0].data),
+            Some(vec![10, 11, 12, 13, 14, 15])
+        );
+    }
+
+    #[test]
+    fn a_child_id_list_past_the_trailer_grows_the_record() {
+        // A geometry list whose declared payload ends with its
+        // sub-header: the six ids follow it, past the framing rules.
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&24u32.to_le_bytes());
+        payload.extend_from_slice(&24u32.to_le_bytes());
+        payload.extend_from_slice(&[0u8; 24]);
+        assert_eq!(payload.len(), 32);
+        let mut record = chunk_header(0x6c, 4, 0, 32, 1, 0x50);
+        record.extend_from_slice(&payload);
+        for id in [20u32, 21, 22, 23, 24, 25] {
+            record.extend_from_slice(&id.to_le_bytes());
+        }
+        let stream = build(11, &[(0x1a, 0xd0, record)], &[]);
+        let mut blocks = Vec::new();
+        let (chunks, warnings) =
+            read_chunks(&stream, FormatVersion::V11, &Limits::DEFAULT, &mut blocks).unwrap();
+        assert_eq!(warnings, Vec::new());
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].data.len(), 56);
+        assert_eq!(
+            child_ids(chunks[0].data),
+            Some(vec![20, 21, 22, 23, 24, 25])
+        );
+    }
+
+    #[test]
+    fn a_list_record_with_a_nonsense_header_keeps_the_framing_rules() {
+        // The list header names an impossible sub-header length: the
+        // record keeps its declared frame and the walk continues.
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&u32::MAX.to_le_bytes());
+        payload.extend_from_slice(&24u32.to_le_bytes());
+        payload.extend_from_slice(&[0u8; 24]);
+        assert_eq!(payload.len(), 32);
+        let mut region = chunk_header(0x6c, 4, 0, 32, 1, 0x50);
+        region.extend_from_slice(&payload);
+        region.extend_from_slice(&chunk(0x8b, 2, 0, &[2, 2], 1, 0x50, 0));
+        let stream = build(11, &[(0x1a, 0xd0, region)], &[]);
+        let mut blocks = Vec::new();
+        let (chunks, warnings) =
+            read_chunks(&stream, FormatVersion::V11, &Limits::DEFAULT, &mut blocks).unwrap();
+        assert_eq!(warnings, Vec::new());
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0].record, GEOM_LIST);
+        assert_eq!(chunks[0].data.len(), 32);
+        assert_eq!(chunks[1].record, LINE_TO);
     }
 
     // --- the limits ----------------------------------------------------
