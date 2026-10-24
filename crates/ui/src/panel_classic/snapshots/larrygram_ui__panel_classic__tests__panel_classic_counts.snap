@@ -1,0 +1,25 @@
+---
+source: crates/ui/src/panel_classic/tests.rs
+expression: report
+---
+layout: panel-classic
+surface: menu_bars
+  button: items 360 (hidden 13) widgets 347
+  check: items 7 (hidden 0) widgets 7
+  list: items 25 (hidden 0) widgets 25
+  submenu: items 31 (hidden 1) widgets 30
+surface: toolbars
+  button: items 243 (hidden 3) widgets 240
+  check: items 7 (hidden 0) widgets 7
+  combo: items 3 (hidden 0) widgets 3
+  dropdown: items 1 (hidden 0) widgets 1
+  heading: items 12 (hidden 0) widgets 12
+  list: items 38 (hidden 0) widgets 38
+  palette: items 1 (hidden 0) widgets 1
+  split: items 26 (hidden 0) widgets 26
+  split_recent: items 4 (hidden 0) widgets 4
+  submenu: items 10 (hidden 0) widgets 10
+surface: context_menus
+  button: items 217 (hidden 0) widgets 217
+  list: items 6 (hidden 0) widgets 6
+  submenu: items 11 (hidden 0) widgets 11
