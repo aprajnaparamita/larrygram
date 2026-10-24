@@ -100,6 +100,18 @@ fn shape(x: f64, y: f64, visio_id: i32) -> Shape {
     shape
 }
 
+/// The settings of the Phase 5 suites: the Panel (2016 data) layout
+/// (the Phase 4 frame they pin: `canvas::show_page_tabs` and the
+/// status bar) and the welcome wizard already seen (task P7-09 flips
+/// both defaults).
+pub fn phase5_settings() -> Settings {
+    let mut settings = Settings::default();
+    settings.ui_layout = larrygram_ui_spec::LayoutKind::Panel2016;
+    settings.default_layout = larrygram_ui_spec::LayoutKind::Panel2016;
+    settings.welcome_seen = true;
+    settings
+}
+
 /// An app with one page and one filled shape at (3, 3).
 pub fn app_with_one_shape() -> (AppCtx, ShapeId) {
     let mut doc = Document::new();
@@ -109,7 +121,7 @@ pub fn app_with_one_shape() -> (AppCtx, ShapeId) {
     page.shapes.push(id);
     page.sheet.cells = vec![cell("PageWidth", 8.5), cell("PageHeight", PAGE_HEIGHT)];
     doc.pages.push(page);
-    let mut app = AppCtx::new(Settings::default());
+    let mut app = AppCtx::new(phase5_settings());
     app.open_document(DocumentSession::new(doc, None));
     let session = app.active_document_mut().expect("session");
     session.view.zoom = ZOOM;

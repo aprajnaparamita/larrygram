@@ -344,7 +344,7 @@ fn clicking_a_page_tab_switches_the_active_page() {
     second.name = "Second".to_owned();
     document.pages.push(first);
     document.pages.push(second);
-    let mut app = AppCtx::new(Settings::default());
+    let mut app = AppCtx::new(crate::phase4_settings());
     app.open_document(DocumentSession::new(document, None));
     let mut rig = ShellRig::with_app(app);
     rig.run();

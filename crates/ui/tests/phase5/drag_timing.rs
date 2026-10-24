@@ -95,7 +95,7 @@ fn app_with_grid(count: usize) -> AppCtx {
         page.shapes.push(id);
     }
     doc.pages.push(page);
-    let mut app = AppCtx::new(Settings::default());
+    let mut app = AppCtx::new(crate::phase5_settings());
     app.open_document(DocumentSession::new(doc, None));
     if let Some(session) = app.active_document_mut() {
         session.view.zoom = ZOOM;

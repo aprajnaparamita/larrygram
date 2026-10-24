@@ -36,7 +36,7 @@ fn resized_master_instance() -> (AppCtx, ShapeId) {
             )
             .expect("resize the instance");
     }
-    let mut app = AppCtx::new(Settings::default());
+    let mut app = AppCtx::new(crate::phase5_settings());
     app.open_document(DocumentSession::new(document, None));
     (app, shape)
 }
