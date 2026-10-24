@@ -1,0 +1,13 @@
+---
+source: crates/ui-spec/tests/v2_snapshot.rs
+expression: "render_counts(&load_layout(LayoutKind::PanelModern).expect(\"the layout loads\"))"
+---
+panel-modern:
+  quick_access_toolbar: 4
+  tabs: 7 (items: 210)
+  contextual_tabs: 3 (items: 34)
+  menu_bars: 0 (items: 0)
+  toolbars: 0 (items: 0)
+  file_view nav: 9
+  context_menus: 13 (items: 149)
+  items by kind: button=279 check=11 combo=2 dropdown=32 gallery=3 list=24 options=4 split=17 submenu=25

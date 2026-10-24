@@ -1,0 +1,46 @@
+# Test fixture for crates/ui-spec. Not real Microsoft data.
+schema_version: 2
+id: panel-modern
+name: Panel Modern
+kind: panel-modern
+theme: panel-modern
+window:
+  regions:
+  - id: drawing
+    edge: fill
+quick_access_toolbar:
+- id: qat.save
+  kind: button
+  label: Save
+  command: file.save
+  new_command: true
+  icon: file.save
+file_button:
+  label: File
+  opens: file_view
+tabs:
+- id: tab.home
+  label: Home
+  groups:
+  - id: tab.home.file
+    label: File
+    layout: stack
+    controls:
+    - id: tab.home.file.save
+      kind: button
+      label: Save
+      command: file.save
+      new_command: true
+contextual_tabs: []
+file_view:
+  back_button: true
+  default_page: file_view.save
+  nav:
+  - id: file_view.save
+    kind: page
+    label: Save
+context_menus:
+- id: context.shape
+  label: Shape
+  trigger: a shape
+  items: []

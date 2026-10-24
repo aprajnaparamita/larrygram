@@ -1,0 +1,13 @@
+---
+source: crates/ui-spec/tests/v2_snapshot.rs
+expression: "render_counts(&load_layout(LayoutKind::Panel365).expect(\"the layout loads\"))"
+---
+panel-365:
+  quick_access_toolbar: 9
+  tabs: 14 (items: 388)
+  contextual_tabs: 5 (items: 68)
+  menu_bars: 0 (items: 0)
+  toolbars: 0 (items: 0)
+  file_view nav: 10
+  context_menus: 43 (items: 0)
+  items by kind: button=231 check=17 combo=2 dropdown=82 heading=4 launcher=12 split=16 toggle=101

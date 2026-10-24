@@ -1,0 +1,13 @@
+---
+source: crates/ui-spec/tests/v2_snapshot.rs
+expression: "render_counts(&load_layout(LayoutKind::Panel2016).expect(\"the layout loads\"))"
+---
+panel-2016:
+  quick_access_toolbar: 9
+  tabs: 12 (items: 353)
+  contextual_tabs: 4 (items: 63)
+  menu_bars: 0 (items: 0)
+  toolbars: 0 (items: 0)
+  file_view nav: 8
+  context_menus: 43 (items: 0)
+  items by kind: button=206 check=16 combo=2 dropdown=78 heading=4 launcher=12 split=16 toggle=91

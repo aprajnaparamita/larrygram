@@ -1,0 +1,13 @@
+# Test fixture for crates/ui-spec. Not real Microsoft data.
+schema_version: 1
+set:
+  name: Tabler Icons
+  version: 3.49.0
+  license: MIT
+  style: outline
+  source: fixture
+  path: assets/icons
+fallback: placeholder
+icons:
+  file.save:
+    icon: save

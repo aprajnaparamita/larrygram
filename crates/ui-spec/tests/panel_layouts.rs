@@ -1,129 +1,49 @@
-//! Validates the committed Panel Modern and Panel Classic layouts.
+//! Validates the committed Panel Modern and Panel Classic layouts
+//! with the loader's own staged path (ADR 0061, ADR 0065).
 //!
-//! Task P7-01 adds this test with the imported data (ADR 0061):
-//!
-//! 1. each layout file validates against
-//!    `ui-spec/layout-v2.schema.json` with the crate's own
-//!    `jsonschema` dependency;
-//! 2. each layout decodes into [`LayoutV2`], so the Rust types and the
-//!    files agree;
-//! 3. every `command` id resolves in `ui-spec/commands.yaml` (task
-//!    P7-02 merged the Phase 7 ids into `OUR_COMMANDS` and deleted the
-//!    proposal file).
-//!
-//! Task P7-03 replaces the ad-hoc walk with the loader's own
-//! cross-checks.
+//! Task P7-01 added this file with an ad-hoc walk of the raw YAML
+//! (schema validation, decode, a command-id walk that skipped the
+//! `ui-spec/commands-phase7.yaml` proposals). Task P7-03 moved those
+//! checks into the loader (`crates/ui-spec/src/v2/load.rs`): this test
+//! now drives the real load path over the committed data, from disk
+//! and from the embedded copies.
 
-use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use larrygram_ui_spec::v2::LayoutV2;
-
-/// A test failure with a formatted message.
-type Error = Box<dyn std::error::Error>;
+use larrygram_ui_spec::Loader;
+use larrygram_ui_spec::v2::{LayoutKind, PanelStyle, load_layout};
 
 /// The repository root: `crates/ui-spec/../..`.
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-/// Parses a YAML or JSON document into a generic value, the same way
-/// the crate's loader does.
-fn parse(path: &Path) -> Result<serde_json::Value, Error> {
-    let text = std::fs::read_to_string(path)?;
-    serde_saphyr::from_str(&text).map_err(|error| format!("{}: {error}", path.display()).into())
-}
-
-/// Every `command` id the item tree uses, in file order.
-fn command_ids(value: &serde_json::Value, out: &mut Vec<String>) {
-    match value {
-        serde_json::Value::Object(map) => {
-            for (key, child) in map {
-                if key == "command" {
-                    if let Some(id) = child.as_str() {
-                        out.push(id.to_owned());
-                    }
-                } else {
-                    command_ids(child, out);
-                }
-            }
-        }
-        serde_json::Value::Array(items) => {
-            for item in items {
-                command_ids(item, out);
-            }
-        }
-        _ => {}
-    }
-}
-
-/// The ids of the `commands.yaml` table (a list of entries).
-fn table_ids(path: &Path) -> Result<BTreeSet<String>, Error> {
-    let value = parse(path)?;
-    let entries = value.as_array().cloned().unwrap_or_default();
-    Ok(entries
-        .iter()
-        .filter_map(|entry| entry.get("id")?.as_str().map(str::to_owned))
-        .collect())
-}
-
 #[test]
-fn both_layouts_validate_against_the_v2_schema() -> Result<(), Error> {
-    let root = workspace_root();
-    let schema = parse(&root.join("ui-spec/layout-v2.schema.json"))?;
-    let validator = jsonschema::validator_for(&schema)
-        .map_err(|error| format!("the schema is not valid: {error}"))?;
-
-    for file in ["panel-classic.yaml", "panel-modern.yaml"] {
-        let layout = parse(&root.join("ui-spec/layouts").join(file))?;
-        let errors: Vec<String> = validator
-            .iter_errors(&layout)
-            .map(|error| format!("{}: {error}", error.instance_path()))
-            .collect();
+fn both_layouts_load_from_disk_through_the_loader() {
+    let loader = Loader::new(workspace_root()).expect("the embedded schemas compile");
+    for (kind, style) in [
+        (LayoutKind::PanelModern, PanelStyle::PanelModern),
+        (LayoutKind::PanelClassic, PanelStyle::PanelClassic),
+    ] {
+        let set = loader
+            .load(kind)
+            .unwrap_or_else(|e| panic!("{kind:?}: {e}"));
+        assert_eq!(set.v2.schema_version, 2, "{kind:?}");
+        assert_eq!(set.v2.kind, style, "{kind:?}");
         assert!(
-            errors.is_empty(),
-            "{file} failed schema validation: {}",
-            errors.join("; ")
+            !set.v2.context_menus.is_empty(),
+            "{kind:?} has context menus"
         );
+        assert!(!set.theme.colors.is_empty(), "{kind:?} theme has colours");
     }
-    Ok(())
 }
 
 #[test]
-fn both_layouts_decode_into_the_v2_types() -> Result<(), Error> {
-    let root = workspace_root();
-    for file in ["panel-classic.yaml", "panel-modern.yaml"] {
-        let value = parse(&root.join("ui-spec/layouts").join(file))?;
-        let layout: LayoutV2 = serde_json::from_value(value).map_err(|error| {
-            format!("{file} does not decode into ui_spec::v2::LayoutV2: {error}")
-        })?;
-        assert_eq!(layout.schema_version, 2);
-        assert!(!layout.context_menus.is_empty(), "{file} has context menus");
+fn both_layouts_load_from_embedded_too() {
+    // The embedded copies go through the same staged load: parse,
+    // schema validation, decode and cross-checks.
+    for kind in [LayoutKind::PanelModern, LayoutKind::PanelClassic] {
+        let layout = load_layout(kind).unwrap_or_else(|e| panic!("{kind:?}: {e}"));
+        assert_eq!(layout.id, kind.id(), "{kind:?}");
     }
-    Ok(())
-}
-
-#[test]
-fn every_command_resolves_in_commands_yaml() -> Result<(), Error> {
-    let root = workspace_root();
-    let known = table_ids(&root.join("ui-spec/commands.yaml"))?;
-    assert!(!known.is_empty(), "commands.yaml has ids");
-
-    let mut missing = BTreeSet::new();
-    for file in ["panel-classic.yaml", "panel-modern.yaml"] {
-        let value = parse(&root.join("ui-spec/layouts").join(file))?;
-        let mut ids = Vec::new();
-        command_ids(&value, &mut ids);
-        assert!(!ids.is_empty(), "{file} links commands");
-        for id in ids {
-            if !known.contains(&id) {
-                missing.insert(format!("{file}: {id}"));
-            }
-        }
-    }
-    assert!(
-        missing.is_empty(),
-        "command ids missing from commands.yaml: {missing:?}"
-    );
-    Ok(())
 }
