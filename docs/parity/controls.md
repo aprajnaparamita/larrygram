@@ -12,9 +12,8 @@ A row listed in `ui-spec/out-of-scope.txt` stays `out-of-scope` even when a comm
 
 | id | type | label | path | status |
 |----|------|-------|------|--------|
-| AlignLeft | toggleButton | AlignLeft | tab/TabHome/GroupParagraph | implemented |
-| AlignRight | toggleButton | AlignRight | tab/TabHome/GroupParagraph | implemented |
 | ConnectorTool | toggleButton | ConnectorTool | tab/TabHome/GroupTools | implemented |
+| ConnectorsGallery | menu | ConnectorsGallery | tab/TabDesignVisio/GroupLayoutRouting | implemented |
 | Copy | button | Copy | tab/TabIconEditor/GroupIconEditClipboard | implemented |
 | Cut | button | Cut | tab/TabIconEditor/GroupIconEditClipboard | implemented |
 | EllipseTool | toggleButton | EllipseTool | tab/TabDeveloper/GroupShapeDesign | implemented |
@@ -27,6 +26,9 @@ A row listed in `ui-spec/out-of-scope.txt` stays `out-of-scope` even when a comm
 | ObjectSendBackward | button | ObjectSendBackward | tab/TabPictureToolsFormat/GroupPictureToolArrange | implemented |
 | ObjectSendToBack | button | ObjectSendToBack | tab/TabPictureToolsFormat/GroupPictureToolArrange | implemented |
 | ObjectSendToBackMenu | splitButton | ObjectSendToBackMenu | tab/TabPictureToolsFormat/GroupPictureToolArrange | implemented |
+| ObjectsGroup | button | ObjectsGroup | tab/TabDeveloper/GroupShapeDesign | implemented |
+| ObjectsGroupMenu | menu | ObjectsGroupMenu | tab/TabDeveloper/GroupShapeDesign | implemented |
+| ObjectsUngroup | button | ObjectsUngroup | tab/TabDeveloper/GroupShapeDesign | implemented |
 | Paste | button | Paste | tab/TabIconEditor/GroupIconEditClipboard | implemented |
 | PasteMenu | splitButton | PasteMenu | tab/TabHome/GroupClipboard | implemented |
 | PointerTool | toggleButton | PointerTool | tab/TabInkToolsPens/GroupInkTools | implemented |
@@ -42,6 +44,8 @@ A row listed in `ui-spec/out-of-scope.txt` stays `out-of-scope` even when a comm
 | AlignCenter | toggleButton | AlignCenter | tab/TabHome/GroupParagraph | stub |
 | AlignGallery | gallery | AlignGallery | tab/TabHome/GroupArrange | stub |
 | AlignJustify | toggleButton | AlignJustify | tab/TabHome/GroupParagraph | stub |
+| AlignLeft | toggleButton | AlignLeft | tab/TabHome/GroupParagraph | stub |
+| AlignRight | toggleButton | AlignRight | tab/TabHome/GroupParagraph | stub |
 | AllowPersonallyIdentifiableInformation | control | AllowPersonallyIdentifiableInformation | backstage/TabInfo | stub |
 | AllowThemes | toggleButton | AllowThemes | tab/TabHome/GroupShapeStyles | stub |
 | AppGuardTrustPromotion | button | AppGuardTrustPromotion | backstage/TabSave | stub |
@@ -94,7 +98,6 @@ A row listed in `ui-spec/out-of-scope.txt` stays `out-of-scope` even when a comm
 | ConnectorRightAngle | toggleButton | ConnectorRightAngle | tab/TabDesignVisio/GroupLayoutRouting | stub |
 | ConnectorShowLineJumps | toggleButton | ConnectorShowLineJumps | tab/TabDesignVisio/GroupLayoutRouting | stub |
 | ConnectorStraightLines | toggleButton | ConnectorStraightLines | tab/TabDesignVisio/GroupLayoutRouting | stub |
-| ConnectorsGallery | menu | ConnectorsGallery | tab/TabDesignVisio/GroupLayoutRouting | stub |
 | ContactUs | button | ContactUs | tab/HelpTab/GroupHelpAndSupport | stub |
 | ContainerDisband | button | ContainerDisband | tab/TabFormat/GroupMembership | stub |
 | ContainerGallery | gallery | ContainerGallery | tab/TabInsert/GroupDiagramParts | stub |
@@ -449,10 +452,7 @@ A row listed in `ui-spec/out-of-scope.txt` stays `out-of-scope` even when a comm
 | ObjectRotateGallery | gallery | ObjectRotateGallery | tab/TabPictureToolsFormat/GroupPictureToolArrange | stub |
 | ObjectsAddToGroup | button | ObjectsAddToGroup | tab/TabDeveloper/GroupShapeDesign | stub |
 | ObjectsConvertToGroup | button | ObjectsConvertToGroup | tab/TabDeveloper/GroupShapeDesign | stub |
-| ObjectsGroup | button | ObjectsGroup | tab/TabDeveloper/GroupShapeDesign | stub |
-| ObjectsGroupMenu | menu | ObjectsGroupMenu | tab/TabDeveloper/GroupShapeDesign | stub |
 | ObjectsRemoveFromGroup | button | ObjectsRemoveFromGroup | tab/TabDeveloper/GroupShapeDesign | stub |
-| ObjectsUngroup | button | ObjectsUngroup | tab/TabDeveloper/GroupShapeDesign | stub |
 | OfficeFeedbackHelpTab | button | OfficeFeedbackHelpTab | tab/HelpTab/GroupHelpAndSupport | stub |
 | OfficeFeedbackIcon | button | OfficeFeedbackIcon | tab/HelpTab/GroupHelpAndSupport | stub |
 | OleObjectctInsert | button | OleObjectctInsert | tab/TabInsert/GroupTextBoxText | stub |
@@ -775,7 +775,7 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | file.render | Render | implemented |
 | file.save | Save | implemented |
 | file.save_as | Save As | implemented |
-| help.about | About | implemented |
+| help.about | About Larrygram | implemented |
 | insert.drawing.ellipse | Ellipse | implemented |
 | insert.drawing.line | Line | implemented |
 | insert.drawing.rectangle | Rectangle | implemented |
@@ -856,6 +856,10 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | arrange.distribute.right | Right | stub |
 | arrange.distribute.top | Top | stub |
 | arrange.distribute.v.space | Space | stub |
+| arrange.distribute_shapes.distribute_center | Distribute Center | stub |
+| arrange.distribute_shapes.distribute_horizontal_spacing | Distribute Horizontal Spacing | stub |
+| arrange.distribute_shapes.distribute_middle | Distribute Middle | stub |
+| arrange.distribute_shapes.distribute_vertical_spacing | Distribute Vertical Spacing | stub |
 | arrange.flip_horizontal | Flip Horizontal | stub |
 | arrange.flip_vertical | Flip Vertical | stub |
 | arrange.group.office.insider.about | Group Office Insider About | stub |
@@ -904,12 +908,30 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | arrange.space.shapes.avoid.page.breaks.toggle | Toggle | stub |
 | arrange.subtract | Shapes Object Subtract | stub |
 | arrange.trim | Shapes Object Trim | stub |
+| connector.add_line_jumps_to | Add Line Jumps To | stub |
+| connector.add_line_jumps_to.first_displayed_line | First Displayed Line | stub |
+| connector.add_line_jumps_to.horizontal_lines | Horizontal Lines | stub |
+| connector.add_line_jumps_to.last_displayed_line | Last Displayed Line | stub |
+| connector.add_line_jumps_to.last_routed_line | Last Routed Line | stub |
+| connector.add_line_jumps_to.no_lines | No Lines | stub |
+| connector.add_line_jumps_to.vertical_lines | Vertical Lines | stub |
 | connector.auto_connect | AutoConnect | stub |
 | connector.conn.points | Points | stub |
 | connector.curved | Curved Connector | stub |
 | connector.curved.lines | Curved Lines | stub |
 | connector.dyn.conn.reroute | Reroute | stub |
 | connector.dynamic.grid | Dynamic Grid | stub |
+| connector.line_jump_style | Line Jump Style | stub |
+| connector.line_jump_style.arc | Arc | stub |
+| connector.line_jump_style.gap | Gap | stub |
+| connector.line_jump_style.page_default | Page Default | stub |
+| connector.line_jump_style.sides_2 | 2 Sides | stub |
+| connector.line_jump_style.sides_3 | 3 Sides | stub |
+| connector.line_jump_style.sides_4 | 4 Sides | stub |
+| connector.line_jump_style.sides_5 | 5 Sides | stub |
+| connector.line_jump_style.sides_6 | 6 Sides | stub |
+| connector.line_jump_style.sides_7 | 7 Sides | stub |
+| connector.line_jump_style.square | Square | stub |
 | connector.right_angle | Right-Angle Connector | stub |
 | connector.show.line.jumps | Show Line Jumps | stub |
 | connector.straight | Straight Connector | stub |
@@ -920,6 +942,20 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | data.automatically.link | Automatically Link | stub |
 | data.column.settings.dlg | Dlg | stub |
 | data.explorer.window | Window | stub |
+| data.external.add | Add... | stub |
+| data.external.arrange_by | Arrange by | stub |
+| data.external.column_settings | Column Settings... | stub |
+| data.external.configure_refresh | Configure Refresh... | stub |
+| data.external.data_source.add | Add... | stub |
+| data.external.data_source.properties | Properties... | stub |
+| data.external.data_source.remove | Remove | stub |
+| data.external.data_source.rename | Rename | stub |
+| data.external.link_to_selected_shapes | Link to Selected Shapes | stub |
+| data.external.linked_shapes | Linked Shapes | stub |
+| data.external.properties | Properties... | stub |
+| data.external.remove | Remove | stub |
+| data.external.rename | Rename | stub |
+| data.external.unlink | Unlink | stub |
 | data.graphic.callouts | Graphic Callouts | stub |
 | data.graphic.create.new | Graphic Create New | stub |
 | data.graphic.edit | Graphic Edit | stub |
@@ -928,6 +964,11 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | data.graphic.position.vertical | Graphic Position Vertical | stub |
 | data.graphics.configure | Graphics Configure | stub |
 | data.graphics.gallery.visio | Graphics Gallery Visio | stub |
+| data.insert_data_solutions.calendar | Calendar... | stub |
+| data.insert_data_solutions.gantt_chart | Gantt Chart... | stub |
+| data.insert_data_solutions.organization_chart | Organization Chart... | stub |
+| data.insert_data_solutions.timeline | Timeline... | stub |
+| data.insert_pivotdiagram | Insert PivotDiagram... | stub |
 | data.link.row.to.shape | Shape | stub |
 | data.options | Options | stub |
 | data.recordset.properties | Properties | stub |
@@ -939,6 +980,7 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | data.refresh.delete.conflict | Conflict | stub |
 | data.refresh.dlg | Dlg | stub |
 | data.refresh.resolve.conflict | Conflict | stub |
+| data.refresh_all | Refresh All | stub |
 | data.selector.dlg | Dlg | stub |
 | data.unlink.row | Row | stub |
 | data.unlink.shape | Shape Data | stub |
@@ -949,10 +991,16 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | developer.prog.ref.help | Help | stub |
 | developer.run.add.on.dlg | Dlg | stub |
 | developer.run.addon.menu | Menu | stub |
+| developer.run_add_on | Run Add-On... | stub |
+| edit.action | Action... | stub |
 | edit.break.ole.link | Link | stub |
 | edit.cancel.in.place.editing | Editing | stub |
 | edit.clear | Delete | stub |
+| edit.connection_point.inward | Inward | stub |
+| edit.connection_point.inward_and_outward | Inward & Outward | stub |
+| edit.connection_point.outward | Outward | stub |
 | edit.convert.object | Object | stub |
+| edit.create_shortcut | Create Shortcut | stub |
 | edit.del.connect.pt | Pt | stub |
 | edit.delete.comment | Comment | stub |
 | edit.delete.connectors | Connectors | stub |
@@ -961,6 +1009,7 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | edit.delete.theme | Theme | stub |
 | edit.delete_back_word | Delete Word Back | stub |
 | edit.delete_forward_word | Delete Forward Word | stub |
+| edit.delete_or_inherit_section | Delete or Inherit Section | stub |
 | edit.deselect.all | All | stub |
 | edit.drag.duplicate | Duplicate | stub |
 | edit.duplicate.data.graphic | Graphic | stub |
@@ -983,7 +1032,9 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | edit.paste.special | Special | stub |
 | edit.paste.special.dialog | Paste Special Dialog | stub |
 | edit.paste.to.location | Location | stub |
+| edit.paste_shortcut | Paste Shortcut | stub |
 | edit.recalc.object.wh | Wh | stub |
+| edit.reconvert | Reconvert | stub |
 | edit.redo.multiple | Multiple | stub |
 | edit.redo.or.repeat | Redo Or Repeat | stub |
 | edit.reinstate.validation.issue | Issue | stub |
@@ -1021,7 +1072,7 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | edit.sw.paste.name.dlg | Dlg | stub |
 | edit.sw.shape.action.dlg | Dlg | stub |
 | edit.sw.show.formulas | Formulas | stub |
-| edit.sw.show.sections.dlg | Dlg | stub |
+| edit.sw.show.sections.dlg | Show Sections | stub |
 | edit.sw.show.toggle | Toggle | stub |
 | edit.sw.show.values | Values | stub |
 | edit.theme | Theme | stub |
@@ -1098,6 +1149,7 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | file.save.workspace | Workspace | stub |
 | file.send.as.attachment | Send As Attachment | stub |
 | file.send.as.mail | Mail | stub |
+| file.shapes.organize_my_shapes | Organize My Shapes | stub |
 | file.summary.info.dlg | Dlg | stub |
 | file.undo.checkout | Checkout | stub |
 | file.upgrade.document | Upgrade Document | stub |
@@ -1115,18 +1167,25 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | format.apply.theme.to.page | Page | stub |
 | format.behavior | Behavior | stub |
 | format.block | Block | stub |
+| format.change_text_direction | Change Text Direction | stub |
 | format.corners | Corners | stub |
 | format.cust.prop.def | Def | stub |
-| format.cust.prop.edit | Edit | stub |
+| format.cust.prop.edit | Shape Data | stub |
 | format.decrease.indent | Indent Decrease Word | stub |
 | format.decrease.para.spacing | Spacing | stub |
 | format.define.styles | Styles | stub |
 | format.double.click | Click | stub |
 | format.fill | Fill | stub |
+| format.fill_color.no_fill | No Fill | stub |
+| format.fill_color.use_default | Use Default | stub |
 | format.increase.indent | Indent Increase Word | stub |
 | format.increase.para.spacing | Spacing | stub |
 | format.ink.dlg | Dlg | stub |
 | format.line | Line | stub |
+| format.line_color.no_line | No Line | stub |
+| format.line_color.use_default | Use Default | stub |
+| format.line_ends.no_line_ends | No Line Ends | stub |
+| format.line_pattern.no_line | No Line | stub |
 | format.paragraph | Paragraph | stub |
 | format.picture.autobalance | Autobalance | stub |
 | format.picture.compression.dlg | Dlg | stub |
@@ -1158,6 +1217,7 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | format.set.page.size | Size | stub |
 | format.set.theme.behavior | Behavior | stub |
 | format.shadow | Shadow | stub |
+| format.shape.pane | Format Shape | stub |
 | format.special | Special | stub |
 | format.style | Style | stub |
 | format.style.explorer | Style Explorer | stub |
@@ -1178,7 +1238,9 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | format.text.small_caps | Text Small Caps | stub |
 | format.text.subscript | Subscript | stub |
 | format.text.underline | Underline | stub |
-| help.about.visio | Visio | stub |
+| format.text_color.use_default | Use Default | stub |
+| format.theme | Theme... | stub |
+| format.transparency.no_transparency | No Transparency | stub |
 | help.contents | Help | stub |
 | help.mode | Mode | stub |
 | help.research.look.up | Up | stub |
@@ -1186,9 +1248,11 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | help.research.translate | Translate | stub |
 | help.rhi | Rhi | stub |
 | help.rhi.dlg | Dlg | stub |
+| help.sample_diagrams | Sample Diagrams | stub |
 | help.search | Search | stub |
 | help.shape.basics | Basics | stub |
 | help.templates | Templates | stub |
+| help.welcome | Welcome | stub |
 | insert.acquire.images | Images | stub |
 | insert.add.connect.pt | Pt | stub |
 | insert.add.control.pt | Pt | stub |
@@ -1215,6 +1279,11 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | insert.drop.on.stencil | Stencil | stub |
 | insert.drop.on.text | Text | stub |
 | insert.hyper.link | Link | stub |
+| insert.hyperlink.add_to_favorites | Add to Favorites | stub |
+| insert.hyperlink.copy_hyperlink | Copy Hyperlink | stub |
+| insert.hyperlink.edit_hyperlink | Edit Hyperlink | stub |
+| insert.hyperlink.open | Open | stub |
+| insert.hyperlink.open_in_new_window | Open in New Window | stub |
 | insert.image.control | Control | stub |
 | insert.image.properties | Properties | stub |
 | insert.image.properties.dlg | Dlg | stub |
@@ -1226,16 +1295,20 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | insert.m365.picture | M365 Picture | stub |
 | insert.member.into.list | List | stub |
 | insert.microsoft.graph | Graph | stub |
+| insert.name | Name... | stub |
 | insert.new.background.page | Background Page Insert | stub |
 | insert.page.tab | Tab | stub |
 | insert.push.button.control | Control | stub |
 | insert.radio.button.control | Control | stub |
+| insert.row | Row | stub |
+| insert.row_after | Row After | stub |
 | insert.scroll.bar.control | Control | stub |
+| insert.section | Section... | stub |
 | insert.spin.control | Control | stub |
 | insert.stamp.tool | Tool | stub |
 | insert.text.box | Text Box Insert Horizontal | stub |
 | insert.toggle.button.control | Control | stub |
-| insert.vert.text.box | Box | stub |
+| insert.vert.text.box | Vertical Text Box | stub |
 | insert.word.art | Art | stub |
 | layer.dialog | Dialog | stub |
 | layer.dlg | Dlg | stub |
@@ -1246,15 +1319,25 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | page.multiple.file.import | Import | stub |
 | page.pages.list | List | stub |
 | page.relayout | Relayout | stub |
+| page.reorder_pages | Reorder Pages... | stub |
+| page.setup.layout_and_routing | Layout & Routing... | stub |
 | page.size.dlg | Size | stub |
 | page.size.to.fit.drawing | Drawing Page | stub |
 | review.check.compatibility | Compatibility | stub |
+| review.delete_markup | Delete Markup | stub |
+| review.delete_markup.delete_all_markup_overlays_in_document | Delete All Markup Overlays | stub |
+| review.delete_markup.delete_markup_overlays_on_current_page.all_on_current_page | All on Current Page | stub |
+| review.edit_comment | Edit Comment | stub |
 | review.ignore.this.issue | Ignore This Issue | stub |
 | review.ignore.validation.issue | Issue | stub |
 | review.ignore.validation.rule | Ignore Rule | stub |
+| review.issues.stop_ignoring_rule | Stop Ignoring Rule | stub |
+| review.issues.stop_ignoring_this_issue | Stop Ignoring This Issue | stub |
 | review.new.comment | New Comment | stub |
 | review.reviewer.visibility.all | All | stub |
 | review.reviewer.visibility.none | None | stub |
+| review.reviewers.hide_all | Hide All | stub |
+| review.show_hide_markup | Show/Hide Markup | stub |
 | review.spelling.change | Spelling | stub |
 | review.spelling.options.dlg | Dlg | stub |
 | review.validate.diagram | Diagram | stub |
@@ -1279,7 +1362,11 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | shape.container.margins | Container Margins | stub |
 | shape.container.no.heading.toggle | Toggle | stub |
 | shape.container.styles | Container Styles | stub |
+| shape.convert_ink_to_geometry | Convert Ink to Geometry | stub |
+| shape.convert_ink_to_text | Convert Ink to Text | stub |
 | shape.crop.object | Object | stub |
+| shape.data.define_shape_data | Define Shape Data... | stub |
+| shape.data.edit_data_graphic | Edit Data Graphic... | stub |
 | shape.data.window | Data Window | stub |
 | shape.data.window.show.hide | Data Window Show Hide | stub |
 | shape.draw.add.guide | Guide | stub |
@@ -1297,6 +1384,8 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | shape.draw.zoom | Zoom | stub |
 | shape.drawing.explorer | Drawing Explorer | stub |
 | shape.drawing.tools | Developer Drawing Tools | stub |
+| shape.edit_icon_image | Edit Icon Image | stub |
+| shape.edit_master_shape | Edit Master Shape | stub |
 | shape.effects | Effects | stub |
 | shape.explorer | Explorer | stub |
 | shape.gallery.add.on | On | stub |
@@ -1312,16 +1401,26 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | shape.icon.select.area | Icon Select Area | stub |
 | shape.icon.select.lasso | Icon Select Lasso | stub |
 | shape.icon.select.net | Net | stub |
+| shape.insert_shape_after | Insert Shape After | stub |
+| shape.insert_shape_before | Insert Shape Before | stub |
 | shape.intersect | Intersect | stub |
 | shape.layer.toolbar | Toolbar | stub |
 | shape.lock.container | Container Lock | stub |
+| shape.master.add_to_my_shapes.add_to_existing_stencil | Add To Existing Stencil... | stub |
+| shape.master.add_to_my_shapes.add_to_new_stencil | Add To New Stencil... | stub |
+| shape.master.add_to_quick_shapes | Add to Quick Shapes | stub |
+| shape.master.delete_master | Delete Master | stub |
+| shape.master.edit_master.properties | Properties... | stub |
 | shape.master.explorer | Master Explorer | stub |
 | shape.master.properties | Master Properties | stub |
+| shape.master.remove_from_quick_shapes | Remove from Quick Shapes | stub |
+| shape.master.rename_master | Rename Master | stub |
 | shape.master.setup | Setup | stub |
 | shape.name | Name | stub |
 | shape.protection | Protection | stub |
 | shape.reports | Reports | stub |
 | shape.search.window.toggle | Toggle | stub |
+| shape.shape.find_similar_shapes | Find Similar Shapes | stub |
 | shape.shapes.object.offset | Shapes Object Offset | stub |
 | shape.shapes.object.update.alignment | Shapes Object Update Alignment | stub |
 | shape.shapes.rotate | Shapes Rotate | stub |
@@ -1354,10 +1453,18 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | shape.sten.properties | Properties | stub |
 | shape.sten.save | Save | stub |
 | shape.sten.save.as | As | stub |
+| shape.stencil.collapse_all_groups | Collapse All Groups | stub |
+| shape.stencil.edit_stencil | Edit Stencil | stub |
+| shape.stencil.expand_all_groups | Expand All Groups | stub |
+| shape.stencil.order.move_down | Move Down | stub |
+| shape.stencil.order.move_up | Move Up | stub |
+| shape.stencil.properties | Properties... | stub |
+| shape.stencil.reset_stencil | Reset Stencil | stub |
 | shape.studio.add.on | On | stub |
 | shape.styles | Styles | stub |
 | shape.transparency | Transparency | stub |
 | shape.transparency.dlg | Dlg | stub |
+| shape.update_icon_image | Update Icon Image | stub |
 | shape.vert | Vert | stub |
 | text.bullets | Bullets | stub |
 | text.direction.left.to.right | Direction Left To Right | stub |
@@ -1373,6 +1480,7 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | text.font.size.decrease | Font Size Decrease | stub |
 | text.font.size.increase | Font Size Increase | stub |
 | text.h.align.distribute | Distribute | stub |
+| text.horizontal_in_vertical | Horizontal in Vertical... | stub |
 | text.initial.caps | Initial Caps | stub |
 | text.normal.case | Normal Case | stub |
 | text.rotate90 | Rotate90 Degrees | stub |
@@ -1436,6 +1544,9 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | tools.finger.painting.mode | Finger Painting Mode | stub |
 | tools.flyout.anchor.insert.pictures | Flyout Anchor Insert Pictures | stub |
 | tools.format_painter | Format Painter | stub |
+| tools.formula_tracing.trace_dependents | Trace Dependents | stub |
+| tools.formula_tracing.trace_precedents | Trace Precedents | stub |
+| tools.formula_tracing.window | Formula Tracing Window | stub |
 | tools.freeform | Freeform | stub |
 | tools.glows.more.options | Glows More Options | stub |
 | tools.hyperlink.hier | Hier | stub |
@@ -1462,11 +1573,15 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | tools.inet.visio.solutions.library | Library | stub |
 | tools.ink.auto.create.shapes | Ink Auto Create Shapes | stub |
 | tools.ink.ballpoint.pen | Ink Ballpoint Pen | stub |
+| tools.ink.close_ink_shape | Close Ink Shape | stub |
 | tools.ink.color.picker | Ink Color Picker | stub |
 | tools.ink.covert.to.geometry | Ink Covert To Geometry | stub |
 | tools.ink.covert.to.text.visio | Ink Covert To Text Visio | stub |
 | tools.ink.eraser | Ink Eraser | stub |
 | tools.ink.highlighter | Ink Highlighter | stub |
+| tools.ink.ink_pen_3 | Ink Pen 3 | stub |
+| tools.ink.ink_pen_4 | Ink Pen 4 | stub |
+| tools.ink.ink_pen_5 | Ink Pen 5 | stub |
 | tools.ink.review.pen | Pen | stub |
 | tools.ink.shape.close | Ink Shape Close | stub |
 | tools.ink.stock.pen0 | Pen0 | stub |
@@ -1500,7 +1615,6 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | tools.objects.add.to | Objects Add To | stub |
 | tools.objects.convert.to | Objects Convert To | stub |
 | tools.objects.remove.from | Objects Remove From | stub |
-| tools.objects.ungroup | Objects Ungroup | stub |
 | tools.ole.objectct.insert | Ole Objectct Insert | stub |
 | tools.operations | Operations | stub |
 | tools.options.color.palette.dlg | Dlg | stub |
@@ -1551,6 +1665,7 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | tools.picture.corrections.dialog | Picture Corrections Dialog | stub |
 | tools.picture.insert.from.file | Picture Insert From File | stub |
 | tools.pointer.mode.options | Pointer Mode Options | stub |
+| tools.pointer_tool.multiple_select | Multiple Select | stub |
 | tools.prepare.visio.diagram.for.export.to.flow | Prepare Visio Diagram For Export To Flow | stub |
 | tools.quick.connector | Quick Connector | stub |
 | tools.recorder.resume | Recorder Resume | stub |
@@ -1614,6 +1729,15 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | view.connections | Connections | stub |
 | view.custom | Custom | stub |
 | view.direction.toggle | Direction | stub |
+| view.explorer.active | Active | stub |
+| view.explorer.delete | Delete | stub |
+| view.explorer.delete_layer | Delete Layer | stub |
+| view.explorer.delete_shape | Delete Shape | stub |
+| view.explorer.delete_style | Delete Style | stub |
+| view.explorer.new_pattern | New Pattern... | stub |
+| view.explorer.protect_document | Protect Document... | stub |
+| view.explorer.ruler_and_grid | Ruler & Grid... | stub |
+| view.explorer.visible | Visible | stub |
 | view.first.tile | Tile | stub |
 | view.fit.container.to.contents | Fit To Contents | stub |
 | view.fit.curve | Curve | stub |
@@ -1621,6 +1745,7 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | view.full.screen.view | Full Screen View | stub |
 | view.full_screen_mode | Full Screen | stub |
 | view.go.to.page.toolbar | Toolbar | stub |
+| view.go_to.unnamed | Go To | stub |
 | view.grid | Show Grid | stub |
 | view.guides | Show Guides | stub |
 | view.hide.all.toolbars | Toolbars | stub |
@@ -1631,6 +1756,8 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | view.left.to.right | Direction Left To Right | stub |
 | view.list.insert.after | After | stub |
 | view.list.insert.before | Before | stub |
+| view.markup | Markup | stub |
+| view.master_explorer.page_setup | Page Setup... | stub |
 | view.next.comment.markup | Markup | stub |
 | view.next.markup | Markup | stub |
 | view.next.tile | Tile | stub |
@@ -1638,12 +1765,22 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | view.page.breaks | Breaks | stub |
 | view.pan.object | Object | stub |
 | view.pan.zoom | Pan And Zoom Window | stub |
+| view.pane.autofit | AutoFit | stub |
+| view.pane.autohide | AutoHide | stub |
+| view.pane.close | Close | stub |
+| view.pane.close_all_stencils | Close All Stencils | stub |
+| view.pane.float_window | Float Window | stub |
+| view.pane.hide_window | Hide Window | stub |
+| view.pane.search_options | Search Options... | stub |
+| view.pane.shape_data_sets | Shape Data Sets... | stub |
 | view.previous.comment.markup | Markup | stub |
 | view.previous.markup | Markup | stub |
 | view.previous.tile | Tile | stub |
+| view.qat.customize | Customize Quick Access Toolbar | stub |
 | view.right.to.left | Left | stub |
 | view.rul.sub | Sub | stub |
 | view.ruler.grid.dlg | Dlg | stub |
+| view.sections | Sections... | stub |
 | view.show.comments | Show Comments | stub |
 | view.show.formula.tracing.window | Show Formula Tracing Window | stub |
 | view.show.ignored.issues.toggle | Show Ignored Issues | stub |
@@ -1654,6 +1791,7 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | view.show.shape.sheet.shape | Shape Sheet Show Formulas | stub |
 | view.show.tags | Show Tags | stub |
 | view.show.training | Show Training | stub |
+| view.show_drawing_page | Show Drawing Page... | stub |
 | view.ss.window.add.section | Section | stub |
 | view.ss.window.change.row.type | Type | stub |
 | view.ss.window.collapse | Collapse | stub |
@@ -1676,7 +1814,22 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | view.toggle.document.stencil | Stencil | stub |
 | view.toggle.visio.flow.placeholders | Toggle Visio Flow Placeholders | stub |
 | view.toggle_guides | Toggle Guides | stub |
+| view.toolbar.action | Action | stub |
+| view.toolbar.customize | Customize... | stub |
+| view.toolbar.data | Data | stub |
+| view.toolbar.developer | Developer | stub |
+| view.toolbar.drawing | Drawing | stub |
+| view.toolbar.format_text | Format Text | stub |
+| view.toolbar.formatting | Formatting | stub |
+| view.toolbar.layout_and_routing | Layout & Routing | stub |
+| view.toolbar.picture | Picture | stub |
+| view.toolbar.reviewing | Reviewing | stub |
+| view.toolbar.standard | Standard | stub |
+| view.toolbar.stencil | Stencil | stub |
+| view.toolbar.view | View | stub |
 | view.toolbars.dlg | Dlg | stub |
+| view.ui_layout.panel_classic | Panel Classic Layout | stub |
+| view.ui_layout.panel_modern | Panel Modern Layout | stub |
 | view.view100 | View100 | stub |
 | view.view150 | View150 | stub |
 | view.view200 | View200 | stub |
@@ -1688,7 +1841,7 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | view.window.new.window | Window New | stub |
 | view.window.show.draw.page | Page | stub |
 | view.window.show.master.objects | Objects | stub |
-| view.window.show.shape.sheet | Sheet | stub |
+| view.window.show.shape.sheet | Show ShapeSheet | stub |
 | view.window.switch.windows.menu.word | Window Switch Windows Menu Word | stub |
 | view.zoom.area | Area | stub |
 | view.zoom.dialog | Zoom Dialog | stub |

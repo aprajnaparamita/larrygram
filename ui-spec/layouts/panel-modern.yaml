@@ -2584,7 +2584,7 @@ context_menus:
     label: Reconvert
     access: "v"
     new_command: true
-    command: text.reconvert
+    command: edit.reconvert
     begin_group: true
   - id: context.text_edit.change_text_direction
     kind: button
@@ -3109,7 +3109,7 @@ context_menus:
       label: Edit Master Shape
       access: "e"
       new_command: true
-      command: shape.master.edit_master.edit_master_shape
+      command: shape.edit_master_shape
       icon: shape.master.edit_master.edit_master_shape
       begin_group: true
     - id: context.master_edit.edit_master.edit_icon_image
@@ -3117,7 +3117,7 @@ context_menus:
       label: Edit Icon Image
       access: "i"
       new_command: true
-      command: shape.master.edit_master.edit_icon_image
+      command: shape.edit_icon_image
   - id: context.master_edit.help
     kind: button
     label: Help
@@ -3245,12 +3245,12 @@ context_menus:
     label: Float Window
     access: "f"
     new_command: true
-    command: shape.stencil.float_window
+    command: view.pane.float_window
     begin_group: true
   - id: context.stencil_edit.close
     kind: button
     label: Close
     access: "c"
     new_command: true
-    command: shape.stencil.close
+    command: view.pane.close
     icon: shape.stencil.close

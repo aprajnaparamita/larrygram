@@ -3,24 +3,6 @@
 # Larrygram command id -> VisUICmds constant (docs/sources.md source 2)
 # and Fluent control names (source 1).
 - fluent_ids:
-    - AlignCenter
-  id: arrange.align.center
-  label: Align Center
-  mapping_confidence: exact
-  visuicmd: visCmdAlignObjectCenter
-- fluent_ids:
-    - AlignLeft
-  id: arrange.align.left
-  label: Align Left
-  mapping_confidence: exact
-  visuicmd: visCmdAlignObjectLeft
-- fluent_ids:
-    - AlignRight
-  id: arrange.align.right
-  label: Align Right
-  mapping_confidence: exact
-  visuicmd: visCmdAlignObjectRight
-- fluent_ids:
     - ObjectBringForward
   id: arrange.bring_forward
   label: Bring Forward
@@ -265,10 +247,6 @@
   mapping_confidence: exact
   visuicmd: visCmdShowShapeSheetPage
 - fluent_ids:
-    - ShapeSheetShowFormulas
-    - ShapeSheetShowSections
-    - ShapeSheetShowValues
-    - ShowShapeSheet
     - ShowShapeSheetShape
   id: view.show.shape.sheet.shape
   label: Shape Sheet Show Formulas
@@ -282,11 +260,17 @@
   visuicmd: visCmdAlignBox
 - fluent_ids:
     - ContainerDisband
-    - ContainerGallery
   id: arrange.disband.container
   label: Container Disband
   mapping_confidence: inferred
   visuicmd: visCmdDisbandContainer
+- fluent_ids:
+    - ObjectsGroup
+    - ObjectsGroupMenu
+  id: arrange.group
+  label: Group
+  mapping_confidence: inferred
+  visuicmd: visCmdObjectGroup
 - fluent_ids:
     - ShapesObjectIntersect
   id: arrange.intersect
@@ -330,13 +314,6 @@
   mapping_confidence: inferred
   visuicmd: visCmdDiagramRotateLeft
 - fluent_ids:
-    - ObjectsGroup
-    - ObjectsGroupMenu
-  id: arrange.size.objects
-  label: Objects
-  mapping_confidence: inferred
-  visuicmd: visCmdSizeObjects
-- fluent_ids:
     - ShapesObjectSubtract
   id: arrange.subtract
   label: Shapes Object Subtract
@@ -348,6 +325,12 @@
   label: Shapes Object Trim
   mapping_confidence: inferred
   visuicmd: visCmdTrim
+- fluent_ids:
+    - ObjectsUngroup
+  id: arrange.ungroup
+  label: Ungroup
+  mapping_confidence: inferred
+  visuicmd: visCmdObjectUngroup
 - fluent_ids:
     - AutoConnect
   id: connector.auto_connect
@@ -369,23 +352,11 @@
   mapping_confidence: inferred
   visuicmd: visCmdDataRefresh
 - fluent_ids:
-    - ShapeData
-  id: data.unlink.shape
-  label: Shape Data
-  mapping_confidence: inferred
-  visuicmd: visCmdDataUnlinkShape
-- fluent_ids:
     - MacroRecord
   id: developer.record.new.macro
   label: Macro Record
   mapping_confidence: inferred
   visuicmd: visCmdRecordNewMacro
-- fluent_ids:
-    - ConnectorsGallery
-  id: edit.delete.connectors
-  label: Connectors
-  mapping_confidence: inferred
-  visuicmd: visCmdDeleteConnectors
 - fluent_ids:
     - DuplicateThisPage
   id: edit.duplicate.page
@@ -422,6 +393,24 @@
   label: Select All
   mapping_confidence: inferred
   visuicmd: visCmdUFEditSelectAll
+- fluent_ids:
+    - ShapeSheetShowFormulas
+  id: edit.sw.show.formulas
+  label: Formulas
+  mapping_confidence: inferred
+  visuicmd: visCmdSWShowFormulas
+- fluent_ids:
+    - ShapeSheetShowSections
+  id: edit.sw.show.sections.dlg
+  label: Show Sections
+  mapping_confidence: inferred
+  visuicmd: visCmdSWShowSectionsDlg
+- fluent_ids:
+    - ShapeSheetShowValues
+  id: edit.sw.show.values
+  label: Values
+  mapping_confidence: inferred
+  visuicmd: visCmdSWShowValues
 - fluent_ids:
     - InkToolsClose
   id: file.close.ink.tools.tab
@@ -470,6 +459,12 @@
   label: Theme Apply To New Shapes
   mapping_confidence: inferred
   visuicmd: visCmdApplyThemeToNewShapesToggle
+- fluent_ids:
+    - ShapeData
+  id: format.cust.prop.edit
+  label: Shape Data
+  mapping_confidence: inferred
+  visuicmd: visCmdFormatCustPropEdit
 - fluent_ids:
     - IndentDecreaseWord
   id: format.decrease.indent
@@ -531,17 +526,35 @@
   mapping_confidence: inferred
   visuicmd: visCmdTextVAlignBottom
 - fluent_ids:
+    - AlignCenter
+  id: format.text.align_center
+  label: Center Text
+  mapping_confidence: inferred
+  visuicmd: visCmdTextHAlignCenter
+- fluent_ids:
     - AlignJustify
   id: format.text.align_justify
   label: Justify Text
   mapping_confidence: inferred
   visuicmd: visCmdTextHAlignJustify
 - fluent_ids:
+    - AlignLeft
+  id: format.text.align_left
+  label: Align Text Left
+  mapping_confidence: inferred
+  visuicmd: visCmdTextHAlignLeft
+- fluent_ids:
     - TextAlignMiddle
   id: format.text.align_middle
   label: Center Text Vertically
   mapping_confidence: inferred
   visuicmd: visCmdTextVAlignMiddle
+- fluent_ids:
+    - AlignRight
+  id: format.text.align_right
+  label: Align Text Right
+  mapping_confidence: inferred
+  visuicmd: visCmdTextHAlignRight
 - fluent_ids:
     - TextAlignTop
   id: format.text.align_top
@@ -567,7 +580,6 @@
   mapping_confidence: inferred
   visuicmd: visCmdHelpContents
 - fluent_ids:
-    - ResearchPane
     - Thesaurus
   id: help.research.thesaurus
   label: Research
@@ -579,6 +591,12 @@
   label: Translate
   mapping_confidence: inferred
   visuicmd: visCmdResearchTranslate
+- fluent_ids:
+    - ContainerGallery
+  id: insert.add.to.new.container
+  label: Container
+  mapping_confidence: inferred
+  visuicmd: visCmdAddToNewContainer
 - fluent_ids:
     - ClipArtInsertDialog
   id: insert.clip.art
@@ -600,11 +618,16 @@
 - fluent_ids:
     - TextBoxInsertHorizontal
     - TextBoxInsertMenu
-    - TextBoxInsertVertical
   id: insert.text.box
   label: Text Box Insert Horizontal
   mapping_confidence: inferred
   visuicmd: visCmdInsertTextBox
+- fluent_ids:
+    - TextBoxInsertVertical
+  id: insert.vert.text.box
+  label: Vertical Text Box
+  mapping_confidence: inferred
+  visuicmd: visCmdInsertVertTextBox
 - fluent_ids:
     - AutoSizePage
   id: page.auto.size.toggle
@@ -764,6 +787,12 @@
   mapping_confidence: inferred
   visuicmd: visCmdShowIgnoredIssuesToggle
 - fluent_ids:
+    - ResearchPane
+  id: view.task.pane.research
+  label: Research
+  mapping_confidence: inferred
+  visuicmd: visCmdTaskPaneResearch
+- fluent_ids:
     - ShowGrid
   id: view.toggle_grid
   label: Toggle Grid
@@ -775,6 +804,12 @@
   label: Window New
   mapping_confidence: inferred
   visuicmd: visCmdWindowNewWindow
+- fluent_ids:
+    - ShowShapeSheet
+  id: view.window.show.shape.sheet
+  label: Show ShapeSheet
+  mapping_confidence: inferred
+  visuicmd: visCmdWindowShowShapeSheet
 - fluent_ids:
     - ZoomPageWidthVisio
   id: view.zoom.page.width
@@ -885,15 +920,30 @@
   mapping_confidence: unknown
   visuicmd: visCmdAlignObjectBottom
 - fluent_ids: []
+  id: arrange.align.center
+  label: Align Center
+  mapping_confidence: unknown
+  visuicmd: visCmdAlignObjectCenter
+- fluent_ids: []
   id: arrange.align.center_x
   label: Align Center
   mapping_confidence: unknown
   visuicmd: null
 - fluent_ids: []
+  id: arrange.align.left
+  label: Align Left
+  mapping_confidence: unknown
+  visuicmd: visCmdAlignObjectLeft
+- fluent_ids: []
   id: arrange.align.middle
   label: Middle
   mapping_confidence: unknown
   visuicmd: visCmdAlignObjectMiddle
+- fluent_ids: []
+  id: arrange.align.right
+  label: Align Right
+  mapping_confidence: unknown
+  visuicmd: visCmdAlignObjectRight
 - fluent_ids: []
   id: arrange.align.top
   label: Top
@@ -1003,6 +1053,26 @@
   mapping_confidence: unknown
   visuicmd: null
 - fluent_ids: []
+  id: arrange.distribute_shapes.distribute_center
+  label: Distribute Center
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: arrange.distribute_shapes.distribute_horizontal_spacing
+  label: Distribute Horizontal Spacing
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: arrange.distribute_shapes.distribute_middle
+  label: Distribute Middle
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: arrange.distribute_shapes.distribute_vertical_spacing
+  label: Distribute Vertical Spacing
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
   id: arrange.flip_horizontal
   label: Flip Horizontal
   mapping_confidence: unknown
@@ -1012,11 +1082,6 @@
   label: Flip Vertical
   mapping_confidence: unknown
   visuicmd: visCmdObjectFlipVertical
-- fluent_ids: []
-  id: arrange.group
-  label: Group
-  mapping_confidence: unknown
-  visuicmd: visCmdObjectGroup
 - fluent_ids:
     - GroupOfficeInsiderAbout
   id: arrange.group.office.insider.about
@@ -1169,6 +1234,11 @@
   mapping_confidence: unknown
   visuicmd: null
 - fluent_ids: []
+  id: arrange.size.objects
+  label: Objects
+  mapping_confidence: unknown
+  visuicmd: visCmdSizeObjects
+- fluent_ids: []
   id: arrange.size.pos
   label: Pos
   mapping_confidence: unknown
@@ -1204,10 +1274,40 @@
   mapping_confidence: unknown
   visuicmd: visCmdSpaceShapesAvoidPageBreaksToggle
 - fluent_ids: []
-  id: arrange.ungroup
-  label: Ungroup
+  id: connector.add_line_jumps_to
+  label: Add Line Jumps To
   mapping_confidence: unknown
-  visuicmd: visCmdObjectUngroup
+  visuicmd: null
+- fluent_ids: []
+  id: connector.add_line_jumps_to.first_displayed_line
+  label: First Displayed Line
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: connector.add_line_jumps_to.horizontal_lines
+  label: Horizontal Lines
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: connector.add_line_jumps_to.last_displayed_line
+  label: Last Displayed Line
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: connector.add_line_jumps_to.last_routed_line
+  label: Last Routed Line
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: connector.add_line_jumps_to.no_lines
+  label: No Lines
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: connector.add_line_jumps_to.vertical_lines
+  label: Vertical Lines
+  mapping_confidence: unknown
+  visuicmd: null
 - fluent_ids: []
   id: connector.conn.points
   label: Points
@@ -1245,6 +1345,61 @@
   mapping_confidence: unknown
   visuicmd: null
 - fluent_ids: []
+  id: connector.line_jump_style
+  label: Line Jump Style
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: connector.line_jump_style.arc
+  label: Arc
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: connector.line_jump_style.gap
+  label: Gap
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: connector.line_jump_style.page_default
+  label: Page Default
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: connector.line_jump_style.sides_2
+  label: 2 Sides
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: connector.line_jump_style.sides_3
+  label: 3 Sides
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: connector.line_jump_style.sides_4
+  label: 4 Sides
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: connector.line_jump_style.sides_5
+  label: 5 Sides
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: connector.line_jump_style.sides_6
+  label: 6 Sides
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: connector.line_jump_style.sides_7
+  label: 7 Sides
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: connector.line_jump_style.square
+  label: Square
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
   id: connector.reroute_all
   label: Reroute All
   mapping_confidence: unknown
@@ -1266,7 +1421,8 @@
   label: Straight Lines
   mapping_confidence: unknown
   visuicmd: null
-- fluent_ids: []
+- fluent_ids:
+    - ConnectorsGallery
   id: connector.style
   label: Connector Style
   mapping_confidence: unknown
@@ -1307,6 +1463,76 @@
   label: Window
   mapping_confidence: unknown
   visuicmd: visCmdDataExplorerWindow
+- fluent_ids: []
+  id: data.external.add
+  label: Add...
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: data.external.arrange_by
+  label: Arrange by
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: data.external.column_settings
+  label: Column Settings...
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: data.external.configure_refresh
+  label: Configure Refresh...
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: data.external.data_source.add
+  label: Add...
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: data.external.data_source.properties
+  label: Properties...
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: data.external.data_source.remove
+  label: Remove
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: data.external.data_source.rename
+  label: Rename
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: data.external.link_to_selected_shapes
+  label: Link to Selected Shapes
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: data.external.linked_shapes
+  label: Linked Shapes
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: data.external.properties
+  label: Properties...
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: data.external.remove
+  label: Remove
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: data.external.rename
+  label: Rename
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: data.external.unlink
+  label: Unlink
+  mapping_confidence: unknown
+  visuicmd: null
 - fluent_ids:
     - DataGraphicCalloutsGallery
   id: data.graphic.callouts
@@ -1353,6 +1579,31 @@
     - DataGraphicsGalleryVisio
   id: data.graphics.gallery.visio
   label: Graphics Gallery Visio
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: data.insert_data_solutions.calendar
+  label: Calendar...
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: data.insert_data_solutions.gantt_chart
+  label: Gantt Chart...
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: data.insert_data_solutions.organization_chart
+  label: Organization Chart...
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: data.insert_data_solutions.timeline
+  label: Timeline...
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: data.insert_pivotdiagram
+  label: Insert PivotDiagram...
   mapping_confidence: unknown
   visuicmd: null
 - fluent_ids:
@@ -1413,6 +1664,11 @@
   mapping_confidence: unknown
   visuicmd: visCmdDataRefreshResolveConflict
 - fluent_ids: []
+  id: data.refresh_all
+  label: Refresh All
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
   id: data.selector.dlg
   label: Dlg
   mapping_confidence: unknown
@@ -1427,6 +1683,11 @@
   label: Row
   mapping_confidence: unknown
   visuicmd: visCmdDataUnlinkRow
+- fluent_ids: []
+  id: data.unlink.shape
+  label: Shape Data
+  mapping_confidence: unknown
+  visuicmd: visCmdDataUnlinkShape
 - fluent_ids:
     - UpdateChannel
   id: data.update.channel
@@ -1465,6 +1726,16 @@
   mapping_confidence: unknown
   visuicmd: visCmdRunAddonMenu
 - fluent_ids: []
+  id: developer.run_add_on
+  label: Run Add-On...
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: edit.action
+  label: Action...
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
   id: edit.break.ole.link
   label: Link
   mapping_confidence: unknown
@@ -1480,10 +1751,30 @@
   mapping_confidence: unknown
   visuicmd: visCmdUFEditClear
 - fluent_ids: []
+  id: edit.connection_point.inward
+  label: Inward
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: edit.connection_point.inward_and_outward
+  label: Inward & Outward
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: edit.connection_point.outward
+  label: Outward
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
   id: edit.convert.object
   label: Object
   mapping_confidence: unknown
   visuicmd: visCmdEditConvertObject
+- fluent_ids: []
+  id: edit.create_shortcut
+  label: Create Shortcut
+  mapping_confidence: unknown
+  visuicmd: null
 - fluent_ids: []
   id: edit.del.connect.pt
   label: Pt
@@ -1499,6 +1790,11 @@
   label: Comment
   mapping_confidence: unknown
   visuicmd: visCmdDeleteComment
+- fluent_ids: []
+  id: edit.delete.connectors
+  label: Connectors
+  mapping_confidence: unknown
+  visuicmd: visCmdDeleteConnectors
 - fluent_ids: []
   id: edit.delete.data.graphic
   label: Graphic
@@ -1524,6 +1820,11 @@
   label: Delete Forward Word
   mapping_confidence: unknown
   visuicmd: visCmdDeleteForwardWord
+- fluent_ids: []
+  id: edit.delete_or_inherit_section
+  label: Delete or Inherit Section
+  mapping_confidence: unknown
+  visuicmd: null
 - fluent_ids: []
   id: edit.deselect
   label: Deselect
@@ -1632,10 +1933,20 @@
   mapping_confidence: unknown
   visuicmd: visCmdPasteToLocation
 - fluent_ids: []
+  id: edit.paste_shortcut
+  label: Paste Shortcut
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
   id: edit.recalc.object.wh
   label: Wh
   mapping_confidence: unknown
   visuicmd: visCmdRecalcObjectWH
+- fluent_ids: []
+  id: edit.reconvert
+  label: Reconvert
+  mapping_confidence: unknown
+  visuicmd: null
 - fluent_ids: []
   id: edit.redo
   label: Redo
@@ -1812,25 +2123,10 @@
   mapping_confidence: unknown
   visuicmd: visCmdSWShapeActionDlg
 - fluent_ids: []
-  id: edit.sw.show.formulas
-  label: Formulas
-  mapping_confidence: unknown
-  visuicmd: visCmdSWShowFormulas
-- fluent_ids: []
-  id: edit.sw.show.sections.dlg
-  label: Dlg
-  mapping_confidence: unknown
-  visuicmd: visCmdSWShowSectionsDlg
-- fluent_ids: []
   id: edit.sw.show.toggle
   label: Toggle
   mapping_confidence: unknown
   visuicmd: visCmdSWShowToggle
-- fluent_ids: []
-  id: edit.sw.show.values
-  label: Values
-  mapping_confidence: unknown
-  visuicmd: visCmdSWShowValues
 - fluent_ids: []
   id: edit.theme
   label: Theme
@@ -2201,6 +2497,11 @@
   mapping_confidence: unknown
   visuicmd: visCmdSendAsMail
 - fluent_ids: []
+  id: file.shapes.organize_my_shapes
+  label: Organize My Shapes
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
   id: file.summary.info.dlg
   label: Dlg
   mapping_confidence: unknown
@@ -2277,6 +2578,11 @@
   mapping_confidence: unknown
   visuicmd: visCmdFormatBlock
 - fluent_ids: []
+  id: format.change_text_direction
+  label: Change Text Direction
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
   id: format.corners
   label: Corners
   mapping_confidence: unknown
@@ -2286,11 +2592,6 @@
   label: Def
   mapping_confidence: unknown
   visuicmd: visCmdFormatCustPropDef
-- fluent_ids: []
-  id: format.cust.prop.edit
-  label: Edit
-  mapping_confidence: unknown
-  visuicmd: visCmdFormatCustPropEdit
 - fluent_ids: []
   id: format.decrease.para.spacing
   label: Spacing
@@ -2312,6 +2613,16 @@
   mapping_confidence: unknown
   visuicmd: visCmdFormatFill
 - fluent_ids: []
+  id: format.fill_color.no_fill
+  label: No Fill
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: format.fill_color.use_default
+  label: Use Default
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
   id: format.increase.para.spacing
   label: Spacing
   mapping_confidence: unknown
@@ -2321,6 +2632,26 @@
   label: Dlg
   mapping_confidence: unknown
   visuicmd: visCmdFormatInkDlg
+- fluent_ids: []
+  id: format.line_color.no_line
+  label: No Line
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: format.line_color.use_default
+  label: Use Default
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: format.line_ends.no_line_ends
+  label: No Line Ends
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: format.line_pattern.no_line
+  label: No Line
+  mapping_confidence: unknown
+  visuicmd: null
 - fluent_ids: []
   id: format.paragraph
   label: Paragraph
@@ -2447,6 +2778,11 @@
   mapping_confidence: unknown
   visuicmd: visCmdFormatShadow
 - fluent_ids: []
+  id: format.shape.pane
+  label: Format Shape
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
   id: format.special
   label: Special
   mapping_confidence: unknown
@@ -2473,21 +2809,6 @@
   mapping_confidence: unknown
   visuicmd: visCmdFormatText
 - fluent_ids: []
-  id: format.text.align_center
-  label: Center Text
-  mapping_confidence: unknown
-  visuicmd: visCmdTextHAlignCenter
-- fluent_ids: []
-  id: format.text.align_left
-  label: Align Text Left
-  mapping_confidence: unknown
-  visuicmd: visCmdTextHAlignLeft
-- fluent_ids: []
-  id: format.text.align_right
-  label: Align Text Right
-  mapping_confidence: unknown
-  visuicmd: visCmdTextHAlignRight
-- fluent_ids: []
   id: format.text.decrease_size
   label: Decrease Font Size
   mapping_confidence: unknown
@@ -2509,13 +2830,23 @@
   mapping_confidence: unknown
   visuicmd: null
 - fluent_ids: []
-  id: help.about
-  label: About
+  id: format.text_color.use_default
+  label: Use Default
   mapping_confidence: unknown
   visuicmd: null
 - fluent_ids: []
-  id: help.about.visio
-  label: Visio
+  id: format.theme
+  label: Theme...
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: format.transparency.no_transparency
+  label: No Transparency
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: help.about
+  label: About Larrygram
   mapping_confidence: unknown
   visuicmd: visCmdHelpAboutVisio
 - fluent_ids: []
@@ -2539,6 +2870,11 @@
   mapping_confidence: unknown
   visuicmd: visCmdRHIDlg
 - fluent_ids: []
+  id: help.sample_diagrams
+  label: Sample Diagrams
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
   id: help.search
   label: Search
   mapping_confidence: unknown
@@ -2553,6 +2889,11 @@
   label: Templates
   mapping_confidence: unknown
   visuicmd: visCmdHelpTemplates
+- fluent_ids: []
+  id: help.welcome
+  label: Welcome
+  mapping_confidence: unknown
+  visuicmd: null
 - fluent_ids: []
   id: insert.acquire.images
   label: Images
@@ -2594,11 +2935,6 @@
   label: Containers
   mapping_confidence: unknown
   visuicmd: visCmdAddToAllContainers
-- fluent_ids: []
-  id: insert.add.to.new.container
-  label: Container
-  mapping_confidence: unknown
-  visuicmd: visCmdAddToNewContainer
 - fluent_ids: []
   id: insert.auto.cad.add.on
   label: "On"
@@ -2700,6 +3036,31 @@
   mapping_confidence: unknown
   visuicmd: visCmdInsertHyperLink
 - fluent_ids: []
+  id: insert.hyperlink.add_to_favorites
+  label: Add to Favorites
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: insert.hyperlink.copy_hyperlink
+  label: Copy Hyperlink
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: insert.hyperlink.edit_hyperlink
+  label: Edit Hyperlink
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: insert.hyperlink.open
+  label: Open
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: insert.hyperlink.open_in_new_window
+  label: Open in New Window
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
   id: insert.image.control
   label: Control
   mapping_confidence: unknown
@@ -2751,6 +3112,11 @@
   mapping_confidence: unknown
   visuicmd: visCmdInsertMicrosoftGraph
 - fluent_ids: []
+  id: insert.name
+  label: Name...
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
   id: insert.page.tab
   label: Tab
   mapping_confidence: unknown
@@ -2766,10 +3132,25 @@
   mapping_confidence: unknown
   visuicmd: visCmdInsertRadioButtonControl
 - fluent_ids: []
+  id: insert.row
+  label: Row
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: insert.row_after
+  label: Row After
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
   id: insert.scroll.bar.control
   label: Control
   mapping_confidence: unknown
   visuicmd: visCmdInsertScrollBarControl
+- fluent_ids: []
+  id: insert.section
+  label: Section...
+  mapping_confidence: unknown
+  visuicmd: null
 - fluent_ids: []
   id: insert.shape
   label: Shape
@@ -2790,11 +3171,6 @@
   label: Control
   mapping_confidence: unknown
   visuicmd: visCmdInsertToggleButtonControl
-- fluent_ids: []
-  id: insert.vert.text.box
-  label: Box
-  mapping_confidence: unknown
-  visuicmd: visCmdInsertVertTextBox
 - fluent_ids: []
   id: insert.word.art
   label: Art
@@ -2884,10 +3260,40 @@
   mapping_confidence: unknown
   visuicmd: visCmdReOrderPage
 - fluent_ids: []
+  id: page.reorder_pages
+  label: Reorder Pages...
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: page.setup.layout_and_routing
+  label: Layout & Routing...
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
   id: review.check.compatibility
   label: Compatibility
   mapping_confidence: unknown
   visuicmd: visCmdCheckCompatibility
+- fluent_ids: []
+  id: review.delete_markup
+  label: Delete Markup
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: review.delete_markup.delete_all_markup_overlays_in_document
+  label: Delete All Markup Overlays
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: review.delete_markup.delete_markup_overlays_on_current_page.all_on_current_page
+  label: All on Current Page
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: review.edit_comment
+  label: Edit Comment
+  mapping_confidence: unknown
+  visuicmd: null
 - fluent_ids:
     - IgnoreThisIssue
     - IgnoreThisIssueMenu
@@ -2900,6 +3306,16 @@
   label: Issue
   mapping_confidence: unknown
   visuicmd: visCmdIgnoreValidationIssue
+- fluent_ids: []
+  id: review.issues.stop_ignoring_rule
+  label: Stop Ignoring Rule
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: review.issues.stop_ignoring_this_issue
+  label: Stop Ignoring This Issue
+  mapping_confidence: unknown
+  visuicmd: null
 - fluent_ids:
     - ReviewNewComment
   id: review.new.comment
@@ -2916,6 +3332,16 @@
   label: None
   mapping_confidence: unknown
   visuicmd: visCmdReviewerVisibilityNone
+- fluent_ids: []
+  id: review.reviewers.hide_all
+  label: Hide All
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: review.show_hide_markup
+  label: Show/Hide Markup
+  mapping_confidence: unknown
+  visuicmd: null
 - fluent_ids: []
   id: review.spelling.options.dlg
   label: Dlg
@@ -3021,10 +3447,30 @@
   mapping_confidence: unknown
   visuicmd: null
 - fluent_ids: []
+  id: shape.convert_ink_to_geometry
+  label: Convert Ink to Geometry
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: shape.convert_ink_to_text
+  label: Convert Ink to Text
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
   id: shape.crop.object
   label: Object
   mapping_confidence: unknown
   visuicmd: visCmdCropObject
+- fluent_ids: []
+  id: shape.data.define_shape_data
+  label: Define Shape Data...
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: shape.data.edit_data_graphic
+  label: Edit Data Graphic...
+  mapping_confidence: unknown
+  visuicmd: null
 - fluent_ids:
     - ShapeDataWindow
   id: shape.data.window
@@ -3105,6 +3551,16 @@
   label: Zoom
   mapping_confidence: unknown
   visuicmd: visCmdDrawZoom
+- fluent_ids: []
+  id: shape.edit_icon_image
+  label: Edit Icon Image
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: shape.edit_master_shape
+  label: Edit Master Shape
+  mapping_confidence: unknown
+  visuicmd: null
 - fluent_ids:
     - ShapeEffectsMenu
   id: shape.effects
@@ -3186,6 +3642,16 @@
   mapping_confidence: unknown
   visuicmd: visCmdIconSelectNet
 - fluent_ids: []
+  id: shape.insert_shape_after
+  label: Insert Shape After
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: shape.insert_shape_before
+  label: Insert Shape Before
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
   id: shape.intersect
   label: Intersect
   mapping_confidence: unknown
@@ -3200,10 +3666,45 @@
   label: Line
   mapping_confidence: unknown
   visuicmd: visCmdDRLineTool
+- fluent_ids: []
+  id: shape.master.add_to_my_shapes.add_to_existing_stencil
+  label: Add To Existing Stencil...
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: shape.master.add_to_my_shapes.add_to_new_stencil
+  label: Add To New Stencil...
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: shape.master.add_to_quick_shapes
+  label: Add to Quick Shapes
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: shape.master.delete_master
+  label: Delete Master
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: shape.master.edit_master.properties
+  label: Properties...
+  mapping_confidence: unknown
+  visuicmd: null
 - fluent_ids:
     - MasterProperties
   id: shape.master.properties
   label: Master Properties
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: shape.master.remove_from_quick_shapes
+  label: Remove from Quick Shapes
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: shape.master.rename_master
+  label: Rename Master
   mapping_confidence: unknown
   visuicmd: null
 - fluent_ids: []
@@ -3277,6 +3778,11 @@
 - fluent_ids: []
   id: shape.set.width
   label: Width
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: shape.shape.find_similar_shapes
+  label: Find Similar Shapes
   mapping_confidence: unknown
   visuicmd: null
 - fluent_ids:
@@ -3429,6 +3935,41 @@
   mapping_confidence: unknown
   visuicmd: visCmdStenSaveAs
 - fluent_ids: []
+  id: shape.stencil.collapse_all_groups
+  label: Collapse All Groups
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: shape.stencil.edit_stencil
+  label: Edit Stencil
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: shape.stencil.expand_all_groups
+  label: Expand All Groups
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: shape.stencil.order.move_down
+  label: Move Down
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: shape.stencil.order.move_up
+  label: Move Up
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: shape.stencil.properties
+  label: Properties...
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: shape.stencil.reset_stencil
+  label: Reset Stencil
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
   id: shape.studio.add.on
   label: "On"
   mapping_confidence: unknown
@@ -3449,6 +3990,11 @@
   label: Dlg
   mapping_confidence: unknown
   visuicmd: visCmdShapeTransparencyDlg
+- fluent_ids: []
+  id: shape.update_icon_image
+  label: Update Icon Image
+  mapping_confidence: unknown
+  visuicmd: null
 - fluent_ids: []
   id: shape.vert
   label: Vert
@@ -3536,6 +4082,11 @@
   label: Distribute
   mapping_confidence: unknown
   visuicmd: visCmdTextHAlignDistribute
+- fluent_ids: []
+  id: text.horizontal_in_vertical
+  label: Horizontal in Vertical...
+  mapping_confidence: unknown
+  visuicmd: null
 - fluent_ids:
     - TextInitialCaps
   id: text.initial.caps
@@ -3884,6 +4435,21 @@
   label: Flyout Anchor Insert Pictures
   mapping_confidence: unknown
   visuicmd: null
+- fluent_ids: []
+  id: tools.formula_tracing.trace_dependents
+  label: Trace Dependents
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: tools.formula_tracing.trace_precedents
+  label: Trace Precedents
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: tools.formula_tracing.window
+  label: Formula Tracing Window
+  mapping_confidence: unknown
+  visuicmd: null
 - fluent_ids:
     - FreeformTool
   id: tools.freeform
@@ -4018,6 +4584,11 @@
   label: Ink Ballpoint Pen
   mapping_confidence: unknown
   visuicmd: null
+- fluent_ids: []
+  id: tools.ink.close_ink_shape
+  label: Close Ink Shape
+  mapping_confidence: unknown
+  visuicmd: null
 - fluent_ids:
     - InkColorPicker
   id: tools.ink.color.picker
@@ -4040,6 +4611,21 @@
     - InkHighlighter
   id: tools.ink.highlighter
   label: Ink Highlighter
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: tools.ink.ink_pen_3
+  label: Ink Pen 3
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: tools.ink.ink_pen_4
+  label: Ink Pen 4
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: tools.ink.ink_pen_5
+  label: Ink Pen 5
   mapping_confidence: unknown
   visuicmd: null
 - fluent_ids: []
@@ -4231,12 +4817,6 @@
     - ObjectsRemoveFromGroup
   id: tools.objects.remove.from
   label: Objects Remove From
-  mapping_confidence: unknown
-  visuicmd: null
-- fluent_ids:
-    - ObjectsUngroup
-  id: tools.objects.ungroup
-  label: Objects Ungroup
   mapping_confidence: unknown
   visuicmd: null
 - fluent_ids:
@@ -4527,6 +5107,11 @@
     - PointerModeOptions
   id: tools.pointer.mode.options
   label: Pointer Mode Options
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: tools.pointer_tool.multiple_select
+  label: Multiple Select
   mapping_confidence: unknown
   visuicmd: null
 - fluent_ids:
@@ -4901,6 +5486,51 @@
   mapping_confidence: unknown
   visuicmd: visCmdViewCustom
 - fluent_ids: []
+  id: view.explorer.active
+  label: Active
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: view.explorer.delete
+  label: Delete
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: view.explorer.delete_layer
+  label: Delete Layer
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: view.explorer.delete_shape
+  label: Delete Shape
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: view.explorer.delete_style
+  label: Delete Style
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: view.explorer.new_pattern
+  label: New Pattern...
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: view.explorer.protect_document
+  label: Protect Document...
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: view.explorer.ruler_and_grid
+  label: Ruler & Grid...
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: view.explorer.visible
+  label: Visible
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
   id: view.first.tile
   label: Tile
   mapping_confidence: unknown
@@ -4931,6 +5561,11 @@
   label: Toolbar
   mapping_confidence: unknown
   visuicmd: visCmdGoToPageToolbar
+- fluent_ids: []
+  id: view.go_to.unnamed
+  label: Go To
+  mapping_confidence: unknown
+  visuicmd: null
 - fluent_ids: []
   id: view.grid
   label: Show Grid
@@ -4967,6 +5602,16 @@
   mapping_confidence: unknown
   visuicmd: visCmdListInsertBefore
 - fluent_ids: []
+  id: view.markup
+  label: Markup
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: view.master_explorer.page_setup
+  label: Page Setup...
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
   id: view.next.comment.markup
   label: Markup
   mapping_confidence: unknown
@@ -4997,6 +5642,46 @@
   mapping_confidence: unknown
   visuicmd: visCmdPanObject
 - fluent_ids: []
+  id: view.pane.autofit
+  label: AutoFit
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: view.pane.autohide
+  label: AutoHide
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: view.pane.close
+  label: Close
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: view.pane.close_all_stencils
+  label: Close All Stencils
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: view.pane.float_window
+  label: Float Window
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: view.pane.hide_window
+  label: Hide Window
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: view.pane.search_options
+  label: Search Options...
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: view.pane.shape_data_sets
+  label: Shape Data Sets...
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
   id: view.previous.comment.markup
   label: Markup
   mapping_confidence: unknown
@@ -5012,6 +5697,11 @@
   mapping_confidence: unknown
   visuicmd: visCmdPreviousTile
 - fluent_ids: []
+  id: view.qat.customize
+  label: Customize Quick Access Toolbar
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
   id: view.right.to.left
   label: Left
   mapping_confidence: unknown
@@ -5026,6 +5716,11 @@
   label: Dlg
   mapping_confidence: unknown
   visuicmd: visCmdRulerGridDlg
+- fluent_ids: []
+  id: view.sections
+  label: Sections...
+  mapping_confidence: unknown
+  visuicmd: null
 - fluent_ids:
     - ShowCommentsMenu
   id: view.show.comments
@@ -5059,6 +5754,11 @@
     - ShowTraining
   id: view.show.training
   label: Show Training
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: view.show_drawing_page
+  label: Show Drawing Page...
   mapping_confidence: unknown
   visuicmd: null
 - fluent_ids: []
@@ -5132,11 +5832,6 @@
   mapping_confidence: unknown
   visuicmd: visCmdTaskPaneDocumentManagement
 - fluent_ids: []
-  id: view.task.pane.research
-  label: Research
-  mapping_confidence: unknown
-  visuicmd: visCmdTaskPaneResearch
-- fluent_ids: []
   id: view.task.pane.reviewer
   label: Reviewer
   mapping_confidence: unknown
@@ -5174,6 +5869,71 @@
   mapping_confidence: unknown
   visuicmd: visCmdViewGuides
 - fluent_ids: []
+  id: view.toolbar.action
+  label: Action
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: view.toolbar.customize
+  label: Customize...
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: view.toolbar.data
+  label: Data
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: view.toolbar.developer
+  label: Developer
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: view.toolbar.drawing
+  label: Drawing
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: view.toolbar.format_text
+  label: Format Text
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: view.toolbar.formatting
+  label: Formatting
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: view.toolbar.layout_and_routing
+  label: Layout & Routing
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: view.toolbar.picture
+  label: Picture
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: view.toolbar.reviewing
+  label: Reviewing
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: view.toolbar.standard
+  label: Standard
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: view.toolbar.stencil
+  label: Stencil
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: view.toolbar.view
+  label: View
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
   id: view.toolbars.dlg
   label: Dlg
   mapping_confidence: unknown
@@ -5186,6 +5946,16 @@
 - fluent_ids: []
   id: view.ui_layout.panel_365
   label: Panel (365 data)
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: view.ui_layout.panel_classic
+  label: Panel Classic Layout
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: view.ui_layout.panel_modern
+  label: Panel Modern Layout
   mapping_confidence: unknown
   visuicmd: null
 - fluent_ids: []
@@ -5245,11 +6015,6 @@
   label: Objects
   mapping_confidence: unknown
   visuicmd: visCmdWindowShowMasterObjects
-- fluent_ids: []
-  id: view.window.show.shape.sheet
-  label: Sheet
-  mapping_confidence: unknown
-  visuicmd: visCmdWindowShowShapeSheet
 - fluent_ids:
     - WindowSwitchWindowsMenuWord
   id: view.window.switch.windows.menu.word

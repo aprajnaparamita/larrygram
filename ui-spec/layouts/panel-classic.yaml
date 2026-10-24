@@ -1527,7 +1527,6 @@ menu_bars:
       label: About Larrygram
       access: "a"
       command: help.about
-      new_command: true
       visuicmd: visCmdHelpAboutVisio
     - id: drawing.help.hyperlinks
       kind: list
@@ -1831,7 +1830,7 @@ menu_bars:
       kind: button
       label: Formula Tracing Window
       access: "r"
-      command: view.formula_tracing_window
+      command: tools.formula_tracing.window
       new_command: true
       icon: view.formula_tracing_window
     - id: shapesheet.view.toolbars
@@ -2110,7 +2109,7 @@ menu_bars:
         kind: button
         label: ShapeSheet Formula Tracing Window
         access: "r"
-        command: tools.formula_tracing.shapesheet_formula_tracing_window
+        command: tools.formula_tracing.window
         new_command: true
         icon: tools.formula_tracing.shapesheet_formula_tracing_window
       - id: shapesheet.tools.formula_tracing.trace_dependents
@@ -2131,17 +2130,15 @@ menu_bars:
         kind: button
         label: Back
         access: "b"
-        command: tools.formula_tracing.back
-        new_command: true
-        icon: tools.formula_tracing.back
+        command: tools.trace.back
+        icon: tools.trace.back
         begin_group: true
       - id: shapesheet.tools.formula_tracing.forward
         kind: button
         label: Forward
         access: "f"
-        command: tools.formula_tracing.forward
-        new_command: true
-        icon: tools.formula_tracing.forward
+        command: tools.trace.forward
+        icon: tools.trace.forward
     - id: shapesheet.tools.customize
       kind: button
       label: Customize...
@@ -2288,7 +2285,6 @@ menu_bars:
       label: About Larrygram
       access: "a"
       command: help.about
-      new_command: true
       visuicmd: visCmdHelpAboutVisio
     - id: shapesheet.help.hyperlinks
       kind: list
@@ -2875,7 +2871,6 @@ menu_bars:
       label: About Larrygram
       access: "a"
       command: help.about
-      new_command: true
       visuicmd: visCmdHelpAboutVisio
     - id: stencil.help.hyperlinks
       kind: list
@@ -4301,7 +4296,7 @@ toolbars:
     - id: toolbar.reviewing.insert_comment.edit_comment
       kind: button
       label: Edit Comment
-      command: review.insert_comment.edit_comment
+      command: review.edit_comment
       new_command: true
       icon: review.insert_comment.edit_comment
     - id: toolbar.reviewing.insert_comment.delete_comment
@@ -4338,7 +4333,7 @@ toolbars:
     - id: toolbar.reviewing.delete_markup.delete_markup
       kind: button
       label: Delete Markup
-      command: review.delete_markup.delete_markup
+      command: review.delete_markup
       new_command: true
       icon: review.delete_markup.delete_markup
     - id: toolbar.reviewing.delete_markup.delete_markup_overlays_on_current_page
@@ -4814,16 +4809,14 @@ toolbars:
   - id: toolbar.shapesheet_formula_tracing.back
     kind: button
     label: Back
-    command: tools.formula_tracing.back
-    new_command: true
-    icon: tools.formula_tracing.back
+    command: tools.trace.back
+    icon: tools.trace.back
     begin_group: true
   - id: toolbar.shapesheet_formula_tracing.forward
     kind: button
     label: Forward
-    command: tools.formula_tracing.forward
-    new_command: true
-    icon: tools.formula_tracing.forward
+    command: tools.trace.forward
+    icon: tools.trace.forward
 - id: toolbar.stencil_standard
   label: Stencil Standard
   visible: true
@@ -5366,7 +5359,7 @@ context_menus:
     kind: button
     label: Reconvert
     access: "v"
-    command: text.reconvert
+    command: edit.reconvert
     new_command: true
     begin_group: true
   - id: context.text_edit.change_text_direction
@@ -5887,7 +5880,7 @@ context_menus:
       kind: button
       label: Edit Master Shape
       access: "e"
-      command: shape.master.edit_master.edit_master_shape
+      command: shape.edit_master_shape
       new_command: true
       icon: shape.master.edit_master.edit_master_shape
       begin_group: true
@@ -5895,7 +5888,7 @@ context_menus:
       kind: button
       label: Edit Icon Image
       access: "i"
-      command: shape.master.edit_master.edit_icon_image
+      command: shape.edit_icon_image
       new_command: true
   - id: context.master_edit.help
     kind: button
@@ -6001,14 +5994,14 @@ context_menus:
     kind: button
     label: Float Window
     access: "f"
-    command: shape.stencil.float_window
+    command: view.pane.float_window
     new_command: true
     begin_group: true
   - id: context.stencil_edit.close
     kind: button
     label: Close
     access: "c"
-    command: shape.stencil.close
+    command: view.pane.close
     new_command: true
     icon: shape.stencil.close
 - id: context.window_title
@@ -6075,7 +6068,7 @@ context_menus:
     kind: button
     label: Define Shape Data...
     access: "d"
-    command: view.pane.define_shape_data
+    command: shape.data.define_shape_data
     new_command: true
     icon: view.pane.define_shape_data
   - id: context.shape_data_window.shape_data_sets
@@ -6373,7 +6366,7 @@ context_menus:
     kind: button
     label: Reorder Pages...
     access: "r"
-    command: view.explorer.reorder_pages
+    command: page.reorder_pages
     new_command: true
 - id: context.explorer_page
   label: 'Drawing Explorer: page'
@@ -6524,7 +6517,7 @@ context_menus:
     kind: button
     label: Create Shortcut
     access: "s"
-    command: view.explorer.create_shortcut
+    command: edit.create_shortcut
     new_command: true
   - id: context.explorer_master.master_properties
     kind: button
@@ -6536,13 +6529,13 @@ context_menus:
     kind: button
     label: Edit Master Shape
     access: "e"
-    command: view.explorer.edit_master_shape
+    command: shape.edit_master_shape
     new_command: true
   - id: context.explorer_master.edit_icon_image
     kind: button
     label: Edit Icon Image
     access: "i"
-    command: view.explorer.edit_icon_image
+    command: shape.edit_icon_image
     new_command: true
 - id: context.explorer_styles
   label: 'Drawing Explorer: styles'
@@ -6573,8 +6566,7 @@ context_menus:
     kind: button
     label: Show ShapeSheet
     access: "s"
-    command: view.explorer.show_shapesheet
-    new_command: true
+    command: view.window.show.shape.sheet
     icon: view.explorer.show_shapesheet
     begin_group: true
 - id: context.explorer_patterns
@@ -6600,8 +6592,7 @@ context_menus:
     kind: button
     label: Show ShapeSheet
     access: "s"
-    command: view.master_explorer.show_shapesheet
-    new_command: true
+    command: view.window.show.shape.sheet
     icon: view.master_explorer.show_shapesheet
     begin_group: true
 - id: context.master_explorer_masters
@@ -6618,13 +6609,12 @@ context_menus:
     kind: button
     label: Ruler & Grid...
     access: "r"
-    command: view.master_explorer.ruler_and_grid
+    command: view.explorer.ruler_and_grid
     new_command: true
   - id: context.master_explorer_masters.show_shapesheet
     kind: button
     label: Show ShapeSheet
     access: "s"
-    command: view.master_explorer.show_shapesheet
-    new_command: true
+    command: view.window.show.shape.sheet
     icon: view.master_explorer.show_shapesheet
     begin_group: true

@@ -3617,7 +3617,7 @@ tabs:
             visual_notes: null
           - aliases: []
             bounds: null
-            command: arrange.align.left
+            command: format.text.align_left
             icon_ref: null
             id: AlignLeft
             keytip: null
@@ -3629,7 +3629,7 @@ tabs:
             visual_notes: null
           - aliases: []
             bounds: null
-            command: arrange.align.right
+            command: format.text.align_right
             icon_ref: null
             id: AlignRight
             keytip: null
@@ -3641,7 +3641,7 @@ tabs:
             visual_notes: null
           - aliases: []
             bounds: null
-            command: arrange.align.center
+            command: format.text.align_center
             icon_ref: null
             id: AlignCenter
             keytip: null
@@ -4299,7 +4299,7 @@ tabs:
           - aliases:
               - GroupShapeDesign
             bounds: null
-            command: arrange.size.objects
+            command: arrange.group
             icon_ref: null
             id: ObjectsGroup
             keytip: null
@@ -4312,7 +4312,7 @@ tabs:
           - aliases:
               - GroupShapeDesign
             bounds: null
-            command: tools.objects.ungroup
+            command: arrange.ungroup
             icon_ref: null
             id: ObjectsUngroup
             keytip: null
@@ -4403,7 +4403,7 @@ tabs:
           - aliases:
               - GroupShapeDesign
             bounds: null
-            command: arrange.size.objects
+            command: arrange.group
             icon_ref: null
             id: ObjectsGroupMenu
             keytip: null
@@ -4855,7 +4855,7 @@ tabs:
         controls:
           - aliases: []
             bounds: null
-            command: arrange.disband.container
+            command: insert.add.to.new.container
             icon_ref: null
             id: ContainerGallery
             keytip: null
@@ -4924,7 +4924,7 @@ tabs:
         controls:
           - aliases: []
             bounds: null
-            command: insert.text.box
+            command: insert.vert.text.box
             icon_ref: null
             id: TextBoxInsertVertical
             keytip: null
@@ -5557,7 +5557,7 @@ tabs:
             visual_notes: null
           - aliases: []
             bounds: null
-            command: edit.delete.connectors
+            command: connector.style
             icon_ref: null
             id: ConnectorsGallery
             keytip: null
@@ -6346,7 +6346,7 @@ tabs:
             visual_notes: null
           - aliases: []
             bounds: null
-            command: help.research.thesaurus
+            command: view.task.pane.research
             icon_ref: null
             id: ResearchPane
             keytip: null
@@ -7239,7 +7239,7 @@ tabs:
           - aliases:
               - GroupArrange
             bounds: null
-            command: arrange.size.objects
+            command: arrange.group
             icon_ref: null
             id: ObjectsGroup
             keytip: null
@@ -7252,7 +7252,7 @@ tabs:
           - aliases:
               - GroupArrange
             bounds: null
-            command: tools.objects.ungroup
+            command: arrange.ungroup
             icon_ref: null
             id: ObjectsUngroup
             keytip: null
@@ -7354,7 +7354,7 @@ tabs:
             visual_notes: null
           - aliases: []
             bounds: null
-            command: view.show.shape.sheet.shape
+            command: view.window.show.shape.sheet
             icon_ref: null
             id: ShowShapeSheet
             keytip: null
@@ -7367,7 +7367,7 @@ tabs:
           - aliases:
               - GroupArrange
             bounds: null
-            command: arrange.size.objects
+            command: arrange.group
             icon_ref: null
             id: ObjectsGroupMenu
             keytip: null
@@ -9550,7 +9550,7 @@ tabs:
         controls:
           - aliases: []
             bounds: null
-            command: view.show.shape.sheet.shape
+            command: edit.sw.show.formulas
             icon_ref: null
             id: ShapeSheetShowFormulas
             keytip: null
@@ -9562,7 +9562,7 @@ tabs:
             visual_notes: null
           - aliases: []
             bounds: null
-            command: view.show.shape.sheet.shape
+            command: edit.sw.show.sections.dlg
             icon_ref: null
             id: ShapeSheetShowSections
             keytip: null
@@ -9574,7 +9574,7 @@ tabs:
             visual_notes: null
           - aliases: []
             bounds: null
-            command: view.show.shape.sheet.shape
+            command: edit.sw.show.values
             icon_ref: null
             id: ShapeSheetShowValues
             keytip: null
@@ -9689,7 +9689,7 @@ tabs:
             visual_notes: null
           - aliases: []
             bounds: null
-            command: data.unlink.shape
+            command: format.cust.prop.edit
             icon_ref: null
             id: ShapeData
             keytip: null
