@@ -36,6 +36,14 @@ serde = { version = "1", features = ["derive"] }
 # is embedded. MIT OR Apache-2.0 / Zlib / BSD (checked by cargo deny).
 egui_extras = { version = "0.37", default-features = false, features = ["image", "svg"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
+# The icon rasteriser (ADR 0062, task P7-04): the same resvg 0.45 that
+# the egui_extras `svg` loader pins, with no text or raster-image
+# features because the icon set is outline paths only. MIT OR
+# Apache-2.0 (already in the tree through egui_extras).
+resvg = { version = "0.45.1", default-features = false }
+# One warning per missing icon key or rasterisation failure (ADR 0062).
+# MIT OR Apache-2.0 (already in the tree through egui).
+log = "0.4"
 
 # The wasm picker bridge (ADR 0036): `wasm-bindgen-futures` completes
 # rfd's async upload dialog on the browser event loop and `web-sys`

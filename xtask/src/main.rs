@@ -4,7 +4,9 @@
 //!
 //! - `gate [--quick] [--skip <step>[,<step>...]]`: the quality gate (see AGENTS.md).
 //! - `codegen [--check]`: regenerate `crates/model/src/generated/` from
-//!   `ui-spec/shapesheet.toml`, or verify it with `--check`. See ADR 0015.
+//!   `ui-spec/shapesheet.toml` and `crates/ui/src/icons/table.rs` from
+//!   `ui-spec/icons.yaml`, or verify them with `--check`. See ADR 0015
+//!   and ADR 0062.
 //! - `parity [--check]`: regenerate `docs/parity/controls.md` from the
 //!   builtin registry and the `ui-spec` data, or verify it with
 //!   `--check`. See ADR 0037.
@@ -41,8 +43,10 @@ tasks:
                                        steps: codegen names parity fmt clippy test doc coverage deny layers wasm fuzz
                                        --quick skips coverage, wasm and fuzz
   codegen [--check]                    regenerate crates/model/src/generated from
-                                       ui-spec/shapesheet.toml (ADR 0015)
-                                       --check fails when the committed file is stale
+                                       ui-spec/shapesheet.toml (ADR 0015) and
+                                       crates/ui/src/icons/table.rs from
+                                       ui-spec/icons.yaml (ADR 0062)
+                                       --check fails when a committed file is stale
   parity [--check]                     regenerate docs/parity/controls.md from the
                                        registry and the ui-spec data (ADR 0037)
                                        --check fails when the committed file is stale
