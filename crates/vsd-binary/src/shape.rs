@@ -308,7 +308,6 @@ const KNOWN: &[Record] = &[
 /// This is the seam of task P8-01: the version 11 payloads and the
 /// [`Limits::DEFAULT`] caps. Use [`collect_with`] for the version 6
 /// payloads or other caps.
-#[allow(dead_code)] // no caller until P8-07 wires the pipeline
 pub fn collect(
     chunks: &[Chunk<'_>],
     document: &mut Document,

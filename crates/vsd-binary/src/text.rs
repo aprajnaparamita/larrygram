@@ -120,7 +120,6 @@ const FONTFACE: Record = Record(0xd7);
 /// spellings). UTF-16 strings ignore the code page: they are read as
 /// they are.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[allow(dead_code)] // constructed by P8-07 from the stream's code page
 pub enum CodePage {
     /// Windows-1252 (the ANSI default).
     Windows1252,
@@ -134,7 +133,6 @@ impl CodePage {
     /// `0` is the ANSI default. Returns `None` for a code page this
     /// module cannot decode; the caller records an `Unsupported`
     /// warning and falls back to [`CodePage::Windows1252`].
-    #[allow(dead_code)] // no caller until P8-07 wires the pipeline
     pub fn from_windows_id(id: u32) -> Option<CodePage> {
         match id {
             65001 => Some(CodePage::Utf8),
@@ -153,7 +151,6 @@ impl Default for CodePage {
 
 /// The options of [`collect_with`].
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)] // no caller until P8-07 wires the pipeline
 pub struct TextOptions {
     /// The chunk format version: the string and paragraph record
     /// layouts differ between version 6 and version 11.
@@ -184,7 +181,6 @@ impl Default for TextOptions {
 /// `warnings`, never fatal. The record layouts are read as version 11
 /// and byte strings as Windows-1252; use [`collect_with`] for other
 /// streams.
-#[allow(dead_code)] // no caller until P8-07 wires the pipeline
 pub fn collect(
     chunks: &[Chunk<'_>],
     document: &mut Document,
@@ -200,7 +196,6 @@ pub fn collect(
 /// version and code page are properties of that stream that the frozen
 /// [`collect`] seam of P8-01 cannot carry, so they travel in
 /// [`TextOptions`] instead.
-#[allow(dead_code)] // no caller until P8-07 wires the pipeline
 pub fn collect_with(
     chunks: &[Chunk<'_>],
     document: &mut Document,

@@ -463,7 +463,6 @@ pub struct Chunk<'a> {
 /// The stream must carry the Visio magic and the version byte at
 /// [`VERSION_OFFSET`]; a shorter stream is [`Error::Invalid`] and a
 /// wrong magic is [`Error::NotAVisioFile`] (ADR 0071).
-#[allow(dead_code)] // no caller until P8-07 wires the pipeline
 pub fn version(visio_document: &[u8]) -> Result<FormatVersion, Error> {
     let Some(byte) = visio_document.get(VERSION_OFFSET).copied() else {
         return Err(Error::Invalid(
@@ -499,7 +498,6 @@ pub fn version(visio_document: &[u8]) -> Result<FormatVersion, Error> {
 /// nonsensical is skipped with a warning and the walk continues at the
 /// next recoverable boundary. When no record at all can be read, the
 /// result is [`Error::Invalid`].
-#[allow(dead_code)] // no caller until P8-07 wires the pipeline
 pub fn read_chunks<'a>(
     stream: &'a [u8],
     file_version: FormatVersion,
