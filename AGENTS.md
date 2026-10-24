@@ -90,7 +90,7 @@ libvisio is MPL-2.0 (verify `COPYING` when you fetch it; record the commit hash)
 
 ## 7. Quality gate
 
-`cargo xtask gate` is the single gate. It runs at two levels:
+`cargo xtask gate` is the single gate. It runs at three levels:
 
 - **Hand-off gate (workers).** `cargo xtask gate --quick` (codegen, parity, fmt, clippy, test, doc, deny, layers) plus every slow step your change triggers (table below). It must be green before hand-off.
 - **Merge gate (master).** `cargo xtask gate --quick` on `main` with the corpus tests required, after each batch of up to three merges.
