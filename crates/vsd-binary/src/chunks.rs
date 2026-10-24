@@ -1376,7 +1376,12 @@ mod tests {
     fn compress_literals(data: &[u8]) -> Vec<u8> {
         let mut out = Vec::new();
         for group in data.chunks(8) {
-            out.push((1u8 << group.len()) - 1);
+            let flags = if group.len() == 8 {
+                0xff
+            } else {
+                (1u8 << group.len()) - 1
+            };
+            out.push(flags);
             out.extend_from_slice(group);
         }
         out
@@ -2335,26 +2340,85 @@ mod tests {
             &Limits::DEFAULT,
             &mut tiny_blocks,
         );
-        match read_chunks(&stream, FormatVersion::V11, &Limits::DEFAULT, &mut blocks) {
-            // The seam is still the P8-01 stub; task P8-02 replaces it
-            // and this arm disappears.
-            Err(Error::NotImplemented) => {}
-            other => {
-                let (chunks, warnings) = other.expect("a restored block walks");
-                assert_eq!(warnings, Vec::new());
-                assert_eq!(chunks.len(), 1);
-                assert_eq!(chunks[0].record, PAGE);
-                assert_eq!(chunks[0].data, &[9u8; 3]);
-                assert_eq!(blocks.len(), 1);
-                let (tiny_chunks, tiny_warnings) =
-                    tiny_result.expect("a tiny restored block degrades");
-                assert_eq!(tiny_chunks.len(), 1);
-                assert!(tiny_warnings.iter().any(|w| w.kind
-                    == WarningKind::BadValue {
-                        what: "pointer range"
-                    }));
-            }
+        let (chunks, warnings) =
+            read_chunks(&stream, FormatVersion::V11, &Limits::DEFAULT, &mut blocks)
+                .expect("a restored block walks");
+        assert_eq!(warnings, Vec::new());
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].record, PAGE);
+        assert_eq!(chunks[0].data, &[9u8; 3]);
+        assert_eq!(blocks.len(), 1);
+        let (tiny_chunks, tiny_warnings) = tiny_result.expect("a tiny restored block degrades");
+        assert_eq!(tiny_chunks.len(), 1);
+        assert!(tiny_warnings.iter().any(|w| w.kind
+            == WarningKind::BadValue {
+                what: "pointer range"
+            }));
+    }
+
+    #[test]
+    fn a_compression_bomb_is_a_limit_error() {
+        // One literal byte, then back-references that copy it forever:
+        // the block expands far past the ratio cap of ADR 0068, and a
+        // cap is an error, not a degradation.
+        let mut group = vec![0x00u8];
+        for _ in 0..8 {
+            group.extend_from_slice(&[0xee, 0xff]);
         }
+        let mut bomb = vec![0x01u8, 0xaa];
+        bomb.extend(group.iter().copied().cycle().take(64 * group.len()));
+        let stream = build(11, &[(0x15, 0x42, bomb)], &[]);
+        let limits = Limits {
+            max_compression_ratio: 2,
+            ..Limits::DEFAULT
+        };
+        let mut blocks = Vec::new();
+        let err = read_chunks(&stream, FormatVersion::V11, &limits, &mut blocks).unwrap_err();
+        assert!(matches!(err, Error::LimitExceeded { .. }), "{err:?}");
+    }
+
+    #[test]
+    fn a_list_header_shorter_than_its_own_keeps_the_framing_rules() {
+        // A payload too short to hold the list header cannot be one,
+        // and a payload that cuts the header in half cannot be one
+        // either: both keep the framing rules. The record ends its
+        // region, so the header reads nothing beyond it.
+        for (payload, size) in [(&[1u8, 2][..], 2usize), (&[24, 0, 0, 0, 5, 6][..], 6)] {
+            let mut record = chunk_header(0x6c, 4, 0, size as u32, 1, 0x50);
+            record.extend_from_slice(payload);
+            let mut trailing = chunk(0x8b, 2, 0, &[2, 2], 1, 0x50, 0);
+            trailing.truncate(CHUNK_HEADER_LEN);
+            let stream = build(11, &[(0x1a, 0xd0, record), (0x1a, 0xd0, trailing)], &[]);
+            let mut blocks = Vec::new();
+            let (chunks, warnings) =
+                read_chunks(&stream, FormatVersion::V11, &Limits::DEFAULT, &mut blocks).unwrap();
+            assert_eq!(warnings.len(), 1);
+            assert_eq!(chunks.len(), 1);
+            assert_eq!(chunks[0].record, GEOM_LIST);
+            assert_eq!(chunks[0].data.len(), size);
+        }
+    }
+
+    #[test]
+    fn a_child_id_list_beyond_the_region_keeps_the_framing_rules() {
+        // The list header names six ids but the region holds none: the
+        // record keeps its declared frame.
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&24u32.to_le_bytes());
+        payload.extend_from_slice(&24u32.to_le_bytes());
+        payload.extend_from_slice(&[0u8; 24]);
+        assert_eq!(payload.len(), 32);
+        let record = chunk_header(0x6c, 4, 0, 32, 1, 0x50)
+            .into_iter()
+            .chain(payload)
+            .collect::<Vec<u8>>();
+        let stream = build(11, &[(0x1a, 0xd0, record)], &[]);
+        let mut blocks = Vec::new();
+        let (chunks, warnings) =
+            read_chunks(&stream, FormatVersion::V11, &Limits::DEFAULT, &mut blocks).unwrap();
+        assert_eq!(warnings, Vec::new());
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].data.len(), 32);
     }
 
     #[test]
@@ -2371,9 +2435,8 @@ mod tests {
     // --- the corpus ----------------------------------------------------
 
     /// The corpus smoke test: every `.vsd` in `corpus/vsd/` yields a
-    /// non-empty chunk list. It skips cleanly when the corpus is absent
-    /// and, until task P8-02 replaces them, when the container seams of
-    /// ADR 0068 are still stubs.
+    /// non-empty chunk list, through the container seams of ADR 0068.
+    /// It skips cleanly when the corpus is absent.
     #[test]
     fn every_corpus_vsd_yields_a_non_empty_chunk_list() {
         let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../corpus/vsd");
@@ -2394,10 +2457,6 @@ mod tests {
             let bytes = fs::read(&path).unwrap_or_else(|e| panic!("cannot read {path:?}: {e}"));
             let streams = match crate::container::read_streams(&bytes, &Limits::DEFAULT) {
                 Ok(streams) => streams,
-                Err(Error::NotImplemented) => {
-                    eprintln!("skip: container::read_streams is still the P8-01 stub");
-                    return;
-                }
                 Err(e) => panic!("{path:?}: {e}"),
             };
             let document = streams
@@ -2408,10 +2467,6 @@ mod tests {
             match read_chunks(document, file_version, &Limits::DEFAULT, &mut blocks) {
                 Ok((chunks, _)) => {
                     assert!(!chunks.is_empty(), "{path:?} yields no chunks");
-                }
-                Err(Error::NotImplemented) => {
-                    eprintln!("skip: container::decompress is still the P8-01 stub");
-                    return;
                 }
                 Err(e) => panic!("{path:?}: {e}"),
             }
