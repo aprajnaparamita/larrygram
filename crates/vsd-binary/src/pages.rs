@@ -47,15 +47,17 @@
 //! # Page properties
 //!
 //! The page-properties record holds six unit-tagged doubles (a unit
-//! byte naming the *display* unit, then the canonical value, inches and
-//! radians — the same spelling [`crate::shape`] maps) in the order of
+//! byte naming the *display* unit, then the value; the same spelling
+//! [`crate::shape`] maps) in the order of
 //! the `Page Properties` row's cell indices (Microsoft Learn,
 //! `VisCellIndices`): `PageWidth`, `PageHeight`, `ShdwOffsetX`,
 //! `ShdwOffsetY`, `PageScale`, then `DrawingScale` behind its own unit
-//! byte. Fields the record carries after them have no model slot on the
-//! page sheet and stay unset. A master's page sheet has no model slot
-//! at all ([`larrygram_model::Master`] holds no sheet), so its page
-//! properties are dropped with a warning.
+//! byte. The size pair is scaled to inches by `PageScale`/`DrawingScale`
+//! (see [`read_page_props`]); the shadow offsets and the two scale cells
+//! keep their raw values. Fields the record carries after them have no
+//! model slot on the page sheet and stay unset. A master's page sheet
+//! has no model slot at all ([`larrygram_model::Master`] holds no
+//! sheet), so its page properties are dropped with a warning.
 //!
 //! # Connects
 //!
@@ -695,6 +697,15 @@ fn read_background(data: &[u8]) -> Option<u32> {
 ///
 /// Returns the cells that parsed; a field that did not parse is a
 /// [`WarningKind::BadValue`] warning and its cell stays unset.
+///
+/// The size pair is not stored in inches: the record holds the page's
+/// size in the units the drawing is scaled in, and the physical size in
+/// inches is `value * PageScale / DrawingScale` (the reference's page
+/// computation, confirmed against the oracle: `Visio11PlanWithDimensions.vsd`
+/// stores 528 x 408 with `PageScale` 0.25 and `DrawingScale` 12 and
+/// renders 11 x 8.5 inches). A zero `DrawingScale` divides as 1 (the
+/// reference's fallback). The other four cells keep their raw values,
+/// which are already inches or radians (ADR 0070's unit rule).
 fn read_page_props(data: &[u8], context: &str, warnings: &mut Vec<ImportWarning>) -> Vec<Cell> {
     const CELLS: [&str; 6] = [
         "PageWidth",
@@ -704,17 +715,39 @@ fn read_page_props(data: &[u8], context: &str, warnings: &mut Vec<ImportWarning>
         "PageScale",
         "DrawingScale",
     ];
-    let mut cells = Vec::new();
     let mut fields = Fields::new(data);
+    let mut read: Vec<(&str, u8, f64)> = Vec::with_capacity(CELLS.len());
     for name in CELLS {
         let Some(tag) = fields.u8() else {
             warnings.push(bad_value(context, "page properties"));
-            return cells;
+            break;
         };
         let Some(value) = fields.f64() else {
             warnings.push(bad_value(context, "page properties"));
-            return cells;
+            break;
         };
+        read.push((name, tag, value));
+    }
+    // The scale the size pair needs: `PageScale / DrawingScale`, with
+    // the reference's fallback for a zero drawing scale.
+    let scale_of = |name: &str| {
+        read.iter()
+            .find(|(seen, _, _)| *seen == name)
+            .map(|(_, _, value)| *value)
+    };
+    let page_scale = scale_of("PageScale").unwrap_or(1.0);
+    let drawing_scale = match scale_of("DrawingScale") {
+        Some(value) if value.abs() >= 1e-9 => value,
+        _ => 1.0,
+    };
+    let size_scale = (page_scale / drawing_scale).abs();
+    let size_scale = if size_scale.is_finite() && size_scale > 0.0 {
+        size_scale
+    } else {
+        1.0
+    };
+    let mut cells = Vec::new();
+    for (name, tag, value) in read {
         let Some(unit) = cell_unit(tag) else {
             warnings.push(bad_value(context, "page properties unit"));
             continue;
@@ -723,6 +756,11 @@ fn read_page_props(data: &[u8], context: &str, warnings: &mut Vec<ImportWarning>
             warnings.push(bad_value(context, "page properties"));
             continue;
         }
+        let value = if name == "PageWidth" || name == "PageHeight" {
+            value * size_scale
+        } else {
+            value
+        };
         let mut cell = Cell::new(CellName::from_static(name));
         cell.value = Some(CellValue::Number(value));
         cell.unit = unit;
@@ -1311,6 +1349,61 @@ mod tests {
         assert_eq!(cells[1].unit, Unit::Inches);
         assert_eq!(cells[5].unit, Unit::Unitsless);
         assert!(warnings.is_empty(), "{warnings:?}");
+    }
+
+    #[test]
+    fn the_page_size_pair_scales_by_the_page_and_drawing_scale() {
+        // Regression (P8-10): `Visio11PlanWithDimensions.vsd` stores its
+        // page as 528 x 408 with `PageScale` 0.25 and `DrawingScale` 12
+        // (a 1/4" = 1' plan); the physical page is 11 x 8.5 inches
+        // (the reference's page computation, confirmed against the
+        // oracle).
+        let values = [
+            (66, 528.0),
+            (66, 408.0),
+            (63, 0.125),
+            (63, -0.125),
+            (65, 0.25),
+            (66, 12.0),
+        ];
+        let mut chunks = vec![
+            chunk(0x15, 2, u32::MAX, page_record(u32::MAX)),
+            chunk(0x92, 3, 0, page_props(&values)),
+        ];
+        chunks.extend(page_name());
+        let (document, warnings) = run(&chunks);
+        let cells = &document.pages[0].sheet.cells;
+        assert_eq!(cells[0].value, Some(CellValue::Number(11.0)));
+        assert_eq!(cells[1].value, Some(CellValue::Number(8.5)));
+        assert_eq!(
+            cells[2].value,
+            Some(CellValue::Number(0.125)),
+            "only the size pair is scaled"
+        );
+        assert_eq!(cells[4].value, Some(CellValue::Number(0.25)));
+        assert_eq!(cells[5].value, Some(CellValue::Number(12.0)));
+        assert!(warnings.is_empty(), "{warnings:?}");
+    }
+
+    #[test]
+    fn a_zero_drawing_scale_scales_the_size_pair_by_one() {
+        // The reference's fallback: a zero `DrawingScale` divides as 1.
+        let values = [
+            (65, 11.0),
+            (65, 8.5),
+            (65, 0.0),
+            (65, 0.0),
+            (65, 1.0),
+            (65, 0.0),
+        ];
+        let mut chunks = vec![
+            chunk(0x15, 2, u32::MAX, page_record(u32::MAX)),
+            chunk(0x92, 3, 0, page_props(&values)),
+        ];
+        chunks.extend(page_name());
+        let (document, _) = run(&chunks);
+        let cells = &document.pages[0].sheet.cells;
+        assert_eq!(cells[0].value, Some(CellValue::Number(11.0)));
     }
 
     #[test]
