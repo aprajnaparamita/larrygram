@@ -97,6 +97,10 @@ pub const OVERRIDES: &[(&str, &str)] = &[
         "visCmdMinimizeRibbonToggle",
         "app.minimize.command_bar.toggle",
     ),
+    // The About command: the Phase 7 layouts use our own `help.about`
+    // id, so the constant lands there instead of on the mechanical
+    // `help.about.visio` (P7-02).
+    ("visCmdHelpAboutVisio", "help.about"),
     // Application chrome (the task's own example family).
     ("visCmdABarAutoHeight", "app.bar.auto_height"),
     ("visCmdABarAutohide", "app.bar.auto_hide"),
@@ -216,6 +220,7 @@ pub const LABELS: &[(&str, &str)] = &[
     ("edit.paste", "Paste"),
     ("edit.redo", "Redo"),
     ("edit.select_all", "Select All"),
+    ("edit.sw.show.sections.dlg", "Show Sections"),
     ("edit.undo", "Undo"),
     ("file.close", "Close"),
     ("file.new", "New"),
@@ -224,6 +229,7 @@ pub const LABELS: &[(&str, &str)] = &[
     ("file.print_preview", "Print Preview"),
     ("file.save", "Save"),
     ("file.save_as", "Save As"),
+    ("format.cust.prop.edit", "Shape Data"),
     ("format.text.align_bottom", "Bottom-Align Text"),
     ("format.text.align_center", "Center Text"),
     ("format.text.align_justify", "Justify Text"),
@@ -235,10 +241,11 @@ pub const LABELS: &[(&str, &str)] = &[
     ("format.text.decrease_size", "Decrease Font Size"),
     ("format.text.increase_size", "Increase Font Size"),
     ("format.text.italic", "Italic"),
-    ("help.about", "About"),
+    ("help.about", "About Larrygram"),
     ("insert.picture", "Picture"),
     ("insert.shape", "Insert Shape"),
     ("insert.text", "Text"),
+    ("insert.vert.text.box", "Vertical Text Box"),
     ("layer.add", "New Layer"),
     ("layer.hide", "Hide Layer"),
     ("layer.show", "Show Layer"),
@@ -265,6 +272,7 @@ pub const LABELS: &[(&str, &str)] = &[
     ("view.cascade_all", "Cascade All"),
     ("view.full_screen_mode", "Full Screen"),
     ("view.tile_all", "Tile All"),
+    ("view.window.show.shape.sheet", "Show ShapeSheet"),
     ("view.zoom.in", "Zoom In"),
     ("view.zoom.out", "Zoom Out"),
 ];
@@ -288,6 +296,52 @@ pub const FLUENT_OVERRIDES: &[(&str, &str)] = &[
     ("_3DRotationGallery", "tools.rotation_3d"),
     ("_3DRotationOptionsDialog", "tools.rotation_3d_options"),
     ("_3DBevelOptionsDialog", "tools.bevel_options_3d"),
+];
+
+/// Explicit Fluent control -> command id bindings (task P7-02).
+///
+/// A control listed here surfaces the given command id whatever the
+/// mechanical derivation would pick. The table holds the joins that
+/// the three derivation passes get wrong: a control whose word set
+/// matches a VisUICmds constant that names a *different* action
+/// (`AlignLeft` is the paragraph alignment, not the shape alignment),
+/// and the controls that the Phase 7 layouts already bind to a
+/// command of their own.
+///
+/// The targets are the command ids the Panel Classic and Panel Modern
+/// layouts use (`ui-spec/layouts/*.yaml`), so the two data sets and
+/// the extractor agree.
+///
+/// Every control name must exist in `ui-spec/panel-2016.yaml` or
+/// `ui-spec/panel-365.yaml`; a binding that names a control in
+/// neither layout is skipped, so the extractor's own tests (which run
+/// over a small fixture tree) still pass.
+pub const FLUENT_JOINS: &[(&str, &str)] = &[
+    // Paragraph alignment, not shape alignment (the `AlignLeft` and
+    // `AlignRight` controls sit in the Paragraph group).
+    ("AlignLeft", "format.text.align_left"),
+    ("AlignCenter", "format.text.align_center"),
+    ("AlignRight", "format.text.align_right"),
+    // Group and ungroup, not the size dialog.
+    ("ObjectsGroup", "arrange.group"),
+    ("ObjectsGroupMenu", "arrange.group"),
+    ("ObjectsUngroup", "arrange.ungroup"),
+    // Add a container, not disband one.
+    ("ContainerGallery", "insert.add.to.new.container"),
+    // The ShapeSheet window's three view modes and the window
+    // itself.
+    ("ShapeSheetShowValues", "edit.sw.show.values"),
+    ("ShapeSheetShowFormulas", "edit.sw.show.formulas"),
+    ("ShapeSheetShowSections", "edit.sw.show.sections.dlg"),
+    ("ShowShapeSheet", "view.window.show.shape.sheet"),
+    // The vertical text box, not the horizontal one.
+    ("TextBoxInsertVertical", "insert.vert.text.box"),
+    // The research pane, not the thesaurus.
+    ("ResearchPane", "view.task.pane.research"),
+    // The connector gallery, not the delete command.
+    ("ConnectorsGallery", "connector.style"),
+    // The Shape Data dialog, not the data link.
+    ("ShapeData", "format.cust.prop.edit"),
 ];
 
 /// Control-type words stripped from a Fluent name before word-set
@@ -388,6 +442,7 @@ pub fn run(in_dir: &Path, out_dir: &Path) -> ExtractResult<Vec<PathBuf>> {
     // command ids, then the Fluent bindings for the controls our
     // commands cover.
     add_our_commands(&mut entries);
+    apply_fluent_joins(&mut entries, &controls);
     apply_fluent_commands(&mut entries, &controls);
 
     // Hard cross-check (B1): every fluent_id must be a real Fluent
@@ -569,9 +624,10 @@ pub fn cross_check_fluent_ids(
 /// The Larrygram-only command ids (ADR 0028 "Ids beyond `commands.yaml`",
 /// the ADR 0006 amendment): affordances with no Microsoft counterpart,
 /// plus the Phase 5 editing ids the mechanical derivation does not
-/// produce (task P5-04). Each becomes its own `commands.yaml` row with
-/// `fluent_ids: []` and `mapping_confidence: unknown`. Keyed as (id,
-/// label); sorted by id.
+/// produce (task P5-04) and the Phase 7 ids the Panel Classic and
+/// Panel Modern layouts use (task P7-02). Each becomes its own
+/// `commands.yaml` row with `fluent_ids: []` and
+/// `mapping_confidence: unknown`. Keyed as (id, label); sorted by id.
 ///
 /// An id the mechanical derivation already produced keeps its row (with
 /// its label, `visuicmd` and Fluent ids): [`add_our_commands`] only
@@ -582,37 +638,198 @@ pub fn cross_check_fluent_ids(
 /// (editing, insertion, text, connector, arrangement and page commands);
 /// `arrange.align.center_x` is the horizontal centre alignment (the
 /// derived `arrange.align.center` row is the box-centre one).
+///
+/// The Phase 7 ids come from `ui-spec/commands-phase7.yaml` (the
+/// proposal P7-01 wrote). Ids that named one action twice were merged:
+/// one action, one command id (ADR 0006). The merged ids are
+/// `shape.edit_master_shape` (also `shape.master.edit_master.*` and
+/// `view.explorer.edit_master_shape`), `shape.edit_icon_image`,
+/// `page.reorder_pages`, `edit.create_shortcut`, `review.delete_markup`,
+/// `review.edit_comment`, `shape.data.define_shape_data`,
+/// `view.pane.float_window`, `view.pane.close`, `edit.reconvert` and
+/// `tools.formula_tracing.window`; the ShapeSheet window command is the
+/// existing `view.window.show.shape.sheet`.
 pub const OUR_COMMANDS: &[(&str, &str)] = &[
     ("app.quit", "Exit"),
     ("arrange.align.center_x", "Align Center"),
     ("arrange.distribute.horizontal", "Distribute Horizontally"),
     ("arrange.distribute.vertical", "Distribute Vertically"),
+    (
+        "arrange.distribute_shapes.distribute_center",
+        "Distribute Center",
+    ),
+    (
+        "arrange.distribute_shapes.distribute_horizontal_spacing",
+        "Distribute Horizontal Spacing",
+    ),
+    (
+        "arrange.distribute_shapes.distribute_middle",
+        "Distribute Middle",
+    ),
+    (
+        "arrange.distribute_shapes.distribute_vertical_spacing",
+        "Distribute Vertical Spacing",
+    ),
+    ("connector.add_line_jumps_to", "Add Line Jumps To"),
+    (
+        "connector.add_line_jumps_to.first_displayed_line",
+        "First Displayed Line",
+    ),
+    (
+        "connector.add_line_jumps_to.horizontal_lines",
+        "Horizontal Lines",
+    ),
+    (
+        "connector.add_line_jumps_to.last_displayed_line",
+        "Last Displayed Line",
+    ),
+    (
+        "connector.add_line_jumps_to.last_routed_line",
+        "Last Routed Line",
+    ),
+    ("connector.add_line_jumps_to.no_lines", "No Lines"),
+    (
+        "connector.add_line_jumps_to.vertical_lines",
+        "Vertical Lines",
+    ),
     ("connector.draw", "Draw Connector"),
     ("connector.glue_begin", "Glue Begin"),
     ("connector.glue_end", "Glue End"),
+    ("connector.line_jump_style", "Line Jump Style"),
+    ("connector.line_jump_style.arc", "Arc"),
+    ("connector.line_jump_style.gap", "Gap"),
+    ("connector.line_jump_style.page_default", "Page Default"),
+    ("connector.line_jump_style.sides_2", "2 Sides"),
+    ("connector.line_jump_style.sides_3", "3 Sides"),
+    ("connector.line_jump_style.sides_4", "4 Sides"),
+    ("connector.line_jump_style.sides_5", "5 Sides"),
+    ("connector.line_jump_style.sides_6", "6 Sides"),
+    ("connector.line_jump_style.sides_7", "7 Sides"),
+    ("connector.line_jump_style.square", "Square"),
     ("connector.reroute_all", "Reroute All"),
     ("connector.style", "Connector Style"),
     ("connector.unglue", "Unglue"),
+    ("data.external.add", "Add..."),
+    ("data.external.arrange_by", "Arrange by"),
+    ("data.external.column_settings", "Column Settings..."),
+    ("data.external.configure_refresh", "Configure Refresh..."),
+    ("data.external.data_source.add", "Add..."),
+    ("data.external.data_source.properties", "Properties..."),
+    ("data.external.data_source.remove", "Remove"),
+    ("data.external.data_source.rename", "Rename"),
+    (
+        "data.external.link_to_selected_shapes",
+        "Link to Selected Shapes",
+    ),
+    ("data.external.linked_shapes", "Linked Shapes"),
+    ("data.external.properties", "Properties..."),
+    ("data.external.remove", "Remove"),
+    ("data.external.rename", "Rename"),
+    ("data.external.unlink", "Unlink"),
+    ("data.insert_data_solutions.calendar", "Calendar..."),
+    ("data.insert_data_solutions.gantt_chart", "Gantt Chart..."),
+    (
+        "data.insert_data_solutions.organization_chart",
+        "Organization Chart...",
+    ),
+    ("data.insert_data_solutions.timeline", "Timeline..."),
+    ("data.insert_pivotdiagram", "Insert PivotDiagram..."),
+    ("data.refresh_all", "Refresh All"),
     ("data.set.property", "Value"),
+    ("developer.run_add_on", "Run Add-On..."),
+    ("edit.action", "Action..."),
+    ("edit.connection_point.inward", "Inward"),
+    (
+        "edit.connection_point.inward_and_outward",
+        "Inward & Outward",
+    ),
+    ("edit.connection_point.outward", "Outward"),
+    ("edit.create_shortcut", "Create Shortcut"),
     ("edit.delete", "Delete"),
+    (
+        "edit.delete_or_inherit_section",
+        "Delete or Inherit Section",
+    ),
     ("edit.deselect", "Deselect"),
+    ("edit.paste_shortcut", "Paste Shortcut"),
+    ("edit.reconvert", "Reconvert"),
     ("edit.select", "Select"),
     ("file.export", "Export"),
     ("file.inspect", "Inspect"),
     ("file.render", "Render"),
-    ("help.about", "About"),
+    ("file.shapes.organize_my_shapes", "Organize My Shapes"),
+    ("format.change_text_direction", "Change Text Direction"),
+    ("format.fill_color.no_fill", "No Fill"),
+    ("format.fill_color.use_default", "Use Default"),
+    ("format.line_color.no_line", "No Line"),
+    ("format.line_color.use_default", "Use Default"),
+    ("format.line_ends.no_line_ends", "No Line Ends"),
+    ("format.line_pattern.no_line", "No Line"),
+    ("format.shape.pane", "Format Shape"),
+    ("format.text_color.use_default", "Use Default"),
+    ("format.theme", "Theme..."),
+    ("format.transparency.no_transparency", "No Transparency"),
+    ("help.about", "About Larrygram"),
+    ("help.sample_diagrams", "Sample Diagrams"),
+    ("help.welcome", "Welcome"),
     ("insert.drawing.ellipse", "Ellipse"),
     ("insert.drawing.line", "Line"),
     ("insert.drawing.rectangle", "Rectangle"),
     ("insert.drawing.text_box", "Text Box"),
+    ("insert.hyperlink.add_to_favorites", "Add to Favorites"),
+    ("insert.hyperlink.copy_hyperlink", "Copy Hyperlink"),
+    ("insert.hyperlink.edit_hyperlink", "Edit Hyperlink"),
+    ("insert.hyperlink.open", "Open"),
+    ("insert.hyperlink.open_in_new_window", "Open in New Window"),
+    ("insert.name", "Name..."),
+    ("insert.row", "Row"),
+    ("insert.row_after", "Row After"),
+    ("insert.section", "Section..."),
     ("insert.shape", "Shape"),
     ("page.move_left", "Move Page Left"),
     ("page.move_right", "Move Page Right"),
     ("page.next", "Next Page"),
     ("page.previous", "Previous Page"),
     ("page.rename", "Rename Page"),
+    ("page.reorder_pages", "Reorder Pages..."),
+    ("page.setup.layout_and_routing", "Layout & Routing..."),
+    ("review.delete_markup", "Delete Markup"),
+    (
+        "review.delete_markup.delete_all_markup_overlays_in_document",
+        "Delete All Markup Overlays",
+    ),
+    (
+        "review.delete_markup.delete_markup_overlays_on_current_page.all_on_current_page",
+        "All on Current Page",
+    ),
+    ("review.edit_comment", "Edit Comment"),
+    ("review.reviewers.hide_all", "Hide All"),
+    ("review.show_hide_markup", "Show/Hide Markup"),
+    ("shape.convert_ink_to_geometry", "Convert Ink to Geometry"),
+    ("shape.convert_ink_to_text", "Convert Ink to Text"),
+    ("shape.data.define_shape_data", "Define Shape Data..."),
+    ("shape.data.edit_data_graphic", "Edit Data Graphic..."),
+    ("shape.edit_icon_image", "Edit Icon Image"),
+    ("shape.edit_master_shape", "Edit Master Shape"),
     ("shape.enter_group", "Enter Group"),
     ("shape.exit_group", "Exit Group"),
+    ("shape.insert_shape_after", "Insert Shape After"),
+    ("shape.insert_shape_before", "Insert Shape Before"),
+    (
+        "shape.master.add_to_my_shapes.add_to_existing_stencil",
+        "Add To Existing Stencil...",
+    ),
+    (
+        "shape.master.add_to_my_shapes.add_to_new_stencil",
+        "Add To New Stencil...",
+    ),
+    ("shape.master.add_to_quick_shapes", "Add to Quick Shapes"),
+    ("shape.master.delete_master", "Delete Master"),
+    (
+        "shape.master.remove_from_quick_shapes",
+        "Remove from Quick Shapes",
+    ),
+    ("shape.master.rename_master", "Rename Master"),
     ("shape.move", "Move"),
     ("shape.resize", "Resize"),
     ("shape.rotate", "Rotate"),
@@ -621,11 +838,66 @@ pub const OUR_COMMANDS: &[(&str, &str)] = &[
     ("shape.set.pin", "Position"),
     ("shape.set.text", "Shape Text"),
     ("shape.set.width", "Width"),
+    ("shape.shape.find_similar_shapes", "Find Similar Shapes"),
+    ("shape.stencil.collapse_all_groups", "Collapse All Groups"),
+    ("shape.stencil.edit_stencil", "Edit Stencil"),
+    ("shape.stencil.expand_all_groups", "Expand All Groups"),
+    ("shape.stencil.order.move_down", "Move Down"),
+    ("shape.stencil.order.move_up", "Move Up"),
+    ("shape.stencil.reset_stencil", "Reset Stencil"),
+    ("shape.update_icon_image", "Update Icon Image"),
     ("text.begin", "Edit Text"),
     ("text.cancel", "Cancel Text"),
     ("text.commit", "Commit Text"),
+    ("text.horizontal_in_vertical", "Horizontal in Vertical..."),
+    ("tools.formula_tracing.trace_dependents", "Trace Dependents"),
+    ("tools.formula_tracing.trace_precedents", "Trace Precedents"),
+    ("tools.formula_tracing.window", "Formula Tracing Window"),
+    ("tools.ink.close_ink_shape", "Close Ink Shape"),
+    ("tools.ink.ink_pen_3", "Ink Pen 3"),
+    ("tools.ink.ink_pen_4", "Ink Pen 4"),
+    ("tools.ink.ink_pen_5", "Ink Pen 5"),
+    ("tools.pointer_tool.multiple_select", "Multiple Select"),
+    ("view.explorer.active", "Active"),
+    ("view.explorer.delete", "Delete"),
+    ("view.explorer.delete_layer", "Delete Layer"),
+    ("view.explorer.delete_shape", "Delete Shape"),
+    ("view.explorer.delete_style", "Delete Style"),
+    ("view.explorer.new_pattern", "New Pattern..."),
+    ("view.explorer.protect_document", "Protect Document..."),
+    ("view.explorer.ruler_and_grid", "Ruler & Grid..."),
+    ("view.explorer.visible", "Visible"),
+    ("view.go_to.unnamed", "Go To"),
+    ("view.markup", "Markup"),
+    ("view.master_explorer.page_setup", "Page Setup..."),
+    ("view.pane.autofit", "AutoFit"),
+    ("view.pane.autohide", "AutoHide"),
+    ("view.pane.close", "Close"),
+    ("view.pane.close_all_stencils", "Close All Stencils"),
+    ("view.pane.float_window", "Float Window"),
+    ("view.pane.hide_window", "Hide Window"),
+    ("view.pane.search_options", "Search Options..."),
+    ("view.pane.shape_data_sets", "Shape Data Sets..."),
+    ("view.qat.customize", "Customize Quick Access Toolbar"),
+    ("view.sections", "Sections..."),
+    ("view.show_drawing_page", "Show Drawing Page..."),
+    ("view.toolbar.action", "Action"),
+    ("view.toolbar.customize", "Customize..."),
+    ("view.toolbar.data", "Data"),
+    ("view.toolbar.developer", "Developer"),
+    ("view.toolbar.drawing", "Drawing"),
+    ("view.toolbar.format_text", "Format Text"),
+    ("view.toolbar.formatting", "Formatting"),
+    ("view.toolbar.layout_and_routing", "Layout & Routing"),
+    ("view.toolbar.picture", "Picture"),
+    ("view.toolbar.reviewing", "Reviewing"),
+    ("view.toolbar.standard", "Standard"),
+    ("view.toolbar.stencil", "Stencil"),
+    ("view.toolbar.view", "View"),
     ("view.ui_layout.panel_2016", "Panel (2016 data)"),
     ("view.ui_layout.panel_365", "Panel (365 data)"),
+    ("view.ui_layout.panel_classic", "Panel Classic Layout"),
+    ("view.ui_layout.panel_modern", "Panel Modern Layout"),
     ("view.units", "Units"),
     ("view.zoom.fit", "Fit to Window"),
 ];
@@ -652,7 +924,50 @@ pub fn add_our_commands(entries: &mut Vec<CommandEntry>) {
     sort_entries(entries);
 }
 
-/// Applies the [`super::fluent::FLUENT_COMMANDS`] bindings (task P4-02).
+/// Applies the [`FLUENT_JOINS`] bindings (task P7-02).
+///
+/// A binding moves its Fluent id onto the row of the target command
+/// id (whatever row holds the id now). The row that held the Fluent
+/// id keeps its VisUICmds constant, if it has one, and loses the
+/// `exact` or `inferred` confidence it had from the join (a row with
+/// no Fluent id left is an `unknown` mapping, as in ADR 0006).
+///
+/// A binding the extracted data cannot express is skipped, not an
+/// error: the extractor's own tests run over a small fixture tree
+/// with none of the real control names, and the real data is pinned by
+/// the `real_fluent_joins_apply` test.
+pub fn apply_fluent_joins(entries: &mut [CommandEntry], controls: &BTreeMap<String, ControlMeta>) {
+    for (fluent, id) in FLUENT_JOINS {
+        if !controls.contains_key(*fluent) {
+            continue;
+        }
+        if !entries.iter().any(|entry| &entry.id == id) {
+            continue;
+        }
+        for entry in entries.iter_mut() {
+            if &entry.id != id {
+                entry.fluent_ids.retain(|f| f != fluent);
+            }
+        }
+        let Some(target) = entries.iter_mut().find(|entry| &entry.id == id) else {
+            continue;
+        };
+        if !target.fluent_ids.iter().any(|f| f == *fluent) {
+            target.fluent_ids.push((*fluent).to_string());
+            target.fluent_ids.sort();
+        }
+    }
+    for entry in entries.iter_mut() {
+        if entry.visuicmd.is_none() || entry.fluent_ids.is_empty() {
+            entry.confidence = Confidence::Unknown;
+        } else if entry.confidence == Confidence::Unknown {
+            entry.confidence = Confidence::Inferred;
+        }
+    }
+    sort_entries(entries);
+}
+
+/// The [`super::fluent::FLUENT_COMMANDS`] bindings (task P4-02).
 ///
 /// A binding moves its Fluent id onto the row of the target command id
 /// (whatever row holds the id now) and drops the row left with neither
@@ -1932,6 +2247,132 @@ controls:
         let before = entries.clone();
         apply_fluent_commands(&mut entries, &controls(&[("Other", "button")]));
         assert_eq!(entries, before);
+    }
+
+    /// A [`FLUENT_JOINS`] binding moves its Fluent id onto the row of
+    /// the target command (task P7-02).
+    #[test]
+    fn fluent_joins_move_the_fluent_id() {
+        let mut entries = vec![
+            constant_row("arrange.align.left", "visCmdAlignObjectLeft"),
+            constant_row("format.text.align_left", "visCmdTextHAlignLeft"),
+        ];
+        entries[0].fluent_ids.push("AlignLeft".into());
+        entries[0].confidence = Confidence::Exact;
+        add_our_commands(&mut entries);
+        apply_fluent_joins(&mut entries, &controls(&[("AlignLeft", "toggleButton")]));
+
+        let source = entries
+            .iter()
+            .find(|e| e.id == "arrange.align.left")
+            .unwrap();
+        assert!(source.fluent_ids.is_empty(), "{:?}", source.fluent_ids);
+        assert_eq!(source.confidence, Confidence::Unknown);
+        assert_eq!(source.visuicmd.as_deref(), Some("visCmdAlignObjectLeft"));
+        let target = entries
+            .iter()
+            .find(|e| e.id == "format.text.align_left")
+            .unwrap();
+        assert_eq!(target.fluent_ids, vec!["AlignLeft"]);
+        assert_eq!(target.confidence, Confidence::Inferred);
+        assert_eq!(target.visuicmd.as_deref(), Some("visCmdTextHAlignLeft"));
+    }
+
+    /// A join the fixture tree cannot express is skipped, not an
+    /// error (task P7-02).
+    #[test]
+    fn fluent_joins_the_data_cannot_express_are_skipped() {
+        let mut entries = vec![constant_row("view.grid", "visCmdGrid")];
+        add_our_commands(&mut entries);
+        let before = entries.clone();
+        apply_fluent_joins(&mut entries, &controls(&[("Other", "button")]));
+        assert_eq!(entries, before);
+    }
+
+    /// The real committed data: every [`FLUENT_JOINS`] binding
+    /// resolved when `cargo xtask extract` last ran. The Fluent
+    /// control dispatches the target command in the Fluent layouts,
+    /// and the `commands.yaml` row lists the Fluent id.
+    /// (No `reference/` needed.)
+    #[test]
+    fn real_fluent_joins_apply() {
+        let root = crate::util::root();
+        let read = |rel: &str| {
+            std::fs::read_to_string(root.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"))
+        };
+        let commands: Value = serde_saphyr::from_str(&read("ui-spec/commands.yaml"))
+            .unwrap_or_else(|e| panic!("parse commands.yaml: {e}"));
+        let rows = commands.as_array().expect("commands.yaml is a list");
+        let mut layouts: BTreeMap<String, String> = BTreeMap::new();
+        for name in ["ui-spec/panel-2016.yaml", "ui-spec/panel-365.yaml"] {
+            let value: Value =
+                serde_saphyr::from_str(&read(name)).unwrap_or_else(|e| panic!("parse {name}: {e}"));
+            visit_objects(&value, &mut |obj| {
+                if let Some(id) = obj.get("id").and_then(Value::as_str)
+                    && let Some(command) = obj.get("command").and_then(Value::as_str)
+                {
+                    layouts.insert(id.to_string(), command.to_string());
+                }
+            });
+        }
+        for (fluent, id) in FLUENT_JOINS {
+            assert_eq!(
+                layouts.get(*fluent).map(String::as_str),
+                Some(*id),
+                "control {fluent} must dispatch {id}"
+            );
+            let row = rows
+                .iter()
+                .find(|row| row.get("id").and_then(Value::as_str) == Some(*id))
+                .unwrap_or_else(|| panic!("commands.yaml has no row for {id}"));
+            let fluent_ids: Vec<&str> = row
+                .get("fluent_ids")
+                .and_then(Value::as_array)
+                .map(|a| a.iter().filter_map(Value::as_str).collect())
+                .unwrap_or_default();
+            assert!(
+                fluent_ids.contains(fluent),
+                "commands.yaml row {id} must list {fluent}"
+            );
+        }
+    }
+
+    /// P7-02: every `command` link in the two Panel layouts resolves
+    /// in `commands.yaml`. The test reads both layout files.
+    #[test]
+    fn every_panel_layout_command_resolves_in_commands_yaml() {
+        let root = crate::util::root();
+        let commands: Value = serde_saphyr::from_str(
+            &std::fs::read_to_string(root.join("ui-spec/commands.yaml"))
+                .expect("read commands.yaml"),
+        )
+        .expect("parse commands.yaml");
+        let known: BTreeSet<String> = commands
+            .as_array()
+            .expect("commands.yaml is a list")
+            .iter()
+            .filter_map(|row| row.get("id").and_then(Value::as_str))
+            .map(str::to_owned)
+            .collect();
+        for name in ["panel-classic.yaml", "panel-modern.yaml"] {
+            let path = root.join("ui-spec/layouts").join(name);
+            let layout: Value = serde_saphyr::from_str(
+                &std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {name}: {e}")),
+            )
+            .unwrap_or_else(|e| panic!("parse {name}: {e}"));
+            let mut missing: BTreeSet<String> = BTreeSet::new();
+            visit_objects(&layout, &mut |obj| {
+                if let Some(command) = obj.get("command").and_then(Value::as_str)
+                    && !known.contains(command)
+                {
+                    missing.insert(command.to_owned());
+                }
+            });
+            assert!(
+                missing.is_empty(),
+                "{name} uses unknown commands: {missing:?}"
+            );
+        }
     }
 
     /// The real committed data: every [`super::fluent::FLUENT_COMMANDS`]

@@ -411,6 +411,8 @@ impl Enabled {
 pub enum UiRequest {
     /// Show the About window.
     ShowAbout,
+    /// Show the welcome wizard (ADR 0066).
+    ShowWelcome,
     /// Show the View/Options dialog (ADR 0032).
     ShowOptions,
     /// Ask the user to confirm closing a document.
