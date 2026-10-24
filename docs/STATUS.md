@@ -2,7 +2,7 @@
 
 Task board. Only the master agent edits this file, on `main`.
 
-- Current phase: **6/7 boundary** (Phase 6 closed; R1, P7-00 and R4 done on 2026-10-24; next: R5, then Phase 7 and Phase 8 side by side)
+- Current phase: **7 and 8 side by side** (the boundary closed on 2026-10-24: R1, P7-00, R4 and R5 (`67adffd`, the image loaders) done). Wave 1 and wave A launch: twelve workers; P7-16 and P8-08 start when the first two finish
 - Phase 6 goal: ShapeSheet engine, core subset (KICKOFF.md). Exit: resizing master-based shapes from the corpus recomputes geometry correctly for supported functions; the phase report gives the agreement rate with cached values.
 - Phase 5 goal: editing core (KICKOFF.md). Exit: a user can build a 10-shape flowchart with connected shapes across two pages, save it, reopen it and keep editing.
 - Phase 6 complete (2026-10-24, report: [progress/phase-6.md](progress/phase-6.md), tag `phase-6`).
@@ -19,15 +19,15 @@ Phase 7: Panel and Classic layouts, the Larrygram rename and the welcome wizard.
 |---|---|---|---|---|---|
 | [P7-01](tasks/P7-01.md) | architect | none | 0 | merged (ADRs 0061–0067, data, brand assets, stubs, task files; master recovered six misplaced files) | — |
 | [P7-00](tasks/P7-00.md) | implementer | P7-01, `phase-6` tag | boundary | merged (the Larrygram rename) | ec182e7 |
-| [P7-02](tasks/P7-02.md) | implementer | boundary | 1 | waiting (commands and the Fluent join fixes) | — |
-| [P7-03](tasks/P7-03.md) | implementer | boundary | 1 | waiting (v2 loader, cross-checks, adapter) | — |
-| [P7-04](tasks/P7-04.md) | implementer | boundary | 1 | waiting (icon pipeline; R5 adds the image loaders) | — |
-| [P7-05](tasks/P7-05.md) | implementer | boundary | 1 | waiting (theme, against the frozen v2 types) | — |
-| [P7-06](tasks/P7-06.md) | implementer | boundary | 1 | waiting (Panel Classic widgets, against the frozen v2 types) | — |
-| [P7-07](tasks/P7-07.md) | implementer | boundary | 1 | waiting (Panel Modern widgets, against the frozen v2 types) | — |
+| [P7-02](tasks/P7-02.md) | implementer | boundary | 1 | ready (commands and the Fluent join fixes) | — |
+| [P7-03](tasks/P7-03.md) | implementer | boundary | 1 | ready (v2 loader, cross-checks, adapter) | — |
+| [P7-04](tasks/P7-04.md) | implementer | boundary | 1 | ready (icon pipeline; the image loaders are in since R5) | — |
+| [P7-05](tasks/P7-05.md) | implementer | boundary | 1 | ready (theme, against the frozen v2 types) | — |
+| [P7-06](tasks/P7-06.md) | implementer | boundary | 1 | ready (Panel Classic widgets, against the frozen v2 types) | — |
+| [P7-07](tasks/P7-07.md) | implementer | boundary | 1 | ready (Panel Modern widgets, against the frozen v2 types) | — |
 | [P7-08](tasks/P7-08.md) | implementer | P7-02 | 1+ | waiting (selection contexts; starts when P7-02 merges) | — |
-| [P7-15](tasks/P7-15.md) | implementer | boundary | 1 | waiting (welcome wizard) | — |
-| [P7-16](tasks/P7-16.md) | implementer | boundary | 1 | waiting (About window, app icon) | — |
+| [P7-15](tasks/P7-15.md) | implementer | boundary | 1 | ready (welcome wizard) | — |
+| [P7-16](tasks/P7-16.md) | implementer | boundary | 1 | ready, starts second (About window, app icon) | — |
 | [P7-09](tasks/P7-09.md) | implementer | P7-05..P7-08, P7-15, P7-16 | C | waiting (shell integration) | — |
 | [P7-10](tasks/P7-10.md) | test-engineer | P7-09 | D | waiting (tests, golden images) | — |
 | [P7-11](tasks/P7-11.md) | reviewer | P7-10 | E | waiting | — |
@@ -44,12 +44,12 @@ Phase 8: binary `.vsd`, `.vss` and `.vst` import, read-only, in `crates/vsd-bina
 | Task | Role | Depends on | Group | State | Branch |
 |---|---|---|---|---|---|
 | [P8-01](tasks/P8-01.md) | architect | none | 0 | merged (plan, ADRs 0068–0072, `vsd-binary` skeleton, task files) | 00769a3 |
-| [P8-02](tasks/P8-02.md) | implementer | P8-01, boundary | A | waiting (container and streams) | — |
-| [P8-03](tasks/P8-03.md) | implementer | P8-01, boundary | A | waiting (chunks and pointers) | — |
-| [P8-04](tasks/P8-04.md) | implementer | P8-01, boundary | A | waiting (shapes and geometry) | — |
-| [P8-05](tasks/P8-05.md) | implementer | P8-01, boundary | A | waiting (text and code pages) | — |
-| [P8-06](tasks/P8-06.md) | implementer | P8-01, boundary | A | waiting (styles and colours) | — |
-| [P8-08](tasks/P8-08.md) | implementer | P8-01, boundary | A | waiting (oracle harness, census) | — |
+| [P8-02](tasks/P8-02.md) | implementer | P8-01, boundary | A | ready (container and streams) | — |
+| [P8-03](tasks/P8-03.md) | implementer | P8-01, boundary | A | ready (chunks and pointers) | — |
+| [P8-04](tasks/P8-04.md) | implementer | P8-01, boundary | A | ready (shapes and geometry) | — |
+| [P8-05](tasks/P8-05.md) | implementer | P8-01, boundary | A | ready (text and code pages) | — |
+| [P8-06](tasks/P8-06.md) | implementer | P8-01, boundary | A | ready (styles and colours) | — |
+| [P8-08](tasks/P8-08.md) | implementer | P8-01, boundary | A | ready, starts second (oracle harness, census) | — |
 | [P8-07](tasks/P8-07.md) | implementer | P8-02..P8-06 | B | waiting (pages, masters, pipeline) | — |
 | [P8-09](tasks/P8-09.md) | implementer | P8-07, P7-09 | C | waiting (open path) | — |
 | [P8-10](tasks/P8-10.md) | test-engineer | P8-07, P8-08 | D | waiting (tests, fuzz, goldens, first parity report) | — |
