@@ -882,11 +882,15 @@ impl Shell {
         if let Some(intent) = menu_item(ui, &self.registry, &self.app, "view.zoom.out", None) {
             produced.push(intent);
         }
-        let response = ui.add(
-            egui::Slider::new(&mut zoom, MIN_ZOOM..=MAX_ZOOM)
-                .logarithmic(true)
-                .show_value(false),
-        );
+        // The slider has no label atom; the tooltip doubles as its
+        // accessible name (ADR 0031 rule).
+        let response = ui
+            .add(
+                egui::Slider::new(&mut zoom, MIN_ZOOM..=MAX_ZOOM)
+                    .logarithmic(true)
+                    .show_value(false),
+            )
+            .on_hover_text("Zoom");
         let changed = response.dragged() || response.changed();
         if let Some(intent) = menu_item(ui, &self.registry, &self.app, "view.zoom.in", None) {
             produced.push(intent);
@@ -1052,8 +1056,23 @@ impl Shell {
                 input.pointer.interact_pos(),
             )
         });
+        // Shift+F10: the modifiers live on the key event as well as
+        // on the frame's modifier state (egui 0.37 keeps the two in
+        // separate places), so both are read.
         let shift_f10 = ui.input(|input| {
-            input.modifiers.shift && input.key_pressed(egui::Key::F10)
+            let on_event = input.events.iter().any(|event| {
+                matches!(
+                    event,
+                    egui::Event::Key {
+                        key: egui::Key::F10,
+                        pressed: true,
+                        modifiers,
+                        ..
+                    } if modifiers.shift
+                )
+            });
+            on_event
+                || (input.modifiers.shift && input.key_pressed(egui::Key::F10))
         });
         if secondary.0 {
             let Some(pos) = secondary.1 else {
@@ -1639,6 +1658,7 @@ impl Shell {
         }
         match &outcome.ui_request {
             Some(UiRequest::ShowAbout) => self.about_open = true,
+            Some(UiRequest::ShowWelcome) => self.wizard = Some(wizard::State::new()),
             Some(UiRequest::ShowOptions) => self.options_open = true,
             Some(UiRequest::ConfirmClose { name }) => self.confirm_close = Some(name.clone()),
             Some(UiRequest::Quit) => self.quit_requested = true,
@@ -1845,8 +1865,12 @@ fn modern_page_tabs(ui: &mut Ui, session: &mut DocumentSession) -> Result<Vec<In
                 }
             }
         });
+        // The insert-page button: a plus. (The spec draws a circled
+        // plus; the egui fonts have no such glyph, so the mark is a
+        // plain `+` with its accessible name.)
         add = ui
-            .button("\u{2295}")
+            .button("+")
+            .accessible_name("New page")
             .on_hover_text("New page")
             .clicked();
     });
@@ -3154,6 +3178,247 @@ mod tests {
             !app.documents[1].undo.can_undo(),
             "not on the document the command opened"
         );
+    }
+
+    /// One 2 x 1 in filled rectangle with its pin at (`x`, `y`) (the
+    /// Phase 5 fixture shape, for the right-click hit test).
+    fn test_cell(name: &str, value: f64) -> larrygram_model::Cell {
+        larrygram_model::Cell {
+            name: larrygram_model::CellName::new(name),
+            formula: Some(format!("{value}")),
+            value: Some(larrygram_model::CellValue::Number(value)),
+            unit: larrygram_geom::Unit::Inches,
+            preserved: larrygram_model::Preserved::new(),
+        }
+    }
+
+    fn test_shape(x: f64, y: f64, visio_id: i32) -> larrygram_model::Shape {
+        let mut shape = larrygram_model::Shape::new(larrygram_model::ShapeId { index: 0 }, visio_id);
+        shape.sheet.cells = vec![
+            test_cell("Width", 2.0),
+            test_cell("Height", 1.0),
+            test_cell("PinX", x),
+            test_cell("PinY", y),
+            test_cell("LocPinX", 1.0),
+            test_cell("LocPinY", 0.5),
+            test_cell("Angle", 0.0),
+            test_cell("FillPattern", 1.0),
+            test_cell("LinePattern", 1.0),
+        ];
+        let mut geometry =
+            larrygram_model::Section::new(larrygram_model::SectionName::from_static("Geometry"));
+        for (ix, (kind, px, py)) in [
+            ("MoveTo", 0.0, 0.0),
+            ("LineTo", 2.0, 0.0),
+            ("LineTo", 2.0, 1.0),
+            ("LineTo", 0.0, 1.0),
+            ("LineTo", 0.0, 0.0),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut row = larrygram_model::Row::new();
+            row.row_type = Some(kind.to_owned());
+            row.ix = Some(i32::try_from(ix).unwrap_or(0));
+            row.cells = vec![test_cell("X", px), test_cell("Y", py)];
+            geometry.rows.push(row);
+        }
+        shape.sheet.sections.push(geometry);
+        shape
+    }
+
+    /// A shell with one page carrying one rectangle at (3, 3).
+    fn shell_with_shape() -> (Shell, larrygram_model::ShapeId) {
+        // Panel Classic carries the `context.shape` menu of the
+        // mapping table (docs/ui/panel-classic.md).
+        let mut document = Document::new();
+        let id = document.add_shape(test_shape(3.0, 3.0, 1));
+        let mut page = larrygram_model::Page::new(PageId { index: 0 }, 1);
+        page.shapes.push(id);
+        page.sheet.cells = vec![
+            test_cell("PageWidth", 8.5),
+            test_cell("PageHeight", 11.0),
+        ];
+        document.pages.push(page);
+        let mut settings = seen_settings();
+        settings.ui_layout = LayoutKind::PanelClassic;
+        let mut app = AppCtx::new(settings);
+        app.open_document(larrygram_commands::DocumentSession::new(document, None));
+        let shell = Shell::new(
+            larrygram_commands::builtins::registry().expect("registry"),
+            sets(),
+            app,
+        );
+        (shell, id)
+    }
+
+    /// A secondary click (press and release) at `pos`.
+    fn secondary_click_event(pos: egui::Pos2) -> Vec<egui::Event> {
+        vec![
+            egui::Event::PointerButton {
+                pos,
+                button: PointerButton::Secondary,
+                pressed: true,
+                modifiers: egui::Modifiers::default(),
+            },
+            egui::Event::PointerButton {
+                pos,
+                button: PointerButton::Secondary,
+                pressed: false,
+                modifiers: egui::Modifiers::default(),
+            },
+        ]
+    }
+
+    #[test]
+    fn a_right_click_on_an_empty_page_opens_its_context_menu() {
+        // No document: the canvas is "No document" and the right-click
+        // still routes through `contexts::menu_for` (task P7-09
+        // Goal 4).
+        let mut shell = full_shell();
+        shell_frame(&mut shell, Vec::new(), 0.0);
+        let rect = shell.canvas_rect.expect("the canvas rect");
+        shell_frame(&mut shell, secondary_click_event(rect.center()), 1.0);
+        assert_eq!(shell.context_menu_id.as_deref(), Some("context.page"));
+    }
+
+    #[test]
+    fn a_right_click_on_a_shape_selects_it_and_opens_its_menu() {
+        let (mut shell, id) = shell_with_shape();
+        shell_frame(&mut shell, Vec::new(), 0.0);
+        let rect = shell.canvas_rect.expect("the canvas rect");
+        let pos = rect.center();
+        // Put the shape under the click: the page position of the
+        // click becomes the shape's pin.
+        let page = {
+            let session = shell.app.active_document().expect("a document");
+            canvas::page_position(rect, session, pos).expect("a page position")
+        };
+        {
+            let session = shell.app.active_document_mut().expect("a document");
+            let shape = session.document.shape_mut(id).expect("the shape");
+            for cell in &mut shape.sheet.cells {
+                if cell.name.as_str() == "PinX" {
+                    cell.value = Some(larrygram_model::CellValue::Number(page.x));
+                }
+                if cell.name.as_str() == "PinY" {
+                    cell.value = Some(larrygram_model::CellValue::Number(page.y));
+                }
+            }
+            // The pointer tool caches the page scene by the session's
+            // change counter; direct cell writes bump it here.
+            session.changes += 1;
+        }
+        shell_frame(&mut shell, secondary_click_event(pos), 1.0);
+        assert_eq!(shell.context_menu_id.as_deref(), Some("context.shape"));
+        assert_eq!(
+            shell.app.selection.anchor,
+            Some(id),
+            "a right-click selects what it hits first"
+        );
+    }
+
+    #[test]
+    fn shift_f10_opens_the_context_menu_of_the_selection() {
+        let (mut shell, id) = shell_with_shape();
+        shell.app.selection.shapes = vec![id];
+        shell.app.selection.anchor = Some(id);
+        shell_frame(
+            &mut shell,
+            vec![key_event(
+                egui::Key::F10,
+                egui::Modifiers {
+                    shift: true,
+                    ..Default::default()
+                },
+            )],
+            1.0,
+        );
+        assert_eq!(shell.context_menu_id.as_deref(), Some("context.shape"));
+    }
+
+    #[test]
+    fn the_per_layout_state_lands_in_the_settings() {
+        // Goal 3: toolbar visibility per window mode, the collapsed
+        // command bar flag and the last core tab are kept in
+        // `Settings`.
+        let mut shell = full_shell();
+        shell.set_layout_kind(LayoutKind::PanelClassic);
+        let toolbar = sets().panel_classic.v2.toolbars[0].id.clone();
+        shell
+            .panel_classic
+            .set_toolbar_visible_in(panel_classic::WindowMode::Drawing, &toolbar, false);
+        shell.record_layout_state();
+        assert_eq!(
+            shell.app
+                .settings
+                .panel_classic_toolbars
+                .get(&format!("drawing/{toolbar}")),
+            Some(&false)
+        );
+        // The Panel Modern state: the collapsed flag and the last
+        // core tab of its command bar (Panel Classic has no tabs).
+        shell.set_layout_kind(LayoutKind::PanelModern);
+        shell.panel_modern.set_collapsed(true);
+        shell.record_layout_state();
+        assert!(shell.app.settings.command_bar_collapsed);
+        assert!(shell.app.settings.last_core_tab.is_some());
+    }
+
+    #[test]
+    fn a_window_mode_change_reaches_the_classic_menu_bar() {
+        // Goal 4: the window mode selects the Panel Classic menu bar
+        // (`docs/ui/panel-classic.md`, "Menu bars per window mode").
+        let mut shell = full_shell();
+        shell.set_layout_kind(LayoutKind::PanelClassic);
+        assert_eq!(
+            shell.classic_window_mode(),
+            panel_classic::WindowMode::Drawing
+        );
+        shell.set_window_mode(contexts::WindowMode::Shapesheet);
+        assert_eq!(
+            shell.classic_window_mode(),
+            panel_classic::WindowMode::Shapesheet
+        );
+        shell_frame(&mut shell, Vec::new(), 0.0);
+        shell.set_window_mode(contexts::WindowMode::Stencil);
+        assert_eq!(
+            shell.classic_window_mode(),
+            panel_classic::WindowMode::Stencil
+        );
+        shell_frame(&mut shell, Vec::new(), 1.0);
+    }
+
+    #[test]
+    fn split_toolbar_key_round_trips_the_window_mode() {
+        for mode in [
+            panel_classic::WindowMode::Drawing,
+            panel_classic::WindowMode::Shapesheet,
+            panel_classic::WindowMode::Stencil,
+        ] {
+            let key = format!("{}/standard", mode.id());
+            let (back, toolbar) = split_toolbar_key(&key).expect("the key splits");
+            assert_eq!(back, mode);
+            assert_eq!(toolbar, "standard");
+        }
+        assert_eq!(split_toolbar_key("drawing"), None);
+        assert_eq!(split_toolbar_key("nope/standard"), None);
+    }
+
+    #[test]
+    fn the_layout_radio_rows_report_the_active_layout() {
+        let mut shell = full_shell();
+        shell.set_layout_kind(LayoutKind::Panel365);
+        for id in [
+            "view.ui_layout.panel_modern",
+            "view.ui_layout.panel_classic",
+            "view.ui_layout.panel_2016",
+            "view.ui_layout.panel_365",
+        ] {
+            let checked = layout_radio_checked(&shell.app, id).expect("a layout row");
+            assert_eq!(checked, id == "view.ui_layout.panel_365", "{id}");
+        }
+        assert_eq!(layout_radio_checked(&shell.app, "file.new"), None);
     }
 
     #[test]
