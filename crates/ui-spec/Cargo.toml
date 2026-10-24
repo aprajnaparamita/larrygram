@@ -21,6 +21,9 @@ thiserror = "2"
 [dev-dependencies]
 # Property tests (P1-08 goal 4) and malformed-input tests (goal 5).
 proptest = "1"
+# Snapshot pins for the v1-to-v2 adapter output and the per-layout
+# count pins (ADR 0065, task P7-03).
+insta = "1"
 
 [lints]
 workspace = true

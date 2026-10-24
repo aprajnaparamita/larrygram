@@ -30,6 +30,31 @@ pub const SHORTCUTS_YAML: &str = include_str!("../../../ui-spec/shortcuts.yaml")
 /// The committed `ui-spec/out-of-scope.txt` as embedded text (ADR 0031).
 pub const OUT_OF_SCOPE_TXT: &str = include_str!("../../../ui-spec/out-of-scope.txt");
 
+/// The committed `ui-spec/layouts/panel-modern.yaml` as embedded text
+/// (ADR 0061).
+pub const LAYOUT_PANEL_MODERN_YAML: &str =
+    include_str!("../../../ui-spec/layouts/panel-modern.yaml");
+
+/// The committed `ui-spec/layouts/panel-classic.yaml` as embedded
+/// text (ADR 0061).
+pub const LAYOUT_PANEL_CLASSIC_YAML: &str =
+    include_str!("../../../ui-spec/layouts/panel-classic.yaml");
+
+/// The committed `ui-spec/themes/panel-modern.yaml` as embedded text
+/// (ADR 0063).
+pub const THEME_PANEL_MODERN_YAML: &str = include_str!("../../../ui-spec/themes/panel-modern.yaml");
+
+/// The committed `ui-spec/themes/panel-classic.yaml` as embedded text
+/// (ADR 0063).
+pub const THEME_PANEL_CLASSIC_YAML: &str =
+    include_str!("../../../ui-spec/themes/panel-classic.yaml");
+
+/// The committed `ui-spec/icons.yaml` as embedded text (ADR 0062).
+pub const ICONS_YAML: &str = include_str!("../../../ui-spec/icons.yaml");
+
+/// The committed `ui-spec/contexts.yaml` as embedded text (ADR 0064).
+pub const CONTEXTS_YAML: &str = include_str!("../../../ui-spec/contexts.yaml");
+
 /// True when `id` is listed in `ui-spec/out-of-scope.txt` (ADR 0031).
 ///
 /// A line is either an exact Fluent id or a glob in which `*` stands
@@ -151,6 +176,15 @@ mod tests {
         assert_eq!(COMMANDS_YAML, read("commands.yaml"));
         assert_eq!(SHORTCUTS_YAML, read("shortcuts.yaml"));
         assert_eq!(OUT_OF_SCOPE_TXT, read("out-of-scope.txt"));
+        assert_eq!(LAYOUT_PANEL_MODERN_YAML, read("layouts/panel-modern.yaml"));
+        assert_eq!(
+            LAYOUT_PANEL_CLASSIC_YAML,
+            read("layouts/panel-classic.yaml")
+        );
+        assert_eq!(THEME_PANEL_MODERN_YAML, read("themes/panel-modern.yaml"));
+        assert_eq!(THEME_PANEL_CLASSIC_YAML, read("themes/panel-classic.yaml"));
+        assert_eq!(ICONS_YAML, read("icons.yaml"));
+        assert_eq!(CONTEXTS_YAML, read("contexts.yaml"));
     }
 
     #[test]
@@ -161,6 +195,12 @@ mod tests {
         assert!(PANEL_365_YAML.contains("Microsoft 365"));
         assert!(COMMANDS_YAML.contains("mapping_confidence"));
         assert!(SHORTCUTS_YAML.contains("sequence"));
+        assert!(LAYOUT_PANEL_MODERN_YAML.contains("kind: panel-modern"));
+        assert!(LAYOUT_PANEL_CLASSIC_YAML.contains("kind: panel-classic"));
+        assert!(THEME_PANEL_MODERN_YAML.contains("id: panel-modern"));
+        assert!(THEME_PANEL_CLASSIC_YAML.contains("id: panel-classic"));
+        assert!(ICONS_YAML.contains("fallback: placeholder"));
+        assert!(CONTEXTS_YAML.contains("enabled_in"));
     }
 
     #[test]

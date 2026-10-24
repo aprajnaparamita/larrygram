@@ -28,6 +28,11 @@ use serde::de::DeserializeOwned;
 
 use crate::error::LoadError;
 use crate::lookup::all_controls;
+use crate::v2::load::{
+    Shared, check_icon_files, command_ids, cross_check_contexts, cross_check_layout, decode_layout,
+    decode_v2, embedded_shared,
+};
+use crate::v2::{Contexts, IconMap, LayoutV2, Theme};
 use crate::{
     CommandId, CommandMapping, Commands, FluentId, Layout, LayoutKind, LayoutSet, LayoutSets,
     Shortcut, Shortcuts,
@@ -50,6 +55,19 @@ const COMMANDS_FILE: &str = "commands.yaml";
 
 /// The keyboard shortcuts, shared by both layouts.
 const SHORTCUTS_FILE: &str = "shortcuts.yaml";
+
+/// The Panel Modern theme, shared by the two adapted layouts (ADR
+/// 0063).
+const THEME_MODERN_FILE: &str = "themes/panel-modern.yaml";
+
+/// The Panel Classic theme.
+const THEME_CLASSIC_FILE: &str = "themes/panel-classic.yaml";
+
+/// The icon map (ADR 0062).
+const ICONS_FILE: &str = "icons.yaml";
+
+/// The selection contexts (ADR 0064).
+const CONTEXTS_FILE: &str = "contexts.yaml";
 
 /// The kind of document a data file holds. The schema's `oneOf`
 /// allows any of the three at any path; the loader knows what each
@@ -97,30 +115,37 @@ impl DocKind {
 pub struct Loader {
     /// Directory containing the `ui-spec/` data files.
     workspace_root: PathBuf,
-    /// The compiled schema validator (`Send + Sync`, cheap to clone).
+    /// The compiled v1 schema validator (`Send + Sync`, cheap to
+    /// clone).
     validator: jsonschema::Validator,
+    /// The compiled layout format v2 schema validator.
+    v2_validator: jsonschema::Validator,
 }
 
 impl Loader {
     /// Creates a loader for the workspace rooted at `workspace_root`.
     ///
-    /// Compiles `ui-spec/schema.json` (embedded in the binary) once.
-    /// The only failure is [`LoadError::Schema`] when the embedded
-    /// schema itself is broken.
+    /// Compiles `ui-spec/schema.json` and
+    /// `ui-spec/layout-v2.schema.json` (both embedded in the binary)
+    /// once. The only failure is [`LoadError::Schema`] when an
+    /// embedded schema itself is broken.
     pub fn new(workspace_root: impl AsRef<Path>) -> Result<Self, LoadError> {
         Ok(Self {
             workspace_root: workspace_root.as_ref().to_path_buf(),
             validator: compile_schema(SCHEMA_JSON)?,
+            v2_validator: crate::v2::load::compile_v2_schema()?,
         })
     }
 
-    /// Loads the full data set for one layout.
+    /// Loads the full data set for one layout kind (all four kinds have
+    /// one: [`LayoutKind::PanelModern`] and [`LayoutKind::PanelClassic`]
+    /// come from the hand-curated v2 files, the other two from the v1
+    /// Fluent data, ADR 0061).
     ///
-    /// Reads `ui-spec/<layout>.yaml` (see [`LayoutKind::file_name`])
-    /// for **both** layouts, plus `ui-spec/commands.yaml` and
-    /// `ui-spec/shortcuts.yaml` from the workspace root, validates
-    /// each against the schema, decodes them, and cross-checks the
-    /// three cross-references of ADR 0007:
+    /// Reads `ui-spec/` for **both** v1 layouts, the shared tables and
+    /// the v2 documents (layouts, themes, `icons.yaml`, `contexts.yaml`),
+    /// validates each against its schema, decodes them, and cross-checks
+    /// the references: the three of ADR 0007 over the v1 documents
     ///
     /// 1. every Fluent id listed in `commands.yaml` appears in at
     ///    least one of the two layouts (`kind: "fluent_id"`; the
@@ -129,34 +154,56 @@ impl Loader {
     /// 2. every `command` on a control of the *requested* layout is
     ///    defined in `commands.yaml` (`kind: "control_command"`),
     /// 3. every `command` in `shortcuts.yaml` is defined in
-    ///    `commands.yaml` (`kind: "command_id"`).
+    ///    `commands.yaml` (`kind: "command_id"`),
     ///
-    /// Only the requested layout is returned; use [`Self::load_all`]
-    /// to get both (its `control_command` check then covers both
-    /// layouts). The data files may be YAML or JSON: a missing
-    /// `.yaml` file is looked up as `.json` with the same stem.
+    /// and the v2 cross-checks of ADR 0061 (task P7-03: commands, icon
+    /// keys and files, contexts, unique placement ids). Only the
+    /// requested layout's [`LayoutSet`] is returned; use
+    /// [`Self::load_all`] to get all four at once. The data files may be
+    /// YAML or JSON: a missing `.yaml` file is looked up as `.json` with
+    /// the same stem.
+    ///
+    /// ```no_run
+    /// use larrygram_ui_spec::{LayoutKind, Loader};
+    ///
+    /// let loader = Loader::new(".")?;
+    /// let modern = loader.load(LayoutKind::PanelModern)?;
+    /// assert_eq!(modern.v2.id, "panel-modern");
+    /// # Ok::<(), larrygram_ui_spec::LoadError>(())
+    /// ```
     pub fn load(&self, kind: LayoutKind) -> Result<LayoutSet, LoadError> {
         let docs = self.read_documents()?;
-        let Some(layout) = docs.layout(kind) else {
-            return Err(LoadError::UnsupportedLayout { id: kind.id() });
-        };
+        let mut checked: Vec<&Layout> = Vec::new();
+        match kind {
+            LayoutKind::Panel2016 => checked.push(&docs.panel_2016),
+            LayoutKind::Panel365 => checked.push(&docs.panel_365),
+            LayoutKind::PanelModern | LayoutKind::PanelClassic => {}
+        }
         check_references(
-            &[layout],
+            &checked,
             &docs.fluent_union(),
             &docs.commands,
             &docs.shortcuts,
         )?;
-        docs.into_set(kind)
-            .ok_or(LoadError::UnsupportedLayout { id: kind.id() })
+        let v2 = self.read_v2_documents(&docs.commands)?;
+        let sets = build_sets(docs, v2)?;
+        Ok(match kind {
+            LayoutKind::PanelModern => sets.panel_modern,
+            LayoutKind::PanelClassic => sets.panel_classic,
+            LayoutKind::Panel2016 => sets.panel_2016,
+            LayoutKind::Panel365 => sets.panel_365,
+        })
     }
 
-    /// Loads the data set for **both** layouts in one pass.
+    /// Loads the data sets for **all four** layouts in one pass.
     ///
-    /// Reads every `ui-spec/` file exactly once and runs all three
-    /// ADR 0007 cross-references over the pair: the `fluent_id` check
-    /// against the union of both layouts' Fluent ids, the
-    /// `control_command` check against each layout's controls, and
-    /// the `command_id` check against the shared shortcut table.
+    /// Reads every `ui-spec/` file exactly once and runs the ADR 0007
+    /// cross-references over the pair of v1 layouts (`fluent_id`
+    /// against the union of both layouts' Fluent ids,
+    /// `control_command` against each layout's controls,
+    /// `command_id` against the shared shortcut table) plus the v2
+    /// cross-checks of ADR 0061 over the curated layouts and the
+    /// shared documents.
     ///
     /// ```no_run
     /// # use larrygram_ui_spec::{LayoutKind, Loader};
@@ -173,7 +220,8 @@ impl Loader {
             &docs.commands,
             &docs.shortcuts,
         )?;
-        Ok(docs.into_sets())
+        let v2 = self.read_v2_documents(&docs.commands)?;
+        build_sets(docs, v2)
     }
 
     /// Reads and validates all four data documents, in file order:
@@ -276,49 +324,208 @@ impl Loader {
         }
     }
 
-    /// Loads both layout sets from the embedded YAML (ADR 0031).
+    /// Reads one v2 document from the workspace.
+    fn read_v2_text(&self, name: &str) -> Result<(String, PathBuf), LoadError> {
+        let path = self.data_file(name)?;
+        let text = std::fs::read_to_string(&path).map_err(|e| io(path.clone(), e))?;
+        Ok((text, path))
+    }
+
+    /// Reads and decodes one v2 document that has no schema of its
+    /// own (a theme, the icon map, the contexts table).
+    fn read_v2_document<T: DeserializeOwned>(&self, name: &str) -> Result<T, LoadError> {
+        let (text, path) = self.read_v2_text(name)?;
+        decode_v2(&text, &path)
+    }
+
+    /// Reads the layout format v2 documents from disk: the two
+    /// curated layouts, the two themes, `icons.yaml` and
+    /// `contexts.yaml`, schema-validated and cross-checked (ADR 0061,
+    /// task P7-03). The icon-file check runs here: this loader has a
+    /// filesystem.
+    fn read_v2_documents(&self, commands: &Commands) -> Result<V2Documents, LoadError> {
+        let name_modern = format!("layouts/{}", LayoutKind::PanelModern.file_name());
+        let name_classic = format!("layouts/{}", LayoutKind::PanelClassic.file_name());
+        let (text, modern_path) = self.read_v2_text(&name_modern)?;
+        let panel_modern = decode_layout(&text, &modern_path, &self.v2_validator)?;
+        let (text, classic_path) = self.read_v2_text(&name_classic)?;
+        let panel_classic = decode_layout(&text, &classic_path, &self.v2_validator)?;
+        let theme_modern: Theme = self.read_v2_document(THEME_MODERN_FILE)?;
+        let theme_classic: Theme = self.read_v2_document(THEME_CLASSIC_FILE)?;
+        let icons: IconMap = self.read_v2_document(ICONS_FILE)?;
+        let contexts: Contexts = self.read_v2_document(CONTEXTS_FILE)?;
+        let known = command_ids(commands);
+        cross_check_contexts(&contexts, &known)?;
+        let check = |layout: &LayoutV2, path: &Path| {
+            cross_check_layout(layout, path, &known, &icons, &contexts)
+        };
+        check(&panel_modern, &modern_path)?;
+        check(&panel_classic, &classic_path)?;
+        check_icon_files(&icons, &self.workspace_root)?;
+        Ok(V2Documents {
+            panel_modern,
+            panel_classic,
+            shared: Shared {
+                icons,
+                contexts,
+                theme_modern,
+                theme_classic,
+            },
+        })
+    }
+
+    /// Loads all four layout sets from the embedded documents (ADR
+    /// 0031).
     ///
     /// Same validation path as [`Self::load_all`], minus the file
-    /// reads: the schema and the four data documents are compiled into
-    /// the binary (the schema by `include_str!`, the documents by
-    /// [`crate::embedded`]), so this works without a filesystem (the
-    /// wasm build). Every document still goes through the full staged
-    /// load of `load_text` (parse, schema validation, document
-    /// kind, decode) and the three ADR 0007 cross-references run over
-    /// the pair of layouts, exactly as on disk.
+    /// reads and the icon-file check (no filesystem): the schemas and
+    /// every data document are compiled into the binary (the schemas
+    /// by `include_str!`, the documents by [`crate::embedded`]), so
+    /// this works on wasm. Every document still goes through the full
+    /// staged load (parse, schema validation, decode) and the
+    /// cross-references run exactly as on disk.
     pub fn from_embedded() -> Result<LayoutSets, LoadError> {
-        use crate::embedded::{COMMANDS_YAML, PANEL_365_YAML, PANEL_2016_YAML, SHORTCUTS_YAML};
-        let loader = Self {
-            workspace_root: PathBuf::from(DATA_DIR),
-            validator: compile_schema(SCHEMA_JSON)?,
-        };
-        let path = |name: &str| PathBuf::from(DATA_DIR).join(name);
-        let name_2016 = LayoutKind::Panel2016.file_name();
-        let name_365 = LayoutKind::Panel365.file_name();
-        let panel_2016 = loader.load_text(PANEL_2016_YAML, &path(name_2016), DocKind::Layout)?;
-        let panel_365 = loader.load_text(PANEL_365_YAML, &path(name_365), DocKind::Layout)?;
-        let commands_path = path(COMMANDS_FILE);
-        let entries: Vec<CommandMapping> =
-            loader.load_text(COMMANDS_YAML, &commands_path, DocKind::Commands)?;
-        check_duplicate_command_ids(&entries, &commands_path)?;
-        let commands = Commands { entries };
-        let entries: Vec<Shortcut> =
-            loader.load_text(SHORTCUTS_YAML, &path(SHORTCUTS_FILE), DocKind::Shortcuts)?;
-        let shortcuts = Shortcuts { entries };
-        let docs = Documents {
-            panel_2016,
-            panel_365,
-            commands,
-            shortcuts,
-        };
-        let union = docs.fluent_union();
-        let layouts = [&docs.panel_2016, &docs.panel_365];
-        check_references(&layouts, &union, &docs.commands, &docs.shortcuts)?;
-        Ok(docs.into_sets())
+        build_embedded()
     }
 }
 
-/// The four data documents of one workspace, read and validated
+/// Builds a [`LoadError::Io`] from the read error of a data file.
+fn io(path: PathBuf, source: std::io::Error) -> LoadError {
+    LoadError::Io { path, source }
+}
+
+/// Builds the [`LoadError::Parse`] of a v1 layout the adapter cannot
+/// convert.
+fn adapt_error(name: &str, message: String) -> LoadError {
+    LoadError::Parse {
+        path: PathBuf::from(DATA_DIR).join(name),
+        message,
+    }
+}
+
+/// The one pass that parses every embedded document: v1 and v2,
+/// staged and cross-checked exactly as [`Loader::load_all`] does on
+/// disk.
+fn build_embedded() -> Result<LayoutSets, LoadError> {
+    use crate::embedded::{
+        COMMANDS_YAML, LAYOUT_PANEL_CLASSIC_YAML, LAYOUT_PANEL_MODERN_YAML, PANEL_365_YAML,
+        PANEL_2016_YAML, SHORTCUTS_YAML,
+    };
+    let loader = Loader {
+        workspace_root: PathBuf::from(DATA_DIR),
+        validator: compile_schema(SCHEMA_JSON)?,
+        v2_validator: crate::v2::load::compile_v2_schema()?,
+    };
+    let path = |name: &str| PathBuf::from(DATA_DIR).join(name);
+    let name_2016 = LayoutKind::Panel2016.file_name();
+    let name_365 = LayoutKind::Panel365.file_name();
+    let panel_2016 = loader.load_text(PANEL_2016_YAML, &path(name_2016), DocKind::Layout)?;
+    let panel_365 = loader.load_text(PANEL_365_YAML, &path(name_365), DocKind::Layout)?;
+    let commands_path = path(COMMANDS_FILE);
+    let entries: Vec<CommandMapping> =
+        loader.load_text(COMMANDS_YAML, &commands_path, DocKind::Commands)?;
+    check_duplicate_command_ids(&entries, &commands_path)?;
+    let commands = Commands { entries };
+    let entries: Vec<Shortcut> =
+        loader.load_text(SHORTCUTS_YAML, &path(SHORTCUTS_FILE), DocKind::Shortcuts)?;
+    let shortcuts = Shortcuts { entries };
+    let docs = Documents {
+        panel_2016,
+        panel_365,
+        commands,
+        shortcuts,
+    };
+    let union = docs.fluent_union();
+    let layouts = [&docs.panel_2016, &docs.panel_365];
+    check_references(&layouts, &union, &docs.commands, &docs.shortcuts)?;
+    let known = command_ids(&docs.commands);
+    let modern_path = path("layouts/panel-modern.yaml");
+    let classic_path = path("layouts/panel-classic.yaml");
+    let v2 = &loader.v2_validator;
+    let panel_modern = decode_layout(LAYOUT_PANEL_MODERN_YAML, &modern_path, v2)?;
+    let panel_classic = decode_layout(LAYOUT_PANEL_CLASSIC_YAML, &classic_path, v2)?;
+    let Shared {
+        icons,
+        contexts,
+        theme_modern,
+        theme_classic,
+    } = embedded_shared()?;
+    cross_check_contexts(&contexts, &known)?;
+    let check = |layout: &LayoutV2, path: &Path| {
+        cross_check_layout(layout, path, &known, &icons, &contexts)
+    };
+    check(&panel_modern, &modern_path)?;
+    check(&panel_classic, &classic_path)?;
+    build_sets(
+        docs,
+        V2Documents {
+            panel_modern,
+            panel_classic,
+            shared: Shared {
+                icons,
+                contexts,
+                theme_modern,
+                theme_classic,
+            },
+        },
+    )
+}
+
+/// The v2 documents of one workspace, read and cross-checked together.
+struct V2Documents {
+    /// `ui-spec/layouts/panel-modern.yaml`.
+    panel_modern: LayoutV2,
+    /// `ui-spec/layouts/panel-classic.yaml`.
+    panel_classic: LayoutV2,
+    /// The icon map, the contexts and both themes.
+    shared: crate::v2::load::Shared,
+}
+
+/// Builds the four [`LayoutSet`]s: the two curated v2 layouts, and
+/// the two adapted v1 layouts (ADR 0061 "Adapter for v1 layouts").
+/// The adapted layouts use the Panel Modern theme (ADR 0063); the
+/// icon map and the contexts are shared by all four.
+fn build_sets(docs: Documents, v2: V2Documents) -> Result<LayoutSets, LoadError> {
+    let Documents {
+        panel_2016,
+        panel_365,
+        commands,
+        shortcuts,
+    } = docs;
+    let V2Documents {
+        panel_modern,
+        panel_classic,
+        shared,
+    } = v2;
+    let Shared {
+        icons,
+        contexts,
+        theme_modern,
+        theme_classic,
+    } = shared;
+    let adapt = |layout: &Layout, name: &str| -> Result<LayoutV2, LoadError> {
+        crate::v2::from_v1(layout).map_err(|e| adapt_error(name, e.to_string()))
+    };
+    let adapted_2016 = adapt(&panel_2016, LayoutKind::Panel2016.file_name())?;
+    let adapted_365 = adapt(&panel_365, LayoutKind::Panel365.file_name())?;
+    let set = |layout, v2, theme| LayoutSet {
+        layout,
+        v2,
+        commands: commands.clone(),
+        shortcuts: shortcuts.clone(),
+        theme,
+        icons: icons.clone(),
+        contexts: contexts.clone(),
+    };
+    Ok(LayoutSets {
+        panel_modern: set(Layout::default(), panel_modern, theme_modern.clone()),
+        panel_classic: set(Layout::default(), panel_classic, theme_classic),
+        panel_2016: set(panel_2016, adapted_2016, theme_modern.clone()),
+        panel_365: set(panel_365, adapted_365, theme_modern),
+    })
+}
+
+/// The v1 data documents of one workspace, read and validated
 /// together so the cross-references can see the whole data set.
 struct Documents {
     /// `ui-spec/panel-2016.yaml`.
@@ -332,15 +539,6 @@ struct Documents {
 }
 
 impl Documents {
-    /// The layout for `kind`, when the kind has v1 data.
-    fn layout(&self, kind: LayoutKind) -> Option<&Layout> {
-        match kind {
-            LayoutKind::Panel2016 => Some(&self.panel_2016),
-            LayoutKind::Panel365 => Some(&self.panel_365),
-            LayoutKind::PanelModern | LayoutKind::PanelClassic => None,
-        }
-    }
-
     /// The union of both layouts' Fluent ids (ADR 0007
     /// cross-reference 1: "must appear in at least one layout").
     fn fluent_union(&self) -> BTreeSet<FluentId> {
@@ -348,43 +546,6 @@ impl Documents {
             .union(&collect_fluent_ids(&self.panel_365))
             .cloned()
             .collect()
-    }
-
-    /// Turns the documents into the set for one layout, when the kind
-    /// has v1 data.
-    fn into_set(self, kind: LayoutKind) -> Option<LayoutSet> {
-        let Self {
-            panel_2016,
-            panel_365,
-            commands,
-            shortcuts,
-        } = self;
-        let layout = match kind {
-            LayoutKind::Panel2016 => panel_2016,
-            LayoutKind::Panel365 => panel_365,
-            LayoutKind::PanelModern | LayoutKind::PanelClassic => return None,
-        };
-        Some(LayoutSet {
-            layout,
-            commands,
-            shortcuts,
-        })
-    }
-
-    /// Turns the documents into both sets.
-    fn into_sets(self) -> LayoutSets {
-        LayoutSets {
-            panel_2016: LayoutSet {
-                layout: self.panel_2016,
-                commands: self.commands.clone(),
-                shortcuts: self.shortcuts.clone(),
-            },
-            panel_365: LayoutSet {
-                layout: self.panel_365,
-                commands: self.commands,
-                shortcuts: self.shortcuts,
-            },
-        }
     }
 }
 
@@ -403,7 +564,7 @@ fn compile_schema(text: &str) -> Result<jsonschema::Validator, LoadError> {
 
 /// Parses document text as JSON (for `.json` paths) or YAML
 /// (everything else; YAML 1.2 is a superset of JSON).
-fn parse_document(text: &str, path: &Path) -> Result<serde_json::Value, LoadError> {
+pub(crate) fn parse_document(text: &str, path: &Path) -> Result<serde_json::Value, LoadError> {
     let is_json = path
         .extension()
         .is_some_and(|extension| extension.eq_ignore_ascii_case("json"));
@@ -910,34 +1071,21 @@ mod tests {
     }
 
     #[test]
-    fn documents_hold_nothing_for_the_curated_layout_kinds() {
-        // The same refusal one level down: `Documents` has no layout
-        // and no set for a curated kind (task P7-00).
-        let docs = || Documents {
-            panel_2016: Layout::default(),
-            panel_365: Layout::default(),
-            commands: Commands::default(),
-            shortcuts: Shortcuts::default(),
-        };
-        for kind in [LayoutKind::PanelModern, LayoutKind::PanelClassic] {
-            assert!(docs().layout(kind).is_none());
-            assert!(docs().into_set(kind).is_none());
-        }
-    }
-
-    #[test]
-    fn load_refuses_the_curated_layout_kinds() {
+    fn load_returns_the_curated_v2_layouts_for_the_curated_kinds() {
         // Panel Modern and Panel Classic have no v1 data file: the
-        // loader says so instead of guessing (task P7-00).
+        // loader reads the hand-curated v2 files for them (ADR 0061).
         let loader = Loader::new(good_fixture()).expect("the fixture workspace loads");
         for kind in [LayoutKind::PanelModern, LayoutKind::PanelClassic] {
-            let error = loader.load(kind).expect_err("no v1 data");
-            assert_eq!(
-                error.to_string(),
-                format!(
-                    "layout {} has no v1 data; load it through ui_spec::v2 (ADR 0061)",
-                    kind.id()
-                )
+            let set = loader
+                .load(kind)
+                .unwrap_or_else(|e| panic!("{kind:?}: {e}"));
+            assert_eq!(set.v2.id, kind.id(), "{kind:?}");
+            assert!(set.layout.tabs.is_empty(), "{kind:?} has no v1 data");
+            assert!(!set.theme.id.is_empty(), "{kind:?} has a theme");
+            assert!(!set.icons.icons.is_empty(), "{kind:?} has the icon map");
+            assert!(
+                !set.contexts.contexts.is_empty(),
+                "{kind:?} has the contexts"
             );
         }
     }
@@ -1143,5 +1291,49 @@ quick_access_toolbar:
             .load_text::<Layout>(layout, Path::new("panel-2016.yaml"), DocKind::Layout)
             .expect_err("must fail");
         assert!(matches!(err, LoadError::Parse { .. }), "got {err:?}");
+    }
+
+    #[test]
+    fn io_wraps_the_read_error_of_a_data_file() {
+        let source = std::io::Error::new(std::io::ErrorKind::NotFound, "gone");
+        let error = io(PathBuf::from("ui-spec/icons.yaml"), source);
+        assert!(
+            matches!(&error, LoadError::Io { path, .. } if path.ends_with("ui-spec/icons.yaml"))
+        );
+        assert!(error.to_string().contains("cannot read"));
+    }
+
+    #[test]
+    fn adapt_error_names_the_v1_file() {
+        let error = adapt_error("panel-2016.yaml", "nope".to_owned());
+        assert!(matches!(&error, LoadError::Parse { message, .. } if message == "nope"));
+        assert!(error.to_string().contains("ui-spec/panel-2016.yaml"));
+    }
+
+    #[test]
+    fn build_sets_reports_a_v1_layout_it_cannot_convert() {
+        let docs = Documents {
+            panel_2016: Layout {
+                schema_version: 2,
+                ..Layout::default()
+            },
+            panel_365: Layout::default(),
+            commands: Commands::default(),
+            shortcuts: Shortcuts::default(),
+        };
+        let v2 = V2Documents {
+            panel_modern: LayoutV2::default(),
+            panel_classic: LayoutV2::default(),
+            shared: Shared {
+                icons: Default::default(),
+                contexts: Default::default(),
+                theme_modern: Default::default(),
+                theme_classic: Default::default(),
+            },
+        };
+        let error = build_sets(docs, v2).expect_err("schema_version 2 cannot convert");
+        assert!(
+            matches!(&error, LoadError::Parse { message, .. } if message.contains("schema_version 2"))
+        );
     }
 }

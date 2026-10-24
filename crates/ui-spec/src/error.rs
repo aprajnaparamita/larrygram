@@ -45,8 +45,8 @@ pub enum LoadError {
         message: String,
     },
 
-    /// A cross-reference between a layout, `commands.yaml` and
-    /// `shortcuts.yaml` is broken (ADR 0007 "Cross-references").
+    /// A cross-reference between the data documents is broken (ADR
+    /// 0007 "Cross-references", ADR 0061, task P7-03).
     #[error("{}", cross_reference_message(kind, id, referenced_by))]
     CrossReference {
         /// What was violated:
@@ -58,13 +58,30 @@ pub enum LoadError {
         ///   `CommandId` that `commands.yaml` does not define.
         /// - `"command_id"`: a shortcut in `shortcuts.yaml` dispatches
         ///   a `CommandId` that `commands.yaml` does not define.
+        /// - `"item_command"`: a v2 item (or group launcher, or File
+        ///   view nav entry) dispatches a command that
+        ///   `commands.yaml` does not define and the placement does
+        ///   not mark as a proposal (`new_command`).
+        /// - `"icon_key"`: a v2 item's `icon` key has no row in
+        ///   `icons.yaml`.
+        /// - `"icon_file"`: an `icons.yaml` row names an SVG that is
+        ///   not on disk (the disk loader only; the embedded loader
+        ///   has no filesystem).
+        /// - `"shown_in"`: a v2 `shown_in` names a context that
+        ///   `contexts.yaml` does not define (the window modes of ADR
+        ///   0064 are always known).
+        /// - `"context_command"`: a `contexts.yaml` command row names
+        ///   a command that `commands.yaml` does not define.
         kind: &'static str,
-        /// The unknown id (Fluent id or command id).
+        /// The unknown id (Fluent id, command id, icon key or
+        /// context id).
         id: String,
         /// The id of the referring entry: the command id for
         /// `"fluent_id"`, the control's Fluent id for
-        /// `"control_command"`, and the rendered key sequence for
-        /// `"command_id"`.
+        /// `"control_command"`, the rendered key sequence for
+        /// `"command_id"`, the placement id of the item, launcher or
+        /// container for the v2 checks, and `"contexts.yaml"` for
+        /// `"context_command"`.
         referenced_by: String,
     },
 
@@ -78,6 +95,8 @@ pub enum LoadError {
         /// - `"command_id"`: a command `id` appears twice in
         ///   `commands.yaml` (the table is one entry per command id,
         ///   ADR 0006).
+        /// - `"item_id"`: a v2 placement `id` (an item or a File view
+        ///   nav entry) appears twice in one layout (ADR 0061).
         kind: &'static str,
         /// The duplicated id.
         id: String,
@@ -92,15 +111,6 @@ pub enum LoadError {
         path: PathBuf,
         /// What was expected and what was found.
         message: String,
-    },
-
-    /// The layout kind has no v1 data file: Panel Modern and Panel
-    /// Classic read the hand-curated v2 files (`ui_spec::v2`, ADR 0061)
-    /// and are not loaded by [`Loader`](crate::Loader).
-    #[error("layout {id} has no v1 data; load it through ui_spec::v2 (ADR 0061)")]
-    UnsupportedLayout {
-        /// The layout id (`panel-modern` or `panel-classic`).
-        id: &'static str,
     },
 }
 
@@ -139,10 +149,16 @@ impl IdError {
 ///
 /// The `fluent_id` case names the union check of ADR 0007: the id
 /// appears in *no* layout, not merely in the layout being loaded.
-/// Every other violation is an id no document defines.
+/// Every other violation is an id no document defines, except the
+/// v2 checks of task P7-03, which name what is missing.
 fn cross_reference_message(kind: &str, id: &str, referenced_by: &str) -> String {
     let problem = match kind {
         "fluent_id" => "is not in any layout",
+        "item_command" => "is not in commands.yaml (and is not marked new_command)",
+        "icon_key" => "is not in the icon map",
+        "icon_file" => "is not on disk",
+        "shown_in" => "is not a known context",
+        "context_command" => "is not in commands.yaml",
         _ => "is not known",
     };
     format!("cross-reference ({kind}): {id} (referenced by {referenced_by}) {problem}")
@@ -212,5 +228,61 @@ mod tests {
                 format!("cross-reference ({kind}): edit.undo (referenced by Ctrl+Z) is not known")
             );
         }
+    }
+
+    #[test]
+    fn v2_violations_name_what_is_missing() {
+        let cases = [
+            (
+                "item_command",
+                "edit.paste",
+                "tab.home.clipboard.paste",
+                "is not in commands.yaml (and is not marked new_command)",
+            ),
+            (
+                "icon_key",
+                "edit.cut",
+                "tab.home.clipboard.cut",
+                "is not in the icon map",
+            ),
+            ("icon_file", "scissors", "edit.cut", "is not on disk"),
+            (
+                "shown_in",
+                "picture_selected",
+                "tab.picture_tools.format",
+                "is not a known context",
+            ),
+            (
+                "context_command",
+                "edit.cut",
+                "contexts.yaml",
+                "is not in commands.yaml",
+            ),
+        ];
+        for (kind, id, referenced_by, problem) in cases {
+            let err = LoadError::CrossReference {
+                kind,
+                id: id.to_owned(),
+                referenced_by: referenced_by.to_owned(),
+            };
+            assert_eq!(
+                err.to_string(),
+                format!("cross-reference ({kind}): {id} (referenced by {referenced_by}) {problem}")
+            );
+        }
+    }
+
+    #[test]
+    fn duplicate_names_the_item_id_space() {
+        let err = LoadError::Duplicate {
+            path: PathBuf::from("ui-spec/layouts/panel-modern.yaml"),
+            kind: "item_id",
+            id: "tab.home.clipboard.paste".to_owned(),
+        };
+        assert_eq!(
+            err.to_string(),
+            "duplicate item_id: tab.home.clipboard.paste \
+             (in ui-spec/layouts/panel-modern.yaml)"
+        );
     }
 }
