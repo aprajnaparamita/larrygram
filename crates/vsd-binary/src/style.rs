@@ -28,8 +28,10 @@
 //! The payload layouts differ between file versions 6 and 11 only after the
 //! fields this module maps: a version 6 fill record ends after its shadow
 //! pattern (no shadow offsets), and its paragraph record has no bullet-font
-//! block. Optional fields are read only when the payload is long enough, so
-//! both versions map without a version argument on [`crate::Chunk`].
+//! block. Optional fields are read only when the payload is long enough. The
+//! name payloads do differ between the versions (version 11 writes UTF-16LE,
+//! version 6 single-byte text), so [`collect_with`] takes the version and the
+//! frozen [`collect`] seam of P8-01 reads version 11 (task P8-07).
 //!
 //! # Colours and the unit rule
 //!
@@ -55,7 +57,7 @@ use larrygram_model::{
     Style, StyleId,
 };
 
-use crate::chunks::{Chunk, Record};
+use crate::chunks::{Chunk, FormatVersion, Record};
 use crate::error::Error;
 use crate::warning::{ImportWarning, WarningKind};
 
@@ -109,13 +111,29 @@ const MAX_SHADOW_PATTERN: u8 = 40;
 /// document colour table, and font records are dropped with a warning
 /// where the model has no place for them. Values the model cannot
 /// represent are recorded in `warnings`, never fatal.
-#[allow(dead_code)] // no caller until P8-07 wires the pipeline
+///
+/// This is the seam of task P8-01: the version 11 payloads. Use
+/// [`collect_with`] for the version 6 name payloads.
 pub fn collect(
     chunks: &[Chunk<'_>],
     document: &mut Document,
     warnings: &mut Vec<ImportWarning>,
 ) -> Result<(), Error> {
-    let names = name_strings(chunks);
+    collect_with(chunks, FormatVersion::V11, document, warnings)
+}
+
+/// Maps `chunks` like [`collect`], for one file version.
+///
+/// `version` selects the name payload layout (version 6 writes
+/// single-byte text, version 11 UTF-16LE). Every other payload layout
+/// is shared between the two versions (the module docs have the rule).
+pub fn collect_with(
+    chunks: &[Chunk<'_>],
+    version: FormatVersion,
+    document: &mut Document,
+    warnings: &mut Vec<ImportWarning>,
+) -> Result<(), Error> {
+    let names = name_strings(chunks, version);
     let style_name_ids = style_name_ids(chunks);
 
     for chunk in chunks {
@@ -940,27 +958,44 @@ fn map_paragraph_row(
     }
 }
 
-/// Reads the document name strings (`Name2` records).
-fn name_strings(chunks: &[Chunk<'_>]) -> HashMap<u32, String> {
+/// Reads the document name strings (`Name2` records), with the version's
+/// name payload layout.
+fn name_strings(chunks: &[Chunk<'_>], version: FormatVersion) -> HashMap<u32, String> {
     let mut names = HashMap::new();
     // The document name list (0x32/0x33) is the one the style name index
     // points into. Shape-local `Name` records (0x2d) use the same id space,
     // so they only fill in ids the document list did not name.
     for chunk in chunks {
         if chunk.record == NAME2
-            && let Some(name) = decode_utf16(chunk.data.get(4..).unwrap_or(&[]))
+            && let Some(name) = decode_name(chunk.data.get(4..).unwrap_or(&[]), version)
         {
             names.insert(chunk.id, name);
         }
     }
     for chunk in chunks {
         if chunk.record == NAME
-            && let Some(name) = decode_utf16(chunk.data)
+            && let Some(name) = decode_name(chunk.data, version)
         {
             names.entry(chunk.id).or_insert(name);
         }
     }
     names
+}
+
+/// Decodes one name payload in the version's layout: version 11 writes
+/// UTF-16LE text, version 6 single-byte text (the same rule
+/// [`crate::shape`] applies to shape names).
+fn decode_name(bytes: &[u8], version: FormatVersion) -> Option<String> {
+    match version {
+        FormatVersion::V6 => Some(
+            bytes
+                .iter()
+                .take_while(|byte| **byte != 0)
+                .map(|byte| char::from(*byte))
+                .collect(),
+        ),
+        FormatVersion::V11 => decode_utf16(bytes),
+    }
 }
 
 /// Maps style element ids to name ids from the styles stream's name index.
@@ -1728,5 +1763,27 @@ mod tests {
         assert_eq!(style.line_style, Some(3));
         assert_eq!(style.fill_style, Some(4));
         assert_eq!(style.text_style, Some(6));
+    }
+
+    #[test]
+    fn version_six_names_decode_as_single_bytes() {
+        let sheet = style_sheet(3, u32::MAX, 6);
+        let index = name_index(3, 4);
+        let mut name = vec![1, 0, 0, 0];
+        name.extend(b"Guide\0");
+        let local = b"Local\0".to_vec();
+        let chunks = vec![
+            chunk(0x33, 1, 3, &name),
+            chunk(0x2d, 1, 9, &local),
+            chunk(0x1a, 1, 0, &[]),
+            chunk(0x4a, 2, 4, &sheet),
+            chunk(0xc9, 3, 0, &index),
+        ];
+        let mut document = Document::new();
+        let mut warnings = Vec::new();
+        super::collect_with(&chunks, FormatVersion::V6, &mut document, &mut warnings)
+            .expect("collect");
+        assert_eq!(document.stylesheet.styles[0].name, "Guide");
+        assert!(warnings.is_empty(), "{warnings:?}");
     }
 }
