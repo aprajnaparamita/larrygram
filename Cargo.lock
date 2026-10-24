@@ -2197,6 +2197,7 @@ dependencies = [
 name = "larrygram-vsd-binary"
 version = "1.0.0-alpha.1"
 dependencies = [
+ "larrygram-geom",
  "larrygram-model",
 ]
 

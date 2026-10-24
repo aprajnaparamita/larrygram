@@ -8,6 +8,8 @@ license = "MPL-2.0"
 publish = false
 
 [dependencies]
+# Units for the cell values (layer L0, ADR 0002).
+larrygram-geom = { path = "../geom" }
 # The document model the importer fills (layer L1, ADR 0002). Same
 # dependency the `.vsdx` reader uses, so both produce one model.
 larrygram-model = { path = "../model" }
