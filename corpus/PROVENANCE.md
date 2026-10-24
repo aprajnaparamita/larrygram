@@ -15,6 +15,18 @@ All from libvisio `src/test/data/` at commit `c7c970775b750a4bf7fd1b4364d69bac98
 | `vsd/fdo86729-utf8.vsd` | UTF-8 text (fdo#86729) |
 | `vsd/no-bgcolor.vsd` | No background colour |
 | `vsd/tdf76829-numeric-format.vsd` | Numeric text-field formats (tdf#76829) |
+| `vsd/tdf76829-datetime-format.vsd` | Date and time text-field formats (tdf#76829) |
+| `vsd/bitmaps.vsd` | Bitmap/foreign data: exercises the drop path with warnings |
+| `vsd/bitmaps2.vsd` | The same, smaller |
+| `vsd/Visio11FormatLine.vsd` | Line pattern, cap, join and line-end samples (version 11) |
+| `vsd/Visio11PlanWithDimensions.vsd` | Dimension shapes and leaders (version 11) |
+| `vsd/Visio11TextFieldsWithAngle.vsd` | Angle field formats (version 11) |
+| `vsd/Visio11TextFieldsWithCurrency.vsd` | Currency field formats (version 11) |
+| `vsd/Visio11TextFieldsWithUnits.vsd` | Field formats with units (version 11) |
+| `vsd/Visio6PlanWithDimensions.vsd` | Dimension shapes (version 6, in scope per ADR 0069) |
+| `vsd/Visio6TextFieldsWithUnits.vsd` | Text and fields with units (version 6) |
+| `vsd/Visio5PlanWithDimensions.vsd` | Version 5: out of scope, must fail cleanly (ADR 0069) |
+| `vsd/Visio5TextFieldsWithUnits.vsd` | Version 5: out of scope, must fail cleanly (ADR 0069) |
 | `vsdx/bgcolor.vsdx` | Background colour |
 | `vsdx/blue-box.vsdx` | Single rectangle |
 | `vsdx/color-boxes.vsdx` | Multiple fill colours |
@@ -31,7 +43,12 @@ All from libvisio `src/test/data/` at commit `c7c970775b750a4bf7fd1b4364d69bac98
 | `vsdx/testfile5.vsdx` | Variant |
 | `vsdx/testfile6.vsdx` | Variant |
 
-Not listed (kept in `reference/corpus-candidates/` only): the larger libvisio files (`bitmaps*.vsd`, `Visio*PlanWithDimensions.vsd` and text-field sets, `tdf154379-DrawingUnits-type.vsd`, `tdf76829-datetime-format.vsd`, `office_varient4.vsdx`) and all LibreOffice core test files (license unclear, commit not pinned). They can be added to the manifest later with a pinned commit.
+Not listed (kept in `reference/corpus-candidates/` only): the libvisio
+`tdf154379-DrawingUnits-type.vsd` (1.2 MB, skipped for size) and all
+LibreOffice core test files (GPL-3.0/MPL-2.0 dual licensed, from a source
+the manifest does not pin). They can be added to the manifest later with a
+pinned commit. The `vsd/` rows the census of task P8-08 proposed were added
+by task P8-10.
 
 ## Committed hand-authored fixtures
 
@@ -59,6 +76,12 @@ Not listed (kept in `reference/corpus-candidates/` only): the larger libvisio fi
 | `fixtures/render-layers.vsdx` | P3-10 | MIT | Rendering fixture: layer membership and layer visibility. Builder output. |
 | `fixtures/render-page-size.vsdx` | P3-10 | MIT | Rendering fixture: a non-default (landscape) page size. Builder output. |
 | `fixtures/render-background-pages.vsdx` | P3-10 | MIT | Rendering fixture: a background page behind the drawing page. Builder output. |
+| `fixtures/minimal-drawing.vsd` | P8-10 | MIT | Hand-authored minimal binary `.vsd`: an OLE compound container with one `VisioDocument` stream (version 11 header, a trailer pointer list and two chunk records). Builder output (`crates/vsd-binary/tests/malformed.rs` and `tests/common/cfb.rs`). |
+| `fixtures/malformed-truncated-container.vsd` | P8-10 | MIT | Malformed: a valid container cut in half. Builder output. |
+| `fixtures/malformed-bad-fat.vsd` | P8-10 | MIT | Malformed: the stream's FAT chain loops back to its own start. Builder output. |
+| `fixtures/malformed-lying-record-length.vsd` | P8-10 | MIT | Malformed: a chunk record declares a payload length beyond its region. Builder output. |
+| `fixtures/malformed-pointer-cycle.vsd` | P8-10 | MIT | Malformed: two pointer lists name each other. Builder output. |
+| `fixtures/malformed-absurd-count.vsd` | P8-10 | MIT | Malformed: a pointer list claims 1073741824 pointers and holds one. Builder output. |
 
 Two more malformed fixtures are generated at test time and never committed:
 `malformed-zip-bomb.vsdx` (8 MiB of zeros deflated; the deflate stream is not
@@ -81,9 +104,22 @@ byte-identical copies of four committed fixtures above
 (`junk-text.bin`, `junk-zip-header.bin`, `junk-zeros.bin`). Same author and
 license (P3-10, MIT).
 
+The seed corpus of the `import` fuzz target
+(`crates/vsd-binary/fuzz/corpus/import/`, task P8-10, ADR 0017 section 4)
+holds byte-identical copies of the six committed `.vsd` fixtures above
+(`minimal-drawing.vsd` and the five `malformed-*.vsd`) plus three tiny
+hand-written junk files (`junk-text.bin`, `junk-visio-magic.bin`,
+`junk-zeros.bin`). Same author and license (P8-10, MIT); `fixtures/` stays
+the single source of truth and a copy that drifts is a bug.
+
 All rows above are our own work: hand-written XML and a plain zip container
-produced by `crates/vsdx/tests/common/mod.rs` (task P2-08). Element names,
-content types and relationship type URIs are structural facts recorded in
-`docs/vsdx-inventory.md`; no third-party bytes are included. A test
-(`fixtures::committed_fixtures_match_the_builder_output`) proves every
+produced by `crates/vsdx/tests/common/mod.rs` (task P2-08), and a
+hand-written OLE compound container with a `VisioDocument` stream produced
+by `crates/vsd-binary/tests/common/cfb.rs` and `tests/malformed.rs` (task
+P8-10). Element names, content types and relationship type URIs are
+structural facts recorded in `docs/vsdx-inventory.md`; the MS-CFB and Visio
+stream layouts are structural facts of the formats (MS-CFB, ADR 0068 and
+ADR 0069); no third-party bytes are included. Tests
+(`fixtures::committed_fixtures_match_the_builder_output` and
+`malformed::committed_fixtures_match_the_builder_output`) prove every
 committed file equals the builder output byte for byte.

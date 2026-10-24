@@ -11,6 +11,9 @@
 //! and ids are additionally the ones its `.vsdx` twin writes in
 //! `visio/masters.xml`. The tests skip cleanly when `corpus/vsd/` is
 //! absent and fail when `LARRYGRAM_REQUIRE_CORPUS=1` is set.
+//!
+//! The version 5 files (ADR 0069 puts versions 6 and 11 in scope) must
+//! fail with a clean `UnsupportedVersion`, never a panic.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -110,7 +113,7 @@ fn every_corpus_file_opens_with_its_pages_shapes_and_text() {
     if !require_corpus(&files) {
         return;
     }
-    assert_eq!(files.len(), 5, "the corpus holds five .vsd files");
+    assert_eq!(files.len(), 17, "the corpus holds 17 .vsd files");
     let mut failures = Vec::new();
     for path in files {
         let name = path
@@ -118,6 +121,16 @@ fn every_corpus_file_opens_with_its_pages_shapes_and_text() {
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_default();
         let bytes = fs::read(&path).unwrap_or_default();
+        if name.starts_with("Visio5") {
+            // Out of scope (ADR 0069): a clean error, never a panic.
+            match import(&bytes, &Limits::DEFAULT) {
+                Err(Error::UnsupportedVersion(5)) => {}
+                other => failures.push(format!(
+                    "{name}: expected UnsupportedVersion(5), got {other:?}"
+                )),
+            }
+            continue;
+        }
         let Ok(imported) = import(&bytes, &Limits::DEFAULT) else {
             failures.push(format!("{name}: import failed"));
             continue;
@@ -140,6 +153,24 @@ fn every_corpus_file_opens_with_its_pages_shapes_and_text() {
             "fdo86729-utf8.vsd" => assert_fdo(document, "mytitleéáőű", "Miklos"),
             "no-bgcolor.vsd" => assert_no_bgcolor(document),
             "tdf76829-numeric-format.vsd" => assert_tdf(document),
+            "tdf76829-datetime-format.vsd" => assert_datetime(document),
+            "Visio11PlanWithDimensions.vsd" => assert_visio11_plan(document),
+            "Visio11TextFieldsWithUnits.vsd" => {
+                assert_text_document(document, 40, "Number 1  with unit [mm] 1 mm")
+            }
+            "Visio11TextFieldsWithAngle.vsd" => {
+                assert_text_document(document, 3, "TextField GeometryAngleGeneral -30")
+            }
+            "Visio11TextFieldsWithCurrency.vsd" => {
+                assert_text_document(document, 7, "1 currency format")
+            }
+            "Visio11FormatLine.vsd" => assert_visio11_format_line(document),
+            "bitmaps.vsd" => assert_bitmaps(document, 20, &[]),
+            "bitmaps2.vsd" => assert_bitmaps(document, 3, &["Component", "Dynamischer Verbinder"]),
+            "Visio6PlanWithDimensions.vsd" => assert_visio6_plan(document),
+            "Visio6TextFieldsWithUnits.vsd" => {
+                assert_text_document(document, 12, "Text with [cm] units 1.0 cm")
+            }
             other => failures.push(format!("unexpected corpus file {other}")),
         }
     }
@@ -309,6 +340,166 @@ fn assert_tdf(document: &Document) {
     );
     assert_eq!(property(document, "creator"), "Bartosz Kosiorek");
     assert!(property(document, "Template").ends_with("BASFLO_M.VST"));
+}
+
+/// `tdf76829-datetime-format.vsd`: the date and time field twin of the
+/// numeric-format drawing: two pages, five German-named masters.
+fn assert_datetime(document: &Document) {
+    assert_eq!(document.pages.len(), 2);
+    let names: Vec<&str> = document
+        .masters
+        .iter()
+        .map(|master| master.name.as_str())
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "Unterteilter Zeitplan",
+            "Klammerintervall 1",
+            "Meilenstein Quadrat",
+            "Titelblock modern",
+            "Hintergrund Kosmos"
+        ]
+    );
+    let texts: Vec<String> = document
+        .shapes
+        .iter()
+        .map(|shape| text_of(shape.text.as_ref()))
+        .collect();
+    assert!(
+        texts.iter().any(|text| text.contains("6/6/2019")),
+        "a date field's display text: {texts:?}"
+    );
+}
+
+/// `Visio11PlanWithDimensions.vsd`: a plan page with dimension shapes
+/// and five masters. The page size pair comes scaled by
+/// `PageScale`/`DrawingScale` (528 x 408 at 1/4" = 1' is 11 x 8.5
+/// inches; the oracle states the same).
+fn assert_visio11_plan(document: &Document) {
+    assert_eq!(document.pages.len(), 1);
+    let page = &document.pages[0];
+    let names: Vec<&str> = document
+        .masters
+        .iter()
+        .map(|master| master.name.as_str())
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "\"L\" Room",
+            "Wall",
+            "Dimension line",
+            "Space",
+            "\"L\" Room.7"
+        ]
+    );
+    approx(cell(&page.sheet, "PageWidth"), 11.0);
+    approx(cell(&page.sheet, "PageHeight"), 8.5);
+    let texts: Vec<String> = document
+        .shapes
+        .iter()
+        .map(|shape| text_of(shape.text.as_ref()))
+        .collect();
+    assert!(
+        texts.iter().any(|text| text.contains("10% Gray fill")),
+        "a shape label: {texts:?}"
+    );
+}
+
+/// `Visio11FormatLine.vsd`: the line pattern, cap, join and line-end
+/// family, one master and many line samples.
+fn assert_visio11_format_line(document: &Document) {
+    assert_eq!(document.pages.len(), 1);
+    let names: Vec<&str> = document
+        .masters
+        .iter()
+        .map(|master| master.name.as_str())
+        .collect();
+    assert_eq!(names, ["Dynamic connector"]);
+    assert!(
+        document
+            .shapes
+            .iter()
+            .any(|shape| { text_of(shape.text.as_ref()).contains("Collosal") }),
+        "a line-sample label"
+    );
+}
+
+/// The `Visio11TextFields*` and `Visio6TextFieldsWithUnits` drawings: one
+/// page of text shapes whose first shape carries `first_text`.
+fn assert_text_document(document: &Document, shapes: usize, first_text: &str) {
+    assert_eq!(document.pages.len(), 1);
+    assert!(document.masters.is_empty());
+    assert_eq!(document.pages[0].shapes.len(), shapes);
+    let texts: Vec<String> = document
+        .shapes
+        .iter()
+        .map(|shape| text_of(shape.text.as_ref()))
+        .collect();
+    assert!(
+        texts.iter().any(|text| text.contains(first_text)),
+        "expected {first_text:?} in {texts:?}"
+    );
+}
+
+/// The `bitmaps*` drawings: bitmap payload shapes whose foreign data is
+/// dropped with warnings (ADR 0070), never a panic.
+fn assert_bitmaps(document: &Document, shapes: usize, masters: &[&str]) {
+    assert_eq!(document.pages.len(), 1);
+    assert_eq!(document.pages[0].shapes.len(), shapes);
+    let names: Vec<&str> = document
+        .masters
+        .iter()
+        .map(|master| master.name.as_str())
+        .collect();
+    assert_eq!(names, masters);
+}
+
+/// `Visio6PlanWithDimensions.vsd`: the version 6 framing of the plan
+/// drawing, three masters.
+fn assert_visio6_plan(document: &Document) {
+    assert_eq!(document.pages.len(), 1);
+    let names: Vec<&str> = document
+        .masters
+        .iter()
+        .map(|master| master.name.as_str())
+        .collect();
+    assert_eq!(names, ["\"L\" Room", "Wall", "Dimension line"]);
+    let texts: Vec<String> = document
+        .shapes
+        .iter()
+        .map(|shape| text_of(shape.text.as_ref()))
+        .collect();
+    assert!(
+        texts.iter().any(|text| text.contains("10% Gray fill")),
+        "a shape label: {texts:?}"
+    );
+}
+
+/// The two `fdo86729` spellings carry the same drawing text: the files
+/// differ only in their summary-stream encoding (P8-07).
+#[test]
+fn the_two_fdo86729_files_give_the_same_text() {
+    let files = corpus_files();
+    if !require_corpus(&files) {
+        return;
+    }
+    let texts_of = |name: &str| -> Vec<String> {
+        let bytes = fs::read(corpus_dir().join(name)).unwrap_or_default();
+        let imported = import(&bytes, &Limits::DEFAULT).unwrap_or_else(|e| panic!("{name}: {e:?}"));
+        imported
+            .document
+            .shapes
+            .iter()
+            .map(|shape| text_of(shape.text.as_ref()))
+            .collect()
+    };
+    assert_eq!(
+        texts_of("fdo86729-ms1252.vsd"),
+        texts_of("fdo86729-utf8.vsd"),
+        "the two spellings of fdo86729 give the same shape text"
+    );
 }
 
 /// Truncated and damaged corpus bytes degrade or error; they never
