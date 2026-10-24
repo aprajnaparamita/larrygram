@@ -11,6 +11,15 @@ Task board. Only the master agent edits this file, on `main`.
 - Phase 3 complete (2026-10-16, report: [progress/phase-3.md](progress/phase-3.md), tag `phase-3`).
 - Phase 2 complete (2026-10-14, report: [progress/phase-2.md](progress/phase-2.md), tag `phase-2`).
 
+## In flight (master, 2026-10-24 evening)
+
+- Gate queue: `tools/gate-queue/gateq` (AGENTS.md section 7). Merge gates are `main --quick --corpus`; the idle full check is `main-full` in `/Volumes/Dara/larrygram/worktrees/main-full`.
+- Merged today: P8-04, P8-02, P8-05, P7-02 (merge gate green at `d156f9c`). P7-08 started; P7-06 and P7-07 resumed.
+- Sent back: P7-04 (remove its seven `#[rustfmt::skip]`, test the `currentColor` tint and non-blank icons). P7-03 must rebase on main (conflict in `crates/ui-spec/tests/panel_layouts.rs`) and resubmit.
+- Waiting for hand-offs: P7-05, P7-15, P8-03, P8-06 (gates queued or running).
+- Queued, not started: P7-16, P8-08.
+- Master items: the parity matrix's one column per layout (P7-02 open issue); `UiRequest::ShowWelcome` in the shell (P7-09); P8-02/P8-04/P8-05 open issues for P8-03, P8-07, P8-08, P8-10 (in their Result sections); the remote still holds the pre-R4 history until the user force-pushes, and the three backup files wait for that.
+
 ## Phase 7 task board (plan: [plans/phase-7.md](plans/phase-7.md))
 
 Phase 7: Panel and Classic layouts, the Larrygram rename and the welcome wizard. Phase 8 is binary `.vsd` import; Phase 9 (agents) is paused. The rename boundary (R1, P7-00, R4, R5) waits for the `phase-6` tag; nothing else runs during it. Settings: `welcome_seen` and the default layout are stubbed in `crates/ui/src/settings.rs` and move onto `Settings` in `crates/commands` in P7-09.

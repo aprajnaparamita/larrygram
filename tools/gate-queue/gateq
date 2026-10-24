@@ -46,6 +46,7 @@ usage:
   gateq show <task>
   gateq bump <task>
   gateq cancel <task>
+  gateq pause | resume
 EOF
     exit 2;
 }
@@ -252,6 +253,7 @@ sub cmd_submit {
 }
 
 sub start_runner {
+    return if paused();
     my $pid = fork();
     die_msg("fork: $!") unless defined $pid;
     return if $pid;
@@ -281,14 +283,17 @@ sub cmd_run {
             close $rl;
             # A submit may have queued a job after the check above, and its
             # own runner may have lost the lock to us: look once more.
-            exec $^X, $SELF, 'run' if queued_jobs();
+            exec $^X, $SELF, 'run' if queued_jobs() && !paused();
             exit 0;
         }
         sleep($started ? 1 : 5);
     }
 }
 
+sub paused { return -e "$HOME_DIR/paused" }
+
 sub start_next {
+    return 0 if paused();
     my @running = running_jobs();
     my $busy = @running + external_gates();
     return 0 if $busy >= $SLOTS;
@@ -371,7 +376,7 @@ sub run_job {
     open(STDOUT, '>>', "$HOME_DIR/runner.log");
     open(STDERR, '>&', \*STDOUT);
     with_lock(sub { finalize($file) });
-    start_runner() if queued_jobs() && !runner_alive();
+    start_runner() if queued_jobs() && !runner_alive() && !paused();
     exit 0;
 }
 
@@ -569,7 +574,7 @@ sub cmd_wait {
             exit 3;
         }
         # Keep a runner alive in case the last one died.
-        start_runner() if (queued_jobs() || running_jobs()) && !runner_alive();
+        start_runner() if (queued_jobs() || running_jobs()) && !runner_alive() && !paused();
         sleep 15;
     }
 }
@@ -584,8 +589,9 @@ sub cmd_status {
     my @run = running_jobs();
     my @q = queued_jobs();
     my $ext = external_gates();
-    printf "slots %d, running %d, queued %d, gates outside the queue %d, runner %s\n",
-        $SLOTS, scalar @run, scalar @q, $ext, runner_alive() ? 'up' : 'down';
+    printf "slots %d, running %d, queued %d, gates outside the queue %d, runner %s%s\n",
+        $SLOTS, scalar @run, scalar @q, $ext, runner_alive() ? 'up' : 'down',
+        paused() ? ', PAUSED (no new jobs start; `gateq resume` to continue)' : '';
     print "\nrunning:\n" if @run;
     printf "  %-8s job %-4d %s  %-24s %s\n", $_->{task}, $_->{id}, substr($_->{sha}, 0, 10),
         ($_->{args} || '(full)') . ($_->{corpus} ? ' +corpus' : ''), ago($_->{started}) for @run;
@@ -623,6 +629,26 @@ sub cmd_bump {
     print "gateq: $task moved to the front of the queue\n";
 }
 
+# Stops new jobs from starting and stops the runner. Running gates
+# finish and record their results; queued jobs wait for `resume`.
+sub cmd_pause {
+    open(my $fh, '>', "$HOME_DIR/paused") or die_msg("pause: $!");
+    print $fh stamp(), "\n";
+    close $fh;
+    for my $line (`ps -Ao pid=,command=`) {
+        my ($pid, $cmd) = $line =~ /^\s*(\d+)\s+(.*)$/ or next;
+        kill 'TERM', $pid if $cmd =~ m{gateq run$};
+    }
+    my $n = scalar(running_jobs());
+    print "gateq: paused; $n running gate(s) will finish, ", scalar(queued_jobs()), " queued job(s) wait for `gateq resume`\n";
+}
+
+sub cmd_resume {
+    unlink "$HOME_DIR/paused";
+    start_runner() unless runner_alive();
+    print "gateq: resumed\n";
+}
+
 sub cmd_cancel {
     my $task = valid_task(shift @ARGV);
     my $did = with_lock(sub {
@@ -650,4 +676,6 @@ elsif ($cmd eq 'status') { cmd_status() }
 elsif ($cmd eq 'show')   { usage() unless @ARGV; cmd_show() }
 elsif ($cmd eq 'bump')   { usage() unless @ARGV; cmd_bump() }
 elsif ($cmd eq 'cancel') { usage() unless @ARGV; cmd_cancel() }
+elsif ($cmd eq 'pause')  { cmd_pause() }
+elsif ($cmd eq 'resume') { cmd_resume() }
 else                     { usage() }

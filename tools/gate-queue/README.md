@@ -16,6 +16,8 @@ $G status                          # running, queued and finished gates
 $G show P7-06                      # the last result prompt again
 $G bump P7-02                      # move a queued job to the front
 $G cancel P7-06                    # drop a queued job or stop a running one
+$G pause                           # no new jobs start; the runner stops; running gates finish
+$G resume                          # start the runner again (from the current terminal)
 ```
 
 ## How it works
