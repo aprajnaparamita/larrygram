@@ -13,6 +13,9 @@ larrygram-geom = { path = "../geom" }
 # The document model the importer fills (layer L1, ADR 0002). Same
 # dependency the `.vsdx` reader uses, so both produce one model.
 larrygram-model = { path = "../model" }
+# The unit type of the model's cells (layer L0): the text mapping sets
+# the declared unit of the rows it writes (ADR 0070's unit rule).
+larrygram-geom = { path = "../geom" }
 
 [lints]
 workspace = true
