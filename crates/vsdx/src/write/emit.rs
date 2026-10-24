@@ -628,6 +628,36 @@ pub(crate) fn document_part(document: &Document, style: &NameStyle) -> XmlNode {
         wrapper.self_closing = false;
         root.children.push(XmlChild::Element(wrapper));
     }
+    // The document colour table (`Colors`/`ColorEntry`, ADR 0019). A
+    // document whose preserved content already carries the element (one
+    // read from a file) keeps it as the source of the spelling; a
+    // document with only the typed table gets the element generated
+    // here (task P8-10: without it a `.vsd` import saved as `.vsdx`
+    // lost its colour table).
+    if !document.color_table.is_empty()
+        && !document
+            .preserved
+            .children
+            .iter()
+            .any(|child| child.name.local == "Colors")
+    {
+        let mut wrapper = empty(style, "Colors");
+        for entry in &document.color_table {
+            let mut node = empty(style, "ColorEntry");
+            push(&mut node, "IX", entry.index.to_string());
+            push(
+                &mut node,
+                "RGB",
+                format!(
+                    "#{:02x}{:02x}{:02x}",
+                    entry.color.r, entry.color.g, entry.color.b
+                ),
+            );
+            wrapper.children.push(XmlChild::Element(node));
+        }
+        wrapper.self_closing = false;
+        root.children.push(XmlChild::Element(wrapper));
+    }
     push_preserved_children(&mut root, &document.preserved);
     root.self_closing = false;
     root

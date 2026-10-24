@@ -285,6 +285,17 @@ pub fn collect_with(
         for target in document.shape_mut(*id) {
             shape.flush(target, &fonts, &names, options, warnings, &mut text_bytes)?;
         }
+        // The model's write-back convention (ADR 0019): the shape's
+        // `Text` element lives in its preserved content and
+        // [`larrygram_model::Shape::text`] is its typed copy. Rebuild the
+        // element from the typed text so the writer emits it (task
+        // P8-10: without it a `.vsd` import saves without its text).
+        let content = document.shape(*id).and_then(|shape| shape.text.clone());
+        if let Some(content) = content {
+            document
+                .set_shape_text(*id, content)
+                .map_err(Error::Model)?;
+        }
     }
     Ok(())
 }

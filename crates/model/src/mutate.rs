@@ -467,8 +467,9 @@ impl Frame {
 }
 /// The `Text` element of one shape's text (the inverse of the reader's
 /// `map_text`, ADR 0019): literal text nodes and `cp`/`pp`/`tp`/`fld`
-/// markers naming their row `IX`. A field's cached display text follows
-/// its marker as literal text.
+/// markers naming their row `IX`. A field's cached display text is the
+/// literal text inside its `fld` element, the spelling Visio writes and
+/// the reader maps back (task P8-10 round-trip fix).
 fn text_element(text: &TextContent, template: Option<&QName>) -> XmlNode {
     let name = |local: &str| -> QName {
         match template {
@@ -486,8 +487,8 @@ fn text_element(text: &TextContent, template: Option<&QName>) -> XmlNode {
         children: Vec::new(),
         self_closing: true,
     };
-    let marker = |local: &str, ix: u32| -> XmlChild {
-        XmlChild::Element(XmlNode {
+    let marker_node = |local: &str, ix: u32| -> XmlNode {
+        XmlNode {
             name: name(local),
             attributes: vec![XmlAttribute {
                 name: name("IX"),
@@ -495,15 +496,32 @@ fn text_element(text: &TextContent, template: Option<&QName>) -> XmlNode {
             }],
             children: Vec::new(),
             self_closing: true,
-        })
+        }
     };
-    for part in &text.parts {
+    let mut parts = text.parts.iter().peekable();
+    while let Some(part) = parts.next() {
         match part {
             TextPart::Text(literal) => node.children.push(XmlChild::Text(literal.clone())),
-            TextPart::CharRun { ix } => node.children.push(marker("cp", *ix)),
-            TextPart::ParaRun { ix } => node.children.push(marker("pp", *ix)),
-            TextPart::TabsRun { ix } => node.children.push(marker("tp", *ix)),
-            TextPart::Field { ix } => node.children.push(marker("fld", *ix)),
+            TextPart::CharRun { ix } => node
+                .children
+                .push(XmlChild::Element(marker_node("cp", *ix))),
+            TextPart::ParaRun { ix } => node
+                .children
+                .push(XmlChild::Element(marker_node("pp", *ix))),
+            TextPart::TabsRun { ix } => node
+                .children
+                .push(XmlChild::Element(marker_node("tp", *ix))),
+            TextPart::Field { ix } => {
+                let mut element = marker_node("fld", *ix);
+                // The cached display text is the literal part right after
+                // the marker; any other part is left in the walk.
+                if let Some(TextPart::Text(literal)) = parts.peek().copied() {
+                    element.children.push(XmlChild::Text(literal.clone()));
+                    element.self_closing = false;
+                    parts.next();
+                }
+                node.children.push(XmlChild::Element(element));
+            }
         }
     }
     if !node.children.is_empty() {
@@ -2021,6 +2039,42 @@ mod tests {
     }
 
     #[test]
+    fn a_fields_display_text_is_written_inside_its_element() {
+        // Regression (P8-10): written after the marker, the display text
+        // merged with the text that follows it through the XML round
+        // trip. Visio writes it inside the `fld` element and the reader
+        // maps it from there.
+        let (mut doc, page) = document();
+        let shape = doc
+            .insert_shape(page, box_shape(1.0, 1.0), None)
+            .expect("s");
+        let mut text = TextContent::new();
+        text.parts.push(TextPart::Field { ix: 0 });
+        text.parts.push(TextPart::Text("1".to_owned()));
+        text.parts.push(TextPart::Text("\n".to_owned()));
+        doc.set_shape_text(shape, text).expect("text");
+        let preserved = doc.shape(shape).expect("s").preserved.clone();
+        let element = preserved
+            .children
+            .iter()
+            .find(|child| child.name.local == "Text")
+            .expect("Text element");
+        assert_eq!(element.children.len(), 2);
+        match &element.children[0] {
+            XmlChild::Element(fld) => {
+                assert_eq!(fld.name.local, "fld");
+                assert!(
+                    matches!(fld.children.as_slice(), [XmlChild::Text(literal)] if literal == "1"),
+                    "{:?}",
+                    fld.children
+                );
+            }
+            other => panic!("expected a fld element, got {other:?}"),
+        }
+        assert!(matches!(&element.children[1], XmlChild::Text(literal) if literal == "\n"));
+    }
+
+    #[test]
     fn set_shape_text_rebuilds_the_text_element() {
         let (mut doc, page) = document();
         let shape = doc
@@ -2703,6 +2757,7 @@ mod tests {
         assert!(!node.self_closing);
         let mut markers = Vec::new();
         let mut literals = Vec::new();
+        let mut field_text = Vec::new();
         for child in &node.children {
             if let XmlChild::Text(text) = child {
                 literals.push(text.clone());
@@ -2716,9 +2771,20 @@ mod tests {
                     .find(|attribute| attribute.name.local == "IX")
                     .expect("IX attribute");
                 markers.push((element.name.local.clone(), ix.value.clone()));
+                if element.name.local == "fld" {
+                    field_text.extend(element.children.iter().filter_map(|child| match child {
+                        XmlChild::Text(text) => Some(text.clone()),
+                        _ => None,
+                    }));
+                }
             }
         }
-        assert_eq!(literals, vec!["a".to_owned(), "b".to_owned()]);
+        assert_eq!(
+            literals,
+            vec!["a".to_owned()],
+            "the field's display text is inside its element"
+        );
+        assert_eq!(field_text, vec!["b".to_owned()]);
         assert_eq!(
             markers,
             vec![
