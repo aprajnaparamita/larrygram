@@ -15,8 +15,8 @@ Task board. Only the master agent edits this file, on `main`.
 
 - Gate queue: `tools/gate-queue/gateq` (AGENTS.md section 7). Merge gates are `main --quick --corpus`; the idle full check is `main-full` in `/Volumes/Dara/larrygram/worktrees/main-full`.
 - Merged today: P8-04, P8-02, P8-05, P7-02 (merge gate green at `d156f9c`). P7-08 started; P7-06 and P7-07 resumed.
-- Sent back: P7-04 (remove its seven `#[rustfmt::skip]`, test the `currentColor` tint and non-blank icons). P7-03 must rebase on main (conflict in `crates/ui-spec/tests/panel_layouts.rs`) and resubmit.
-- Merged since the restart: P8-06, P7-05, P7-15, P8-03; P8-07 ready; P8-03 RED at `51ce31e7`, resubmitted at `fc3fec7b`. Queued (paused for the iTerm2 restart): P7-06, P7-05, P7-03, P7-07, P7-08, P8-03, P7-04, then `main-full` at `13942e0`.
+- P7-03 must rebase on main (conflict in `crates/ui-spec/tests/panel_layouts.rs`) and resubmit.
+- Merged since the restart: P8-06, P7-05, P7-15, P8-03, P7-04, P7-08; P8-07 ready; P7-09 waits for P7-06 and P7-07; P8-03 RED at `51ce31e7`, resubmitted at `fc3fec7b`. Queued (paused for the iTerm2 restart): P7-06, P7-05, P7-03, P7-07, P7-08, P8-03, P7-04, then `main-full` at `13942e0`.
 - Queued, not started: P7-16, P8-08.
 - Master items: the parity matrix's one column per layout (P7-02 open issue); `UiRequest::ShowWelcome` in the shell (P7-09); P8-02/P8-04/P8-05 open issues for P8-03, P8-07, P8-08, P8-10 (in their Result sections); the remote still holds the pre-R4 history until the user force-pushes, and the three backup files wait for that.
 
@@ -30,11 +30,11 @@ Phase 7: Panel and Classic layouts, the Larrygram rename and the welcome wizard.
 | [P7-00](tasks/P7-00.md) | implementer | P7-01, `phase-6` tag | boundary | merged (the Larrygram rename) | ec182e7 |
 | [P7-02](tasks/P7-02.md) | implementer | boundary | 1 | merged (151 Phase 7 ids, the Fluent joins, the Panel Classic and Panel Modern switches, `help.welcome`; open: the parity matrix's one column per layout, `UiRequest::ShowWelcome` in the shell for P7-09) | c2a5fa2 |
 | [P7-03](tasks/P7-03.md) | implementer | boundary | 1 | ready (v2 loader, cross-checks, adapter) | — |
-| [P7-04](tasks/P7-04.md) | implementer | boundary | 1 | ready (icon pipeline; the image loaders are in since R5) | — |
+| [P7-04](tasks/P7-04.md) | implementer | boundary | 1 | merged (Tabler icon rasteriser, bounded cache, tint; review round removed seven `rustfmt::skip`) | 532ae78 |
 | [P7-05](tasks/P7-05.md) | implementer | boundary | 1 | merged (theme tokens on egui, Selawik, canvas colours from the theme; minor: Selawik embedded a second time from `crates/text/fonts`, for P7-09/P7-11) | 484ec1b |
 | [P7-06](tasks/P7-06.md) | implementer | boundary | 1 | ready (Panel Classic widgets, against the frozen v2 types) | — |
 | [P7-07](tasks/P7-07.md) | implementer | boundary | 1 | ready (Panel Modern widgets, against the frozen v2 types) | — |
-| [P7-08](tasks/P7-08.md) | implementer | P7-02 | 1+ | ready (selection contexts; P7-02 merged) | — |
+| [P7-08](tasks/P7-08.md) | implementer | P7-02 | 1+ | merged (selection contexts, `menu_for`, predicate cross-check; Ungroup and Select All predicates fixed; open: window state, two contexts, 18 toggles, for P7-09) | 8b71f1e |
 | [P7-15](tasks/P7-15.md) | implementer | boundary | 1 | merged (welcome wizard, both pages, kittest flow tests) | 96dbcc1 |
 | [P7-16](tasks/P7-16.md) | implementer | boundary | 1 | ready, starts second (About window, app icon) | — |
 | [P7-09](tasks/P7-09.md) | implementer | P7-05..P7-08, P7-15, P7-16 | C | waiting (shell integration) | — |
