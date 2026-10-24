@@ -96,20 +96,16 @@ fn all_four_kinds_load_from_embedded_and_match_disk() {
         let from_disk = loader
             .load(kind)
             .unwrap_or_else(|e| panic!("{kind:?}: {e}"));
-        // `LayoutSets::get` is the shell's v1-widget seam and answers
-        // `None` for the v2-only kinds (task P7-00), so read the
-        // fields here.
-        let embedded = match kind {
+        // `LayoutSets::get` answers every kind (task P7-09 drops the
+        // v1-data `Option`), so the shell's seam reads all four here.
+        let field = match kind {
             LayoutKind::PanelModern => &sets.panel_modern,
             LayoutKind::PanelClassic => &sets.panel_classic,
             LayoutKind::Panel2016 => &sets.panel_2016,
             LayoutKind::Panel365 => &sets.panel_365,
         };
-        // The two v1-data kinds also answer through the shell's
-        // `LayoutSets::get` seam.
-        if matches!(kind, LayoutKind::Panel2016 | LayoutKind::Panel365) {
-            assert_eq!(sets.get(kind), Some(embedded), "{kind:?} get matches");
-        }
+        assert!(std::ptr::eq(sets.get(kind), field), "{kind:?} get borrows the field");
+        let embedded = field;
         assert_eq!(embedded.v2, from_disk.v2, "{kind:?} v2 matches");
         assert_eq!(embedded.theme, from_disk.theme, "{kind:?} theme matches");
         assert_eq!(embedded.icons, from_disk.icons, "{kind:?} icons match");

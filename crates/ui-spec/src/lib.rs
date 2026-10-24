@@ -860,8 +860,7 @@ pub struct LayoutSet {
 /// so the ADR 0007 cross-references are checked over the whole set at
 /// once: a Fluent id listed in `commands.yaml` must appear in at
 /// least one of the two v1 layouts. [`Self::get`] is the runtime
-/// layout switch for the v1 widgets: it borrows one set by its
-/// [`LayoutKind`], when the kind has v1 data.
+/// layout switch: it borrows one set by its [`LayoutKind`].
 #[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct LayoutSets {
     /// Panel Modern: the curated 2013 data (ADR 0061).
@@ -879,22 +878,17 @@ pub struct LayoutSets {
 /// All four kinds have a [`LayoutSet`]: Panel Modern and Panel
 /// Classic carry the hand-curated v2 files, the two Fluent-data kinds
 /// carry their v1 layout plus the [`v2::from_v1`] conversion (ADR
-/// 0061). The borrow keeps every set usable.
+/// 0061). The borrow keeps every set usable (task P7-09 drops the
+/// v1-data `Option`: the shell draws the curated kinds from
+/// [`crate::v2`] and gates the v1 widgets on [`LayoutSet::layout`]).
 impl LayoutSets {
-    /// The set for `kind`, when the kind has v1 data (borrowed, so
-    /// the caller keeps all four).
-    ///
-    /// The shell gates every v1 widget on this `Option` (ADR 0032):
-    /// Panel Modern and Panel Classic must draw no v1 widgets, so
-    /// they answer `None` here (task P7-00) and their sets are read
-    /// from the [`Self::panel_modern`] and [`Self::panel_classic`]
-    /// fields. Task P7-09 draws those kinds from [`crate::v2`] and
-    /// drops the `Option`.
-    pub fn get(&self, kind: LayoutKind) -> Option<&LayoutSet> {
+    /// The set for `kind` (borrowed, so the caller keeps all four).
+    pub fn get(&self, kind: LayoutKind) -> &LayoutSet {
         match kind {
-            LayoutKind::Panel2016 => Some(&self.panel_2016),
-            LayoutKind::Panel365 => Some(&self.panel_365),
-            LayoutKind::PanelModern | LayoutKind::PanelClassic => None,
+            LayoutKind::Panel2016 => &self.panel_2016,
+            LayoutKind::Panel365 => &self.panel_365,
+            LayoutKind::PanelModern => &self.panel_modern,
+            LayoutKind::PanelClassic => &self.panel_classic,
         }
     }
 }
@@ -1063,47 +1057,35 @@ mod tests {
         let mut sets = LayoutSets::default();
         sets.panel_2016.layout.source = "2016".to_owned();
         sets.panel_365.layout.source = "365".to_owned();
-        assert_eq!(
-            sets.get(LayoutKind::Panel2016).map(|s| &s.layout.source),
-            Some(&"2016".to_owned())
-        );
-        assert_eq!(
-            sets.get(LayoutKind::Panel365).map(|s| &s.layout.source),
-            Some(&"365".to_owned())
-        );
+        assert_eq!(sets.get(LayoutKind::Panel2016).layout.source, "2016");
+        assert_eq!(sets.get(LayoutKind::Panel365).layout.source, "365");
         // Borrows, so both sets stay usable.
         assert_eq!(sets.panel_2016.layout.product, "visio");
         assert_eq!(sets.panel_365.layout.source, "365");
-        assert!(
-            LayoutSets::default()
-                .get(LayoutKind::Panel365)
-                .is_some_and(|s| s.layout.tabs.is_empty())
-        );
+        assert!(LayoutSets::default()
+            .get(LayoutKind::Panel365)
+            .layout
+            .tabs
+            .is_empty());
     }
 
     #[test]
-    fn layout_sets_get_answers_only_for_the_v1_data_kinds() {
-        // The shell gates every v1 widget on this `Option` (ADR 0032):
-        // Panel Modern and Panel Classic draw no v1 widgets (task
-        // P7-00), so `get` answers `None` for them until P7-09 draws
-        // those kinds from `v2`. All four sets stay wired: the loader
-        // fills the fields and `tests/v2_layouts.rs` pins them.
+    fn layout_sets_get_answers_every_kind() {
+        // Task P7-09 drops the v1-data `Option`: the shell draws the
+        // curated kinds from `v2`, so `get` borrows the kind's own set
+        // for all four kinds. (The committed sets carry v1 data only
+        // for the two Fluent-data kinds; `tests/v2_layouts.rs` pins
+        // that.)
         let sets = LayoutSets::default();
         let cases = [
-            (LayoutKind::Panel2016, true),
-            (LayoutKind::Panel365, true),
-            (LayoutKind::PanelModern, false),
-            (LayoutKind::PanelClassic, false),
+            (LayoutKind::Panel2016, &sets.panel_2016),
+            (LayoutKind::Panel365, &sets.panel_365),
+            (LayoutKind::PanelModern, &sets.panel_modern),
+            (LayoutKind::PanelClassic, &sets.panel_classic),
         ];
-        for (kind, has_v1) in cases {
-            assert_eq!(sets.get(kind).is_some(), has_v1, "{kind:?}");
+        for (kind, expected) in cases {
+            assert!(std::ptr::eq(sets.get(kind), expected), "{kind:?}");
         }
-        assert_eq!(
-            sets.get(LayoutKind::Panel2016).map(|s| &s.layout),
-            Some(&sets.panel_2016.layout)
-        );
-        assert_eq!(sets.get(LayoutKind::PanelModern), None);
-        assert_eq!(sets.get(LayoutKind::PanelClassic), None);
     }
 
     #[test]
@@ -1114,9 +1096,9 @@ mod tests {
         // the inliner decides, so the coverage of the seams stays
         // stable across builds.
         let sets = LayoutSets::default();
-        let get: fn(&LayoutSets, LayoutKind) -> Option<&LayoutSet> = LayoutSets::get;
-        assert!(get(&sets, LayoutKind::Panel2016).is_some());
-        assert_eq!(get(&sets, LayoutKind::PanelClassic), None);
+        let get: fn(&LayoutSets, LayoutKind) -> &LayoutSet = LayoutSets::get;
+        assert!(get(&sets, LayoutKind::Panel2016).layout.tabs.is_empty());
+        assert!(get(&sets, LayoutKind::PanelClassic).v2.tabs.is_empty());
         let empty: fn() -> CommandLookup = CommandLookup::empty;
         let lookup = empty();
         let len: fn(&CommandLookup) -> usize = CommandLookup::len;
