@@ -90,7 +90,7 @@ pub(crate) const TABLE: CommandTable = &[
         run_distribute_vertical,
     ),
     ("arrange.group", "Group", has_selection, run_group),
-    ("arrange.ungroup", "Ungroup", has_selection, run_ungroup),
+    ("arrange.ungroup", "Ungroup", can_ungroup, run_ungroup),
     (
         "arrange.bring_forward",
         "Bring Forward",
@@ -676,6 +676,31 @@ fn group_for_members(doc: &Document, page: PageId, members: &[ShapeId]) -> Optio
                 && members.iter().all(|member| shape.children.contains(member))
         })
     })
+}
+
+/// Enabled when at least one selected shape is a group.
+///
+/// The command dissolves groups only; a selection of ordinary shapes is
+/// greyed out instead of producing a run-time warning (task P7-08
+/// cross-check).
+fn can_ungroup(ctx: &AppCtx) -> crate::Enabled {
+    if ctx.selection.is_empty() {
+        return crate::Enabled::no("no selection");
+    }
+    let Some(session) = ctx.active_document() else {
+        return crate::Enabled::no("no open document");
+    };
+    let has_group = ctx.selection.shapes.iter().any(|shape| {
+        session
+            .document
+            .shape(*shape)
+            .is_some_and(|entity| !entity.children.is_empty())
+    });
+    if has_group {
+        crate::Enabled::yes()
+    } else {
+        crate::Enabled::no("the selection has no group")
+    }
 }
 
 /// `arrange.ungroup`: dissolves every selected group.

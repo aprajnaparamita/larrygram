@@ -380,7 +380,16 @@ fn arrangement_state_and_argument_failures() {
     select(&mut ctx, page, &[shapes[0]]);
     let error =
         dispatch(&mut ctx, &registry, "arrange.ungroup", Args::new()).expect_err("not a group");
-    assert!(matches!(error, CommandError::Failed { .. }), "{error:?}");
+    assert!(
+        matches!(
+            error,
+            CommandError::NotEnabled {
+                reason: Some(ref reason),
+                ..
+            } if reason == "the selection has no group"
+        ),
+        "{error:?}"
+    );
 
     select(&mut ctx, page, &shapes);
     let doc = ctx.active_document_mut().expect("session");
