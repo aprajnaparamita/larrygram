@@ -487,4 +487,67 @@ mod tests {
         assert!(intents.is_empty());
         assert!(!close);
     }
+
+    #[test]
+    fn the_default_impl_is_the_default_page() {
+        let file_view = FileView::default();
+        assert!(!file_view.is_open());
+        assert_eq!(file_view.page(), DEFAULT_PAGE);
+    }
+
+    #[test]
+    fn entry_intent_emits_only_when_the_command_resolves() {
+        let file_view = FileView::new();
+        let entry = FileViewEntry {
+            id: "file_view.save".to_owned(),
+            kind: FileViewEntryKind::Command,
+            label: "Save".to_owned(),
+            command: Some(larrygram_ui_spec::CommandId::new("file.save")),
+        };
+        let intent = file_view
+            .entry_intent(&entry, &always)
+            .expect("the command resolves");
+        assert_eq!(intent.command.as_str(), "file.save");
+        // An entry with no command resolves to nothing.
+        let broken = FileViewEntry {
+            id: "file_view.broken".to_owned(),
+            kind: FileViewEntryKind::Command,
+            label: "Broken".to_owned(),
+            command: None,
+        };
+        assert!(file_view.entry_intent(&broken, &always).is_none());
+    }
+
+    #[test]
+    fn the_pages_draw_with_live_data() {
+        use larrygram_commands::app::{AppCtx, DocumentSession, Settings};
+        use larrygram_model::Document;
+
+        use crate::test_util::with_ui;
+        let mut app = AppCtx::new(Settings::default());
+        app.open_document(DocumentSession::new(Document::new(), None));
+        app.settings
+            .recent_files
+            .push(std::path::PathBuf::from("/drawings/a.vsdx"));
+        let mut lists = ListData::new();
+        lists.insert("template_categories", vec!["Basic".to_owned()]);
+        let mut file_view = FileView::new();
+        file_view.open();
+        for page in [
+            "file_view.info",
+            "file_view.new",
+            "file_view.open",
+            "file_view.save_as",
+            "file_view.print",
+            "file_view.export",
+        ] {
+            file_view.set_page(page);
+            let outcome = with_ui(|ui| {
+                file_view.show(ui, &view(), &Metrics::default(), &app, &lists, &always)
+            });
+            let (intents, close) = outcome.expect("the page renders");
+            assert!(intents.is_empty(), "a draw-only frame dispatches nothing");
+            assert!(!close, "{page} leaves the view open");
+        }
+    }
 }

@@ -396,4 +396,50 @@ mod tests {
             too_deep(ui, &item("a", None));
         });
     }
+
+    #[test]
+    fn dynamic_labels_with_an_empty_undo_stack_fall_back() {
+        let app = app_with_document();
+        let mut undo = item("qat.undo", Some("edit.undo"));
+        undo.dynamic_label = true;
+        assert_eq!(display_label(&undo, &app), "Can't Undo");
+        let mut redo = item("qat.redo", Some("edit.redo.or.repeat"));
+        redo.dynamic_label = true;
+        assert_eq!(display_label(&redo, &app), "Can't Redo");
+        // Any other command with a document keeps its label.
+        let mut other = item("qat.save", Some("file.save"));
+        other.dynamic_label = true;
+        assert_eq!(display_label(&other, &app), "Label");
+        // And a plain item keeps its label.
+        let plain = item("qat.save", Some("file.save"));
+        assert_eq!(display_label(&plain, &app), "Label");
+    }
+
+    #[test]
+    fn finish_greys_out_a_disabled_action() {
+        use crate::test_util::with_ui;
+        with_ui(|ui| {
+            let response = ui.add_enabled_ui(false, |ui| ui.button("Grey")).inner;
+            let mut out = Vec::new();
+            let disabled = Action::Disabled {
+                reason: "why".to_owned(),
+            };
+            finish(response, &disabled, "tip", &mut out);
+            assert!(out.is_empty(), "a disabled action never dispatches");
+        });
+    }
+
+    #[test]
+    fn the_error_seam_is_always_ok() {
+        assert!(no_error().is_ok());
+    }
+
+    #[test]
+    fn the_noop_edit_applies_and_reverts() {
+        let mut app = AppCtx::new(Settings::default());
+        let mut edit = NoopEdit("Move shape");
+        assert_eq!(edit.label(), "Move shape");
+        assert!(edit.apply(&mut app).is_ok());
+        assert!(edit.revert(&mut app).is_ok());
+    }
 }
