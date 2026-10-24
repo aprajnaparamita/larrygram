@@ -328,64 +328,41 @@ fn map_colours(data: &[u8], document: &mut Document, warnings: &mut Vec<ImportWa
     // A chunk reader that keeps the compressed blob's four-byte prefix
     // leaves the record fields four bytes later; accept both spellings and
     // prefer the one whose declared count matches the payload length.
-    let count_at = |at: usize| {
-        reader
-            .byte(at)
-            .and_then(|count| at.checked_add(2).map(|start| (count, start)))
-    };
-    let exact = |(count, at): (u8, usize)| {
-        at.checked_add(usize::from(count).saturating_mul(4)) == Some(data.len())
-    };
-    let plausible =
-        |(count, at): (u8, usize)| usize::from(count) <= data.len().saturating_sub(at) / 4;
-    let plain = count_at(2).filter(|candidate| exact(*candidate));
-    let prefixed = count_at(6).filter(|candidate| exact(*candidate));
-    let candidate = plain
-        .or(prefixed)
-        .or_else(|| count_at(2).filter(|candidate| plausible(*candidate)))
-        .or_else(|| count_at(6).filter(|candidate| plausible(*candidate)));
-    let Some((count, mut at)) = candidate else {
-        warn(
-            warnings,
-            "colour table",
-            WarningKind::BadValue {
-                what: "colour table record",
-            },
-        );
-        return;
+    let (count, at) = match (reader.byte(2), reader.byte(6)) {
+        (Some(count), _)
+            if usize::from(count).saturating_mul(4).saturating_add(4) == data.len() =>
+        {
+            (count, 4usize)
+        }
+        (_, Some(count))
+            if usize::from(count).saturating_mul(4).saturating_add(8) == data.len() =>
+        {
+            (count, 8usize)
+        }
+        _ => {
+            warn(
+                warnings,
+                "colour table",
+                WarningKind::BadValue {
+                    what: "colour table record",
+                },
+            );
+            return;
+        }
     };
     document.color_table.clear();
-    for index in 0..usize::from(count) {
-        let Some(color) = reader.rgba(at) else {
-            warn(
-                warnings,
-                "colour table",
-                WarningKind::BadValue {
-                    what: "colour table entry",
-                },
-            );
-            break;
-        };
-        let Ok(index) = i32::try_from(index) else {
-            warn(
-                warnings,
-                "colour table",
-                WarningKind::BadValue {
-                    what: "colour table index",
-                },
-            );
-            break;
-        };
+    let entries = data.get(at..).unwrap_or(&[]);
+    for (index, color) in entries.chunks_exact(4).take(usize::from(count)).enumerate() {
+        let index = i32::try_from(index).unwrap_or(i32::MAX);
+        let red = color.first().copied().unwrap_or(0);
+        let green = color.get(1).copied().unwrap_or(0);
+        let blue = color.get(2).copied().unwrap_or(0);
         if index >= 24 {
             document.color_table.push(ColorTableEntry {
                 index,
-                color: Color::new(color[0], color[1], color[2]),
+                color: Color::new(red, green, blue),
             });
         }
-        let Some(next) = at.checked_add(4) else {
-            break;
-        };
-        at = next;
     }
 }
 
@@ -427,31 +404,28 @@ fn map_styles(
         let Some((style_index, visio_id, sheet_level)) = current else {
             continue;
         };
-        if chunk.level <= sheet_level {
-            current = None;
-            continue;
-        }
         if chunk.level != sheet_level.saturating_add(2) {
             continue;
         }
         let context = format!("style {visio_id} / {}", record_name(chunk.record));
-        let Some(style) = document.stylesheet.styles.get_mut(style_index) else {
-            continue;
-        };
-        match chunk.record {
-            LINE => map_line(chunk.data, &mut style.sheet, &context, warnings),
-            FILL_AND_SHADOW => map_fill(chunk.data, &mut style.sheet, &context, warnings),
-            TEXT_BLOCK => map_text_block(chunk.data, &mut style.sheet, &context, warnings),
-            CHAR_IX => map_character(chunk, &mut style.sheet, &context, warnings),
-            PARA_IX => map_paragraph(chunk.data, chunk.id, &mut style.sheet, &context, warnings),
-            record if is_structural(record) => {}
-            _ => warn(
-                warnings,
-                &context,
-                WarningKind::SkippedRecord {
-                    name: "style record",
-                },
-            ),
+        for style in document.stylesheet.styles.get_mut(style_index).into_iter() {
+            match chunk.record {
+                LINE => map_line(chunk.data, &mut style.sheet, &context, warnings),
+                FILL_AND_SHADOW => map_fill(chunk.data, &mut style.sheet, &context, warnings),
+                TEXT_BLOCK => map_text_block(chunk.data, &mut style.sheet, &context, warnings),
+                CHAR_IX => map_character(chunk, &mut style.sheet, &context, warnings),
+                PARA_IX => {
+                    map_paragraph(chunk.data, chunk.id, &mut style.sheet, &context, warnings)
+                }
+                record if is_structural(record) => {}
+                _ => warn(
+                    warnings,
+                    &context,
+                    WarningKind::SkippedRecord {
+                        name: "style record",
+                    },
+                ),
+            }
         }
     }
     Ok(())
@@ -497,16 +471,7 @@ fn map_style_sheet(
     document: &mut Document,
     warnings: &mut Vec<ImportWarning>,
 ) -> usize {
-    let Ok(index) = u32::try_from(document.stylesheet.styles.len()) else {
-        warn(
-            warnings,
-            "stylesheet",
-            WarningKind::BadValue {
-                what: "stylesheet row count",
-            },
-        );
-        return document.stylesheet.styles.len().saturating_sub(1);
-    };
+    let index = u32::try_from(document.stylesheet.styles.len()).unwrap_or(u32::MAX);
     let context = format!("style {}", chunk.id);
     let reader = Reader::new(chunk.data);
     let line_style = style_reference(&reader, 0x22, &context, warnings, "line style reference");
@@ -801,16 +766,7 @@ fn map_character(
     context: &str,
     warnings: &mut Vec<ImportWarning>,
 ) {
-    let Ok(ix) = i32::try_from(chunk.id) else {
-        warn(
-            warnings,
-            context,
-            WarningKind::BadValue {
-                what: "character row index",
-            },
-        );
-        return;
-    };
+    let ix = i32::try_from(chunk.id).unwrap_or(i32::MAX);
     let reader = Reader::new(chunk.data);
     let Some(size) = reader.f64(18) else {
         warn(
@@ -822,24 +778,32 @@ fn map_character(
         );
         return;
     };
-    let Some(section) = section(sheet, "Character") else {
-        return;
-    };
-    let Some(row) = row(section, ix) else {
-        return;
-    };
+    if let Some(section) = section(sheet, "Character")
+        && let Some(row) = row(section, ix)
+    {
+        map_character_row(&reader, row, size, context, warnings);
+    }
+}
 
-    if let (Some(index), Some(color)) = (reader.byte(6), reader.rgba(7)) {
-        set_row_cell(row, indexed_color_cell("Color", index, color));
-        if let Some(cell) = number_cell(
-            "ColorTrans",
-            f64::from(color[3]) / 255.0,
-            context,
-            warnings,
-            "character colour transparency",
-        ) {
-            set_row_cell(row, cell);
-        }
+/// Maps the cells of one character row.
+fn map_character_row(
+    reader: &Reader<'_>,
+    row: &mut Row,
+    size: f64,
+    context: &str,
+    warnings: &mut Vec<ImportWarning>,
+) {
+    let index = reader.byte(6).unwrap_or(0);
+    let color = reader.rgba(7).unwrap_or([0, 0, 0, 0]);
+    set_row_cell(row, indexed_color_cell("Color", index, color));
+    if let Some(cell) = number_cell(
+        "ColorTrans",
+        f64::from(color[3]) / 255.0,
+        context,
+        warnings,
+        "character colour transparency",
+    ) {
+        set_row_cell(row, cell);
     }
     if let Some(style) = reader.byte(11)
         && let Some(cell) = number_cell(
@@ -910,16 +874,7 @@ fn map_paragraph(
     context: &str,
     warnings: &mut Vec<ImportWarning>,
 ) {
-    let Ok(ix) = i32::try_from(id) else {
-        warn(
-            warnings,
-            context,
-            WarningKind::BadValue {
-                what: "paragraph row index",
-            },
-        );
-        return;
-    };
+    let ix = i32::try_from(id).unwrap_or(i32::MAX);
     let reader = Reader::new(data);
     let Some(ind_first) = reader.f64(5) else {
         warn(
@@ -931,12 +886,21 @@ fn map_paragraph(
         );
         return;
     };
-    let Some(section) = section(sheet, "Paragraph") else {
-        return;
-    };
-    let Some(row) = row(section, ix) else {
-        return;
-    };
+    if let Some(section) = section(sheet, "Paragraph")
+        && let Some(row) = row(section, ix)
+    {
+        map_paragraph_row(&reader, row, ind_first, context, warnings);
+    }
+}
+
+/// Maps the cells of one paragraph row.
+fn map_paragraph_row(
+    reader: &Reader<'_>,
+    row: &mut Row,
+    ind_first: f64,
+    context: &str,
+    warnings: &mut Vec<ImportWarning>,
+) {
     let fields = [
         ("IndFirst", Some(ind_first), "first line indent"),
         ("IndLeft", reader.f64(14), "left indent"),
@@ -1038,29 +1002,19 @@ fn read_name_index(data: &[u8], pairs: bool, names: &mut HashMap<u32, u32>) {
         let mut at = 0usize;
         while let (Some(name_id), Some(element_id)) = (reader.u32(at), reader.u32(at + 4)) {
             names.insert(element_id, name_id);
-            let Some(next) = at.checked_add(8) else {
-                break;
-            };
-            at = next;
+            at = at.saturating_add(8);
         }
         return;
     }
-    let Some(count) = reader.u32(0) else {
-        return;
-    };
+    let count = reader.u32(0).unwrap_or(0);
     let mut at = 4usize;
     for _ in 0..count {
-        let Some(name_id) = reader.u32(at) else {
-            break;
-        };
-        let Some(element_id) = reader.u32(at + 8) else {
-            break;
-        };
-        names.insert(element_id, name_id);
-        let Some(next) = at.checked_add(13) else {
-            break;
-        };
-        at = next;
+        let name_id = reader.u32(at).unwrap_or(u32::MAX);
+        let element_id = reader.u32(at + 8).unwrap_or(u32::MAX);
+        if name_id != u32::MAX && element_id != u32::MAX {
+            names.insert(element_id, name_id);
+        }
+        at = at.saturating_add(13);
     }
 }
 
@@ -1483,6 +1437,20 @@ mod tests {
     }
 
     #[test]
+    fn an_empty_colour_table_record_warns() {
+        let chunks = vec![chunk(0x16, 1, 0, &[])];
+        let (document, warnings) = collect(&chunks);
+        assert!(document.color_table.is_empty());
+        assert_eq!(warnings.len(), 1);
+        assert!(matches!(
+            warnings[0].kind,
+            WarningKind::BadValue {
+                what: "colour table record"
+            }
+        ));
+    }
+
+    #[test]
     fn a_colour_count_beyond_the_payload_warns() {
         let chunks = vec![chunk(0x16, 1, 0, &[0, 0, 255, 0])];
         let (document, warnings) = collect(&chunks);
@@ -1616,6 +1584,118 @@ mod tests {
         assert!(warnings.is_empty());
         assert_eq!(value(&style.sheet, "ShapeShdwOffsetX"), None);
         assert_eq!(value(&style.sheet, "ShapeShdwOffsetY"), None);
+    }
+
+    #[test]
+    fn duplicate_records_replace_the_existing_cells() {
+        let sheet = style_sheet(u32::MAX, u32::MAX, u32::MAX);
+        let first_line = line_record(0.1, [0, 0, 0, 0], 1);
+        let second_line = line_record(0.5, [0, 0, 0, 0], 1);
+        let first_character = character_record();
+        let mut second_character = character_record();
+        second_character[18..26].copy_from_slice(&0.25f64.to_le_bytes());
+        let chunks = style_chunks(
+            &sheet,
+            &[
+                (0x85, 1, &first_line),
+                (0x85, 2, &second_line),
+                (0x94, 0, &first_character),
+                (0x94, 0, &second_character),
+            ],
+        );
+        let (document, _) = collect(&chunks);
+        let style = &document.stylesheet.styles[0];
+        assert_eq!(value(&style.sheet, "LineWeight"), number(0.5));
+        assert_eq!(
+            row_value(&style.sheet, "Character", 0, "Size"),
+            number(0.25)
+        );
+        assert_eq!(style.sheet.sections.len(), 1);
+        assert_eq!(style.sheet.sections[0].rows.len(), 1);
+    }
+
+    #[test]
+    fn a_truncated_line_record_maps_only_its_width() {
+        let sheet = style_sheet(u32::MAX, u32::MAX, u32::MAX);
+        let line = line_record(0.1, [0, 0, 0, 0], 1);
+        let chunks = style_chunks(&sheet, &[(0x85, 1, &line[..10])]);
+        let (document, warnings) = collect(&chunks);
+        let style = &document.stylesheet.styles[0];
+        assert!(warnings.is_empty());
+        assert_eq!(value(&style.sheet, "LineWeight"), number(0.1));
+        assert_eq!(value(&style.sheet, "LineColor"), None);
+    }
+
+    #[test]
+    fn an_empty_fill_record_warns() {
+        let sheet = style_sheet(u32::MAX, u32::MAX, u32::MAX);
+        let chunks = style_chunks(&sheet, &[(0x86, 2, &[])]);
+        let (_, warnings) = collect(&chunks);
+        assert_eq!(warnings.len(), 1);
+        assert!(matches!(
+            warnings[0].kind,
+            WarningKind::BadValue {
+                what: "fill record"
+            }
+        ));
+    }
+
+    #[test]
+    fn a_transparent_text_background_is_index_zero() {
+        let sheet = style_sheet(u32::MAX, u32::MAX, u32::MAX);
+        let mut text = text_block_record();
+        text[37] = 0;
+        let chunks = style_chunks(&sheet, &[(0x87, 3, &text)]);
+        let (document, _) = collect(&chunks);
+        assert_eq!(
+            value(&document.stylesheet.styles[0].sheet, "TextBkgnd"),
+            number(0.0)
+        );
+    }
+
+    #[test]
+    fn a_truncated_text_block_maps_its_margins() {
+        let sheet = style_sheet(u32::MAX, u32::MAX, u32::MAX);
+        let text = text_block_record();
+        let chunks = style_chunks(&sheet, &[(0x87, 3, &text[..37])]);
+        let (document, warnings) = collect(&chunks);
+        let style = &document.stylesheet.styles[0];
+        assert!(warnings.is_empty());
+        assert_eq!(value(&style.sheet, "VerticalAlign"), number(2.0));
+        assert_eq!(value(&style.sheet, "TextBkgnd"), None);
+    }
+
+    #[test]
+    fn a_character_record_without_the_flags_byte_still_maps_its_cells() {
+        let sheet = style_sheet(u32::MAX, u32::MAX, u32::MAX);
+        let character = character_record();
+        let chunks = style_chunks(&sheet, &[(0x94, 0, &character[..26])]);
+        let (document, warnings) = collect(&chunks);
+        let style = &document.stylesheet.styles[0];
+        assert!(warnings.is_empty());
+        assert_eq!(
+            row_value(&style.sheet, "Character", 0, "Size"),
+            number(0.125)
+        );
+        assert_eq!(
+            row_value(&style.sheet, "Character", 0, "DblUnderline"),
+            None
+        );
+    }
+
+    #[test]
+    fn an_empty_name_record_does_not_name_a_style() {
+        let sheet = style_sheet(u32::MAX, u32::MAX, u32::MAX);
+        let empty = [1u8, 0, 0, 0, 0, 0];
+        let index = name_index(3, 4);
+        let chunks = vec![
+            chunk(0x33, 1, 3, &empty),
+            chunk(0x1a, 1, 0, &[]),
+            chunk(0x4a, 2, 4, &sheet),
+            chunk(0xc9, 3, 0, &index),
+        ];
+        let (document, _) = collect(&chunks);
+        assert_eq!(document.stylesheet.styles[0].name, "");
     }
 
     #[test]
