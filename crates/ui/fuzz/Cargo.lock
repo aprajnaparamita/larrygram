@@ -856,6 +856,8 @@ dependencies = [
  "larrygram-render",
  "larrygram-shapesheet",
  "larrygram-ui-spec",
+ "log",
+ "resvg",
  "rfd",
  "serde",
  "serde_json",
