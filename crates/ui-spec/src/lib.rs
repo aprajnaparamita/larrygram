@@ -826,40 +826,70 @@ impl<'de> serde::Deserialize<'de> for Shortcuts {
     }
 }
 
-/// The full set of data loaded for a single layout (e.g. 2016).
+/// The full set of data loaded for a single layout kind: the v1
+/// Fluent data where there is any, the v2 model the widgets read
+/// (ADR 0061), the shared tables, and the theme, icon map and
+/// contexts that belong with it.
 #[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct LayoutSet {
-    /// The command bar + backstage + context menus + QAT.
+    /// The v1 command bar + backstage + context menus + QAT. Empty
+    /// for Panel Modern and Panel Classic, which are v2-only.
     pub layout: Layout,
+    /// The v2 layout every widget reads: the curated file for Panel
+    /// Modern and Panel Classic, [`v2::from_v1`] output for the two
+    /// Fluent-data kinds.
+    pub v2: v2::LayoutV2,
     /// The commands referenced by the layout.
     pub commands: Commands,
     /// The shortcuts dispatched on this layout.
     pub shortcuts: Shortcuts,
+    /// The layout's theme (ADR 0063): `themes/<theme>.yaml`. The two
+    /// adapted layouts use the Panel Modern theme.
+    pub theme: v2::Theme,
+    /// The icon map (ADR 0062), shared by every layout.
+    pub icons: v2::IconMap,
+    /// The selection contexts (ADR 0064), shared by every layout.
+    pub contexts: v2::Contexts,
 }
 
-/// Both [`LayoutSet`]s, loaded together by [`Loader::load_all`].
+/// All four [`LayoutSet`]s, loaded together by
+/// [`Loader::load_all`](crate::Loader::load_all) or
+/// [`Loader::from_embedded`](crate::Loader::from_embedded).
 ///
-/// `commands.yaml` and `shortcuts.yaml` are shared by the two
-/// layouts, so the ADR 0007 cross-references are checked over the
-/// whole set at once: a Fluent id listed in `commands.yaml` must
-/// appear in at least one of the two layouts. [`Self::get`] is the
-/// runtime layout switch: it borrows one set by its [`LayoutKind`].
+/// `commands.yaml` and `shortcuts.yaml` are shared by the layouts,
+/// so the ADR 0007 cross-references are checked over the whole set at
+/// once: a Fluent id listed in `commands.yaml` must appear in at
+/// least one of the two v1 layouts. [`Self::get`] is the runtime
+/// layout switch for the v1 widgets: it borrows one set by its
+/// [`LayoutKind`], when the kind has v1 data.
 #[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct LayoutSets {
-    /// The Office 2016 Fluent data.
+    /// Panel Modern: the curated 2013 data (ADR 0061).
+    pub panel_modern: LayoutSet,
+    /// Panel Classic: the curated 2007 data (ADR 0061).
+    pub panel_classic: LayoutSet,
+    /// Panel (2016 data): the Office 2016 Fluent data.
     pub panel_2016: LayoutSet,
-    /// The Microsoft 365 Current Channel Fluent data.
+    /// Panel (365 data): the Microsoft 365 Current Channel data.
     pub panel_365: LayoutSet,
 }
 
 /// The [`crate::v2::LayoutKind`] of the requested layout, borrowed.
 ///
-/// Only the two Fluent-data layouts have a [`LayoutSet`]; Panel Modern
-/// and Panel Classic read the hand-curated v2 files (`ui_spec::v2`,
-/// ADR 0061) and return `None` here.
+/// All four kinds have a [`LayoutSet`]: Panel Modern and Panel
+/// Classic carry the hand-curated v2 files, the two Fluent-data kinds
+/// carry their v1 layout plus the [`v2::from_v1`] conversion (ADR
+/// 0061). The borrow keeps every set usable.
 impl LayoutSets {
-    /// The set for `kind`, when the kind has v1 data (borrowed, so the
-    /// caller keeps both).
+    /// The set for `kind`, when the kind has v1 data (borrowed, so
+    /// the caller keeps all four).
+    ///
+    /// The shell gates every v1 widget on this `Option` (ADR 0032):
+    /// Panel Modern and Panel Classic must draw no v1 widgets, so
+    /// they answer `None` here (task P7-00) and their sets are read
+    /// from the [`Self::panel_modern`] and [`Self::panel_classic`]
+    /// fields. Task P7-09 draws those kinds from [`crate::v2`] and
+    /// drops the `Option`.
     pub fn get(&self, kind: LayoutKind) -> Option<&LayoutSet> {
         match kind {
             LayoutKind::Panel2016 => Some(&self.panel_2016),
@@ -1052,12 +1082,47 @@ mod tests {
     }
 
     #[test]
-    fn layout_sets_get_is_empty_for_the_curated_layouts() {
-        // Panel Modern and Panel Classic read the v2 files (ADR 0061),
-        // so no `LayoutSet` backs them (task P7-00).
+    fn layout_sets_get_answers_only_for_the_v1_data_kinds() {
+        // The shell gates every v1 widget on this `Option` (ADR 0032):
+        // Panel Modern and Panel Classic draw no v1 widgets (task
+        // P7-00), so `get` answers `None` for them until P7-09 draws
+        // those kinds from `v2`. All four sets stay wired: the loader
+        // fills the fields and `tests/v2_layouts.rs` pins them.
         let sets = LayoutSets::default();
-        assert!(sets.get(LayoutKind::PanelModern).is_none());
-        assert!(sets.get(LayoutKind::PanelClassic).is_none());
+        let cases = [
+            (LayoutKind::Panel2016, true),
+            (LayoutKind::Panel365, true),
+            (LayoutKind::PanelModern, false),
+            (LayoutKind::PanelClassic, false),
+        ];
+        for (kind, has_v1) in cases {
+            assert_eq!(sets.get(kind).is_some(), has_v1, "{kind:?}");
+        }
+        assert_eq!(
+            sets.get(LayoutKind::Panel2016).map(|s| &s.layout),
+            Some(&sets.panel_2016.layout)
+        );
+        assert_eq!(sets.get(LayoutKind::PanelModern), None);
+        assert_eq!(sets.get(LayoutKind::PanelClassic), None);
+    }
+
+    #[test]
+    fn the_thin_accessors_run_through_function_pointers() {
+        // The shell and the lookup users call these accessors
+        // directly; calling them through function pointers here too
+        // keeps the standalone instrumented copies exercised whatever
+        // the inliner decides, so the coverage of the seams stays
+        // stable across builds.
+        let sets = LayoutSets::default();
+        let get: fn(&LayoutSets, LayoutKind) -> Option<&LayoutSet> = LayoutSets::get;
+        assert!(get(&sets, LayoutKind::Panel2016).is_some());
+        assert_eq!(get(&sets, LayoutKind::PanelClassic), None);
+        let empty: fn() -> CommandLookup = CommandLookup::empty;
+        let lookup = empty();
+        let len: fn(&CommandLookup) -> usize = CommandLookup::len;
+        let is_empty: fn(&CommandLookup) -> bool = CommandLookup::is_empty;
+        assert_eq!(len(&lookup), 0);
+        assert!(is_empty(&lookup));
     }
 
     #[test]
@@ -1549,6 +1614,7 @@ mod tests {
         round_trip(&LayoutSets {
             panel_2016: set.clone(),
             panel_365: set,
+            ..LayoutSets::default()
         });
         round_trip(&CommandLookup::empty());
         round_trip(&CommandLookup {

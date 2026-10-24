@@ -1,0 +1,6 @@
+# Test fixture for crates/ui-spec. Not real Microsoft data.
+schema_version: 1
+contexts:
+- id: empty_page
+  description: A drawing page with no shapes; nothing selected.
+commands: {}

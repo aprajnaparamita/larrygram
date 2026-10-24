@@ -47,6 +47,31 @@ fn copy_good_layouts(dir: &Path) {
     }
 }
 
+/// Copies the layout format v2 documents (and the icon SVGs) from the
+/// good fixture into a temp workspace (every load reads them too).
+#[allow(clippy::unwrap_used)] // test helper; tests may panic
+fn copy_good_v2(dir: &Path) {
+    let good = fixtures().join("good");
+    let source = good.join("ui-spec");
+    for name in ["icons.yaml", "contexts.yaml"] {
+        std::fs::copy(source.join(name), dir.join("ui-spec").join(name)).unwrap();
+    }
+    for sub in [
+        "layouts/panel-modern.yaml",
+        "layouts/panel-classic.yaml",
+        "themes/panel-modern.yaml",
+        "themes/panel-classic.yaml",
+    ] {
+        let target = dir.join("ui-spec").join(sub);
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        std::fs::copy(source.join(sub), target).unwrap();
+    }
+    let svg = good.join("assets/icons/save.svg");
+    let target = dir.join("assets/icons/save.svg");
+    std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+    std::fs::copy(svg, target).unwrap();
+}
+
 #[test]
 fn loader_reads_both_layouts_from_the_good_fixture() {
     let loader = Loader::new(fixtures().join("good")).unwrap();
@@ -118,6 +143,7 @@ fn bad_fixture_is_rejected_with_a_schema_error() {
     let dir = temp_workspace("bad");
     copy_good_layouts(&dir);
     copy_good_tables(&dir);
+    copy_good_v2(&dir);
     std::fs::copy(
         fixtures().join("bad.yaml"),
         dir.join("ui-spec").join("panel-2016.yaml"),
@@ -234,6 +260,7 @@ fn empty_shortcut_table_loads() {
     let dir = temp_workspace("empty-shortcuts");
     copy_good_layouts(&dir);
     copy_good_tables(&dir);
+    copy_good_v2(&dir);
     std::fs::write(dir.join("ui-spec/shortcuts.yaml"), "[]\n").unwrap();
 
     let loader = Loader::new(&dir).unwrap();
@@ -296,6 +323,7 @@ quick_access_toolbar:
     }
     std::fs::write(dir.join("ui-spec/commands.yaml"), "[]\n").unwrap();
     std::fs::write(dir.join("ui-spec/shortcuts.yaml"), "[]\n").unwrap();
+    copy_good_v2(&dir);
 
     let loader = Loader::new(&dir).unwrap();
     let set = loader.load(LayoutKind::Panel2016).unwrap();
@@ -382,6 +410,7 @@ fn json_data_files_load_too() {
         r#"[{"sequence": [["Ctrl", "Z"]], "command": "edit.undo", "scope": "global"}]"#,
     )
     .unwrap();
+    copy_good_v2(&dir);
 
     let loader = Loader::new(&dir).unwrap();
     // No `.yaml` data file exists in this workspace: every read goes

@@ -1,23 +1,31 @@
 //! Layout format v2 (ADR 0061): the type surface the Panel Modern and
 //! Panel Classic widgets read.
 //!
-//! Task P7-01 defines the types and the layout-kind enum as interface
-//! stubs. Every function in this module returns
-//! [`V2Error::NotImplemented`] until task P7-03 implements the loader,
-//! the schema check and the v1 adapter. The machine-checked shape of
-//! the data is `ui-spec/layout-v2.schema.json`, and the guide is
-//! `docs/ui/layout-format.md`.
+//! The machine-checked shape of the data is
+//! `ui-spec/layout-v2.schema.json`, and the guide is
+//! `docs/ui/layout-format.md`. [`load_layout`] loads one committed
+//! layout from the embedded copies; [`crate::Loader`] reads the same
+//! documents from disk, with the cross-checks of task P7-03
+//! ([`crate::LoadError`]). [`from_v1`] converts the v1 Fluent-data
+//! layouts into this model.
 //!
 //! The four layouts are Panel Modern (`panel-modern`, the 2013 data),
 //! Panel Classic (`panel-classic`, the 2007 data), Panel (2016 data)
 //! and Panel (365 data). The two Fluent-data layouts are converted
-//! into this model by [`from_v1`] (P7-03).
+//! into this model by [`from_v1`] (ADR 0061 "Adapter for v1
+//! layouts").
+
+mod adapter;
+pub(crate) mod load;
 
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{CommandId, FluentId, Layout};
+use crate::{CommandId, FluentId};
+
+pub use adapter::from_v1;
+pub use load::load_layout;
 
 /// Which of the four layouts a file or setting names.
 ///
@@ -81,12 +89,13 @@ impl LayoutKind {
 
 /// The container style a layout uses, as the `kind` field of a layout
 /// file: `panel-classic` or `panel-modern`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum PanelStyle {
     /// Menu bars, toolbars and context menus.
     PanelClassic,
     /// Tabs with placed controls, a File view and context menus.
+    #[default]
     PanelModern,
 }
 
@@ -202,7 +211,7 @@ pub enum GroupLayout {
 /// The first ten variants are the selection contexts; `StencilEdit` is
 /// the window mode that `shown_in` also accepts. The UI-side enum with
 /// `PageSelected` lives in `crates/ui/src/contexts.rs`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ContextId {
     /// A page with no shapes, nothing selected.
@@ -227,6 +236,26 @@ pub enum ContextId {
     ShapesheetWindow,
     /// A stencil is open for editing (a window mode).
     StencilEdit,
+}
+
+impl ContextId {
+    /// The id string used in `ui-spec/contexts.yaml` and `shown_in`.
+    pub fn as_str(self) -> &'static str {
+        use ContextId as C;
+        match self {
+            C::EmptyPage => "empty_page",
+            C::ShapeSelected => "shape_selected",
+            C::ShapesSelected => "shapes_selected",
+            C::TextEditing => "text_editing",
+            C::ConnectorSelected => "connector_selected",
+            C::GroupSelected => "group_selected",
+            C::SecondPage => "second_page",
+            C::PictureSelected => "picture_selected",
+            C::ContainerSelected => "container_selected",
+            C::ShapesheetWindow => "shapesheet_window",
+            C::StencilEdit => "stencil_edit",
+        }
+    }
 }
 
 /// The kind of a File view navigation entry.
@@ -314,6 +343,12 @@ pub struct Launcher {
     pub label: Option<String>,
     /// The command dispatched on activation.
     pub command: CommandId,
+    /// Fluent control id, cross-reference only.
+    #[serde(default)]
+    pub fluent: Option<FluentId>,
+    /// The `command` id is a Phase 7 proposal (task P7-03).
+    #[serde(default)]
+    pub new_command: bool,
 }
 
 /// One group of a tab (`groups`).
@@ -324,6 +359,9 @@ pub struct Group {
     /// Caption drawn along the bottom edge.
     #[serde(default)]
     pub label: Option<String>,
+    /// Fluent control id, cross-reference only.
+    #[serde(default)]
+    pub fluent: Option<FluentId>,
     /// Stack or rows.
     #[serde(default)]
     pub layout: GroupLayout,
@@ -674,33 +712,104 @@ pub struct Contexts {
     pub commands: BTreeMap<String, CommandAvailability>,
 }
 
-/// Why a v2 operation is not available (task P7-01 stub).
+impl Default for LayoutV2 {
+    /// An empty panel-modern layout: no surfaces and no items. The
+    /// loader fills every field from the data files.
+    fn default() -> Self {
+        Self {
+            schema_version: 2,
+            id: String::new(),
+            name: String::new(),
+            kind: PanelStyle::PanelModern,
+            description: None,
+            theme: String::new(),
+            window: Window {
+                regions: Vec::new(),
+            },
+            menu_bars: Vec::new(),
+            toolbars: Vec::new(),
+            quick_access_toolbar: Vec::new(),
+            file_button: None,
+            tabs: Vec::new(),
+            contextual_tabs: Vec::new(),
+            file_view: None,
+            context_menus: Vec::new(),
+        }
+    }
+}
+
+impl Default for Theme {
+    /// An empty theme: every token falls back to an egui default
+    /// (ADR 0063).
+    fn default() -> Self {
+        Self {
+            schema_version: 1,
+            id: String::new(),
+            name: String::new(),
+            fonts: BTreeMap::new(),
+            colors: BTreeMap::new(),
+            metrics: BTreeMap::new(),
+            contextual_tab_sets: BTreeMap::new(),
+        }
+    }
+}
+
+impl Default for IconSet {
+    /// The set an empty icon map draws from: nothing.
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            version: String::new(),
+            license: String::new(),
+            style: String::new(),
+            source: String::new(),
+            path: String::new(),
+        }
+    }
+}
+
+impl Default for IconMap {
+    /// An empty icon map: every key draws the placeholder mark (ADR
+    /// 0062).
+    fn default() -> Self {
+        Self {
+            schema_version: 1,
+            set: IconSet::default(),
+            fallback: String::new(),
+            tints: BTreeMap::new(),
+            icons: BTreeMap::new(),
+        }
+    }
+}
+
+impl Default for Contexts {
+    /// An empty contexts table: no context definitions, no rows.
+    fn default() -> Self {
+        Self {
+            schema_version: 1,
+            contexts: Vec::new(),
+            notes: Vec::new(),
+            commands: BTreeMap::new(),
+        }
+    }
+}
+
+/// Why a v2 operation failed (task P7-03).
 ///
-/// Task P7-03 adds the loader and cross-check failures and implements
-/// every function in this module.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+/// The v2 error type folds the loader errors in: loading and
+/// cross-checking report [`LoadError`](crate::LoadError), and the
+/// adapter reports a layout it cannot convert.
+#[derive(Debug, thiserror::Error)]
 pub enum V2Error {
-    /// The operation is not implemented yet.
-    #[error("not implemented yet")]
-    NotImplemented,
-}
-
-/// Loads one committed v2 layout (stub, task P7-01).
-///
-/// Task P7-03 reads `ui-spec/layouts/<kind>`, validates against
-/// `ui-spec/layout-v2.schema.json`, cross-checks the command and icon
-/// ids, and converts the v1 layouts with [`from_v1`].
-pub fn load_layout(_kind: LayoutKind) -> Result<LayoutV2, V2Error> {
-    Err(V2Error::NotImplemented)
-}
-
-/// Converts a v1 Fluent-data layout into the v2 model (stub, task
-/// P7-01).
-///
-/// Task P7-03 implements the rules in ADR 0061 ("Adapter for v1
-/// layouts").
-pub fn from_v1(_layout: &Layout) -> Result<LayoutV2, V2Error> {
-    Err(V2Error::NotImplemented)
+    /// A data file failed to load, validate or cross-check.
+    #[error(transparent)]
+    Load(#[from] crate::LoadError),
+    /// The v1 layout cannot be converted (wrong `schema_version`).
+    #[error("cannot convert the v1 layout: {message}")]
+    Convert {
+        /// What is wrong with the layout.
+        message: String,
+    },
 }
 
 #[cfg(test)]
@@ -743,16 +852,56 @@ mod tests {
     }
 
     #[test]
-    fn load_layout_is_not_implemented() {
-        let error = load_layout(LayoutKind::PanelModern).expect_err("must be a stub");
-        assert_eq!(error, V2Error::NotImplemented);
-        assert_eq!(error.to_string(), "not implemented yet");
+    fn v2_error_folds_the_loader_errors_in() {
+        let load: V2Error = crate::LoadError::Unknown {
+            path: std::path::PathBuf::from("ui-spec/layouts/panel-modern.yaml"),
+            message: "broken".to_owned(),
+        }
+        .into();
+        assert_eq!(
+            load.to_string(),
+            "ui-spec/layouts/panel-modern.yaml: broken"
+        );
+        let convert = V2Error::Convert {
+            message: "nope".to_owned(),
+        };
+        assert_eq!(convert.to_string(), "cannot convert the v1 layout: nope");
     }
 
     #[test]
-    fn from_v1_is_not_implemented() {
-        let error = from_v1(&Layout::default()).expect_err("must be a stub");
-        assert_eq!(error, V2Error::NotImplemented);
+    fn context_ids_are_the_data_names() {
+        let names: Vec<&str> = [
+            ContextId::EmptyPage,
+            ContextId::ShapeSelected,
+            ContextId::ShapesSelected,
+            ContextId::TextEditing,
+            ContextId::ConnectorSelected,
+            ContextId::GroupSelected,
+            ContextId::SecondPage,
+            ContextId::PictureSelected,
+            ContextId::ContainerSelected,
+            ContextId::ShapesheetWindow,
+            ContextId::StencilEdit,
+        ]
+        .iter()
+        .map(|id| id.as_str())
+        .collect();
+        assert_eq!(
+            names,
+            vec![
+                "empty_page",
+                "shape_selected",
+                "shapes_selected",
+                "text_editing",
+                "connector_selected",
+                "group_selected",
+                "second_page",
+                "picture_selected",
+                "container_selected",
+                "shapesheet_window",
+                "stencil_edit",
+            ]
+        );
     }
 
     #[test]

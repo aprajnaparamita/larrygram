@@ -533,9 +533,12 @@ mod tests {
         }
     }
 
-    /// Loader check (P1-04): the committed quartet loads with the
-    /// runtime [`larrygram_ui_spec::Loader`], including the three ADR
-    /// 0007 cross-references.
+    /// Loader check (P1-04): the committed `ui-spec/` data loads
+    /// with the runtime [`larrygram_ui_spec::Loader`], including the
+    /// three ADR 0007 cross-references. The fixture mirrors the
+    /// loader's whole data set (`ui-spec/` with the v2 documents of
+    /// task P7-03, plus the icon set the `icon_file` cross-check
+    /// resolves) in a temp workspace.
     #[test]
     fn committed_ui_spec_loads_with_the_runtime_loader() {
         use larrygram_ui_spec::Loader;
@@ -553,14 +556,14 @@ mod tests {
             return;
         }
         let tmp = crate::util::test_support::TempDir::new("ui-loader");
-        let data = tmp.join("ui-spec");
-        std::fs::create_dir_all(&data).unwrap();
-        for f in files {
-            std::fs::copy(ui.join(f), data.join(f)).unwrap();
-        }
+        crate::util::test_support::copy_tree(&ui, &tmp.join("ui-spec"));
+        crate::util::test_support::copy_tree(
+            &root.join("crates/ui/assets/icons/tabler"),
+            &tmp.join("crates/ui/assets/icons/tabler"),
+        );
 
         let loader = Loader::new(tmp.path()).expect("loader compiles");
-        let sets = loader.load_all().expect("the committed quartet loads");
+        let sets = loader.load_all().expect("the committed data loads");
         assert!(!sets.panel_365.commands.entries.is_empty());
         assert!(!sets.panel_365.shortcuts.entries.is_empty());
     }

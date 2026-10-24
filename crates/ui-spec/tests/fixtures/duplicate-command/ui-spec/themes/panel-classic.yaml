@@ -1,0 +1,4 @@
+# Test fixture for crates/ui-spec. Not real Microsoft data.
+schema_version: 1
+id: panel-classic
+name: Panel Classic (fixture)

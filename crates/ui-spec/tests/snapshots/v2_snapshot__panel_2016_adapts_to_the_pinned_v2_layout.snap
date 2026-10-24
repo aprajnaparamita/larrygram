@@ -1,0 +1,585 @@
+---
+source: crates/ui-spec/tests/v2_snapshot.rs
+expression: render_layout(&layout)
+---
+panel-2016 "Panel (2016 data)" theme=panel-modern kind=PanelModern
+description: Adapted from the v1 Fluent data (Office Fluent UI 2016, Visio).
+window title_bar Top size=Some(25.0)
+window tab_strip Top size=Some(25.0)
+window command_bar Top size=Some(93.0)
+window shapes_window Left size=Some(262.0)
+window rulers TopLeftOfDrawing size=Some(16.0)
+window drawing Fill size=None
+window page_tabs BottomOfDrawing size=Some(40.0)
+window status_bar Bottom size=Some(22.0)
+quick_access_toolbar (9):
+  qat.spelling button label="Spelling" cmd=review.spelling.change fluent=Spelling icon=review.spelling.change
+  qat.file_save button label="File Save" cmd=file.save fluent=FileSave icon=file.save
+  qat.undo dropdown label="Undo" cmd=edit.undo fluent=Undo icon=edit.undo
+  qat.redo_or_repeat button label="Redo Or Repeat" cmd=edit.redo.or.repeat fluent=RedoOrRepeat icon=edit.redo.or.repeat
+  qat.file_send_as_attachment button label="File Send As Attachment" cmd=file.send.as.attachment fluent=FileSendAsAttachment icon=file.send.as.attachment
+  qat.file_new_default button label="File New Default" cmd=file.new fluent=FileNewDefault icon=file.new
+  qat.file_print_quick button label="File Print Quick" cmd=file.print fluent=FilePrintQuick icon=file.print
+  qat.file_open_using_backstage button label="File Open Using Backstage" cmd=file.open fluent=FileOpenUsingBackstage icon=file.open
+  qat.pointer_mode_options dropdown label="Pointer Mode Options" cmd=tools.pointer.mode.options fluent=PointerModeOptions icon=tools.pointer.mode.options
+tab tab_home Some("Home")
+group tab_home.group_clipboard Some("Clipboard") layout=Stack rows=None
+  tab_home.group_clipboard.copy button label="Copy" cmd=edit.copy fluent=Copy icon=edit.copy
+  tab_home.group_clipboard.cut button label="Cut" cmd=edit.cut fluent=Cut icon=edit.cut
+  tab_home.group_clipboard.format_painter button label="Format Painter" cmd=tools.format_painter fluent=FormatPainter icon=tools.format_painter
+  tab_home.group_clipboard.paste_menu split label="Paste Menu" cmd=edit.paste fluent=PasteMenu icon=edit.paste
+    tab_home.group_clipboard.paste_menu.paste button label="Paste" cmd=edit.paste fluent=Paste icon=edit.paste
+    tab_home.group_clipboard.paste_menu.paste_duplicate button label="Paste Duplicate" cmd=edit.paste.duplicate fluent=PasteDuplicate icon=edit.paste.duplicate
+    tab_home.group_clipboard.paste_menu.paste_special_dialog button label="Paste Special Dialog" cmd=edit.paste.special.dialog fluent=PasteSpecialDialog icon=edit.paste.special.dialog
+    tab_home.group_clipboard.paste_menu.paste_as_hyperlink button label="Paste As Hyperlink" cmd=tools.inet.paste.as.hyperlink fluent=PasteAsHyperlink icon=tools.inet.paste.as.hyperlink
+group tab_home.group_font Some("Font") layout=Stack rows=None
+  tab_home.group_font.bold toggle label="Bold" cmd=format.text.bold fluent=Bold icon=format.text.bold
+  tab_home.group_font.italic toggle label="Italic" cmd=format.text.italic fluent=Italic icon=format.text.italic
+  tab_home.group_font.underline toggle label="Underline" cmd=format.text.underline fluent=Underline icon=format.text.underline
+  tab_home.group_font.strikethrough toggle label="Strikethrough" cmd=tools.strikethrough fluent=Strikethrough icon=tools.strikethrough
+  tab_home.group_font.change_case_dialog_classic dropdown label="Change Case Dialog Classic" cmd=tools.change.case.dialog.classic fluent=ChangeCaseDialogClassic icon=tools.change.case.dialog.classic
+    tab_home.group_font.change_case_dialog_classic.text_small_caps toggle label="Text Small Caps" cmd=format.text.small_caps fluent=TextSmallCaps icon=format.text.small_caps
+    tab_home.group_font.change_case_dialog_classic.text_all_caps toggle label="Text All Caps" cmd=format.text.all_caps fluent=TextAllCaps icon=format.text.all_caps
+    tab_home.group_font.change_case_dialog_classic.text_normal_case toggle label="Text Normal Case" cmd=text.normal.case fluent=TextNormalCase icon=text.normal.case
+    tab_home.group_font.change_case_dialog_classic.text_initial_caps toggle label="Text Initial Caps" cmd=text.initial.caps fluent=TextInitialCaps icon=text.initial.caps
+  tab_home.group_font.font_size_increase button label="Font Size Increase" cmd=text.font.size.increase fluent=FontSizeIncrease icon=text.font.size.increase
+  tab_home.group_font.font_size_decrease button label="Font Size Decrease" cmd=text.font.size.decrease fluent=FontSizeDecrease icon=text.font.size.decrease
+  tab_home.group_font.font combo label="Font" cmd=text.font fluent=Font icon=text.font
+  tab_home.group_font.font_size combo label="Font Size" cmd=text.font.size fluent=FontSize icon=text.font.size
+  tab_home.group_font.font_dialog_visio launcher label="Font Dialog Visio" fluent=FontDialogVisio
+  tab_home.group_font.font_color_gallery dropdown label="Font Color Gallery" cmd=text.font.color fluent=FontColorGallery icon=text.font.color
+group tab_home.group_paragraph Some("Paragraph") layout=Stack rows=None
+  tab_home.group_paragraph.bullets toggle label="Bullets" cmd=text.bullets fluent=Bullets icon=text.bullets
+  tab_home.group_paragraph.align_left toggle label="Align Left" cmd=format.text.align_left fluent=AlignLeft icon=format.text.align_left
+  tab_home.group_paragraph.align_right toggle label="Align Right" cmd=format.text.align_right fluent=AlignRight icon=format.text.align_right
+  tab_home.group_paragraph.align_center toggle label="Align Center" cmd=format.text.align_center fluent=AlignCenter icon=format.text.align_center
+  tab_home.group_paragraph.align_justify toggle label="Align Justify" cmd=format.text.align_justify fluent=AlignJustify icon=format.text.align_justify
+  tab_home.group_paragraph.text_direction_left_to_right toggle label="Text Direction Left To Right" cmd=text.direction.left.to.right fluent=TextDirectionLeftToRight icon=text.direction.left.to.right
+  tab_home.group_paragraph.text_direction_right_to_left toggle label="Text Direction Right To Left" cmd=text.direction.right.to.left fluent=TextDirectionRightToLeft icon=text.direction.right.to.left
+  tab_home.group_paragraph.text_align_top toggle label="Text Align Top" cmd=format.text.align_top fluent=TextAlignTop icon=format.text.align_top
+  tab_home.group_paragraph.text_align_bottom toggle label="Text Align Bottom" cmd=format.text.align_bottom fluent=TextAlignBottom icon=format.text.align_bottom
+  tab_home.group_paragraph.text_align_middle toggle label="Text Align Middle" cmd=format.text.align_middle fluent=TextAlignMiddle icon=format.text.align_middle
+  tab_home.group_paragraph.text_direction_vertical button label="Text Direction Vertical" cmd=text.direction.vertical fluent=TextDirectionVertical icon=text.direction.vertical
+  tab_home.group_paragraph.indent_increase_word button label="Indent Increase Word" cmd=format.increase.indent fluent=IndentIncreaseWord icon=format.increase.indent
+  tab_home.group_paragraph.indent_decrease_word button label="Indent Decrease Word" cmd=format.decrease.indent fluent=IndentDecreaseWord icon=format.decrease.indent
+  tab_home.group_paragraph.text_rotate90_degrees button label="Text Rotate90 Degrees" cmd=text.rotate90 fluent=TextRotate90Degrees icon=text.rotate90
+  tab_home.group_paragraph.paragraph_dialog_visio launcher label="Paragraph Dialog Visio" fluent=ParagraphDialogVisio
+group tab_home.group_tools Some("Tools") layout=Stack rows=None
+  tab_home.group_tools.pointer_tool toggle label="Pointer Tool" cmd=tools.pointer fluent=PointerTool icon=tools.pointer
+  tab_home.group_tools.connector_tool toggle label="Connector Tool" cmd=tools.connector fluent=ConnectorTool icon=tools.connector
+  tab_home.group_tools.connection_point_tool toggle label="Connection Point Tool" cmd=tools.connection.point fluent=ConnectionPointTool icon=tools.connection.point
+  tab_home.group_tools.text_tool toggle label="Text Tool" cmd=tools.text fluent=TextTool icon=tools.text
+  tab_home.group_tools.text_block_tool toggle label="Text Block Tool" cmd=tools.text_block fluent=TextBlockTool icon=tools.text_block
+  tab_home.group_tools.drawing_tools_menu split label="Drawing Tools Menu" cmd=shape.drawing.tools fluent=DrawingToolsMenu icon=shape.drawing.tools
+    tab_home.group_tools.drawing_tools_menu.rectangle_tool toggle label="Rectangle Tool" cmd=tools.rectangle fluent=RectangleTool icon=tools.rectangle
+    tab_home.group_tools.drawing_tools_menu.ellipse_tool toggle label="Ellipse Tool" cmd=tools.ellipse fluent=EllipseTool icon=tools.ellipse
+    tab_home.group_tools.drawing_tools_menu.line_tool toggle label="Line Tool" cmd=format.line fluent=LineTool icon=format.line
+    tab_home.group_tools.drawing_tools_menu.arc_tool toggle label="Arc Tool" cmd=shape.arc fluent=ArcTool icon=shape.arc
+    tab_home.group_tools.drawing_tools_menu.freeform_tool toggle label="Freeform Tool" cmd=tools.freeform fluent=FreeformTool icon=tools.freeform
+    tab_home.group_tools.drawing_tools_menu.pencil_tool toggle label="Pencil Tool" cmd=tools.pencil fluent=PencilTool icon=tools.pencil
+group tab_home.group_shape_styles Some("Shape Styles") layout=Stack rows=None
+  tab_home.group_shape_styles.object_format_dialog launcher label="Object Format Dialog" fluent=ObjectFormatDialog
+  tab_home.group_shape_styles.shape_styles_gallery dropdown label="Shape Styles Gallery" cmd=shape.styles fluent=ShapeStylesGallery icon=shape.styles
+    tab_home.group_shape_styles.shape_styles_gallery.allow_themes toggle label="Allow Themes" cmd=tools.allow.themes fluent=AllowThemes icon=tools.allow.themes
+    tab_home.group_shape_styles.shape_styles_gallery.remove_theme button label="Remove Theme" cmd=edit.remove.theme.from.sel fluent=RemoveTheme icon=edit.remove.theme.from.sel
+  tab_home.group_shape_styles.shape_effects_menu dropdown label="Shape Effects Menu" cmd=shape.effects fluent=ShapeEffectsMenu icon=shape.effects
+    tab_home.group_shape_styles.shape_effects_menu.x_3_d_rotation_gallery dropdown label="3 D Rotation Gallery" cmd=tools.rotation_3d fluent=_3DRotationGallery icon=tools.rotation_3d
+    tab_home.group_shape_styles.shape_effects_menu.object_effect_soft_edges_gallery dropdown label="Object Effect Soft Edges Gallery" cmd=arrange.object.effect.soft.edges fluent=ObjectEffectSoftEdgesGallery icon=arrange.object.effect.soft.edges
+    tab_home.group_shape_styles.shape_effects_menu.object_effect_glow_gallery dropdown label="Object Effect Glow Gallery" cmd=arrange.object.effect.glow fluent=ObjectEffectGlowGallery icon=arrange.object.effect.glow
+    tab_home.group_shape_styles.shape_effects_menu.object_effect_shadow_gallery dropdown label="Object Effect Shadow Gallery" cmd=arrange.object.effect.shadow fluent=ObjectEffectShadowGallery icon=arrange.object.effect.shadow
+    tab_home.group_shape_styles.shape_effects_menu.shadow_options_dialog button label="Shadow Options Dialog" cmd=tools.shadow.options.dialog fluent=ShadowOptionsDialog icon=tools.shadow.options.dialog
+    tab_home.group_shape_styles.shape_effects_menu.x_3_d_rotation_options_dialog button label="3 D Rotation Options Dialog" cmd=tools.rotation_3d_options fluent=_3DRotationOptionsDialog icon=tools.rotation_3d_options
+    tab_home.group_shape_styles.shape_effects_menu.x_3_d_bevel_options_dialog button label="3 D Bevel Options Dialog" cmd=tools.bevel_options_3d fluent=_3DBevelOptionsDialog icon=tools.bevel_options_3d
+    tab_home.group_shape_styles.shape_effects_menu.reflection_gallery dropdown label="Reflection Gallery" cmd=tools.reflection fluent=ReflectionGallery icon=tools.reflection
+    tab_home.group_shape_styles.shape_effects_menu.bevel_shape_gallery dropdown label="Bevel Shape Gallery" cmd=tools.bevel.shape fluent=BevelShapeGallery icon=tools.bevel.shape
+    tab_home.group_shape_styles.shape_effects_menu.reflections_more_options button label="Reflections More Options" cmd=tools.reflections.more.options fluent=ReflectionsMoreOptions icon=tools.reflections.more.options
+    tab_home.group_shape_styles.shape_effects_menu.glows_more_options button label="Glows More Options" cmd=tools.glows.more.options fluent=GlowsMoreOptions icon=tools.glows.more.options
+    tab_home.group_shape_styles.shape_effects_menu.soft_edges_more_options button label="Soft Edges More Options" cmd=tools.soft.edges.more.options fluent=SoftEdgesMoreOptions icon=tools.soft.edges.more.options
+  tab_home.group_shape_styles.fill_color_gallery dropdown label="Fill Color Gallery" cmd=format.set.fill.color fluent=FillColorGallery icon=format.set.fill.color
+    tab_home.group_shape_styles.fill_color_gallery.fill_dialog button label="Fill Dialog" cmd=tools.fill.dialog fluent=FillDialog icon=tools.fill.dialog
+  tab_home.group_shape_styles.line_color_gallery dropdown label="Line Color Gallery" cmd=format.set.line.color fluent=LineColorGallery icon=format.set.line.color
+    tab_home.group_shape_styles.line_color_gallery.line_styles_dialog button label="Line Styles Dialog" cmd=tools.line.styles.dialog fluent=LineStylesDialog icon=tools.line.styles.dialog
+    tab_home.group_shape_styles.line_color_gallery.line_styles_dialog_2 button label="Line Styles Dialog" cmd=tools.line.styles.dialog fluent=LineStylesDialog icon=tools.line.styles.dialog
+    tab_home.group_shape_styles.line_color_gallery.arrows_more button label="Arrows More" cmd=tools.arrows.more fluent=ArrowsMore icon=tools.arrows.more
+    tab_home.group_shape_styles.line_color_gallery.line_dialog button label="Line Dialog" cmd=tools.line.dialog fluent=LineDialog icon=tools.line.dialog
+    tab_home.group_shape_styles.line_color_gallery.line_arrows_gallery dropdown label="Line Arrows Gallery" cmd=tools.line.arrows fluent=LineArrowsGallery icon=tools.line.arrows
+    tab_home.group_shape_styles.line_color_gallery.line_weight_gallery dropdown label="Line Weight Gallery" cmd=format.set.line.weight fluent=LineWeightGallery icon=format.set.line.weight
+    tab_home.group_shape_styles.line_color_gallery.line_pattern_gallery dropdown label="Line Pattern Gallery" cmd=format.set.line.pattern fluent=LinePatternGallery icon=format.set.line.pattern
+group tab_home.group_arrange Some("Arrange") layout=Stack rows=None
+  tab_home.group_arrange.object_bring_to_front_menu split label="Object Bring To Front Menu" cmd=arrange.bring_to_front fluent=ObjectBringToFrontMenu icon=arrange.bring_to_front
+    tab_home.group_arrange.object_bring_to_front_menu.object_bring_to_front button label="Object Bring To Front" cmd=arrange.bring_to_front fluent=ObjectBringToFront icon=arrange.bring_to_front
+    tab_home.group_arrange.object_bring_to_front_menu.object_bring_forward button label="Object Bring Forward" cmd=arrange.bring_forward fluent=ObjectBringForward icon=arrange.bring_forward
+  tab_home.group_arrange.object_send_to_back_menu split label="Object Send To Back Menu" cmd=arrange.send_to_back fluent=ObjectSendToBackMenu icon=arrange.send_to_back
+    tab_home.group_arrange.object_send_to_back_menu.object_send_to_back button label="Object Send To Back" cmd=arrange.send_to_back fluent=ObjectSendToBack icon=arrange.send_to_back
+    tab_home.group_arrange.object_send_to_back_menu.object_send_backward button label="Object Send Backward" cmd=arrange.send_backward fluent=ObjectSendBackward icon=arrange.send_backward
+  tab_home.group_arrange.objects_group_menu dropdown label="Objects Group Menu" cmd=arrange.group fluent=ObjectsGroupMenu icon=arrange.group
+    tab_home.group_arrange.objects_group_menu.objects_group button label="Objects Group" cmd=arrange.group fluent=ObjectsGroup icon=arrange.group
+    tab_home.group_arrange.objects_group_menu.objects_ungroup button label="Objects Ungroup" cmd=arrange.ungroup fluent=ObjectsUngroup icon=arrange.ungroup
+    tab_home.group_arrange.objects_group_menu.objects_add_to_group button label="Objects Add To Group" cmd=tools.objects.add.to fluent=ObjectsAddToGroup icon=tools.objects.add.to
+    tab_home.group_arrange.objects_group_menu.objects_convert_to_group button label="Objects Convert To Group" cmd=tools.objects.convert.to fluent=ObjectsConvertToGroup icon=tools.objects.convert.to
+    tab_home.group_arrange.objects_group_menu.objects_remove_from_group button label="Objects Remove From Group" cmd=tools.objects.remove.from fluent=ObjectsRemoveFromGroup icon=tools.objects.remove.from
+  tab_home.group_arrange.position_menu dropdown label="Position Menu" cmd=arrange.position fluent=PositionMenu icon=arrange.position
+    tab_home.group_arrange.position_menu.shapes_rotate_gallery dropdown label="Shapes Rotate Gallery" cmd=shape.shapes.rotate fluent=ShapesRotateGallery icon=shape.shapes.rotate
+    tab_home.group_arrange.position_menu.rotate_diagram dropdown label="Rotate Diagram" cmd=arrange.rotate_left fluent=RotateDiagram icon=arrange.rotate_left
+  tab_home.group_arrange.align_gallery dropdown label="Align Gallery" cmd=arrange.align.box fluent=AlignGallery icon=arrange.align.box
+group tab_home.group_editing Some("Editing") layout=Stack rows=None
+  tab_home.group_editing.select_menu dropdown label="Select Menu" cmd=edit.select.special fluent=SelectMenu icon=edit.select.special
+    tab_home.group_editing.select_menu.select_all button label="Select All" cmd=edit.select_all fluent=SelectAll icon=edit.select_all
+    tab_home.group_editing.select_menu.lasso_select_visio toggle label="Lasso Select Visio" cmd=tools.lasso.select.visio fluent=LassoSelectVisio icon=tools.lasso.select.visio
+    tab_home.group_editing.select_menu.select_by_type_dialog button label="Select By Type Dialog" cmd=edit.select.by.type.dialog fluent=SelectByTypeDialog icon=edit.select.by.type.dialog
+    tab_home.group_editing.select_menu.area_select toggle label="Area Select" cmd=tools.area.select fluent=AreaSelect icon=tools.area.select
+  tab_home.group_editing.find_menu dropdown label="Find Menu" cmd=edit.find fluent=FindMenu icon=edit.find
+    tab_home.group_editing.find_menu.find_dialog button label="Find Dialog" cmd=tools.find.dialog fluent=FindDialog icon=tools.find.dialog
+    tab_home.group_editing.find_menu.replace_dialog button label="Replace Dialog" cmd=edit.replace.dialog fluent=ReplaceDialog icon=edit.replace.dialog
+  tab_home.group_editing.layers_menu dropdown label="Layers Menu" cmd=tools.layers fluent=LayersMenu icon=tools.layers
+    tab_home.group_editing.layers_menu.layer_properties_dialog button label="Layer Properties Dialog" cmd=layer.properties.dialog fluent=LayerPropertiesDialog icon=layer.properties.dialog
+    tab_home.group_editing.layers_menu.layer_dialog button label="Layer Dialog" cmd=layer.dialog fluent=LayerDialog icon=layer.dialog
+  tab_home.group_editing.replace_shape dropdown label="Replace Shape" cmd=edit.replace.shape fluent=ReplaceShape icon=edit.replace.shape
+tab tab_insert Some("Insert")
+group tab_insert.group_insert_pages Some("Insert Pages") layout=Stack rows=None
+  tab_insert.group_insert_pages.blank_page_insert_menu split label="Blank Page Insert Menu" cmd=tools.blank.page.insert fluent=BlankPageInsertMenu icon=tools.blank.page.insert
+    tab_insert.group_insert_pages.blank_page_insert_menu.background_page_insert button label="Background Page Insert" cmd=insert.new.background.page fluent=BackgroundPageInsert icon=insert.new.background.page
+    tab_insert.group_insert_pages.blank_page_insert_menu.blank_page_insert_visio button label="Blank Page Insert Visio" cmd=tools.blank.page.insert.visio fluent=BlankPageInsertVisio icon=tools.blank.page.insert.visio
+    tab_insert.group_insert_pages.blank_page_insert_menu.duplicate_this_page button label="Duplicate This Page" cmd=edit.duplicate.page fluent=DuplicateThisPage icon=edit.duplicate.page
+group tab_insert.group_insert_illustrations Some("Insert Illustrations") layout=Stack rows=None
+  tab_insert.group_insert_illustrations.chart_insert button label="Chart Insert" cmd=tools.chart.insert fluent=ChartInsert icon=tools.chart.insert
+  tab_insert.group_insert_illustrations.picture_insert_from_file button label="Picture Insert From File" cmd=tools.picture.insert.from.file fluent=PictureInsertFromFile icon=tools.picture.insert.from.file
+  tab_insert.group_insert_illustrations.cad_drawing button label="Cad Drawing" cmd=tools.cad.drawing fluent=CadDrawing icon=tools.cad.drawing
+  tab_insert.group_insert_illustrations.clip_art_insert_dialog button label="Clip Art Insert Dialog" cmd=insert.clip.art fluent=ClipArtInsertDialog icon=insert.clip.art
+group tab_insert.group_diagram_parts Some("Diagram Parts") layout=Stack rows=None
+  tab_insert.group_diagram_parts.container_gallery dropdown label="Container Gallery" cmd=insert.add.to.new.container fluent=ContainerGallery icon=insert.add.to.new.container
+  tab_insert.group_diagram_parts.callout_gallery dropdown label="Callout Gallery" cmd=shape.associate.callout fluent=CalloutGallery icon=shape.associate.callout
+  tab_insert.group_diagram_parts.quick_connector_tool toggle label="Quick Connector Tool" cmd=tools.quick.connector fluent=QuickConnectorTool icon=tools.quick.connector
+group tab_insert.group_insert_links Some("Insert Links") layout=Stack rows=None
+  tab_insert.group_insert_links.hyperlink_insert button label="Hyperlink Insert" cmd=tools.hyperlink.insert fluent=HyperlinkInsert icon=tools.hyperlink.insert
+group tab_insert.group_text_box_text Some("Text Box Text") layout=Stack rows=None
+  tab_insert.group_text_box_text.ole_objectct_insert button label="Ole Objectct Insert" cmd=tools.ole.objectct.insert fluent=OleObjectctInsert icon=tools.ole.objectct.insert
+  tab_insert.group_text_box_text.field_insert button label="Field Insert" cmd=edit.insert.field fluent=FieldInsert icon=edit.insert.field
+  tab_insert.group_text_box_text.symbol_insert_gallery dropdown label="Symbol Insert Gallery" cmd=tools.mso.insert.symbol fluent=SymbolInsertGallery icon=tools.mso.insert.symbol
+    tab_insert.group_text_box_text.symbol_insert_gallery.symbols_dialog button label="Symbols Dialog" cmd=tools.symbols.dialog fluent=SymbolsDialog icon=tools.symbols.dialog
+  tab_insert.group_text_box_text.text_box_insert_menu split label="Text Box Insert Menu" cmd=insert.text.box fluent=TextBoxInsertMenu icon=insert.text.box
+    tab_insert.group_text_box_text.text_box_insert_menu.text_box_insert_vertical toggle label="Text Box Insert Vertical" cmd=insert.vert.text.box fluent=TextBoxInsertVertical icon=insert.vert.text.box
+    tab_insert.group_text_box_text.text_box_insert_menu.text_box_insert_horizontal toggle label="Text Box Insert Horizontal" cmd=insert.text.box fluent=TextBoxInsertHorizontal icon=insert.text.box
+  tab_insert.group_text_box_text.screen_tip button label="Screen Tip" cmd=tools.screen.tip fluent=ScreenTip icon=tools.screen.tip
+tab tab_design_visio Some("Design Visio")
+group tab_design_visio.group_print_preview_page_setup Some("Print Preview Page Setup") layout=Stack rows=None
+  tab_design_visio.group_print_preview_page_setup.auto_size_page toggle label="Auto Size Page" cmd=page.auto.size.toggle fluent=AutoSizePage icon=page.auto.size.toggle
+  tab_design_visio.group_print_preview_page_setup.page_setup_dialog_visio launcher label="Page Setup Dialog Visio" fluent=PageSetupDialogVisio
+  tab_design_visio.group_print_preview_page_setup.page_size dropdown label="Page Size" cmd=page.size.dlg fluent=PageSize icon=page.size.dlg
+    tab_design_visio.group_print_preview_page_setup.page_size.more_page_sizes button label="More Page Sizes" cmd=tools.more.page.sizes fluent=MorePageSizes icon=tools.more.page.sizes
+    tab_design_visio.group_print_preview_page_setup.page_size.page_fit_to_drawing button label="Page Fit To Drawing" cmd=page.size.to.fit.drawing fluent=PageFitToDrawing icon=page.size.to.fit.drawing
+  tab_design_visio.group_print_preview_page_setup.page_orientation dropdown label="Page Orientation" cmd=format.set.page.orientation fluent=PageOrientation icon=format.set.page.orientation
+group tab_design_visio.group_themes_visio_legacy Some("Themes Visio Legacy") layout=Stack rows=None
+  tab_design_visio.group_themes_visio_legacy.themes_gallery_visio_legacy dropdown label="Themes Gallery Visio Legacy" cmd=tools.themes.gallery.visio.legacy fluent=ThemesGalleryVisioLegacy icon=tools.themes.gallery.visio.legacy
+group tab_design_visio.group_themes_visio Some("Themes Visio") layout=Stack rows=None
+  tab_design_visio.group_themes_visio.themes_gallery_visio dropdown label="Themes Gallery Visio" cmd=tools.themes.gallery.visio fluent=ThemesGalleryVisio icon=tools.themes.gallery.visio
+    tab_design_visio.group_themes_visio.themes_gallery_visio.theme_apply_to_new_shapes toggle label="Theme Apply To New Shapes" cmd=format.apply.theme.to.new.shapes.toggle fluent=ThemeApplyToNewShapes icon=format.apply.theme.to.new.shapes.toggle
+group tab_design_visio.group_theme_variants Some("Theme Variants") layout=Stack rows=None
+  tab_design_visio.group_theme_variants.theme_variants_gallery dropdown label="Theme Variants Gallery" cmd=tools.theme.variants fluent=ThemeVariantsGallery icon=tools.theme.variants
+    tab_design_visio.group_theme_variants.theme_variants_gallery.theme_colors_gallery_visio dropdown label="Theme Colors Gallery Visio" cmd=tools.theme.colors.gallery.visio fluent=ThemeColorsGalleryVisio icon=tools.theme.colors.gallery.visio
+    tab_design_visio.group_theme_variants.theme_variants_gallery.theme_effects_gallery_visio dropdown label="Theme Effects Gallery Visio" cmd=tools.theme.effects.gallery.visio fluent=ThemeEffectsGalleryVisio icon=tools.theme.effects.gallery.visio
+    tab_design_visio.group_theme_variants.theme_variants_gallery.theme_colors_create_new_visio button label="Theme Colors Create New Visio" cmd=file.new.theme.colors fluent=ThemeColorsCreateNewVisio icon=file.new.theme.colors
+    tab_design_visio.group_theme_variants.theme_variants_gallery.theme_connectors_gallery dropdown label="Theme Connectors Gallery" cmd=tools.theme.connectors fluent=ThemeConnectorsGallery icon=tools.theme.connectors
+    tab_design_visio.group_theme_variants.theme_variants_gallery.embellishment_gallery dropdown label="Embellishment Gallery" cmd=tools.embellishment fluent=EmbellishmentGallery icon=tools.embellishment
+group tab_design_visio.group_backgrounds Some("Backgrounds") layout=Stack rows=None
+  tab_design_visio.group_backgrounds.page_setup_page_dialog launcher label="Page Setup Page Dialog" fluent=PageSetupPageDialog
+  tab_design_visio.group_backgrounds.backgrounds_gallery dropdown label="Backgrounds Gallery" cmd=tools.backgrounds fluent=BackgroundsGallery icon=tools.backgrounds
+    tab_design_visio.group_backgrounds.backgrounds_gallery.background_color dropdown label="Background Color" cmd=tools.background.color fluent=BackgroundColor icon=tools.background.color
+  tab_design_visio.group_backgrounds.borders_and_titles_gallery dropdown label="Borders And Titles Gallery" cmd=tools.borders.and.titles fluent=BordersAndTitlesGallery icon=tools.borders.and.titles
+group tab_design_visio.group_layout_routing Some("Layout Routing") layout=Stack rows=None
+  tab_design_visio.group_layout_routing.page_relayout_gallery dropdown label="Page Relayout Gallery" cmd=page.relayout fluent=PageRelayoutGallery icon=page.relayout
+    tab_design_visio.group_layout_routing.page_relayout_gallery.layout_more_options button label="Layout More Options" cmd=arrange.layout.more.options fluent=LayoutMoreOptions icon=arrange.layout.more.options
+  tab_design_visio.group_layout_routing.connectors_gallery dropdown label="Connectors Gallery" cmd=connector.style fluent=ConnectorsGallery icon=connector.style
+    tab_design_visio.group_layout_routing.connectors_gallery.connector_right_angle toggle label="Connector Right Angle" cmd=connector.right_angle fluent=ConnectorRightAngle icon=connector.right_angle
+    tab_design_visio.group_layout_routing.connectors_gallery.connector_straight_lines toggle label="Connector Straight Lines" cmd=connector.straight.lines fluent=ConnectorStraightLines icon=connector.straight.lines
+    tab_design_visio.group_layout_routing.connectors_gallery.connector_curved_lines toggle label="Connector Curved Lines" cmd=connector.curved.lines fluent=ConnectorCurvedLines icon=connector.curved.lines
+    tab_design_visio.group_layout_routing.connectors_gallery.connector_show_line_jumps toggle label="Connector Show Line Jumps" cmd=connector.show.line.jumps fluent=ConnectorShowLineJumps icon=connector.show.line.jumps
+  tab_design_visio.group_layout_routing.page_setup_layout_and_routing_dialog launcher label="Page Setup Layout And Routing Dialog" fluent=PageSetupLayoutAndRoutingDialog
+tab tab_data Some("Data")
+group tab_data.group_external_data Some("External Data") layout=Stack rows=None
+  tab_data.group_external_data.refresh_menu split label="Refresh Menu" cmd=data.refresh fluent=RefreshMenu icon=data.refresh
+    tab_data.group_external_data.refresh_menu.data_refresh_all_dialog button label="Data Refresh All Dialog" cmd=data.refresh fluent=DataRefreshAllDialog icon=data.refresh
+    tab_data.group_external_data.refresh_menu.data_refresh_dialog button label="Data Refresh Dialog" cmd=data.refresh fluent=DataRefreshDialog icon=data.refresh
+  tab_data.group_external_data.data_link_data_to_shapes button label="Data Link Data To Shapes" cmd=data.link.data.to.shapes fluent=DataLinkDataToShapes icon=data.link.data.to.shapes
+  tab_data.group_external_data.quick_data_link_data_to_shapes button label="Quick Data Link Data To Shapes" cmd=tools.quick.data.link.data.to.shapes fluent=QuickDataLinkDataToShapes icon=tools.quick.data.link.data.to.shapes
+group tab_data.group_data_graphics Some("Data Graphics") layout=Stack rows=None
+  tab_data.group_data_graphics.data_graphic_callouts_gallery dropdown label="Data Graphic Callouts Gallery" cmd=data.graphic.callouts fluent=DataGraphicCalloutsGallery icon=data.graphic.callouts
+    tab_data.group_data_graphics.data_graphic_callouts_gallery.more_data_graphics button label="More Data Graphics" cmd=tools.more.data.graphics fluent=MoreDataGraphics icon=tools.more.data.graphics
+  tab_data.group_data_graphics.data_graphics_configure button label="Data Graphics Configure" cmd=data.graphics.configure fluent=DataGraphicsConfigure icon=data.graphics.configure
+  tab_data.group_data_graphics.data_graphic_position dropdown label="Data Graphic Position" cmd=data.graphic.position fluent=DataGraphicPosition icon=data.graphic.position
+    tab_data.group_data_graphics.data_graphic_position.data_graphic_position_horizontal dropdown label="Data Graphic Position Horizontal" cmd=data.graphic.position.horizontal fluent=DataGraphicPositionHorizontal icon=data.graphic.position.horizontal
+    tab_data.group_data_graphics.data_graphic_position.data_graphic_position_vertical dropdown label="Data Graphic Position Vertical" cmd=data.graphic.position.vertical fluent=DataGraphicPositionVertical icon=data.graphic.position.vertical
+group tab_data.group_display_data Some("Display Data") layout=Stack rows=None
+  tab_data.group_display_data.legend_insert_gallery dropdown label="Legend Insert Gallery" cmd=insert.legend.horizontal fluent=LegendInsertGallery icon=insert.legend.horizontal
+group tab_data.group_data_show_hide Some("Data Show Hide") layout=Stack rows=None
+  tab_data.group_data_show_hide.shape_data_window check label="Shape Data Window" cmd=shape.data.window fluent=ShapeDataWindow icon=shape.data.window
+  tab_data.group_data_show_hide.external_data_window check label="External Data Window" cmd=tools.external.data.window fluent=ExternalDataWindow icon=tools.external.data.window
+  tab_data.group_data_show_hide.data_options_pane check label="Data Options Pane" cmd=data.options fluent=DataOptionsPane icon=data.options
+group tab_data.group_advanced_data_linking Some("Advanced Data Linking") layout=Stack rows=None
+  tab_data.group_advanced_data_linking.data_automatically_link button label="Data Automatically Link" cmd=data.automatically.link fluent=DataAutomaticallyLink icon=data.automatically.link
+  tab_data.group_advanced_data_linking.data_graphics_gallery_visio dropdown label="Data Graphics Gallery Visio" cmd=data.graphics.gallery.visio fluent=DataGraphicsGalleryVisio icon=data.graphics.gallery.visio
+    tab_data.group_advanced_data_linking.data_graphics_gallery_visio.data_graphic_edit button label="Data Graphic Edit" cmd=data.graphic.edit fluent=DataGraphicEdit icon=data.graphic.edit
+    tab_data.group_advanced_data_linking.data_graphics_gallery_visio.data_graphic_apply_after_linking_data toggle label="Data Graphic Apply After Linking Data" cmd=format.apply.data.graphic fluent=DataGraphicApplyAfterLinkingData icon=format.apply.data.graphic
+    tab_data.group_advanced_data_linking.data_graphics_gallery_visio.data_graphic_create_new button label="Data Graphic Create New" cmd=data.graphic.create.new fluent=DataGraphicCreateNew icon=data.graphic.create.new
+tab tab_process Some("Process")
+group tab_process.group_sub_process Some("Sub Process") layout=Stack rows=None
+  tab_process.group_sub_process.subprocess_create_new button label="Subprocess Create New" cmd=tools.subprocess.create.new fluent=SubprocessCreateNew icon=tools.subprocess.create.new
+  tab_process.group_sub_process.subprocess_link_to_existing dropdown label="Subprocess Link To Existing" cmd=tools.subprocess.link.to.existing fluent=SubprocessLinkToExisting icon=tools.subprocess.link.to.existing
+    tab_process.group_sub_process.subprocess_link_to_existing.subprocess_browse_to_other_document button label="Subprocess Browse To Other Document" cmd=tools.subprocess.browse.to.other.document fluent=SubprocessBrowseToOtherDocument icon=tools.subprocess.browse.to.other.document
+    tab_process.group_sub_process.subprocess_link_to_existing.subprocess_edit_link button label="Subprocess Edit Link" cmd=tools.subprocess.edit.link fluent=SubprocessEditLink icon=tools.subprocess.edit.link
+  tab_process.group_sub_process.subprocess_create_from_selection button label="Subprocess Create From Selection" cmd=tools.subprocess.create.from.selection fluent=SubprocessCreateFromSelection icon=tools.subprocess.create.from.selection
+group tab_process.group_diagram_validation Some("Diagram Validation") layout=Stack rows=None
+  tab_process.group_diagram_validation.diagram_check_menu split label="Diagram Check Menu" cmd=arrange.diagram.check fluent=DiagramCheckMenu icon=arrange.diagram.check
+    tab_process.group_diagram_validation.diagram_check_menu.diagram_check button label="Diagram Check" cmd=arrange.diagram.check fluent=DiagramCheck icon=arrange.diagram.check
+    tab_process.group_diagram_validation.diagram_check_menu.rules_to_check dropdown label="Rules To Check" cmd=tools.rules.to.check fluent=RulesToCheck icon=tools.rules.to.check
+    tab_process.group_diagram_validation.diagram_check_menu.rules_import_from dropdown label="Rules Import From" cmd=tools.rules.import.from fluent=RulesImportFrom icon=tools.rules.import.from
+  tab_process.group_diagram_validation.ignore_this_issue_menu split label="Ignore This Issue Menu" cmd=review.ignore.this.issue fluent=IgnoreThisIssueMenu icon=review.ignore.this.issue
+    tab_process.group_diagram_validation.ignore_this_issue_menu.ignore_this_issue button label="Ignore This Issue" cmd=review.ignore.this.issue fluent=IgnoreThisIssue icon=review.ignore.this.issue
+    tab_process.group_diagram_validation.ignore_this_issue_menu.ignore_rule button label="Ignore Rule" cmd=review.ignore.validation.rule fluent=IgnoreRule icon=review.ignore.validation.rule
+    tab_process.group_diagram_validation.ignore_this_issue_menu.stop_ignoring_this_issue button label="Stop Ignoring This Issue" cmd=tools.stop.ignoring.this.issue fluent=StopIgnoringThisIssue icon=tools.stop.ignoring.this.issue
+    tab_process.group_diagram_validation.ignore_this_issue_menu.stop_ignoring_rule button label="Stop Ignoring Rule" cmd=tools.stop.ignoring.validation.rule fluent=StopIgnoringRule icon=tools.stop.ignoring.validation.rule
+    tab_process.group_diagram_validation.ignore_this_issue_menu.show_ignored_issues toggle label="Show Ignored Issues" cmd=view.show.ignored.issues.toggle fluent=ShowIgnoredIssues icon=view.show.ignored.issues.toggle
+  tab_process.group_diagram_validation.issues_window check label="Issues Window" cmd=review.validation.issues.window.toggle fluent=IssuesWindow icon=review.validation.issues.window.toggle
+group tab_process.group_sharepoint_workflow Some("Sharepoint Workflow") layout=Stack rows=None
+  tab_process.group_sharepoint_workflow.share_point_workflow_import button label="Share Point Workflow Import" cmd=tools.share.point.workflow.import fluent=SharePointWorkflowImport icon=tools.share.point.workflow.import
+  tab_process.group_sharepoint_workflow.share_point_workflow_export button label="Share Point Workflow Export" cmd=tools.share.point.workflow.export fluent=SharePointWorkflowExport icon=tools.share.point.workflow.export
+  tab_process.group_sharepoint_workflow.create_stage_view_diagram button label="Create Stage View Diagram" cmd=file.create.stage.view.diagram fluent=CreateStageViewDiagram icon=file.create.stage.view.diagram
+  tab_process.group_sharepoint_workflow.create_workflow_diagram button label="Create Workflow Diagram" cmd=file.create.workflow.diagram fluent=CreateWorkflowDiagram icon=file.create.workflow.diagram
+tab tab_review_word Some("Review Word")
+group tab_review_word.group_proofing Some("Proofing") layout=Stack rows=None
+  tab_review_word.group_proofing.spelling button label="Spelling" cmd=review.spelling.change fluent=Spelling icon=review.spelling.change
+  tab_review_word.group_proofing.research_pane toggle label="Research Pane" cmd=view.task.pane.research fluent=ResearchPane icon=view.task.pane.research
+  tab_review_word.group_proofing.thesaurus button label="Thesaurus" cmd=help.research.thesaurus fluent=Thesaurus icon=help.research.thesaurus
+group tab_review_word.group_language Some("Language") layout=Stack rows=None
+  tab_review_word.group_language.translate button label="Translate" cmd=help.research.translate fluent=Translate icon=help.research.translate
+  tab_review_word.group_language.language_commands dropdown label="Language Commands" cmd=tools.language.commands fluent=LanguageCommands icon=tools.language.commands
+    tab_review_word.group_language.language_commands.set_language button label="Set Language" cmd=format.set.language.dlg fluent=SetLanguage icon=format.set.language.dlg
+    tab_review_word.group_language.language_commands.language_preferences button label="Language Preferences" cmd=tools.language.preferences.dlg fluent=LanguagePreferences icon=tools.language.preferences.dlg
+group tab_review_word.group_comments Some("Comments") layout=Stack rows=None
+  tab_review_word.group_comments.review_new_comment button label="Review New Comment" cmd=review.new.comment fluent=ReviewNewComment icon=review.new.comment
+  tab_review_word.group_comments.ink_tool button label="Ink Tool" cmd=tools.ink.tool fluent=InkTool icon=tools.ink.tool
+  tab_review_word.group_comments.show_comments_menu split label="Show Comments Menu" cmd=view.show.comments fluent=ShowCommentsMenu icon=view.show.comments
+    tab_review_word.group_comments.show_comments_menu.show_tags toggle label="Show Tags" cmd=view.show.tags fluent=ShowTags icon=view.show.tags
+    tab_review_word.group_comments.show_comments_menu.commenting_pane toggle label="Commenting Pane" cmd=tools.commenting fluent=CommentingPane icon=tools.commenting
+    tab_review_word.group_comments.show_comments_menu.comments_pane_split_button toggle label="Comments Pane Split Button" cmd=tools.comments.pane fluent=CommentsPaneSplitButton icon=tools.comments.pane
+group tab_review_word.group_reports Some("Reports") layout=Stack rows=None
+  tab_review_word.group_reports.shape_reports button label="Shape Reports" cmd=shape.reports fluent=ShapeReports icon=shape.reports
+tab tab_view Some("View")
+group tab_view.group_document_views_visio Some("Document Views Visio") layout=Stack rows=None
+  tab_view.group_document_views_visio.view_full_screen_view toggle label="View Full Screen View" cmd=view.full.screen.view fluent=ViewFullScreenView icon=view.full.screen.view
+group tab_view.group_view_show_hide Some("View Show Hide") layout=Stack rows=None
+  tab_view.group_view_show_hide.show_page_breaks check label="Show Page Breaks" cmd=view.show.page.breaks fluent=ShowPageBreaks icon=view.show.page.breaks
+  tab_view.group_view_show_hide.ruler_and_grid_dialog launcher label="Ruler And Grid Dialog" fluent=RulerAndGridDialog
+  tab_view.group_view_show_hide.show_grid check label="Show Grid" cmd=view.toggle_grid fluent=ShowGrid icon=view.toggle_grid
+  tab_view.group_view_show_hide.show_guides check label="Show Guides" cmd=view.guides fluent=ShowGuides icon=view.guides
+  tab_view.group_view_show_hide.show_ruler_visio check label="Show Ruler Visio" cmd=view.rulers fluent=ShowRulerVisio icon=view.rulers
+  tab_view.group_view_show_hide.task_panes_menu_visio dropdown label="Task Panes Menu Visio" cmd=view.task.panes.menu.visio fluent=TaskPanesMenuVisio icon=view.task.panes.menu.visio
+    tab_view.group_view_show_hide.task_panes_menu_visio.pan_and_zoom_window toggle label="Pan And Zoom Window" cmd=view.pan.zoom fluent=PanAndZoomWindow icon=view.pan.zoom
+    tab_view.group_view_show_hide.task_panes_menu_visio.shapes_window toggle label="Shapes Window" cmd=shape.shapes.window fluent=ShapesWindow icon=shape.shapes.window
+    tab_view.group_view_show_hide.task_panes_menu_visio.size_and_position_window toggle label="Size And Position Window" cmd=arrange.size.and.position.window fluent=SizeAndPositionWindow icon=arrange.size.and.position.window
+    tab_view.group_view_show_hide.task_panes_menu_visio.shape_data_window_show_hide toggle label="Shape Data Window Show Hide" cmd=shape.data.window.show.hide fluent=ShapeDataWindowShowHide icon=shape.data.window.show.hide
+group tab_view.group_view_direction Some("View Direction") layout=Stack rows=None
+  tab_view.group_view_direction.view_direction_menu dropdown label="View Direction Menu" cmd=view.direction.toggle fluent=ViewDirectionMenu icon=view.direction.toggle
+    tab_view.group_view_direction.view_direction_menu.view_direction_left_to_right toggle label="View Direction Left To Right" cmd=view.left.to.right fluent=ViewDirectionLeftToRight icon=view.left.to.right
+    tab_view.group_view_direction.view_direction_menu.view_direction_right_to_left toggle label="View Direction Right To Left" cmd=view.left.to.right fluent=ViewDirectionRightToLeft icon=view.left.to.right
+group tab_view.group_zoom Some("Zoom") layout=Stack rows=None
+  tab_view.group_zoom.zoom_dialog button label="Zoom Dialog" cmd=view.zoom.dialog fluent=ZoomDialog icon=view.zoom.dialog
+  tab_view.group_zoom.zoom_page_width_visio button label="Zoom Page Width Visio" cmd=view.zoom.page.width fluent=ZoomPageWidthVisio icon=view.zoom.page.width
+  tab_view.group_zoom.zoom_fit_to_window_visio button label="Zoom Fit To Window Visio" cmd=view.zoom.fit fluent=ZoomFitToWindowVisio icon=view.zoom.fit
+group tab_view.group_visual_aids Some("Visual Aids") layout=Stack rows=None
+  tab_view.group_visual_aids.auto_connect check label="Auto Connect" cmd=connector.auto_connect fluent=AutoConnect icon=connector.auto_connect
+  tab_view.group_visual_aids.snap_and_glue_dialog launcher label="Snap And Glue Dialog" fluent=SnapAndGlueDialog
+  tab_view.group_visual_aids.dynamic_grid check label="Dynamic Grid" cmd=connector.dynamic.grid fluent=DynamicGrid icon=connector.dynamic.grid
+  tab_view.group_visual_aids.connection_points check label="Connection Points" cmd=tools.connection.points fluent=ConnectionPoints icon=tools.connection.points
+group tab_view.group_window Some("Window") layout=Stack rows=None
+  tab_view.group_window.windows_arrange_all button label="Windows Arrange All" cmd=tools.windows.arrange.all fluent=WindowsArrangeAll icon=tools.windows.arrange.all
+  tab_view.group_window.window_new button label="Window New" cmd=view.window.new.window fluent=WindowNew icon=view.window.new.window
+  tab_view.group_window.windows_cascade button label="Windows Cascade" cmd=tools.windows.cascade fluent=WindowsCascade icon=tools.windows.cascade
+  tab_view.group_window.window_switch_windows_menu_word dropdown label="Window Switch Windows Menu Word" cmd=view.window.switch.windows.menu.word fluent=WindowSwitchWindowsMenuWord icon=view.window.switch.windows.menu.word
+    tab_view.group_window.window_switch_windows_menu_word.window_more_windows_dialog toggle label="Window More Windows Dialog" cmd=view.window.more.windows.dialog fluent=WindowMoreWindowsDialog icon=view.window.more.windows.dialog
+group tab_view.group_macros Some("Macros") layout=Stack rows=None
+  tab_view.group_macros.macro_play button label="Macro Play" cmd=tools.macro.play fluent=MacroPlay icon=tools.macro.play
+  tab_view.group_macros.add_ons_menu dropdown label="Add Ons Menu" cmd=insert.add.ons fluent=AddOnsMenu icon=insert.add.ons
+tab tab_developer Some("Developer")
+group tab_developer.group_code Some("Code") layout=Stack rows=None
+  tab_developer.group_code.macro_record button label="Macro Record" cmd=developer.record.new.macro fluent=MacroRecord icon=developer.record.new.macro
+  tab_developer.group_code.macro_recorder_pause button label="Macro Recorder Pause" cmd=tools.macro.recorder.pause fluent=MacroRecorderPause icon=tools.macro.recorder.pause
+  tab_developer.group_code.macro_play button label="Macro Play" cmd=tools.macro.play fluent=MacroPlay icon=tools.macro.play
+  tab_developer.group_code.recorder_stop_visio button label="Recorder Stop Visio" cmd=tools.recorder.stop.visio fluent=RecorderStopVisio icon=tools.recorder.stop.visio
+  tab_developer.group_code.recorder_resume button label="Recorder Resume" cmd=tools.recorder.resume fluent=RecorderResume icon=tools.recorder.resume
+  tab_developer.group_code.visual_basic button label="Visual Basic" cmd=tools.visual.basic fluent=VisualBasic icon=tools.visual.basic
+  tab_developer.group_code.macro_security button label="Macro Security" cmd=tools.macro.security fluent=MacroSecurity icon=tools.macro.security
+group tab_developer.group_addins Some("Addins") layout=Stack rows=None
+  tab_developer.group_addins.com_add_ins_dialog button label="Com Add Ins Dialog" cmd=tools.com.add.ins.dialog fluent=ComAddInsDialog icon=tools.com.add.ins.dialog
+group tab_developer.group_controls Some("Controls") layout=Stack rows=None
+  tab_developer.group_controls.view_visual_basic_code button label="View Visual Basic Code" cmd=view.visual.basic.code fluent=ViewVisualBasicCode icon=view.visual.basic.code
+  tab_developer.group_controls.design_mode toggle label="Design Mode" cmd=tools.design.mode fluent=DesignMode icon=tools.design.mode
+  tab_developer.group_controls.control_properties button label="Control Properties" cmd=tools.control.properties fluent=ControlProperties icon=tools.control.properties
+  tab_developer.group_controls.controls_gallery dropdown label="Controls Gallery" cmd=tools.controls fluent=ControlsGallery icon=tools.controls
+group tab_developer.group_shape_design Some("Shape Design") layout=Stack rows=None
+  tab_developer.group_shape_design.developer_drawing_tools split label="Developer Drawing Tools" cmd=shape.drawing.tools fluent=DeveloperDrawingTools icon=shape.drawing.tools
+    tab_developer.group_shape_design.developer_drawing_tools.rectangle_tool toggle label="Rectangle Tool" cmd=tools.rectangle fluent=RectangleTool icon=tools.rectangle
+    tab_developer.group_shape_design.developer_drawing_tools.ellipse_tool toggle label="Ellipse Tool" cmd=tools.ellipse fluent=EllipseTool icon=tools.ellipse
+    tab_developer.group_shape_design.developer_drawing_tools.line_tool toggle label="Line Tool" cmd=format.line fluent=LineTool icon=format.line
+    tab_developer.group_shape_design.developer_drawing_tools.arc_tool toggle label="Arc Tool" cmd=shape.arc fluent=ArcTool icon=shape.arc
+    tab_developer.group_shape_design.developer_drawing_tools.freeform_tool toggle label="Freeform Tool" cmd=tools.freeform fluent=FreeformTool icon=tools.freeform
+    tab_developer.group_shape_design.developer_drawing_tools.pencil_tool toggle label="Pencil Tool" cmd=tools.pencil fluent=PencilTool icon=tools.pencil
+  tab_developer.group_shape_design.show_shape_sheet split label="Show Shape Sheet" cmd=view.window.show.shape.sheet fluent=ShowShapeSheet icon=view.window.show.shape.sheet
+    tab_developer.group_shape_design.show_shape_sheet.show_shape_sheet_shape toggle label="Show Shape Sheet Shape" cmd=view.show.shape.sheet.shape fluent=ShowShapeSheetShape icon=view.show.shape.sheet.shape
+    tab_developer.group_shape_design.show_shape_sheet.show_shape_sheet_page toggle label="Show Shape Sheet Page" cmd=view.show.shape.sheet.page fluent=ShowShapeSheetPage icon=view.show.shape.sheet.page
+    tab_developer.group_shape_design.show_shape_sheet.show_shape_sheet_document toggle label="Show Shape Sheet Document" cmd=view.show.shape.sheet.document fluent=ShowShapeSheetDocument icon=view.show.shape.sheet.document
+  tab_developer.group_shape_design.objects_group_menu dropdown label="Objects Group Menu" cmd=arrange.group fluent=ObjectsGroupMenu icon=arrange.group
+    tab_developer.group_shape_design.objects_group_menu.objects_group button label="Objects Group" cmd=arrange.group fluent=ObjectsGroup icon=arrange.group
+    tab_developer.group_shape_design.objects_group_menu.objects_ungroup button label="Objects Ungroup" cmd=arrange.ungroup fluent=ObjectsUngroup icon=arrange.ungroup
+    tab_developer.group_shape_design.objects_group_menu.objects_add_to_group button label="Objects Add To Group" cmd=tools.objects.add.to fluent=ObjectsAddToGroup icon=tools.objects.add.to
+    tab_developer.group_shape_design.objects_group_menu.objects_convert_to_group button label="Objects Convert To Group" cmd=tools.objects.convert.to fluent=ObjectsConvertToGroup icon=tools.objects.convert.to
+    tab_developer.group_shape_design.objects_group_menu.objects_remove_from_group button label="Objects Remove From Group" cmd=tools.objects.remove.from fluent=ObjectsRemoveFromGroup icon=tools.objects.remove.from
+  tab_developer.group_shape_design.shape_protection button label="Shape Protection" cmd=shape.protection fluent=ShapeProtection icon=shape.protection
+  tab_developer.group_shape_design.shape_behavior button label="Shape Behavior" cmd=shape.behavior fluent=ShapeBehavior icon=shape.behavior
+  tab_developer.group_shape_design.shape_name button label="Shape Name" cmd=shape.name fluent=ShapeName icon=shape.name
+  tab_developer.group_shape_design.operations_menu dropdown label="Operations Menu" cmd=tools.operations fluent=OperationsMenu icon=tools.operations
+    tab_developer.group_shape_design.operations_menu.shapes_object_combine button label="Shapes Object Combine" cmd=arrange.object.combine fluent=ShapesObjectCombine icon=arrange.object.combine
+    tab_developer.group_shape_design.operations_menu.shapes_object_fragment button label="Shapes Object Fragment" cmd=arrange.object.fragment fluent=ShapesObjectFragment icon=arrange.object.fragment
+    tab_developer.group_shape_design.operations_menu.shapes_object_intersect button label="Shapes Object Intersect" cmd=arrange.intersect fluent=ShapesObjectIntersect icon=arrange.intersect
+    tab_developer.group_shape_design.operations_menu.shapes_object_join button label="Shapes Object Join" cmd=arrange.join fluent=ShapesObjectJoin icon=arrange.join
+    tab_developer.group_shape_design.operations_menu.shapes_object_union button label="Shapes Object Union" cmd=arrange.object.union fluent=ShapesObjectUnion icon=arrange.object.union
+    tab_developer.group_shape_design.operations_menu.shapes_object_offset button label="Shapes Object Offset" cmd=shape.shapes.object.offset fluent=ShapesObjectOffset icon=shape.shapes.object.offset
+    tab_developer.group_shape_design.operations_menu.shapes_object_subtract button label="Shapes Object Subtract" cmd=arrange.subtract fluent=ShapesObjectSubtract icon=arrange.subtract
+    tab_developer.group_shape_design.operations_menu.shapes_object_trim button label="Shapes Object Trim" cmd=arrange.trim fluent=ShapesObjectTrim icon=arrange.trim
+    tab_developer.group_shape_design.operations_menu.shapes_object_update_alignment_box button label="Shapes Object Update Alignment Box" cmd=shape.shapes.object.update.alignment fluent=ShapesObjectUpdateAlignmentBox icon=shape.shapes.object.update.alignment
+group tab_developer.group_new_stencil Some("New Stencil") layout=Stack rows=None
+  tab_developer.group_new_stencil.new_blank_stencil button label="New Blank Stencil" cmd=file.new.blank.stencil fluent=NewBlankStencil icon=file.new.blank.stencil
+  tab_developer.group_new_stencil.new_blank_stencil_metric button label="New Blank Stencil Metric" cmd=file.new.blank.stencil.metric fluent=NewBlankStencilMetric icon=file.new.blank.stencil.metric
+  tab_developer.group_new_stencil.new_blank_stencil_us button label="New Blank Stencil US" cmd=file.new.blank.stencil.us fluent=NewBlankStencilUS icon=file.new.blank.stencil.us
+group tab_developer.group_show_hide_developer_visio Some("Show Hide Developer Visio") layout=Stack rows=None
+  tab_developer.group_show_hide_developer_visio.document_stencil check label="Document Stencil" cmd=view.hide.document.stencil fluent=DocumentStencil icon=view.hide.document.stencil
+  tab_developer.group_show_hide_developer_visio.drawing_explorer check label="Drawing Explorer" cmd=shape.drawing.explorer fluent=DrawingExplorer icon=shape.drawing.explorer
+  tab_developer.group_show_hide_developer_visio.master_explorer check label="Master Explorer" cmd=shape.master.explorer fluent=MasterExplorer icon=shape.master.explorer
+group tab_developer.group_sdk_tools Some("Sdk Tools") layout=Stack rows=None
+  tab_developer.group_sdk_tools.event_monitor button label="Event Monitor" cmd=tools.event.monitor fluent=EventMonitor icon=tools.event.monitor
+  tab_developer.group_sdk_tools.persistent_events button label="Persistent Events" cmd=tools.persistent.events fluent=PersistentEvents icon=tools.persistent.events
+  tab_developer.group_sdk_tools.print_shape_sheet button label="Print Shape Sheet" cmd=file.print.shape.sheet fluent=PrintShapeSheet icon=file.print.shape.sheet
+tab tab_org_chart Some("Org Chart")
+group tab_org_chart.group_org_chart_layout Some("Org Chart Layout") layout=Stack rows=None
+  tab_org_chart.group_org_chart_layout.org_chart_relayout button label="Org Chart Relayout" cmd=tools.org.chart.relayout fluent=OrgChartRelayout icon=tools.org.chart.relayout
+  tab_org_chart.group_org_chart_layout.org_chart_fit_to_page button label="Org Chart Fit To Page" cmd=tools.org.chart.fit.to.page fluent=OrgChartFitToPage icon=tools.org.chart.fit.to.page
+  tab_org_chart.group_org_chart_layout.org_chart_arrange_subordinates launcher label="Org Chart Arrange Subordinates" fluent=OrgChartArrangeSubordinates
+  tab_org_chart.group_org_chart_layout.org_chart_layout_gallery dropdown label="Org Chart Layout Gallery" cmd=tools.org.chart.layout fluent=OrgChartLayoutGallery icon=tools.org.chart.layout
+    tab_org_chart.group_org_chart_layout.org_chart_layout_gallery.layout_apply_to_shape_style toggle label="Layout Apply To Shape Style" cmd=arrange.layout.apply.to.shape.style fluent=LayoutApplyToShapeStyle icon=arrange.layout.apply.to.shape.style
+  tab_org_chart.group_org_chart_layout.org_chart_synchronize split label="Org Chart Synchronize" cmd=tools.org.chart.synchronize fluent=OrgChartSynchronize icon=tools.org.chart.synchronize
+    tab_org_chart.group_org_chart_layout.org_chart_synchronize.org_chart_copy_create toggle label="Org Chart Copy Create" cmd=tools.org.chart.copy.create fluent=OrgChartCopyCreate icon=tools.org.chart.copy.create
+    tab_org_chart.group_org_chart_layout.org_chart_synchronize.org_chart_subordinates_expand toggle label="Org Chart Subordinates Expand" cmd=tools.org.chart.subordinates.expand fluent=OrgChartSubordinatesExpand icon=tools.org.chart.subordinates.expand
+group tab_org_chart.group_org_chart_arrange Some("Org Chart Arrange") layout=Stack rows=None
+  tab_org_chart.group_org_chart_arrange.org_chart_layout_spacing_change launcher label="Org Chart Layout Spacing Change" fluent=OrgChartLayoutSpacingChange
+  tab_org_chart.group_org_chart_arrange.org_chart_subordinates_show_hide button label="Org Chart Subordinates Show Hide" cmd=tools.org.chart.subordinates.show.hide fluent=OrgChartSubordinatesShowHide icon=tools.org.chart.subordinates.show.hide
+  tab_org_chart.group_org_chart_arrange.org_chart_report_move_left button label="Org Chart Report Move Left" cmd=tools.org.chart.report.move.left fluent=OrgChartReportMoveLeft icon=tools.org.chart.report.move.left
+  tab_org_chart.group_org_chart_arrange.org_chart_report_move_right button label="Org Chart Report Move Right" cmd=tools.org.chart.report.move.right fluent=OrgChartReportMoveRight icon=tools.org.chart.report.move.right
+  tab_org_chart.group_org_chart_arrange.group_org_chart_spacing heading label="Org Chart Spacing" fluent=GroupOrgChartSpacing
+  tab_org_chart.group_org_chart_arrange.org_chart_report_move_closer button label="Org Chart Report Move Closer" cmd=tools.org.chart.report.move.closer fluent=OrgChartReportMoveCloser icon=tools.org.chart.report.move.closer
+  tab_org_chart.group_org_chart_arrange.org_chart_report_move_further button label="Org Chart Report Move Further" cmd=tools.org.chart.report.move.further fluent=OrgChartReportMoveFurther icon=tools.org.chart.report.move.further
+  tab_org_chart.group_org_chart_arrange.move heading label="Move" fluent=Move
+group tab_org_chart.group_org_chart_shapes Some("Org Chart Shapes") layout=Stack rows=None
+  tab_org_chart.group_org_chart_shapes.org_chart_position_type_change button label="Org Chart Position Type Change" cmd=tools.org.chart.position.type.change fluent=OrgChartPositionTypeChange icon=tools.org.chart.position.type.change
+  tab_org_chart.group_org_chart_shapes.org_chart_data_options_display launcher label="Org Chart Data Options Display" fluent=OrgChartDataOptionsDisplay
+  tab_org_chart.group_org_chart_shapes.org_chart_change_style dropdown label="Org Chart Change Style" cmd=tools.org.chart.change.style fluent=OrgChartChangeStyle icon=tools.org.chart.change.style
+    tab_org_chart.group_org_chart_shapes.org_chart_change_style.layout_apply_to_shape_style toggle label="Layout Apply To Shape Style" cmd=arrange.layout.apply.to.shape.style fluent=LayoutApplyToShapeStyle icon=arrange.layout.apply.to.shape.style
+  tab_org_chart.group_org_chart_shapes.org_chart_increase_height button label="Org Chart Increase Height" cmd=tools.org.chart.increase.height fluent=OrgChartIncreaseHeight icon=tools.org.chart.increase.height
+  tab_org_chart.group_org_chart_shapes.org_chart_reduce_height button label="Org Chart Reduce Height" cmd=tools.org.chart.reduce.height fluent=OrgChartReduceHeight icon=tools.org.chart.reduce.height
+  tab_org_chart.group_org_chart_shapes.org_chart_increase_width button label="Org Chart Increase Width" cmd=tools.org.chart.increase.width fluent=OrgChartIncreaseWidth icon=tools.org.chart.increase.width
+  tab_org_chart.group_org_chart_shapes.org_chart_reduce_width button label="Org Chart Reduce Width" cmd=tools.org.chart.reduce.width fluent=OrgChartReduceWidth icon=tools.org.chart.reduce.width
+  tab_org_chart.group_org_chart_shapes.org_chart_shape_height heading label="Org Chart Shape Height" fluent=OrgChartShapeHeight
+  tab_org_chart.group_org_chart_shapes.org_chart_shape_width heading label="Org Chart Shape Width" fluent=OrgChartShapeWidth
+group tab_org_chart.group_org_chart_picture Some("Org Chart Picture") layout=Stack rows=None
+  tab_org_chart.group_org_chart_picture.org_chart_picture_insert split label="Org Chart Picture Insert" cmd=tools.org.chart.picture.insert fluent=OrgChartPictureInsert icon=tools.org.chart.picture.insert
+    tab_org_chart.group_org_chart_picture.org_chart_picture_insert.org_chart_picture_insert_one button label="Org Chart Picture Insert One" cmd=tools.org.chart.picture.insert.one fluent=OrgChartPictureInsertOne icon=tools.org.chart.picture.insert.one
+    tab_org_chart.group_org_chart_picture.org_chart_picture_insert.org_chart_picture_insert_multiple button label="Org Chart Picture Insert Multiple" cmd=tools.org.chart.picture.insert.multiple fluent=OrgChartPictureInsertMultiple icon=tools.org.chart.picture.insert.multiple
+  tab_org_chart.group_org_chart_picture.org_chart_picture_delete button label="Org Chart Picture Delete" cmd=tools.org.chart.picture.delete fluent=OrgChartPictureDelete icon=tools.org.chart.picture.delete
+  tab_org_chart.group_org_chart_picture.org_chart_picture_hide button label="Org Chart Picture Hide" cmd=tools.org.chart.picture.hide fluent=OrgChartPictureHide icon=tools.org.chart.picture.hide
+  tab_org_chart.group_org_chart_picture.org_chart_picture_change button label="Org Chart Picture Change" cmd=tools.org.chart.picture.change fluent=OrgChartPictureChange icon=tools.org.chart.picture.change
+group tab_org_chart.group_org_chart_organization_data Some("Org Chart Organization Data") layout=Stack rows=None
+  tab_org_chart.group_org_chart_organization_data.org_chart_data_import button label="Org Chart Data Import" cmd=tools.org.chart.data.import fluent=OrgChartDataImport icon=tools.org.chart.data.import
+  tab_org_chart.group_org_chart_organization_data.org_chart_data_export button label="Org Chart Data Export" cmd=tools.org.chart.data.export fluent=OrgChartDataExport icon=tools.org.chart.data.export
+  tab_org_chart.group_org_chart_organization_data.org_chart_data_compare button label="Org Chart Data Compare" cmd=tools.org.chart.data.compare fluent=OrgChartDataCompare icon=tools.org.chart.data.compare
+tab tab_add_ins Some("Add Ins")
+group tab_add_ins.group_add_ins_menu_commands Some("Add Ins Menu Commands") layout=Stack rows=None
+group tab_add_ins.group_add_ins_toolbar_commands Some("Add Ins Toolbar Commands") layout=Stack rows=None
+group tab_add_ins.group_add_ins_custom_toolbars Some("Add Ins Custom Toolbars") layout=Stack rows=None
+tab tab_stencil Some("Stencil")
+group tab_stencil.group_stencil Some("Stencil") layout=Stack rows=None
+  tab_stencil.group_stencil.open_stencil button label="Open Stencil" cmd=file.open.stencil fluent=OpenStencil icon=file.open.stencil
+  tab_stencil.group_stencil.new_blank_stencil button label="New Blank Stencil" cmd=file.new.blank.stencil fluent=NewBlankStencil icon=file.new.blank.stencil
+  tab_stencil.group_stencil.new_blank_stencil_metric button label="New Blank Stencil Metric" cmd=file.new.blank.stencil.metric fluent=NewBlankStencilMetric icon=file.new.blank.stencil.metric
+  tab_stencil.group_stencil.new_blank_stencil_us button label="New Blank Stencil US" cmd=file.new.blank.stencil.us fluent=NewBlankStencilUS icon=file.new.blank.stencil.us
+group tab_stencil.group_stencil_view Some("Stencil View") layout=Stack rows=None
+  tab_stencil.group_stencil_view.stencil_explorer toggle label="Stencil Explorer" cmd=tools.stencil.explorer fluent=StencilExplorer icon=tools.stencil.explorer
+  tab_stencil.group_stencil_view.icons_and_details toggle label="Icons And Details" cmd=tools.icons.and.details fluent=IconsAndDetails icon=tools.icons.and.details
+  tab_stencil.group_stencil_view.icons_and_names toggle label="Icons And Names" cmd=tools.icons.and.names fluent=IconsAndNames icon=tools.icons.and.names
+  tab_stencil.group_stencil_view.icons_only toggle label="Icons Only" cmd=tools.icons.only fluent=IconsOnly icon=tools.icons.only
+  tab_stencil.group_stencil_view.names_only toggle label="Names Only" cmd=tools.names.only fluent=NamesOnly icon=tools.names.only
+  tab_stencil.group_stencil_view.names_under_icons toggle label="Names Under Icons" cmd=shape.sten.names.under.icons fluent=NamesUnderIcons icon=shape.sten.names.under.icons
+  tab_stencil.group_stencil_view.drawing_page button label="Drawing Page" cmd=page.size.to.fit.drawing fluent=DrawingPage icon=page.size.to.fit.drawing
+group tab_stencil.group_stencil_master_shape Some("Stencil Master Shape") layout=Stack rows=None
+  tab_stencil.group_stencil_master_shape.edit_icon button label="Edit Icon" cmd=shape.sten.edit.icon fluent=EditIcon icon=shape.sten.edit.icon
+  tab_stencil.group_stencil_master_shape.edit_master button label="Edit Master" cmd=file.create.edit.master fluent=EditMaster icon=file.create.edit.master
+  tab_stencil.group_stencil_master_shape.master_properties button label="Master Properties" cmd=shape.master.properties fluent=MasterProperties icon=shape.master.properties
+  tab_stencil.group_stencil_master_shape.new_master button label="New Master" cmd=shape.sten.new.master fluent=NewMaster icon=shape.sten.new.master
+  tab_stencil.group_stencil_master_shape.update_icon button label="Update Icon" cmd=data.update.icon fluent=UpdateIcon icon=data.update.icon
+group tab_stencil.group_stencil_window Some("Stencil Window") layout=Stack rows=None
+  tab_stencil.group_stencil_window.window_switch_windows_menu_word dropdown label="Window Switch Windows Menu Word" cmd=view.window.switch.windows.menu.word fluent=WindowSwitchWindowsMenuWord icon=view.window.switch.windows.menu.word
+    tab_stencil.group_stencil_window.window_switch_windows_menu_word.window_more_windows_dialog toggle label="Window More Windows Dialog" cmd=view.window.more.windows.dialog fluent=WindowMoreWindowsDialog icon=view.window.more.windows.dialog
+group tab_stencil.group_stencil_close Some("Stencil Close") layout=Stack rows=None
+  tab_stencil.group_stencil_close.stencil_close button label="Stencil Close" cmd=tools.stencil.close fluent=StencilClose icon=tools.stencil.close
+tab tab_icon_editor Some("Icon Editor")
+group tab_icon_editor.group_icon_edit_clipboard Some("Icon Edit Clipboard") layout=Stack rows=None
+  tab_icon_editor.group_icon_edit_clipboard.copy button label="Copy" cmd=edit.copy fluent=Copy icon=edit.copy
+  tab_icon_editor.group_icon_edit_clipboard.cut button label="Cut" cmd=edit.cut fluent=Cut icon=edit.cut
+  tab_icon_editor.group_icon_edit_clipboard.paste button label="Paste" cmd=edit.paste fluent=Paste icon=edit.paste
+  tab_icon_editor.group_icon_edit_clipboard.clear_icon_colors button label="Clear Icon Colors" cmd=tools.clear.icon.colors fluent=ClearIconColors icon=tools.clear.icon.colors
+group tab_icon_editor.group_icon_edit_select Some("Icon Edit Select") layout=Stack rows=None
+  tab_icon_editor.group_icon_edit_select.select_all button label="Select All" cmd=edit.select_all fluent=SelectAll icon=edit.select_all
+  tab_icon_editor.group_icon_edit_select.icon_select_lasso button label="Icon Select Lasso" cmd=shape.icon.select.lasso fluent=IconSelectLasso icon=shape.icon.select.lasso
+  tab_icon_editor.group_icon_edit_select.icon_select_area button label="Icon Select Area" cmd=shape.icon.select.area fluent=IconSelectArea icon=shape.icon.select.area
+group tab_icon_editor.group_icon_edit_paint Some("Icon Edit Paint") layout=Stack rows=None
+  tab_icon_editor.group_icon_edit_paint.icon_bucket_tool button label="Icon Bucket Tool" cmd=shape.icon.bucket.tool fluent=IconBucketTool icon=shape.icon.bucket.tool
+  tab_icon_editor.group_icon_edit_paint.icon_pencil_tool button label="Icon Pencil Tool" cmd=shape.icon.pencil.tool fluent=IconPencilTool icon=shape.icon.pencil.tool
+  tab_icon_editor.group_icon_edit_paint.left_button_icon_color dropdown label="Left Button Icon Color" cmd=shape.icon.left.color fluent=LeftButtonIconColor icon=shape.icon.left.color
+    tab_icon_editor.group_icon_edit_paint.left_button_icon_color.left_button_icon_transparent button label="Left Button Icon Transparent" cmd=tools.left.button.icon.transparent fluent=LeftButtonIconTransparent icon=tools.left.button.icon.transparent
+  tab_icon_editor.group_icon_edit_paint.right_button_icon_color dropdown label="Right Button Icon Color" cmd=edit.right.button.icon.color fluent=RightButtonIconColor icon=edit.right.button.icon.color
+    tab_icon_editor.group_icon_edit_paint.right_button_icon_color.right_button_icon_transparent button label="Right Button Icon Transparent" cmd=edit.right.button.icon.transparent fluent=RightButtonIconTransparent icon=edit.right.button.icon.transparent
+group tab_icon_editor.group_icon_edit_close Some("Icon Edit Close") layout=Stack rows=None
+  tab_icon_editor.group_icon_edit_close.icon_edit_close button label="Icon Edit Close" cmd=shape.icon.edit.close fluent=IconEditClose icon=shape.icon.edit.close
+contextual_tab tab_picture_tools_format Some("Picture Tools Format") tab_set=Some("Picture Tools") shown_in=Some("picture_selected")
+group tab_picture_tools_format.group_picture_tool_adjust Some("Picture Tool Adjust")
+  tab_picture_tools_format.group_picture_tool_adjust.picture_brightness_gallery dropdown label="Picture Brightness Gallery" cmd=tools.picture.brightness fluent=PictureBrightnessGallery icon=tools.picture.brightness
+    tab_picture_tools_format.group_picture_tool_adjust.picture_brightness_gallery.picture_corrections_dialog button label="Picture Corrections Dialog" cmd=tools.picture.corrections.dialog fluent=PictureCorrectionsDialog icon=tools.picture.corrections.dialog
+  tab_picture_tools_format.group_picture_tool_adjust.picture_contrast_gallery dropdown label="Picture Contrast Gallery" cmd=tools.picture.contrast fluent=PictureContrastGallery icon=tools.picture.contrast
+    tab_picture_tools_format.group_picture_tool_adjust.picture_contrast_gallery.picture_corrections_dialog button label="Picture Corrections Dialog" cmd=tools.picture.corrections.dialog fluent=PictureCorrectionsDialog icon=tools.picture.corrections.dialog
+  tab_picture_tools_format.group_picture_tool_adjust.picture_auto_balance button label="Picture Auto Balance" cmd=tools.picture.auto.balance fluent=PictureAutoBalance icon=tools.picture.auto.balance
+  tab_picture_tools_format.group_picture_tool_adjust.picture_compress button label="Picture Compress" cmd=tools.picture.compress fluent=PictureCompress icon=tools.picture.compress
+  tab_picture_tools_format.group_picture_tool_adjust.picture_format_dialog_visio launcher label="Picture Format Dialog Visio" fluent=PictureFormatDialogVisio
+group tab_picture_tools_format.group_picture_styles_visio Some("Picture Styles Visio")
+  tab_picture_tools_format.group_picture_styles_visio.line_color_gallery dropdown label="Line Color Gallery" cmd=format.set.line.color fluent=LineColorGallery icon=format.set.line.color
+    tab_picture_tools_format.group_picture_styles_visio.line_color_gallery.line_styles_dialog button label="Line Styles Dialog" cmd=tools.line.styles.dialog fluent=LineStylesDialog icon=tools.line.styles.dialog
+    tab_picture_tools_format.group_picture_styles_visio.line_color_gallery.line_styles_dialog_2 button label="Line Styles Dialog" cmd=tools.line.styles.dialog fluent=LineStylesDialog icon=tools.line.styles.dialog
+    tab_picture_tools_format.group_picture_styles_visio.line_color_gallery.arrows_more button label="Arrows More" cmd=tools.arrows.more fluent=ArrowsMore icon=tools.arrows.more
+    tab_picture_tools_format.group_picture_styles_visio.line_color_gallery.line_dialog button label="Line Dialog" cmd=tools.line.dialog fluent=LineDialog icon=tools.line.dialog
+    tab_picture_tools_format.group_picture_styles_visio.line_color_gallery.line_arrows_gallery dropdown label="Line Arrows Gallery" cmd=tools.line.arrows fluent=LineArrowsGallery icon=tools.line.arrows
+    tab_picture_tools_format.group_picture_styles_visio.line_color_gallery.line_weight_gallery dropdown label="Line Weight Gallery" cmd=format.set.line.weight fluent=LineWeightGallery icon=format.set.line.weight
+    tab_picture_tools_format.group_picture_styles_visio.line_color_gallery.line_pattern_gallery dropdown label="Line Pattern Gallery" cmd=format.set.line.pattern fluent=LinePatternGallery icon=format.set.line.pattern
+group tab_picture_tools_format.group_picture_tool_arrange Some("Picture Tool Arrange")
+  tab_picture_tools_format.group_picture_tool_arrange.crop_tool toggle label="Crop Tool" cmd=tools.crop fluent=CropTool icon=tools.crop
+  tab_picture_tools_format.group_picture_tool_arrange.object_rotate_gallery dropdown label="Object Rotate Gallery" cmd=arrange.rotate.object fluent=ObjectRotateGallery icon=arrange.rotate.object
+  tab_picture_tools_format.group_picture_tool_arrange.object_bring_to_front_menu split label="Object Bring To Front Menu" cmd=arrange.bring_to_front fluent=ObjectBringToFrontMenu icon=arrange.bring_to_front
+    tab_picture_tools_format.group_picture_tool_arrange.object_bring_to_front_menu.object_bring_to_front button label="Object Bring To Front" cmd=arrange.bring_to_front fluent=ObjectBringToFront icon=arrange.bring_to_front
+    tab_picture_tools_format.group_picture_tool_arrange.object_bring_to_front_menu.object_bring_forward button label="Object Bring Forward" cmd=arrange.bring_forward fluent=ObjectBringForward icon=arrange.bring_forward
+  tab_picture_tools_format.group_picture_tool_arrange.object_send_to_back_menu split label="Object Send To Back Menu" cmd=arrange.send_to_back fluent=ObjectSendToBackMenu icon=arrange.send_to_back
+    tab_picture_tools_format.group_picture_tool_arrange.object_send_to_back_menu.object_send_to_back button label="Object Send To Back" cmd=arrange.send_to_back fluent=ObjectSendToBack icon=arrange.send_to_back
+    tab_picture_tools_format.group_picture_tool_arrange.object_send_to_back_menu.object_send_backward button label="Object Send Backward" cmd=arrange.send_backward fluent=ObjectSendBackward icon=arrange.send_backward
+contextual_tab tab_ink_tools_pens Some("Ink Tools Pens") tab_set=Some("Ink Tools") shown_in=None
+group tab_ink_tools_pens.group_ink_tools Some("Ink Tools")
+  tab_ink_tools_pens.group_ink_tools.pointer_tool toggle label="Pointer Tool" cmd=tools.pointer fluent=PointerTool icon=tools.pointer
+  tab_ink_tools_pens.group_ink_tools.ink_eraser toggle label="Ink Eraser" cmd=tools.ink.eraser fluent=InkEraser icon=tools.ink.eraser
+  tab_ink_tools_pens.group_ink_tools.ink_ballpoint_pen toggle label="Ink Ballpoint Pen" cmd=tools.ink.ballpoint.pen fluent=InkBallpointPen icon=tools.ink.ballpoint.pen
+  tab_ink_tools_pens.group_ink_tools.ink_highlighter toggle label="Ink Highlighter" cmd=tools.ink.highlighter fluent=InkHighlighter icon=tools.ink.highlighter
+group tab_ink_tools_pens.group_ink_pens Some("Ink Pens")
+  tab_ink_tools_pens.group_ink_pens.outline_weight_gallery dropdown label="Outline Weight Gallery" cmd=tools.outline.weight fluent=OutlineWeightGallery icon=tools.outline.weight
+    tab_ink_tools_pens.group_ink_pens.outline_weight_gallery.pen_pressure toggle label="Pen Pressure" cmd=tools.pen.pressure fluent=PenPressure icon=tools.pen.pressure
+  tab_ink_tools_pens.group_ink_pens.ink_color_picker dropdown label="Ink Color Picker" cmd=tools.ink.color.picker fluent=InkColorPicker icon=tools.ink.color.picker
+group tab_ink_tools_pens.group_ink_create Some("Ink Create")
+  tab_ink_tools_pens.group_ink_create.ink_auto_create_shapes check label="Ink Auto Create Shapes" cmd=tools.ink.auto.create.shapes fluent=InkAutoCreateShapes icon=tools.ink.auto.create.shapes
+  tab_ink_tools_pens.group_ink_create.ink_shape_close button label="Ink Shape Close" cmd=tools.ink.shape.close fluent=InkShapeClose icon=tools.ink.shape.close
+group tab_ink_tools_pens.group_ink_convert Some("Ink Convert")
+  tab_ink_tools_pens.group_ink_convert.ink_covert_to_text_visio button label="Ink Covert To Text Visio" cmd=tools.ink.covert.to.text.visio fluent=InkCovertToTextVisio icon=tools.ink.covert.to.text.visio
+  tab_ink_tools_pens.group_ink_convert.ink_covert_to_geometry button label="Ink Covert To Geometry" cmd=tools.ink.covert.to.geometry fluent=InkCovertToGeometry icon=tools.ink.covert.to.geometry
+group tab_ink_tools_pens.group_ink_close Some("Ink Close")
+  tab_ink_tools_pens.group_ink_close.ink_tools_close button label="Ink Tools Close" cmd=file.close.ink.tools.tab fluent=InkToolsClose icon=file.close.ink.tools.tab
+contextual_tab tab_shape_sheet_design Some("Shape Sheet Design") tab_set=Some("Shape Sheet Tools") shown_in=Some("shapesheet_window")
+group tab_shape_sheet_design.group_shape_sheet_view Some("Shape Sheet View")
+  tab_shape_sheet_design.group_shape_sheet_view.shape_sheet_show_formulas toggle label="Shape Sheet Show Formulas" cmd=edit.sw.show.formulas fluent=ShapeSheetShowFormulas icon=edit.sw.show.formulas
+  tab_shape_sheet_design.group_shape_sheet_view.shape_sheet_show_sections button label="Shape Sheet Show Sections" cmd=edit.sw.show.sections.dlg fluent=ShapeSheetShowSections icon=edit.sw.show.sections.dlg
+  tab_shape_sheet_design.group_shape_sheet_view.shape_sheet_show_values toggle label="Shape Sheet Show Values" cmd=edit.sw.show.values fluent=ShapeSheetShowValues icon=edit.sw.show.values
+  tab_shape_sheet_design.group_shape_sheet_view.style_explorer check label="Style Explorer" cmd=format.style.explorer fluent=StyleExplorer icon=format.style.explorer
+group tab_shape_sheet_design.group_shape_sheet_sections Some("Shape Sheet Sections")
+  tab_shape_sheet_design.group_shape_sheet_sections.shape_sheet_insert_section button label="Shape Sheet Insert Section" cmd=shape.sheet.insert.section fluent=ShapeSheetInsertSection icon=shape.sheet.insert.section
+  tab_shape_sheet_design.group_shape_sheet_sections.shape_sheet_delete_section button label="Shape Sheet Delete Section" cmd=shape.sheet.delete.section fluent=ShapeSheetDeleteSection icon=shape.sheet.delete.section
+group tab_shape_sheet_design.group_shape_sheet_rows Some("Shape Sheet Rows")
+  tab_shape_sheet_design.group_shape_sheet_rows.shape_sheet_delete_row button label="Shape Sheet Delete Row" cmd=shape.sheet.delete.row fluent=ShapeSheetDeleteRow icon=shape.sheet.delete.row
+  tab_shape_sheet_design.group_shape_sheet_rows.shape_sheet_insert_row button label="Shape Sheet Insert Row" cmd=shape.sheet.insert.row fluent=ShapeSheetInsertRow icon=shape.sheet.insert.row
+group tab_shape_sheet_design.group_shape_sheet_editing Some("Shape Sheet Editing")
+  tab_shape_sheet_design.group_shape_sheet_editing.hyperlink_insert button label="Hyperlink Insert" cmd=tools.hyperlink.insert fluent=HyperlinkInsert icon=tools.hyperlink.insert
+  tab_shape_sheet_design.group_shape_sheet_editing.shape_data button label="Shape Data" cmd=format.cust.prop.edit fluent=ShapeData icon=format.cust.prop.edit
+  tab_shape_sheet_design.group_shape_sheet_editing.shape_sheet_shape_action button label="Shape Sheet Shape Action" cmd=shape.sheet.shape.action fluent=ShapeSheetShapeAction icon=shape.sheet.shape.action
+  tab_shape_sheet_design.group_shape_sheet_editing.shape_sheet_edit_formula button label="Shape Sheet Edit Formula" cmd=shape.sheet.edit.formula fluent=ShapeSheetEditFormula icon=shape.sheet.edit.formula
+group tab_shape_sheet_design.group_shape_sheet_formula_tracing Some("Shape Sheet Formula Tracing")
+  tab_shape_sheet_design.group_shape_sheet_formula_tracing.show_formula_tracing_window toggle label="Show Formula Tracing Window" cmd=view.show.formula.tracing.window fluent=ShowFormulaTracingWindow icon=view.show.formula.tracing.window
+  tab_shape_sheet_design.group_shape_sheet_formula_tracing.trace_back button label="Trace Back" cmd=tools.trace.back fluent=TraceBack icon=tools.trace.back
+  tab_shape_sheet_design.group_shape_sheet_formula_tracing.trace_forward button label="Trace Forward" cmd=tools.trace.forward fluent=TraceForward icon=tools.trace.forward
+  tab_shape_sheet_design.group_shape_sheet_formula_tracing.trace_precedent_cells toggle label="Trace Precedent Cells" cmd=tools.trace.precedent.cells fluent=TracePrecedentCells icon=tools.trace.precedent.cells
+  tab_shape_sheet_design.group_shape_sheet_formula_tracing.trace_dependent_cells toggle label="Trace Dependent Cells" cmd=tools.trace.dependent.cells fluent=TraceDependentCells icon=tools.trace.dependent.cells
+contextual_tab tab_format Some("Format") tab_set=Some("Container Tools") shown_in=Some("container_selected")
+group tab_format.group_container_size Some("Container Size")
+  tab_format.group_container_size.container_margins dropdown label="Container Margins" cmd=shape.container.margins fluent=ContainerMargins icon=shape.container.margins
+  tab_format.group_container_size.fit_to_contents button label="Fit To Contents" cmd=view.fit.container.to.contents fluent=FitToContents icon=view.fit.container.to.contents
+  tab_format.group_container_size.automatic_resize dropdown label="Automatic Resize" cmd=tools.automatic.resize fluent=AutomaticResize icon=tools.automatic.resize
+    tab_format.group_container_size.automatic_resize.automatic_resize_none toggle label="Automatic Resize None" cmd=tools.automatic.resize.none fluent=AutomaticResizeNone icon=tools.automatic.resize.none
+    tab_format.group_container_size.automatic_resize.automatic_resize_expand_as_needed toggle label="Automatic Resize Expand As Needed" cmd=tools.automatic.resize.expand.as.needed fluent=AutomaticResizeExpandAsNeeded icon=tools.automatic.resize.expand.as.needed
+    tab_format.group_container_size.automatic_resize.automatic_resize_always_fit_to_contents toggle label="Automatic Resize Always Fit To Contents" cmd=tools.automatic.resize.always.fit.to.contents fluent=AutomaticResizeAlwaysFitToContents icon=tools.automatic.resize.always.fit.to.contents
+group tab_format.group_container_styles Some("Container Styles")
+  tab_format.group_container_styles.container_styles dropdown label="Container Styles" cmd=shape.container.styles fluent=ContainerStyles icon=shape.container.styles
+  tab_format.group_container_styles.container_heading_styles dropdown label="Container Heading Styles" cmd=shape.container.heading.styles fluent=ContainerHeadingStyles icon=shape.container.heading.styles
+group tab_format.group_membership Some("Membership")
+  tab_format.group_membership.container_lock toggle label="Container Lock" cmd=shape.lock.container fluent=ContainerLock icon=shape.lock.container
+  tab_format.group_membership.select_contents button label="Select Contents" cmd=edit.select.contents fluent=SelectContents icon=edit.select.contents
+  tab_format.group_membership.container_disband button label="Container Disband" cmd=arrange.disband.container fluent=ContainerDisband icon=arrange.disband.container
+file_view back_button=true default_page=file_view.tab_info
+nav file_view.tab_info Page "Info" cmd=Some("tools.usage.permissions")
+nav file_view.tab_office_start Page "Office Start" cmd=None
+nav file_view.tab_recent Command "Recent" cmd=Some("tools.button.open.browse")
+nav file_view.tab_save Page "Save" cmd=None
+nav file_view.tab_print Page "Print" cmd=None
+nav file_view.tab_share Page "Share" cmd=None
+nav file_view.tab_publish Page "Publish" cmd=None
+nav file_view.tab_help Page "Help" cmd=None
+context_menu context_menu_comment_marker Some("Comment Marker") trigger=None
+context_menu context_menu_connection_point Some("Connection Point") trigger=None
+context_menu context_menu_drawing_page Some("Drawing Page") trigger=None
+context_menu context_menu_explorer_document Some("Explorer Document") trigger=None
+context_menu context_menu_explorer_layer Some("Explorer Layer") trigger=None
+context_menu context_menu_explorer_layers Some("Explorer Layers") trigger=None
+context_menu context_menu_explorer_master Some("Explorer Master") trigger=None
+context_menu context_menu_explorer_masters Some("Explorer Masters") trigger=None
+context_menu context_menu_explorer_page Some("Explorer Page") trigger=None
+context_menu context_menu_explorer_pages Some("Explorer Pages") trigger=None
+context_menu context_menu_explorer_patterns Some("Explorer Patterns") trigger=None
+context_menu context_menu_explorer_shape Some("Explorer Shape") trigger=None
+context_menu context_menu_explorer_shapes Some("Explorer Shapes") trigger=None
+context_menu context_menu_explorer_style Some("Explorer Style") trigger=None
+context_menu context_menu_explorer_styles Some("Explorer Styles") trigger=None
+context_menu context_menu_full_screen Some("Full Screen") trigger=None
+context_menu context_menu_master Some("Master") trigger=None
+context_menu context_menu_master_explorer_document Some("Master Explorer Document") trigger=None
+context_menu context_menu_master_explorer_master Some("Master Explorer Master") trigger=None
+context_menu context_menu_ole_object Some("Ole Object") trigger=None
+context_menu context_menu_page_navigation Some("Page Navigation") trigger=None
+context_menu context_menu_page_tab Some("Page Tab") trigger=None
+context_menu context_menu_shape Some("Shape") trigger=None
+context_menu context_menu_shape1_d Some("Shape1 D") trigger=None
+context_menu context_menu_shape_sheet Some("Shape Sheet") trigger=None
+context_menu context_menu_spelling Some("Spelling") trigger=None
+context_menu context_menu_text Some("Text") trigger=None
+context_menu context_menu_text_drag Some("Text Drag") trigger=None
+context_menu context_menu_window_drawing_explorer Some("Window Drawing Explorer") trigger=None
+context_menu context_menu_window_external_data Some("Window External Data") trigger=None
+context_menu context_menu_window_external_data_item Some("Window External Data Item") trigger=None
+context_menu context_menu_window_external_data_tab Some("Window External Data Tab") trigger=None
+context_menu context_menu_window_formula_tracing Some("Window Formula Tracing") trigger=None
+context_menu context_menu_window_issues Some("Window Issues") trigger=None
+context_menu context_menu_window_issues_item Some("Window Issues Item") trigger=None
+context_menu context_menu_window_master_explorer Some("Window Master Explorer") trigger=None
+context_menu context_menu_window_pan_zoom Some("Window Pan Zoom") trigger=None
+context_menu context_menu_window_shape_data Some("Window Shape Data") trigger=None
+context_menu context_menu_window_shapes Some("Window Shapes") trigger=None
+context_menu context_menu_window_shapes_more_shapes Some("Window Shapes More Shapes") trigger=None
+context_menu context_menu_window_shapes_stencil Some("Window Shapes Stencil") trigger=None
+context_menu context_menu_window_size_position Some("Window Size Position") trigger=None
+context_menu context_menu_window_style_explorer Some("Window Style Explorer") trigger=None

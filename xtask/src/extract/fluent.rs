@@ -1262,10 +1262,12 @@ mod tests {
     }
 
     /// M2 of the P1-03 review: prove the committed layouts load
-    /// with the runtime [`larrygram_ui_spec::Loader`]. Copies the
-    /// committed YAMLs into a temp workspace, adds empty
-    /// `commands.yaml` and `shortcuts.yaml` (the P1-04 files do not
-    /// exist yet), and calls `Loader::load` for both layouts.
+    /// with the runtime [`larrygram_ui_spec::Loader`]. Mirrors the
+    /// loader's data set in a temp workspace — `ui-spec/` whole (the
+    /// v1 pair, the shared tables and the v2 `layouts/` and `themes/`
+    /// documents, task P7-03) plus the icon set its `icon_file`
+    /// cross-check resolves — and calls `Loader::load` for both v1
+    /// layouts.
     #[test]
     fn committed_layouts_load_with_the_runtime_loader() {
         use larrygram_ui_spec::{LayoutKind, Loader};
@@ -1278,26 +1280,12 @@ mod tests {
             return;
         }
 
-        // Build a temp workspace that mirrors the layout directory
-        // shape: ui-spec/{panel-2016.yaml, panel-365.yaml, commands.yaml, shortcuts.yaml}.
         let tmp = crate::util::test_support::TempDir::new("fluent-loader");
-        let data_dir = tmp.join("ui-spec");
-        std::fs::create_dir_all(&data_dir).unwrap();
-        std::fs::copy(&committed_2016, data_dir.join("panel-2016.yaml")).unwrap();
-        std::fs::copy(&committed_365, data_dir.join("panel-365.yaml")).unwrap();
-        // The loader requires commands.yaml and shortcuts.yaml to
-        // exist. Since P1-04 the committed layouts carry `command`
-        // links, so the loader's cross-reference check needs the real
-        // committed files; fall back to empty lists when they are not
-        // present (pre-P1-04 trees).
-        for name in ["commands.yaml", "shortcuts.yaml"] {
-            let committed = ws.join("ui-spec").join(name);
-            if committed.is_file() {
-                std::fs::copy(&committed, data_dir.join(name)).unwrap();
-            } else {
-                std::fs::write(data_dir.join(name), "[]\n").unwrap();
-            }
-        }
+        crate::util::test_support::copy_tree(&ws.join("ui-spec"), &tmp.join("ui-spec"));
+        crate::util::test_support::copy_tree(
+            &ws.join("crates/ui/assets/icons/tabler"),
+            &tmp.join("crates/ui/assets/icons/tabler"),
+        );
 
         let loader = Loader::new(tmp.path()).expect("loader compiles");
         let set_2016 = loader.load(LayoutKind::Panel2016).expect("2016 loads");
