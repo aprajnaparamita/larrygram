@@ -803,11 +803,6 @@ pub const OUR_COMMANDS: &[(&str, &str)] = &[
         "All on Current Page",
     ),
     ("review.edit_comment", "Edit Comment"),
-    ("review.issues.stop_ignoring_rule", "Stop Ignoring Rule"),
-    (
-        "review.issues.stop_ignoring_this_issue",
-        "Stop Ignoring This Issue",
-    ),
     ("review.reviewers.hide_all", "Hide All"),
     ("review.show_hide_markup", "Show/Hide Markup"),
     ("shape.convert_ink_to_geometry", "Convert Ink to Geometry"),
@@ -830,7 +825,6 @@ pub const OUR_COMMANDS: &[(&str, &str)] = &[
     ),
     ("shape.master.add_to_quick_shapes", "Add to Quick Shapes"),
     ("shape.master.delete_master", "Delete Master"),
-    ("shape.master.edit_master.properties", "Properties..."),
     (
         "shape.master.remove_from_quick_shapes",
         "Remove from Quick Shapes",
@@ -850,7 +844,6 @@ pub const OUR_COMMANDS: &[(&str, &str)] = &[
     ("shape.stencil.expand_all_groups", "Expand All Groups"),
     ("shape.stencil.order.move_down", "Move Down"),
     ("shape.stencil.order.move_up", "Move Up"),
-    ("shape.stencil.properties", "Properties..."),
     ("shape.stencil.reset_stencil", "Reset Stencil"),
     ("shape.update_icon_image", "Update Icon Image"),
     ("text.begin", "Edit Text"),

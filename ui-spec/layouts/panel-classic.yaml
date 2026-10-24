@@ -5874,8 +5874,7 @@ context_menus:
       kind: button
       label: Properties...
       access: "p"
-      command: shape.master.edit_master.properties
-      new_command: true
+      command: shape.master.properties
     - id: context.master_edit.edit_master.edit_master_shape
       kind: button
       label: Edit Master Shape
@@ -5924,8 +5923,7 @@ context_menus:
     kind: button
     label: Properties...
     access: "i"
-    command: shape.stencil.properties
-    new_command: true
+    command: shape.sten.properties
     icon: shape.stencil.properties
   - id: context.stencil_edit.view
     kind: submenu

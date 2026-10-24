@@ -2850,14 +2850,12 @@ context_menus:
     kind: button
     label: Stop Ignoring This Issue
     access: "s"
-    new_command: true
-    command: review.issues.stop_ignoring_this_issue
+    command: tools.stop.ignoring.this.issue
   - id: context.issues_list.stop_ignoring_rule
     kind: button
     label: Stop Ignoring Rule
     access: "t"
-    new_command: true
-    command: review.issues.stop_ignoring_rule
+    command: tools.stop.ignoring.validation.rule
   - id: context.issues_list.show_ignored_issues
     kind: button
     label: Show Ignored Issues
@@ -3102,8 +3100,7 @@ context_menus:
       kind: button
       label: Properties...
       access: "p"
-      new_command: true
-      command: shape.master.edit_master.properties
+      command: shape.master.properties
     - id: context.master_edit.edit_master.edit_master_shape
       kind: button
       label: Edit Master Shape
@@ -3152,8 +3149,7 @@ context_menus:
     kind: button
     label: Properties...
     access: "i"
-    new_command: true
-    command: shape.stencil.properties
+    command: shape.sten.properties
     icon: shape.stencil.properties
   - id: context.stencil_edit.view
     kind: submenu

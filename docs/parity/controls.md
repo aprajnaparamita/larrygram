@@ -1333,8 +1333,6 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | review.ignore.this.issue | Ignore This Issue | stub |
 | review.ignore.validation.issue | Issue | stub |
 | review.ignore.validation.rule | Ignore Rule | stub |
-| review.issues.stop_ignoring_rule | Stop Ignoring Rule | stub |
-| review.issues.stop_ignoring_this_issue | Stop Ignoring This Issue | stub |
 | review.new.comment | New Comment | stub |
 | review.reviewer.visibility.all | All | stub |
 | review.reviewer.visibility.none | None | stub |
@@ -1412,7 +1410,6 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | shape.master.add_to_my_shapes.add_to_new_stencil | Add To New Stencil... | stub |
 | shape.master.add_to_quick_shapes | Add to Quick Shapes | stub |
 | shape.master.delete_master | Delete Master | stub |
-| shape.master.edit_master.properties | Properties... | stub |
 | shape.master.explorer | Master Explorer | stub |
 | shape.master.properties | Master Properties | stub |
 | shape.master.remove_from_quick_shapes | Remove from Quick Shapes | stub |
@@ -1460,7 +1457,6 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | shape.stencil.expand_all_groups | Expand All Groups | stub |
 | shape.stencil.order.move_down | Move Down | stub |
 | shape.stencil.order.move_up | Move Up | stub |
-| shape.stencil.properties | Properties... | stub |
 | shape.stencil.reset_stencil | Reset Stencil | stub |
 | shape.studio.add.on | On | stub |
 | shape.styles | Styles | stub |

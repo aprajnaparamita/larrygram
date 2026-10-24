@@ -3306,16 +3306,6 @@
   label: Issue
   mapping_confidence: unknown
   visuicmd: visCmdIgnoreValidationIssue
-- fluent_ids: []
-  id: review.issues.stop_ignoring_rule
-  label: Stop Ignoring Rule
-  mapping_confidence: unknown
-  visuicmd: null
-- fluent_ids: []
-  id: review.issues.stop_ignoring_this_issue
-  label: Stop Ignoring This Issue
-  mapping_confidence: unknown
-  visuicmd: null
 - fluent_ids:
     - ReviewNewComment
   id: review.new.comment
@@ -3686,11 +3676,6 @@
   label: Delete Master
   mapping_confidence: unknown
   visuicmd: null
-- fluent_ids: []
-  id: shape.master.edit_master.properties
-  label: Properties...
-  mapping_confidence: unknown
-  visuicmd: null
 - fluent_ids:
     - MasterProperties
   id: shape.master.properties
@@ -3957,11 +3942,6 @@
 - fluent_ids: []
   id: shape.stencil.order.move_up
   label: Move Up
-  mapping_confidence: unknown
-  visuicmd: null
-- fluent_ids: []
-  id: shape.stencil.properties
-  label: Properties...
   mapping_confidence: unknown
   visuicmd: null
 - fluent_ids: []
