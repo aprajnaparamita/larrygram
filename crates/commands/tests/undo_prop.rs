@@ -1065,6 +1065,7 @@ const NON_EDITING: &[(&str, &str)] = &[
     ("app.office.center.options", "opens a dialog (UiRequest)"),
     ("app.quit", "quits (UiRequest)"),
     ("help.about", "opens a dialog (UiRequest)"),
+    ("help.welcome", "opens a dialog (UiRequest)"),
     ("file.new", "replaces the active document, no undo (P4-02)"),
     ("file.open", "reads a file, no undo (P4-02)"),
     ("file.save", "writes a file (ADR 0048)"),
@@ -1082,6 +1083,14 @@ const NON_EDITING: &[(&str, &str)] = &[
     ("view.units", "view state only (ADR 0040 rule 3)"),
     ("view.ui_layout.panel_2016", "layout choice only (ADR 0032)"),
     ("view.ui_layout.panel_365", "layout choice only (ADR 0032)"),
+    (
+        "view.ui_layout.panel_classic",
+        "layout choice only (ADR 0061)",
+    ),
+    (
+        "view.ui_layout.panel_modern",
+        "layout choice only (ADR 0061)",
+    ),
     ("page.next", "active-page navigation, no edit"),
     ("page.previous", "active-page navigation, no edit"),
     ("edit.select", "selection only (P5-16)"),

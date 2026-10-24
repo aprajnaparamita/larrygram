@@ -303,6 +303,27 @@ pub(super) fn run_ui_layout_365(
     Ok(outcome("Panel layout: Panel (365 data)", Vec::new()))
 }
 
+/// `view.ui_layout.panel_classic`: switches the command bar to the
+/// Panel Classic layout (ADR 0061; always enabled, no restart, like
+/// the two Fluent-data layouts).
+pub(super) fn run_ui_layout_panel_classic(
+    ctx: &mut AppCtx,
+    _inv: &Invocation,
+) -> Result<Outcome, CommandError> {
+    ctx.settings.ui_layout = larrygram_ui_spec::LayoutKind::PanelClassic;
+    Ok(outcome("Panel layout: Panel Classic", Vec::new()))
+}
+
+/// `view.ui_layout.panel_modern`: switches the command bar to the
+/// Panel Modern layout (ADR 0061; always enabled, no restart).
+pub(super) fn run_ui_layout_panel_modern(
+    ctx: &mut AppCtx,
+    _inv: &Invocation,
+) -> Result<Outcome, CommandError> {
+    ctx.settings.ui_layout = larrygram_ui_spec::LayoutKind::PanelModern;
+    Ok(outcome("Panel layout: Panel Modern", Vec::new()))
+}
+
 /// `page.next`: moves to the next page, wrapping at the end.
 pub(super) fn run_page_next(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandError> {
     move_page(ctx, 1)
@@ -358,6 +379,17 @@ pub(super) fn run_about(_ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome,
     })
 }
 
+/// `help.welcome`: asks the dispatcher to show the welcome wizard
+/// (ADR 0066; never a dialog from inside the command, AGENTS.md
+/// section 6).
+pub(super) fn run_welcome(_ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandError> {
+    Ok(Outcome {
+        message: Some("Welcome".to_owned()),
+        ui_request: Some(UiRequest::ShowWelcome),
+        ..Outcome::default()
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -400,5 +432,68 @@ mod tests {
         let outcome =
             run_zoom_fit(&mut ctx, &Invocation::new(args, crate::Source::Test)).expect("zoom fit");
         assert!(outcome.message.unwrap_or_default().starts_with("Zoom "));
+    }
+
+    /// The four layout switches (ADR 0032 for the two Fluent-data
+    /// layouts, ADR 0061 for Panel Classic and Panel Modern): each
+    /// sets the layout and names it in the status line.
+    #[test]
+    fn the_four_layout_switches_set_the_layout() {
+        let mut ctx = AppCtx::new(Settings::default());
+        let invocation = Invocation::empty(crate::Source::Test);
+
+        let outcome = run_ui_layout_panel_classic(&mut ctx, &invocation).expect("classic");
+        assert_eq!(
+            outcome.message.as_deref(),
+            Some("Panel layout: Panel Classic")
+        );
+        assert_eq!(
+            ctx.settings.ui_layout,
+            larrygram_ui_spec::LayoutKind::PanelClassic
+        );
+
+        let outcome = run_ui_layout_panel_modern(&mut ctx, &invocation).expect("modern");
+        assert_eq!(
+            outcome.message.as_deref(),
+            Some("Panel layout: Panel Modern")
+        );
+        assert_eq!(
+            ctx.settings.ui_layout,
+            larrygram_ui_spec::LayoutKind::PanelModern
+        );
+
+        let outcome = run_ui_layout_2016(&mut ctx, &invocation).expect("2016");
+        assert_eq!(
+            outcome.message.as_deref(),
+            Some("Panel layout: Panel (2016 data)")
+        );
+        assert_eq!(
+            ctx.settings.ui_layout,
+            larrygram_ui_spec::LayoutKind::Panel2016
+        );
+
+        let outcome = run_ui_layout_365(&mut ctx, &invocation).expect("365");
+        assert_eq!(
+            outcome.message.as_deref(),
+            Some("Panel layout: Panel (365 data)")
+        );
+        assert_eq!(
+            ctx.settings.ui_layout,
+            larrygram_ui_spec::LayoutKind::Panel365
+        );
+    }
+
+    /// The two Help commands ask the dispatcher for their window
+    /// (ADR 0066); they never open one themselves.
+    #[test]
+    fn the_help_commands_request_their_windows() {
+        let mut ctx = AppCtx::new(Settings::default());
+        let invocation = Invocation::empty(crate::Source::Test);
+        let outcome = run_about(&mut ctx, &invocation).expect("about");
+        assert_eq!(outcome.message.as_deref(), Some("About Larrygram"));
+        assert_eq!(outcome.ui_request, Some(UiRequest::ShowAbout));
+        let outcome = run_welcome(&mut ctx, &invocation).expect("welcome");
+        assert_eq!(outcome.message.as_deref(), Some("Welcome"));
+        assert_eq!(outcome.ui_request, Some(UiRequest::ShowWelcome));
     }
 }

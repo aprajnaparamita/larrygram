@@ -83,8 +83,11 @@ const PIN_365: LayoutCounts = LayoutCounts {
 // derivation does not produce (task P5-04, forced companion update to
 // the regenerated `commands.yaml`). P5-16 adds `edit.select`. P6-18
 // adds `data.set.property` (the Shape Data pane's edit, ADR 0035
-// amendment).
-const COMMANDS: usize = 978;
+// amendment). P7-02 adds the 155 Phase 7 ids the Panel Classic and
+// Panel Modern layouts use, merges the duplicates among them and drops
+// the two rows that only held a moved Fluent id (`tools.objects.ungroup`
+// and `help.about.visio`).
+const COMMANDS: usize = 1131;
 const SHORTCUTS: usize = 90;
 
 #[test]

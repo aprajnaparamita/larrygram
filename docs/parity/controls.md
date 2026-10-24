@@ -776,6 +776,7 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | file.save | Save | implemented |
 | file.save_as | Save As | implemented |
 | help.about | About Larrygram | implemented |
+| help.welcome | Welcome | implemented |
 | insert.drawing.ellipse | Ellipse | implemented |
 | insert.drawing.line | Line | implemented |
 | insert.drawing.rectangle | Rectangle | implemented |
@@ -814,6 +815,8 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | view.toggle_grid | Toggle Grid | implemented |
 | view.ui_layout.panel_2016 | Panel (2016 data) | implemented |
 | view.ui_layout.panel_365 | Panel (365 data) | implemented |
+| view.ui_layout.panel_classic | Panel Classic Layout | implemented |
+| view.ui_layout.panel_modern | Panel Modern Layout | implemented |
 | view.units | Units | implemented |
 | view.zoom.fit | Fit to Window | implemented |
 | view.zoom.in | Zoom In | implemented |
@@ -1252,7 +1255,6 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | help.search | Search | stub |
 | help.shape.basics | Basics | stub |
 | help.templates | Templates | stub |
-| help.welcome | Welcome | stub |
 | insert.acquire.images | Images | stub |
 | insert.add.connect.pt | Pt | stub |
 | insert.add.control.pt | Pt | stub |
@@ -1828,8 +1830,6 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | view.toolbar.stencil | Stencil | stub |
 | view.toolbar.view | View | stub |
 | view.toolbars.dlg | Dlg | stub |
-| view.ui_layout.panel_classic | Panel Classic Layout | stub |
-| view.ui_layout.panel_modern | Panel Modern Layout | stub |
 | view.view100 | View100 | stub |
 | view.view150 | View150 | stub |
 | view.view200 | View200 | stub |

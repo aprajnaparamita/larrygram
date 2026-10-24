@@ -154,6 +154,18 @@ const BUILTINS: &[(&str, &str, EnabledFn, RunFn)] = &[
         always,
         view::run_ui_layout_365,
     ),
+    (
+        "view.ui_layout.panel_classic",
+        "Panel Classic Layout",
+        always,
+        view::run_ui_layout_panel_classic,
+    ),
+    (
+        "view.ui_layout.panel_modern",
+        "Panel Modern Layout",
+        always,
+        view::run_ui_layout_panel_modern,
+    ),
     ("page.next", "Next Page", has_pages, view::run_page_next),
     (
         "page.previous",
@@ -161,7 +173,8 @@ const BUILTINS: &[(&str, &str, EnabledFn, RunFn)] = &[
         has_pages,
         view::run_page_previous,
     ),
-    ("help.about", "About", always, view::run_about),
+    ("help.about", "About Larrygram", always, view::run_about),
+    ("help.welcome", "Welcome", always, view::run_welcome),
 ];
 
 /// Builds the registry with every implemented command registered over

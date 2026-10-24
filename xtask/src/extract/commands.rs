@@ -654,17 +654,44 @@ pub const OUR_COMMANDS: &[(&str, &str)] = &[
     ("arrange.align.center_x", "Align Center"),
     ("arrange.distribute.horizontal", "Distribute Horizontally"),
     ("arrange.distribute.vertical", "Distribute Vertically"),
-    ("arrange.distribute_shapes.distribute_center", "Distribute Center"),
-    ("arrange.distribute_shapes.distribute_horizontal_spacing", "Distribute Horizontal Spacing"),
-    ("arrange.distribute_shapes.distribute_middle", "Distribute Middle"),
-    ("arrange.distribute_shapes.distribute_vertical_spacing", "Distribute Vertical Spacing"),
+    (
+        "arrange.distribute_shapes.distribute_center",
+        "Distribute Center",
+    ),
+    (
+        "arrange.distribute_shapes.distribute_horizontal_spacing",
+        "Distribute Horizontal Spacing",
+    ),
+    (
+        "arrange.distribute_shapes.distribute_middle",
+        "Distribute Middle",
+    ),
+    (
+        "arrange.distribute_shapes.distribute_vertical_spacing",
+        "Distribute Vertical Spacing",
+    ),
     ("connector.add_line_jumps_to", "Add Line Jumps To"),
-    ("connector.add_line_jumps_to.first_displayed_line", "First Displayed Line"),
-    ("connector.add_line_jumps_to.horizontal_lines", "Horizontal Lines"),
-    ("connector.add_line_jumps_to.last_displayed_line", "Last Displayed Line"),
-    ("connector.add_line_jumps_to.last_routed_line", "Last Routed Line"),
+    (
+        "connector.add_line_jumps_to.first_displayed_line",
+        "First Displayed Line",
+    ),
+    (
+        "connector.add_line_jumps_to.horizontal_lines",
+        "Horizontal Lines",
+    ),
+    (
+        "connector.add_line_jumps_to.last_displayed_line",
+        "Last Displayed Line",
+    ),
+    (
+        "connector.add_line_jumps_to.last_routed_line",
+        "Last Routed Line",
+    ),
     ("connector.add_line_jumps_to.no_lines", "No Lines"),
-    ("connector.add_line_jumps_to.vertical_lines", "Vertical Lines"),
+    (
+        "connector.add_line_jumps_to.vertical_lines",
+        "Vertical Lines",
+    ),
     ("connector.draw", "Draw Connector"),
     ("connector.glue_begin", "Glue Begin"),
     ("connector.glue_end", "Glue End"),
@@ -690,7 +717,10 @@ pub const OUR_COMMANDS: &[(&str, &str)] = &[
     ("data.external.data_source.properties", "Properties..."),
     ("data.external.data_source.remove", "Remove"),
     ("data.external.data_source.rename", "Rename"),
-    ("data.external.link_to_selected_shapes", "Link to Selected Shapes"),
+    (
+        "data.external.link_to_selected_shapes",
+        "Link to Selected Shapes",
+    ),
     ("data.external.linked_shapes", "Linked Shapes"),
     ("data.external.properties", "Properties..."),
     ("data.external.remove", "Remove"),
@@ -698,7 +728,10 @@ pub const OUR_COMMANDS: &[(&str, &str)] = &[
     ("data.external.unlink", "Unlink"),
     ("data.insert_data_solutions.calendar", "Calendar..."),
     ("data.insert_data_solutions.gantt_chart", "Gantt Chart..."),
-    ("data.insert_data_solutions.organization_chart", "Organization Chart..."),
+    (
+        "data.insert_data_solutions.organization_chart",
+        "Organization Chart...",
+    ),
     ("data.insert_data_solutions.timeline", "Timeline..."),
     ("data.insert_pivotdiagram", "Insert PivotDiagram..."),
     ("data.refresh_all", "Refresh All"),
@@ -706,11 +739,17 @@ pub const OUR_COMMANDS: &[(&str, &str)] = &[
     ("developer.run_add_on", "Run Add-On..."),
     ("edit.action", "Action..."),
     ("edit.connection_point.inward", "Inward"),
-    ("edit.connection_point.inward_and_outward", "Inward & Outward"),
+    (
+        "edit.connection_point.inward_and_outward",
+        "Inward & Outward",
+    ),
     ("edit.connection_point.outward", "Outward"),
     ("edit.create_shortcut", "Create Shortcut"),
     ("edit.delete", "Delete"),
-    ("edit.delete_or_inherit_section", "Delete or Inherit Section"),
+    (
+        "edit.delete_or_inherit_section",
+        "Delete or Inherit Section",
+    ),
     ("edit.deselect", "Deselect"),
     ("edit.paste_shortcut", "Paste Shortcut"),
     ("edit.reconvert", "Reconvert"),
@@ -755,11 +794,20 @@ pub const OUR_COMMANDS: &[(&str, &str)] = &[
     ("page.reorder_pages", "Reorder Pages..."),
     ("page.setup.layout_and_routing", "Layout & Routing..."),
     ("review.delete_markup", "Delete Markup"),
-    ("review.delete_markup.delete_all_markup_overlays_in_document", "Delete All Markup Overlays"),
-    ("review.delete_markup.delete_markup_overlays_on_current_page.all_on_current_page", "All on Current Page"),
+    (
+        "review.delete_markup.delete_all_markup_overlays_in_document",
+        "Delete All Markup Overlays",
+    ),
+    (
+        "review.delete_markup.delete_markup_overlays_on_current_page.all_on_current_page",
+        "All on Current Page",
+    ),
     ("review.edit_comment", "Edit Comment"),
     ("review.issues.stop_ignoring_rule", "Stop Ignoring Rule"),
-    ("review.issues.stop_ignoring_this_issue", "Stop Ignoring This Issue"),
+    (
+        "review.issues.stop_ignoring_this_issue",
+        "Stop Ignoring This Issue",
+    ),
     ("review.reviewers.hide_all", "Hide All"),
     ("review.show_hide_markup", "Show/Hide Markup"),
     ("shape.convert_ink_to_geometry", "Convert Ink to Geometry"),
@@ -772,12 +820,21 @@ pub const OUR_COMMANDS: &[(&str, &str)] = &[
     ("shape.exit_group", "Exit Group"),
     ("shape.insert_shape_after", "Insert Shape After"),
     ("shape.insert_shape_before", "Insert Shape Before"),
-    ("shape.master.add_to_my_shapes.add_to_existing_stencil", "Add To Existing Stencil..."),
-    ("shape.master.add_to_my_shapes.add_to_new_stencil", "Add To New Stencil..."),
+    (
+        "shape.master.add_to_my_shapes.add_to_existing_stencil",
+        "Add To Existing Stencil...",
+    ),
+    (
+        "shape.master.add_to_my_shapes.add_to_new_stencil",
+        "Add To New Stencil...",
+    ),
     ("shape.master.add_to_quick_shapes", "Add to Quick Shapes"),
     ("shape.master.delete_master", "Delete Master"),
     ("shape.master.edit_master.properties", "Properties..."),
-    ("shape.master.remove_from_quick_shapes", "Remove from Quick Shapes"),
+    (
+        "shape.master.remove_from_quick_shapes",
+        "Remove from Quick Shapes",
+    ),
     ("shape.master.rename_master", "Rename Master"),
     ("shape.move", "Move"),
     ("shape.resize", "Resize"),
@@ -850,7 +907,6 @@ pub const OUR_COMMANDS: &[(&str, &str)] = &[
     ("view.ui_layout.panel_modern", "Panel Modern Layout"),
     ("view.units", "Units"),
     ("view.zoom.fit", "Fit to Window"),
-
 ];
 
 /// Adds one row per [`OUR_COMMANDS`] id (task P4-02, ADR 0006
@@ -887,10 +943,7 @@ pub fn add_our_commands(entries: &mut Vec<CommandEntry>) {
 /// error: the extractor's own tests run over a small fixture tree
 /// with none of the real control names, and the real data is pinned by
 /// the `real_fluent_joins_apply` test.
-pub fn apply_fluent_joins(
-    entries: &mut Vec<CommandEntry>,
-    controls: &BTreeMap<String, ControlMeta>,
-) {
+pub fn apply_fluent_joins(entries: &mut [CommandEntry], controls: &BTreeMap<String, ControlMeta>) {
     for (fluent, id) in FLUENT_JOINS {
         if !controls.contains_key(*fluent) {
             continue;
@@ -2214,12 +2267,12 @@ controls:
         entries[0].fluent_ids.push("AlignLeft".into());
         entries[0].confidence = Confidence::Exact;
         add_our_commands(&mut entries);
-        apply_fluent_joins(
-            &mut entries,
-            &controls(&[("AlignLeft", "toggleButton")]),
-        );
+        apply_fluent_joins(&mut entries, &controls(&[("AlignLeft", "toggleButton")]));
 
-        let source = entries.iter().find(|e| e.id == "arrange.align.left").unwrap();
+        let source = entries
+            .iter()
+            .find(|e| e.id == "arrange.align.left")
+            .unwrap();
         assert!(source.fluent_ids.is_empty(), "{:?}", source.fluent_ids);
         assert_eq!(source.confidence, Confidence::Unknown);
         assert_eq!(source.visuicmd.as_deref(), Some("visCmdAlignObjectLeft"));
@@ -2322,7 +2375,10 @@ controls:
                     missing.insert(command.to_owned());
                 }
             });
-            assert!(missing.is_empty(), "{name} uses unknown commands: {missing:?}");
+            assert!(
+                missing.is_empty(),
+                "{name} uses unknown commands: {missing:?}"
+            );
         }
     }
 

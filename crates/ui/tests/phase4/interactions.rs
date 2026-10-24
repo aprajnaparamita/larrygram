@@ -155,7 +155,7 @@ fn switching_layouts_from_the_options_dialog_needs_no_restart() {
 fn the_help_menu_opens_the_about_dialog() {
     let mut rig = ShellRig::large();
     rig.click(Role::Button, "Help");
-    rig.click(Role::Button, "About");
+    rig.click(Role::Button, "About Larrygram");
     assert_eq!(
         rig.shell.borrow().status(),
         "About Larrygram",

@@ -7,10 +7,9 @@
 //!    `jsonschema` dependency;
 //! 2. each layout decodes into [`LayoutV2`], so the Rust types and the
 //!    files agree;
-//! 3. every `command` id resolves in `ui-spec/commands.yaml`, except
-//!    the ids listed in `ui-spec/commands-phase7.yaml`, which task
-//!    P7-02 merges into `OUR_COMMANDS` (the cross-check skips them
-//!    until then).
+//! 3. every `command` id resolves in `ui-spec/commands.yaml` (task
+//!    P7-02 merged the Phase 7 ids into `OUR_COMMANDS` and deleted the
+//!    proposal file).
 //!
 //! Task P7-03 replaces the ad-hoc walk with the loader's own
 //! cross-checks.
@@ -58,19 +57,10 @@ fn command_ids(value: &serde_json::Value, out: &mut Vec<String>) {
     }
 }
 
-/// The ids of one commands table (`commands.yaml` is a list,
-/// `commands-phase7.yaml` has a `commands` key).
+/// The ids of the `commands.yaml` table (a list of entries).
 fn table_ids(path: &Path) -> Result<BTreeSet<String>, Error> {
     let value = parse(path)?;
-    let entries = match &value {
-        serde_json::Value::Array(items) => items.clone(),
-        serde_json::Value::Object(_) => value
-            .get("commands")
-            .and_then(|commands| commands.as_array())
-            .cloned()
-            .unwrap_or_default(),
-        _ => Vec::new(),
-    };
+    let entries = value.as_array().cloned().unwrap_or_default();
     Ok(entries
         .iter()
         .filter_map(|entry| entry.get("id")?.as_str().map(str::to_owned))
@@ -114,10 +104,9 @@ fn both_layouts_decode_into_the_v2_types() -> Result<(), Error> {
 }
 
 #[test]
-fn every_command_resolves_except_the_p7_02_proposals() -> Result<(), Error> {
+fn every_command_resolves_in_commands_yaml() -> Result<(), Error> {
     let root = workspace_root();
     let known = table_ids(&root.join("ui-spec/commands.yaml"))?;
-    let proposals = table_ids(&root.join("ui-spec/commands-phase7.yaml"))?;
     assert!(!known.is_empty(), "commands.yaml has ids");
 
     let mut missing = BTreeSet::new();
@@ -127,14 +116,14 @@ fn every_command_resolves_except_the_p7_02_proposals() -> Result<(), Error> {
         command_ids(&value, &mut ids);
         assert!(!ids.is_empty(), "{file} links commands");
         for id in ids {
-            if !known.contains(&id) && !proposals.contains(&id) {
+            if !known.contains(&id) {
                 missing.insert(format!("{file}: {id}"));
             }
         }
     }
     assert!(
         missing.is_empty(),
-        "command ids in neither commands.yaml nor commands-phase7.yaml: {missing:?}"
+        "command ids missing from commands.yaml: {missing:?}"
     );
     Ok(())
 }
