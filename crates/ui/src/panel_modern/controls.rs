@@ -669,3 +669,226 @@ fn set_latched(toggles: &mut Toggles, item: &Item, latched: bool) {
         toggles.remove(item.id.as_str());
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use larrygram_commands::app::{AppCtx, Settings};
+
+    use super::*;
+    use crate::test_util::with_ui;
+
+    /// A minimal item with a label and no command.
+    fn item(id: &str, kind: ItemKind, label: &str) -> Item {
+        Item {
+            id: id.to_owned(),
+            kind,
+            label: Some(label.to_owned()),
+            access: None,
+            shortcut: None,
+            command: None,
+            new_command: false,
+            fluent: None,
+            visuicmd: None,
+            icon: None,
+            display: None,
+            size: None,
+            column: None,
+            row: None,
+            width: None,
+            begin_group: false,
+            hidden: false,
+            dynamic_label: false,
+            list: None,
+            options: Vec::new(),
+            items: Vec::new(),
+        }
+    }
+
+    /// A resolver that disables everything: the draw-only tests below
+    /// render widgets but never click them.
+    fn off(target: &Item) -> Action {
+        Action::Disabled {
+            reason: format!("no {:?}", target.id),
+        }
+    }
+
+    /// The rectangle one control draws at.
+    fn placed() -> Placed {
+        Placed {
+            rect: egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(120.0, 32.0)),
+            large: false,
+        }
+    }
+
+    #[test]
+    fn show_control_stops_at_the_recursion_cap() {
+        with_ui(|ui| {
+            let lists = ListData::new();
+            let metrics = Metrics::default();
+            let app = AppCtx::new(Settings::default());
+            let mut toggles = Toggles::default();
+            let mut draw = Draw {
+                lists: &lists,
+                metrics: &metrics,
+                app: &app,
+                toggles: &mut toggles,
+            };
+            let mut out = Vec::new();
+            let target = item("deep", ItemKind::Button, "Too deep");
+            let done = show_control(ui, &target, placed(), &mut draw, &off, &mut out, MAX_DEPTH);
+            assert!(done.is_ok(), "the cap renders instead of erroring");
+            assert!(out.is_empty(), "the cap dispatches nothing");
+        });
+    }
+
+    #[test]
+    fn menu_only_control_kinds_draw_labels_and_children() {
+        with_ui(|ui| {
+            let lists = ListData::new();
+            let metrics = Metrics::default();
+            let app = AppCtx::new(Settings::default());
+            let mut toggles = Toggles::default();
+            let mut draw = Draw {
+                lists: &lists,
+                metrics: &metrics,
+                app: &app,
+                toggles: &mut toggles,
+            };
+            let mut out = Vec::new();
+            for kind in [
+                ItemKind::Submenu,
+                ItemKind::Heading,
+                ItemKind::List,
+                ItemKind::Options,
+            ] {
+                let mut parent = item("parent", kind, "Parent");
+                parent.items = vec![item("child", ItemKind::Button, "Child")];
+                let done = show_control(ui, &parent, placed(), &mut draw, &off, &mut out, 0);
+                assert!(done.is_ok(), "{kind:?} renders as a label");
+            }
+        });
+    }
+
+    #[test]
+    fn the_menu_seams_stop_at_the_recursion_cap() {
+        with_ui(|ui| {
+            let lists = ListData::new();
+            let metrics = Metrics::default();
+            let app = AppCtx::new(Settings::default());
+            let mut toggles = Toggles::default();
+            let mut draw = Draw {
+                lists: &lists,
+                metrics: &metrics,
+                app: &app,
+                toggles: &mut toggles,
+            };
+            let mut out = Vec::new();
+            let target = item("entry", ItemKind::Button, "Entry");
+            let items = vec![target.clone()];
+            assert!(show_menu(ui, &items, &mut draw, &off, &mut out, MAX_DEPTH).is_ok());
+            assert!(show_menu_entry(ui, &target, &mut draw, &off, &mut out, MAX_DEPTH).is_ok());
+            assert!(show_options(ui, &target, &mut draw, &off, &mut out, MAX_DEPTH).is_ok());
+            assert!(show_gallery(ui, &target, &mut draw, &off, &mut out, MAX_DEPTH).is_ok());
+        });
+    }
+
+    #[test]
+    fn entry_rows_maps_the_list_or_the_placeholder() {
+        let mut lists = ListData::new();
+        lists.insert("colors", vec!["Red".to_owned(), "Blue".to_owned()]);
+        let rows = entry_rows(&lists, "colors");
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].text, "Red");
+        assert!(!rows[0].placeholder);
+        let none = entry_rows(&lists, "missing");
+        assert_eq!(none.len(), 1);
+        assert_eq!(none[0].text, "(none)");
+        assert!(none[0].placeholder);
+    }
+
+    #[test]
+    fn latching_round_trips_through_the_toggle_set() {
+        let mut toggles = Toggles::default();
+        let target = item("check", ItemKind::Check, "Check");
+        assert!(!latched(&toggles, &target));
+        set_latched(&mut toggles, &target, true);
+        assert!(latched(&toggles, &target));
+        set_latched(&mut toggles, &target, false);
+        assert!(!latched(&toggles, &target));
+    }
+
+    #[test]
+    fn menu_rows_draw_every_entry_kind() {
+        with_ui(|ui| {
+            let mut lists = ListData::new();
+            lists.insert("colors", vec!["Red".to_owned()]);
+            let metrics = Metrics::default();
+            let app = AppCtx::new(Settings::default());
+            let mut toggles = Toggles::default();
+            // The check entry starts latched, so both marks draw.
+            toggles.insert("m.check".to_owned());
+            let mut draw = Draw {
+                lists: &lists,
+                metrics: &metrics,
+                app: &app,
+                toggles: &mut toggles,
+            };
+            let mut rows: Vec<Item> = Vec::new();
+            let mut heading = item("m.heading", ItemKind::Heading, "Section");
+            heading.items = vec![item("m.heading.child", ItemKind::Button, "Ignored")];
+            rows.push(heading);
+            let mut list = item("m.list", ItemKind::List, "List");
+            list.list = Some("colors".to_owned());
+            rows.push(list);
+            let mut empty_list = item("m.list.empty", ItemKind::List, "Empty");
+            empty_list.list = Some("missing".to_owned());
+            rows.push(empty_list);
+            let mut options = item("m.options", ItemKind::Options, "Options");
+            options.options = vec!["One".to_owned()];
+            rows.push(options);
+            let mut fallback = item("m.options.fallback", ItemKind::Options, "Fallback");
+            fallback.items = vec![item("m.options.fallback.child", ItemKind::Button, "Child")];
+            rows.push(fallback);
+            let mut submenu = item("m.submenu", ItemKind::Submenu, "Submenu");
+            submenu.icon = Some("edit.copy".to_owned());
+            submenu.shortcut = Some("Ctrl+S".to_owned());
+            submenu.items = vec![item("m.submenu.child", ItemKind::Button, "Deep")];
+            rows.push(submenu);
+            let mut check_entry = item("m.check", ItemKind::Check, "Check Entry");
+            check_entry.shortcut = Some("Ctrl+K".to_owned());
+            rows.push(check_entry);
+            rows.push(item("m.toggle", ItemKind::Toggle, "Toggle Entry"));
+            let mut plain = item("m.plain", ItemKind::Button, "Plain");
+            plain.icon = Some("edit.paste".to_owned());
+            rows.push(plain);
+            rows.push(item("m.disabled", ItemKind::Button, "Disabled"));
+            let mut out = Vec::new();
+            assert!(show_menu(ui, &rows, &mut draw, &off, &mut out, 0).is_ok());
+            assert!(out.is_empty(), "a draw-only frame dispatches nothing");
+        });
+    }
+
+    #[test]
+    fn gallery_and_list_rows_draw_their_entries() {
+        with_ui(|ui| {
+            let mut lists = ListData::new();
+            lists.insert("colors", vec!["Red".to_owned(), "Blue".to_owned()]);
+            let metrics = Metrics::default();
+            let app = AppCtx::new(Settings::default());
+            let mut toggles = Toggles::default();
+            let mut draw = Draw {
+                lists: &lists,
+                metrics: &metrics,
+                app: &app,
+                toggles: &mut toggles,
+            };
+            let mut out = Vec::new();
+            let mut gallery = item("g", ItemKind::Gallery, "Gallery");
+            gallery.list = Some("colors".to_owned());
+            assert!(show_gallery(ui, &gallery, &mut draw, &off, &mut out, 0).is_ok());
+            let mut list = item("l", ItemKind::List, "List");
+            list.list = Some("colors".to_owned());
+            assert!(show_list_rows(ui, &list, &mut draw, &off, &mut out).is_ok());
+        });
+    }
+}

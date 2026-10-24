@@ -3,7 +3,7 @@
 //!
 //! The widgets resolve a control's `command` through the registry and
 //! render anything not dispatchable as disabled with a reason
-//! tooltip. The seam is thin ([`Resolve`]); the tests drive the same
+//! tooltip. The seam is thin (`Resolve`); the tests drive the same
 //! widget code with their own mapping.
 
 use std::collections::BTreeSet;
@@ -97,7 +97,7 @@ pub(crate) fn action_for_item(item: &Item, registry: &Registry, app: &AppCtx) ->
 /// The label a control draws today: the layout's label, replaced by
 /// the run-time one for `dynamic_label` items (`docs/ui/panel-modern.md`).
 ///
-/// Undo reads "Undo <action>" and Redo "Repeat <action>" or
+/// Undo reads "Undo `<action>`" and Redo "Repeat `<action>`" or
 /// "Can't Redo"; with nothing to undo the label is "Can't Undo".
 pub(crate) fn display_label(item: &Item, app: &AppCtx) -> String {
     let label = item.label.clone().unwrap_or_default();

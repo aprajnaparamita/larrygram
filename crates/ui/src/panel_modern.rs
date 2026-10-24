@@ -6,7 +6,7 @@
 //! strip carries the File button and the upper-case tab captions; the
 //! contextual tab sets (ADR 0064) appear when their context is
 //! current. The command bar lays each group out as `stack` or `rows`
-//! ([`place`]) and draws the controls at their sizes ([`controls`]).
+//! ([`place`]) and draws the controls at their sizes (`controls`).
 //! The bar collapses (double-click, Ctrl+F1 or the ^ button) to the
 //! tab strip, with the groups as an overlay while collapsed. The
 //! Quick Access Toolbar and the File view are separate surfaces:
@@ -228,7 +228,7 @@ impl PanelModern {
     /// Draws the Quick Access Toolbar (the left of the title bar).
     ///
     /// Save, Undo (a split with the history list; the label changes to
-    /// "Undo <action>"), Redo ("Can't Redo" or "Repeat <action>") and
+    /// "Undo `<action>`"), Redo ("Can't Redo" or "Repeat `<action>`") and
     /// the ▾ customise menu, which shows the current items as checked
     /// and disabled (`docs/ui/panel-modern.md`).
     pub fn show_qat(
