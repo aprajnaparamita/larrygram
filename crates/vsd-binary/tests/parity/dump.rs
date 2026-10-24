@@ -69,6 +69,9 @@ struct PageBuilder {
 #[derive(Default)]
 struct ShapeBuilder {
     label: Option<String>,
+    /// A text object the dump emitted outside any layer (a shape with
+    /// no geometry): it becomes a shape of its own.
+    synthetic: bool,
     styles: Vec<BTreeMap<String, String>>,
     /// The `svg:d` strings, in order, deduplicated (the generator
     /// emits every path twice: once filled, once stroked).
@@ -143,6 +146,17 @@ impl State {
                 }
             }
             "startTextObject" => {
+                // A text-only shape has no `startLayer` at all: open a
+                // synthetic shape so the text and its box attach.
+                if self.stack.is_empty() {
+                    if !self.page_open {
+                        return;
+                    }
+                    self.stack.push(ShapeBuilder {
+                        synthetic: true,
+                        ..ShapeBuilder::default()
+                    });
+                }
                 let props = split_props(payload);
                 let x = prop(&props, "svg:x").and_then(|v| inches(&v));
                 let y = prop(&props, "svg:y").and_then(|v| inches(&v));
@@ -166,6 +180,12 @@ impl State {
             "endTextObject" => {
                 if let Some(shape) = self.stack.last_mut() {
                     shape.in_text = false;
+                    if shape.synthetic {
+                        let shape = self.stack.pop().unwrap_or_default();
+                        if let Some(page) = self.pages.last_mut() {
+                            page.shapes.push(shape);
+                        }
+                    }
                 }
             }
             "insertText" => {
@@ -313,12 +333,8 @@ fn geometry_of(ds: &[String]) -> Option<Geometry> {
             }
         }
         for (i, subpath) in subpaths.iter_mut().enumerate() {
-            if closed.get(i).copied().unwrap_or(false) && subpath.len() >= 2 {
-                let first = subpath.first().copied().unwrap_or((0.0, 0.0));
-                let last = subpath.last().copied().unwrap_or((0.0, 0.0));
-                if (first.0 - last.0).abs() < 1e-4 && (first.1 - last.1).abs() < 1e-4 {
-                    subpath.pop();
-                }
+            if closed.get(i).copied().unwrap_or(false) {
+                crate::neutral::drop_closing_vertex(subpath);
             }
         }
         geometry.subpaths += subpaths.len();

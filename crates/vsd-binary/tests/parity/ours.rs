@@ -213,19 +213,33 @@ fn text_box_of(
     let pin_y = number(reader, "TxtPinY").unwrap_or(xform.pin_y);
     let angle = number(reader, "TxtAngle").unwrap_or(0.0);
 
-    // The box's (0, 0) corner in the shape's local coordinates.
+    // The box's corners in the shape's local coordinates, mapped to
+    // dump space; the box is reported by its min-x/min-y corner (the
+    // top-left corner in the dump's y-down space).
     let corner = (pin_x - loc_x, pin_y - loc_y);
-    let mut point = corner;
-    for step in chain_of(document, id) {
-        point = apply(point, &step);
+    let corners = [
+        corner,
+        (corner.0 + width, corner.1),
+        (corner.0, corner.1 + height),
+        (corner.0 + width, corner.1 + height),
+    ];
+    let mut mapped = [(0.0, 0.0); 4];
+    for (slot, point) in mapped.iter_mut().zip(corners) {
+        let mut p = point;
+        for step in chain_of(document, id) {
+            p = apply(p, &step);
+        }
+        *slot = (p.0, page_height - p.1);
     }
+    let x = mapped.iter().map(|p| p.0).fold(f64::INFINITY, f64::min);
+    let y = mapped.iter().map(|p| p.1).fold(f64::INFINITY, f64::min);
     let mut total_angle = angle;
     for step in chain_of(document, id) {
         total_angle += step.angle;
     }
     Some(TextBox {
-        x: point.0,
-        y: page_height - point.1,
+        x,
+        y,
         width,
         height,
         rotate_deg: (-total_angle).to_degrees().rem_euclid(360.0),
@@ -239,19 +253,19 @@ fn geometry_of(document: &Document, id: ShapeId, page_height: f64) -> Option<Geo
         polyline: true,
         ..Geometry::default()
     };
+    let mut subpaths: Vec<Vec<(f64, f64)>> = Vec::new();
     for path in &sheet.paths {
         for row in &path.rows {
             match row {
                 GeometryRow::MoveTo { x, y } => {
-                    geometry.subpaths += 1;
-                    geometry
-                        .points
-                        .push(page_point(document, id, (*x, *y), page_height));
+                    subpaths.push(vec![page_point(document, id, (*x, *y), page_height)]);
                 }
                 GeometryRow::LineTo { x, y } => {
-                    geometry
-                        .points
-                        .push(page_point(document, id, (*x, *y), page_height));
+                    let point = page_point(document, id, (*x, *y), page_height);
+                    match subpaths.last_mut() {
+                        Some(last) => last.push(point),
+                        None => subpaths.push(vec![point]),
+                    }
                 }
                 // A row the reference flattens into chords: the vertex
                 // lists do not align, so the whole shape's coordinates
@@ -259,6 +273,13 @@ fn geometry_of(document: &Document, id: ShapeId, page_height: f64) -> Option<Geo
                 _ => geometry.polyline = false,
             }
         }
+    }
+    geometry.subpaths = subpaths.len();
+    for mut subpath in subpaths {
+        // The rows store the closing vertex explicitly; the oracle
+        // closes with `Z` instead (the shared rule of `neutral`).
+        crate::neutral::drop_closing_vertex(&mut subpath);
+        geometry.points.extend(subpath);
     }
     Some(geometry)
 }
@@ -478,11 +499,10 @@ mod tests {
         let doc = doc(&fixture_import());
         let shape = &doc.pages[0].shapes[0];
         let text_box = shape.text_box.unwrap();
-        // The block's (0, 0) corner is (1 - 1.5, 2 - 2) in local
-        // coordinates; the chain maps it to (-0.5, 0), and the y flip
-        // with a 10 in page gives 10.
+        // The box spans (-0.5, 0) to (2.5, 4) on the page; in the
+        // dump's y-down space that is the corner (-0.5, 6).
         assert_eq!(text_box.x, -0.5);
-        assert_eq!(text_box.y, 10.0);
+        assert_eq!(text_box.y, 6.0);
         assert_eq!(text_box.width, 3.0);
         assert_eq!(text_box.height, 4.0);
         assert_eq!(text_box.rotate_deg, 0.0);
@@ -519,6 +539,35 @@ mod tests {
         // Local (0, 0) is at (1 - 1.5, 2 - 2) on the page, y-flipped
         // against the 10 in page: (-0.5, 10) and (2.5, 6).
         assert_eq!(geometry.points, vec![(-0.5, 10.0), (2.5, 6.0)]);
+    }
+
+    #[test]
+    fn a_closing_vertex_repeating_the_first_is_dropped() {
+        let mut import = fixture_import();
+        let mut section = Section::new(SectionName::from_static("Geometry"));
+        let mut rows = Vec::new();
+        for (kind, x, y) in [
+            ("MoveTo", 0.0, 0.0),
+            ("LineTo", 3.0, 0.0),
+            ("LineTo", 3.0, 4.0),
+            ("LineTo", 0.0, 4.0),
+            ("LineTo", 0.0, 0.0),
+        ] {
+            let mut row = larrygram_vsd_binary::model::Row::new();
+            row.row_type = Some(kind.to_owned());
+            row.cells.push(number_cell("X", x));
+            row.cells.push(number_cell("Y", y));
+            rows.push(row);
+        }
+        section.rows.extend(rows);
+        import.document.shapes[0].sheet.sections.push(section);
+
+        let doc = doc(&import);
+        let geometry = doc.pages[0].shapes[0].geometry.as_ref().unwrap();
+        assert_eq!(geometry.subpaths, 1);
+        // The explicit closing vertex (0, 0) is dropped like the
+        // oracle's `Z` close.
+        assert_eq!(geometry.points.len(), 4);
     }
 
     #[test]

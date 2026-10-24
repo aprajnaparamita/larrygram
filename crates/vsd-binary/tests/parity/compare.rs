@@ -124,13 +124,14 @@ impl Report {
 
 /// The fields the comparison never covers (ADR 0070's drops and the
 /// limits of the oracle's dump).
-pub const ALWAYS_NOT_COMPARED: [&str; 6] = [
+pub const ALWAYS_NOT_COMPARED: [&str; 7] = [
     "shape transforms as values (position, size, angle): vsd2raw bakes them into the path coordinates; they enter the geometry comparison",
     "FlipX/FlipY: the dump does not state flips",
     "background pages: vsd2raw does not state them",
     "stylesheet rows and master shapes: compared through each shape's resolved cells instead",
     "foreign data (OLE objects, pictures), hyperlinks, events and macro references, annotations, reviewers, smart tags, the document font list and shape-data custom labels (ADR 0070 drops)",
     "curved geometry coordinates: the oracle flattens curves into line chords, so vertex lists do not align (row kinds are compared through `geometry.polyline`)",
+    "group structure (shape nesting): vsd2raw nests rendering groups (master geometry, sub-shape content) inside a shape's layer, so both sides compare top-level shapes with the descendants' content merged",
 ];
 
 /// Compares the oracle's document against ours.
@@ -143,6 +144,17 @@ pub fn compare(file: &str, oracle: &Doc, ours: &Doc) -> Report {
         let place = "document".to_owned();
         let field = key.to_owned();
         match (oracle.metadata.get(key), ours.metadata.get(key)) {
+            (Some(a), Some(b)) if key == "template" => {
+                // The oracle emits the template's file name; the file
+                // stores the whole path. Compare the file name.
+                check_string(
+                    &mut report,
+                    &place,
+                    &field,
+                    file_name_of(a),
+                    file_name_of(b),
+                )
+            }
             (Some(a), Some(b)) => check_string(&mut report, &place, &field, a, b),
             (a, b) => skip_stated(&mut report, &place, &field, a.is_some(), b.is_some()),
         }
@@ -177,21 +189,83 @@ fn compare_page(report: &mut Report, place: &str, oracle: &Page, ours: &Page) {
         Some(ours.shapes.len() as f64),
     );
     for (index, (a, b)) in oracle.shapes.iter().zip(ours.shapes.iter()).enumerate() {
+        let a = flatten(a);
+        let b = flatten(b);
         let shape_place = if a.label.is_empty() {
             format!("{place} / shape {}", index + 1)
         } else {
             format!("{place} / {}", a.label)
         };
-        compare_shape(report, &shape_place, a, b);
+        compare_shape(report, &shape_place, &a, &b);
     }
-    if oracle.shapes.len() != ours.shapes.len() {
-        report.mismatches.push(Mismatch {
-            place: place.to_owned(),
-            field: "shape count".to_owned(),
-            oracle: oracle.shapes.len().to_string(),
-            ours: ours.shapes.len().to_string(),
-        });
-        report.compared += 1;
+}
+
+/// One shape with every descendant's content merged in (the "shape"
+/// unit of the comparison).
+///
+/// `vsd2raw` nests rendering groups (a master's geometry, a group's
+/// sub-shape content) as anonymous layers inside the shape's layer, so
+/// the dump states one shape per top-level layer. Both sides are
+/// flattened the same way: text concatenates, style facts take the
+/// first stated value, the geometry merges and the first text box
+/// wins.
+fn flatten(shape: &Shape) -> Shape {
+    let mut flat = shape.clone();
+    flat.children = Vec::new();
+    let mut descendants = Vec::new();
+    collect_descendants(shape, &mut descendants);
+    for child in descendants {
+        if let Some(text) = &child.text {
+            flat.text = Some(match flat.text.take() {
+                Some(mut own) => {
+                    own.push_str(text);
+                    own
+                }
+                None => text.clone(),
+            });
+        }
+        if flat.fill.is_none() {
+            flat.fill = child.fill;
+        }
+        if flat.fill_color.is_none() {
+            flat.fill_color = child.fill_color;
+        }
+        if flat.stroke.is_none() {
+            flat.stroke = child.stroke;
+        }
+        if flat.stroke_color.is_none() {
+            flat.stroke_color = child.stroke_color;
+        }
+        if flat.stroke_width.is_none() {
+            flat.stroke_width = child.stroke_width;
+        }
+        if flat.shadow.is_none() {
+            flat.shadow = child.shadow;
+        }
+        if flat.shadow_color.is_none() {
+            flat.shadow_color = child.shadow_color;
+        }
+        if flat.text_box.is_none() {
+            flat.text_box = child.text_box;
+        }
+        if let Some(geometry) = &child.geometry {
+            let merged = flat.geometry.get_or_insert_with(|| Geometry {
+                polyline: true,
+                ..Geometry::default()
+            });
+            merged.subpaths += geometry.subpaths;
+            merged.polyline = merged.polyline && geometry.polyline;
+            merged.points.extend(geometry.points.iter().copied());
+        }
+    }
+    flat
+}
+
+/// Every descendant of `shape`, depth first.
+fn collect_descendants<'a>(shape: &'a Shape, out: &mut Vec<&'a Shape>) {
+    for child in &shape.children {
+        out.push(child);
+        collect_descendants(child, out);
     }
 }
 
@@ -369,17 +443,25 @@ pub fn shape_texts(doc: &Doc) -> Vec<String> {
 
 /// Compares the text strings and their order (ADR 0072: the
 /// `vsd2xhtml` side of the comparison).
-pub fn compare_text_order(report: &mut Report, oracle: &[String], ours: &[String]) {
-    check_number(
+///
+/// The strings concatenate in order and compare as one string: the
+/// two sides split runs differently (a field's display text is its
+/// own `svg:tspan` in the XHTML), so the run boundaries are not
+/// compared.
+pub fn compare_text(report: &mut Report, oracle: &[String], ours: &[String]) {
+    report.skipped.push(Skipped {
+        place: "document".to_owned(),
+        field: "text run boundaries".to_owned(),
+        reason: "the two sides split runs differently (a field's display text is its own span in the XHTML)"
+            .to_owned(),
+    });
+    check_string(
         report,
         "document",
-        "xhtml.text.count",
-        Some(oracle.len() as f64),
-        Some(ours.len() as f64),
+        "xhtml.text",
+        &oracle.join(""),
+        &ours.join(""),
     );
-    for (index, (a, b)) in oracle.iter().zip(ours.iter()).enumerate() {
-        check_string(report, "document", &format!("xhtml.text[{index}]"), a, b);
-    }
 }
 
 /// Records a string comparison after NFC and trailing-whitespace
@@ -478,6 +560,15 @@ fn skip_stated(report: &mut Report, place: &str, field: &str, oracle: bool, ours
         field: field.to_owned(),
         reason: reason.to_owned(),
     });
+}
+
+/// The last path component of a `Template` value (`a\\b\\NAME.VSTX` or
+/// `a/b/NAME.VSTX` becomes `NAME.VSTX`).
+pub fn file_name_of(value: &str) -> &str {
+    match value.rfind(['\\', '/']) {
+        Some(pos) => value.get(pos + 1..).unwrap_or(value),
+        None => value,
+    }
 }
 
 /// ADR 0072's string normalisation: Unicode NFC and trailing
@@ -673,6 +764,26 @@ mod tests {
     }
 
     #[test]
+    fn descendants_are_merged_into_the_shape_they_belong_to() {
+        let (oracle, ours) = agreeing_docs();
+        // The oracle states the content of one shape as a nested
+        // rendering group; our side keeps it on the shape itself.
+        let mut nested = oracle.clone();
+        let shape = nested.pages[0].shapes.remove(0);
+        let (text, rest) = (shape.text.clone(), shape);
+        let mut parent = rest.clone();
+        parent.text = None;
+        parent.children = vec![NeutralShape {
+            label: String::new(),
+            text,
+            ..NeutralShape::default()
+        }];
+        nested.pages[0].shapes.push(parent);
+        let report = compare("fixture", &nested, &ours);
+        assert!(report.mismatches.is_empty(), "{}", report.render());
+    }
+
+    #[test]
     fn the_report_renders_the_adr_0072_shape() {
         let (oracle, mut ours) = agreeing_docs();
         ours.pages[0].shapes[0].stroke = Some(Stroke::None);
@@ -712,16 +823,30 @@ mod tests {
     fn text_order_mismatches_are_reported() {
         let (oracle, ours) = agreeing_docs();
         let mut report = compare("fixture", &oracle, &ours);
-        compare_text_order(
+        compare_text(
             &mut report,
             &["Hi".to_owned(), "Extra".to_owned()],
             &shape_texts(&ours),
         );
+        assert!(report.mismatches.iter().any(|m| m.field == "xhtml.text"));
+        // Run boundaries are not compared.
         assert!(
             report
-                .mismatches
+                .skipped
                 .iter()
-                .any(|m| m.field == "xhtml.text.count")
+                .any(|s| s.field == "text run boundaries")
         );
+    }
+
+    #[test]
+    fn equal_text_in_different_run_splits_matches() {
+        let (oracle, ours) = agreeing_docs();
+        let mut report = compare("fixture", &oracle, &ours);
+        compare_text(
+            &mut report,
+            &["H".to_owned(), "i".to_owned()],
+            &shape_texts(&ours),
+        );
+        assert!(report.mismatches.is_empty(), "{}", report.render());
     }
 }

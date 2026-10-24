@@ -156,6 +156,21 @@ impl std::fmt::Display for Rgb {
     }
 }
 
+/// Drops a sub-path's trailing vertex when it repeats the first one.
+///
+/// Both sides normalise the same way: the oracle emits a `Z` close and
+/// repeats the start point before it, and the binary rows store the
+/// closing vertex as a final `LineTo` (ADR 0072's row-kind rule).
+pub fn drop_closing_vertex(subpath: &mut Vec<(f64, f64)>) {
+    if subpath.len() >= 2 {
+        let first = subpath.first().copied().unwrap_or((0.0, 0.0));
+        let last = subpath.last().copied().unwrap_or((0.0, 0.0));
+        if (first.0 - last.0).abs() < 1e-4 && (first.1 - last.1).abs() < 1e-4 {
+            subpath.pop();
+        }
+    }
+}
+
 /// A text box: the top-left corner of the box, its size and its
 /// rotation, all in dump space.
 #[derive(Debug, Clone, Copy, PartialEq)]

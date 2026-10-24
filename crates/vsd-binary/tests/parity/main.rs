@@ -58,7 +58,7 @@ pub fn report_for(
     };
     let ours = ours::doc(import);
     let mut report = compare::compare(file, &oracle, &ours);
-    compare::compare_text_order(&mut report, &oracle_texts, &compare::shape_texts(&ours));
+    compare::compare_text(&mut report, &oracle_texts, &compare::shape_texts(&ours));
     if let Some(note) = note {
         report.note = Some(note);
     }
@@ -182,7 +182,7 @@ startDocument()
     startLayer (draw:id: id1)
       setStyle(draw:fill: solid, draw:fill-color: #5b9bd5, draw:stroke: none, svg:stroke-color: #000000, svg:stroke-width: 0.0139in)
       drawPath (svg:d: ((librevenge:path-action: M, svg:x: 1.0000in, svg:y: 8.0000in), (librevenge:path-action: L, svg:x: 3.0000in, svg:y: 6.0000in), (librevenge:path-action: Z)))
-      startTextObject (svg:x: 0.5000in, svg:y: 8.0000in, svg:width: 3.0000in, svg:height: 4.0000in, librevenge:rotate: 0.0000)
+      startTextObject (svg:x: 0.5000in, svg:y: 4.0000in, svg:width: 3.0000in, svg:height: 4.0000in, librevenge:rotate: 0.0000)
         openSpan()
           insertText (Hi)
         closeSpan
