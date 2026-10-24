@@ -92,7 +92,7 @@ libvisio is MPL-2.0 (verify `COPYING` when you fetch it; record the commit hash)
 
 `cargo xtask gate` is the single gate. It runs at three levels:
 
-- **Hand-off gate (workers).** `cargo xtask gate --quick` (codegen, parity, fmt, clippy, test, doc, deny, layers) plus every slow step your change triggers (table below). It must be green before hand-off.
+- **Hand-off gate (workers).** `cargo xtask gate --skip wasm,fuzz` (codegen, parity, fmt, clippy, test, doc, coverage, deny, layers), or `--quick` for a docs-only or test-only task. It must be green before hand-off.
 - **Merge gate (master).** `cargo xtask gate --quick` on `main` with the corpus tests required, after each batch of up to three merges.
 - **Full check (master).** The full `cargo xtask gate` with the corpus tests required, at low priority in its own worktree, on the latest merged `main`. Merging goes on while it runs; a step that goes red there becomes a master fix or a follow-up task.
 
@@ -109,15 +109,9 @@ libvisio is MPL-2.0 (verify `COPYING` when you fetch it; record the commit hash)
 | wasm | `cargo build -p larrygram-web --target wasm32-unknown-unknown` |
 | fuzz | `cargo +nightly fuzz build` in every `crates/*/fuzz` |
 
-Slow steps a worker adds to the hand-off gate:
+Coverage runs in every hand-off gate that changes non-test code. The ratchets sit near 99%, so new untested code fails them; give each interface stub a test of its "not implemented" contract. Name the steps that ran in the Result's gate summary.
 
-| Step | Run it when your change |
-|---|---|
-| wasm | touches `crates/ui`, `apps/larrygram-web`, `#[cfg(target_arch)]` code, or any `Cargo.toml` / `Cargo.lock` |
-| fuzz | touches a `crates/*/fuzz` directory, or changes the public API of a crate that has one (`ui-spec`, `vsdx`, `render`, `ui`) |
-| coverage | changes any non-test code in a crate. The ratchets sit near 99%, so new untested code fails them. Give each interface stub a test of its "not implemented" contract. Skip coverage only for docs-only or test-only tasks |
-
-Skip only the untriggered steps: for example `cargo xtask gate --skip wasm,fuzz` runs coverage. If unsure, run the step. Name the steps you ran in the Result's gate summary.
+The wasm and fuzz steps run only in the master's full check: on one shared machine they cost a worker gate 5 to 15 minutes each. When your change touches `crates/ui`, `apps/larrygram-web`, `#[cfg(target_arch)]` code, a `Cargo.toml`, a `crates/*/fuzz` directory or the public API of a crate with a fuzz target (`ui-spec`, `vsdx`, `render`, `ui`), you may check it with a per-crate build (`cargo build -p larrygram-web --target wasm32-unknown-unknown`, or `cargo +nightly fuzz build` in that one fuzz directory) and say so in the Result. A red wasm or fuzz step in the full check becomes a master fix or a follow-up task.
 
 **Every gate goes through the gate queue** (`tools/gate-queue/README.md`). Many workers share one machine, and more than two workspace-wide builds at once exhaust its memory and disk. Never run `cargo xtask gate`, or any `--workspace` cargo command (`test`, `clippy`, `llvm-cov`, `check`), directly:
 
@@ -131,7 +125,7 @@ $G wait <task-id>                                # run again while it exits 3 (n
 
 - After each change, check only the crates you touched: `cargo test -p <crate>` and `cargo clippy -p <crate> --all-targets --all-features -- -D warnings`.
 - Submit `--quick` at milestones only (before a rebase, after a large change).
-- Submit the hand-off gate with its slow steps **once**, after the last code commit and the rebase. Submit again only if code changes after that; a Result-only commit does not need it.
+- Submit the hand-off gate (`--skip wasm,fuzz`) **once**, after the last code commit and the rebase. Submit again only if code changes after that; a Result-only commit does not need it.
 - The master submits the merge gate as `gateq submit main --corpus --front --quick` and the full check as `gateq submit main-full --dir /Volumes/Dara/larrygram/worktrees/main-full --checkout main --corpus --idle`.
 
 Coverage thresholds: geom, model, vsdx, vsd-binary, shapesheet, commands, ui-spec ≥ 85%; render, text ≥ 75%; control, ui, apps ≥ 50% (UI via egui_kittest). No crate may drop below its previous-phase number (`[ratchet]` in `coverage.toml`; only the master updates it).
