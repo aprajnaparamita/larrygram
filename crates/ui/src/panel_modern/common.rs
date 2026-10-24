@@ -12,7 +12,7 @@ use larrygram_commands::{AppCtx, CommandId, CommandStatus, Invocation, Registry,
 use larrygram_ui_spec::embedded::is_out_of_scope;
 use larrygram_ui_spec::v2::Item;
 
-use crate::{Intent, UiError};
+use crate::Intent;
 
 /// Tooltip of a control whose command has no handler yet (ADR 0031).
 pub(crate) const NOT_YET_IMPLEMENTED: &str = "Not yet implemented";
@@ -212,13 +212,6 @@ pub(crate) fn spacer(width: f32) -> egui::Atom<'static> {
 pub(crate) fn too_deep(ui: &mut egui::Ui, item: &Item) {
     let label = item.label.clone().unwrap_or_default();
     ui.label(label);
-}
-
-/// The error path used by every widget seam (kept for the `Result`
-/// the public API returns).
-#[allow(dead_code)]
-pub(crate) fn no_error() -> Result<(), UiError> {
-    Ok(())
 }
 
 #[cfg(test)]
@@ -427,11 +420,6 @@ mod tests {
             finish(response, &disabled, "tip", &mut out);
             assert!(out.is_empty(), "a disabled action never dispatches");
         });
-    }
-
-    #[test]
-    fn the_error_seam_is_always_ok() {
-        assert!(no_error().is_ok());
     }
 
     #[test]
