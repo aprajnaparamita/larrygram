@@ -93,7 +93,8 @@ libvisio is MPL-2.0 (verify `COPYING` when you fetch it; record the commit hash)
 `cargo xtask gate` is the single gate. It runs at two levels:
 
 - **Hand-off gate (workers).** `cargo xtask gate --quick` (codegen, parity, fmt, clippy, test, doc, deny, layers) plus every slow step your change triggers (table below). It must be green before hand-off.
-- **Merge gate (master).** The full `cargo xtask gate` on `main` after each merge. A slow step that goes red there becomes a master fix or a follow-up task.
+- **Merge gate (master).** `cargo xtask gate --quick` on `main` with the corpus tests required, after each batch of up to three merges.
+- **Full check (master).** The full `cargo xtask gate` with the corpus tests required, at low priority in its own worktree, on the latest merged `main`. Merging goes on while it runs; a step that goes red there becomes a master fix or a follow-up task.
 
 | Step | Command |
 |---|---|
@@ -131,7 +132,7 @@ $G wait <task-id>                                # run again while it exits 3 (n
 - After each change, check only the crates you touched: `cargo test -p <crate>` and `cargo clippy -p <crate> --all-targets --all-features -- -D warnings`.
 - Submit `--quick` at milestones only (before a rebase, after a large change).
 - Submit the hand-off gate with its slow steps **once**, after the last code commit and the rebase. Submit again only if code changes after that; a Result-only commit does not need it.
-- The master submits the merge gate as task `main` with `--corpus`.
+- The master submits the merge gate as `gateq submit main --corpus --front --quick` and the full check as `gateq submit main-full --dir /Volumes/Dara/larrygram/worktrees/main-full --checkout main --corpus --idle`.
 
 Coverage thresholds: geom, model, vsdx, vsd-binary, shapesheet, commands, ui-spec ≥ 85%; render, text ≥ 75%; control, ui, apps ≥ 50% (UI via egui_kittest). No crate may drop below its previous-phase number (`[ratchet]` in `coverage.toml`; only the master updates it).
 

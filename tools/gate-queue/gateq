@@ -7,7 +7,7 @@
 # ready-to-paste prompt for the agent that submitted it. See README.md.
 #
 # Usage:
-#   gateq submit <task> [--corpus] [--dir PATH] [--front] [gate args...]
+#   gateq submit <task> [--corpus] [--dir PATH] [--checkout REV] [--front|--idle] [gate args...]
 #   gateq wait <task> [--timeout SECS]
 #   gateq status
 #   gateq show <task>
@@ -40,7 +40,7 @@ my ($LOCK_FH, $RUNNER_FH);
 sub usage {
     print STDERR <<'EOF';
 usage:
-  gateq submit <task> [--corpus] [--dir PATH] [--front] [gate args...]
+  gateq submit <task> [--corpus] [--dir PATH] [--checkout REV] [--front|--idle] [gate args...]
   gateq wait <task> [--timeout SECS]   (default 1500; exit 0 green, 1 red, 3 timeout)
   gateq status
   gateq show <task>
@@ -176,13 +176,15 @@ sub external_gates {
 
 sub cmd_submit {
     my $task = valid_task(shift @ARGV);
-    my ($corpus, $front, $dir) = (0, 0, undef);
+    my ($corpus, $prio, $dir, $checkout) = (0, 0, undef, undef);
     my @args;
     while (@ARGV) {
         my $a = shift @ARGV;
         if    ($a eq '--corpus') { $corpus = 1 }
-        elsif ($a eq '--front')  { $front = 1 }
+        elsif ($a eq '--front')  { $prio = 1 }
+        elsif ($a eq '--idle')   { $prio = -1 }
         elsif ($a eq '--dir')    { $dir = shift @ARGV // usage() }
+        elsif ($a eq '--checkout') { $checkout = shift @ARGV // usage() }
         else {
             die_msg("unsupported gate argument '$a'") unless $a =~ /^[A-Za-z0-9,._=-]+$/;
             push @args, $a;
@@ -190,7 +192,17 @@ sub cmd_submit {
     }
     $dir //= $task eq 'main' ? $MAIN_DIR : "$WORKTREES/$task";
     die_msg("$dir is not a git worktree") unless -e "$dir/.git";
-    my $sha = git_head($dir) or die_msg("no HEAD in $dir");
+    my $sha;
+    if (defined $checkout) {
+        # Resolve the revision now, in the main repository, so the job
+        # tests exactly the commit that was submitted.
+        die_msg("bad revision '$checkout'") unless $checkout =~ /^[A-Za-z0-9._\/-]+$/;
+        $sha = `git -C '$MAIN_DIR' rev-parse --verify -q '$checkout^{commit}' 2>/dev/null`;
+        chomp $sha;
+        die_msg("unknown revision $checkout") unless $sha;
+    } else {
+        $sha = git_head($dir) or die_msg("no HEAD in $dir");
+    }
     my $dirty = git_dirty($dir);
 
     my $id = with_lock(sub {
@@ -202,7 +214,8 @@ sub cmd_submit {
         write_kv("$DIRS{queue}/" . sprintf('%06d', $id) . '.job', {
             id => $id, task => $task, dir => $dir, sha => $sha,
             args => join(' ', @args), corpus => $corpus,
-            prio => $front ? 1 : 0, submitted => now(),
+            checkout => defined $checkout ? 1 : 0,
+            prio => $prio, submitted => now(),
             dirty => $dirty,
         });
         return $id;
@@ -211,7 +224,7 @@ sub cmd_submit {
     my @running = grep { $_->{task} eq $task } running_jobs();
     print "gateq: queued job $id for $task at ", substr($sha, 0, 10),
         " (cargo xtask gate", (@args ? " @args" : ''), ")",
-        ($corpus ? ' plus the corpus tests' : ''), "\n";
+        ($corpus ? ' with the corpus tests required' : ''), "\n";
     print "gateq: warning: $dir has uncommitted changes; the gate tests the working tree as it is when the job starts\n"
         if $dirty;
     print "gateq: a gate for $task is running; this job starts after it\n" if @running;
@@ -268,7 +281,7 @@ sub start_next {
     my ($job) = grep { !$active{$_->{task}} } queued_jobs();
     return 0 unless $job;
 
-    my $sha = git_head($job->{dir}) || $job->{sha};
+    my $sha = $job->{checkout} ? $job->{sha} : git_head($job->{dir}) || $job->{sha};
     my $log = "$DIRS{logs}/$job->{task}-" . substr($sha, 0, 10) . '-' . strftime('%Y%m%d-%H%M%S', localtime) . '.log';
     my $file = "$DIRS{running}/$job->{task}.job";
     my %run = (
@@ -312,7 +325,21 @@ sub run_job {
     # AGENTS.md section 2: no CARGO_* variables for worktree builds
     # (sccache hashes them); the main checkout builds in its own target.
     delete $ENV{$_} for grep { /^CARGO_/ || $_ eq 'RUSTC_WRAPPER' } keys %ENV;
-    $ENV{CARGO_TARGET_DIR} = $MAIN_TARGET if $job->{task} eq 'main';
+    $ENV{CARGO_TARGET_DIR} = $MAIN_TARGET if abs_path($job->{dir}) eq abs_path($MAIN_DIR);
+    # The corpus tests honour this variable, so the gate's test (or
+    # coverage) step runs them; no second test build is needed.
+    $ENV{LARRYGRAM_REQUIRE_CORPUS} = '1' if $job->{corpus};
+    if ($job->{checkout}) {
+        print "gateq: checkout $job->{sha}\n";
+        if (system('git', '-C', $job->{dir}, 'checkout', '-q', '--detach', $job->{sha}) != 0) {
+            print "gateq: checkout failed\ngateq: exit 125\n";
+            close STDOUT;
+            open(STDOUT, '>>', "$HOME_DIR/runner.log");
+            open(STDERR, '>&', \*STDOUT);
+            with_lock(sub { finalize($file) });
+            exit 0;
+        }
+    }
     $ENV{PATH} = "$ENV{HOME}/.cargo/bin:$ENV{PATH}" unless $ENV{PATH} =~ m{\.cargo/bin};
 
     my @gate = ('cargo', 'xtask', 'gate', split(' ', $job->{args} // ''));
@@ -322,13 +349,6 @@ sub run_job {
     print "gateq: started ", stamp(), "\n\n";
     my $code = run_cmd(@gate);
     print "\ngateq: exit $code\n";
-    if ($job->{corpus} && $code == 0) {
-        $ENV{LARRYGRAM_REQUIRE_CORPUS} = '1';
-        my @corpus = qw(cargo test --workspace --all-features);
-        print "\ngateq: run LARRYGRAM_REQUIRE_CORPUS=1 @corpus\n\n";
-        my $c = run_cmd(@corpus);
-        print "\ngateq: corpus exit $c\n";
-    }
     print "gateq: finished ", stamp(), "\n";
     close STDOUT;
     # Record the result here, so it does not depend on the runner being
@@ -390,7 +410,7 @@ sub parse_log {
         if ($line =~ /^==> gate: (\S+)/)          { $section = $1; $in_summary = 0; next }
         if ($line =~ /^gateq: run LARRYGRAM_REQUIRE_CORPUS/) { $section = 'corpus'; $in_summary = 0; next }
         if ($in_summary) {
-            if ($line =~ /^gate: /) { push @{ $r{summary} }, $line; $in_summary = 0; next }
+            if ($line =~ /^(xtask: )?gate: /) { push @{ $r{summary} }, $line; $in_summary = 0; next }
             push @{ $r{summary} }, $line;
             push @{ $r{fail} }, $1 if $line =~ /^\s+FAIL\s+(\S+)/;
             next;
@@ -406,7 +426,7 @@ sub excerpt {
     return () unless $lines && @$lines;
     my @hits;
     for my $i (0 .. $#$lines) {
-        next unless $lines->[$i] =~ /(^error|^warning: .*(denied|failed)|panicked|FAILED|^failures:|^test result: FAILED|^\s+FAIL\b|below|ratchet|Diff in|^thread ')/i;
+        next unless $lines->[$i] =~ /^error(\[|:)|^warning: .*(denied|failed)|panicked at|^test .* FAILED$|^failures:$|^test result: FAILED|^coverage below target|% < |^Diff in|^thread '|^\s+FAIL\b/;
         push @hits, $i;
     }
     my @out;
@@ -435,26 +455,24 @@ sub finalize {
     elsif ($r->{cancelled})                         { $status = 'CANCELLED' }
     elsif (!defined $r->{exit})                     { $status = 'KILLED' }
     elsif ($r->{exit} != 0)                         { $status = 'RED' }
-    elsif ($j->{corpus} && ($r->{corpus} // 1) != 0) { $status = 'RED' }
     else                                             { $status = 'GREEN' }
     my $finished = now();
     my $head = git_head($j->{dir});
     my $moved = $head && $head ne $j->{sha} ? 1 : 0;
     my $task = $j->{task};
     my $gate = 'cargo xtask gate' . ($j->{args} ? " $j->{args}" : '');
-    my $resubmit = "$SELF submit $task" . ($j->{corpus} ? ' --corpus' : '') . ($j->{args} ? " $j->{args}" : '');
+    my $resubmit = "$SELF submit $task" . ($j->{corpus} ? ' --corpus' : '') . ($j->{checkout} ? " --checkout $j->{sha}" : '') . ($j->{args} ? " $j->{args}" : '');
     my $quick = ($j->{args} // '') =~ /(^| )--quick( |$)/;
     my $short = substr($j->{sha}, 0, 10);
     my $took = ago($j->{started});
 
     my @p;
     push @p, "Gate queue result for $task: $status.";
-    push @p, "`$gate`" . ($j->{corpus} ? ' plus the corpus tests' : '') . " ran at $short in $took. Full log: $j->{log}";
+    push @p, "`$gate`" . ($j->{corpus} ? ' (corpus tests required)' : '') . " ran at $short in $took. Full log: $j->{log}";
     push @p, "Warning: the worktree had uncommitted changes when the gate started." if $j->{dirty};
     push @p, "Warning: HEAD moved to " . substr($head, 0, 10) . " during the run; this result is for $short." if $moved;
     if (@{ $r->{summary} }) { push @p, '', 'Summary:', @{ $r->{summary} } }
     my @failed = @{ $r->{fail} };
-    push @failed, 'corpus' if $j->{corpus} && defined $r->{corpus} && $r->{corpus} != 0;
     for my $step (@failed) {
         my @ex = excerpt($r->{sections}{$step});
         push @p, '', "Failing lines from the $step step:", @ex if @ex;
@@ -463,6 +481,8 @@ sub finalize {
     if ($status eq 'GREEN') {
         if ($task eq 'main') {
             push @p, 'Next: the merge gate on main is green; continue merging.';
+        } elsif ($task eq 'main-full') {
+            push @p, "Next: the full check of main at $short is green; nothing to do.";
         } elsif ($quick) {
             push @p, "Next: continue the task. When the code is done and rebased on main, submit the hand-off gate with `$SELF submit $task <args>` (AGENTS.md section 7), then run `$SELF wait $task` until it prints the result.";
         } else {
@@ -557,7 +577,7 @@ sub cmd_status {
     print "\nqueued:\n" if @q;
     my $n = 0;
     printf "  %d. %-8s job %-4d %s  %-24s waiting %s%s\n", ++$n, $_->{task}, $_->{id}, substr($_->{sha}, 0, 10),
-        ($_->{args} || '(full)') . ($_->{corpus} ? ' +corpus' : ''), ago($_->{submitted}), $_->{prio} ? ' (front)' : '' for @q;
+        ($_->{args} || '(full)') . ($_->{corpus} ? ' +corpus' : ''), ago($_->{submitted}), ($_->{prio} // 0) > 0 ? ' (front)' : ($_->{prio} // 0) < 0 ? ' (idle)' : '' for @q;
     opendir(my $dh, $DIRS{results}) or return;
     my @res = sort { $b->{finished} <=> $a->{finished} }
         grep { defined } map { read_kv("$DIRS{results}/$_") } grep { /\.result$/ } readdir $dh;
