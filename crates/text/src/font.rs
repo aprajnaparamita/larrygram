@@ -581,27 +581,13 @@ mod tests {
         let glyph = f.glyph_of('A').unwrap();
         let path = f.outline(glyph).unwrap();
         assert!(!path.is_empty());
-        let mut max = 0.0_f64;
-        for seg in path.segments() {
-            match *seg {
-                Segment::MoveTo(p) | Segment::LineTo(p) => {
-                    max = max.max(p.x.abs()).max(p.y.abs());
-                }
-                Segment::QuadTo { ctrl, to } => {
-                    max = max.max(ctrl.x.abs()).max(to.x.abs());
-                }
-                Segment::CubicTo { ctrl1, ctrl2, to } => {
-                    max = max
-                        .max(ctrl1.x.abs())
-                        .max(ctrl2.x.abs())
-                        .max(to.x.abs())
-                        .max(to.y.abs());
-                }
-                _ => {}
-            }
-        }
-        // Em units: coordinates stay within ±1 for a capital letter.
-        assert!(max <= 1.0, "outline left em units: {max}");
+        // Em units: every point, control points included, stays within
+        // ±1 for a capital letter.
+        let bounds = path.bounds().unwrap();
+        let max = [bounds.min.x, bounds.min.y, bounds.max.x, bounds.max.y]
+            .into_iter()
+            .fold(0.0_f64, |max, v| max.max(v.abs()));
+        assert!(max > 0.0 && max <= 1.0, "outline left em units: {max}");
     }
 
     #[test]
