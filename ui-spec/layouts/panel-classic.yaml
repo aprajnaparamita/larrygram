@@ -182,6 +182,7 @@ menu_bars:
           label: Organize My Shapes
           access: "o"
           command: file.shapes.organize_my_shapes
+          new_command: true
           begin_group: true
       - id: drawing.file.shapes.stencil_categories
         kind: list
@@ -531,6 +532,7 @@ menu_bars:
         kind: button
         label: Format Shape
         command: format.shape.pane
+        new_command: true
       - id: drawing.view.toolbars.format_text
         kind: button
         label: Format Text
@@ -1514,6 +1516,7 @@ menu_bars:
       label: Sample Diagrams
       access: "s"
       command: help.sample_diagrams
+      new_command: true
       begin_group: true
     - id: drawing.help.welcome
       kind: button
@@ -1660,6 +1663,7 @@ menu_bars:
           label: Organize My Shapes
           access: "o"
           command: file.shapes.organize_my_shapes
+          new_command: true
           begin_group: true
       - id: shapesheet.file.shapes.stencil_categories
         kind: list
@@ -1873,6 +1877,7 @@ menu_bars:
         kind: button
         label: Format Shape
         command: format.shape.pane
+        new_command: true
       - id: shapesheet.view.toolbars.format_text
         kind: button
         label: Format Text
@@ -2272,6 +2277,7 @@ menu_bars:
       label: Sample Diagrams
       access: "s"
       command: help.sample_diagrams
+      new_command: true
       begin_group: true
     - id: shapesheet.help.welcome
       kind: button
@@ -2418,6 +2424,7 @@ menu_bars:
           label: Organize My Shapes
           access: "o"
           command: file.shapes.organize_my_shapes
+          new_command: true
           begin_group: true
       - id: stencil.file.shapes.stencil_categories
         kind: list
@@ -2633,6 +2640,7 @@ menu_bars:
         kind: button
         label: Format Shape
         command: format.shape.pane
+        new_command: true
       - id: stencil.view.toolbars.format_text
         kind: button
         label: Format Text
@@ -2858,6 +2866,7 @@ menu_bars:
       label: Sample Diagrams
       access: "s"
       command: help.sample_diagrams
+      new_command: true
       begin_group: true
     - id: stencil.help.welcome
       kind: button
@@ -3006,6 +3015,7 @@ toolbars:
         kind: button
         label: Organize My Shapes
         command: file.shapes.organize_my_shapes
+        new_command: true
         begin_group: true
     - id: toolbar.standard.shapes.stencil_categories
       kind: list
@@ -4703,6 +4713,7 @@ toolbars:
         kind: button
         label: Organize My Shapes
         command: file.shapes.organize_my_shapes
+        new_command: true
         begin_group: true
     - id: toolbar.shapesheet_standard.shapes.stencil_categories
       kind: list
@@ -4908,6 +4919,7 @@ toolbars:
         kind: button
         label: Organize My Shapes
         command: file.shapes.organize_my_shapes
+        new_command: true
         begin_group: true
     - id: toolbar.stencil_standard.shapes.stencil_categories
       kind: list
@@ -5845,6 +5857,7 @@ context_menus:
       label: Organize My Shapes
       access: "o"
       command: file.shapes.organize_my_shapes
+      new_command: true
       begin_group: true
   - id: context.master_edit.new_master
     kind: button
