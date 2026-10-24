@@ -105,8 +105,7 @@ pub fn dropdown_arrow(size: f32) -> Atom<'static> {
     })
 }
 
-/// Sanitizes a requested icon size: finite and inside
-/// `MIN_SIZE..=MAX_SIZE`, else [`DEFAULT_SIZE`].
+/// Clamps an icon size to `MIN_SIZE..=MAX_SIZE`, else the default.
 fn clamp_size(size: f32) -> f32 {
     if size.is_finite() {
         size.clamp(MIN_SIZE, MAX_SIZE)
@@ -115,35 +114,23 @@ fn clamp_size(size: f32) -> f32 {
     }
 }
 
-/// Paints the placeholder mark: a filled rounded square in the
-/// faint background colour with the first letter of `id` on top.
+/// Paints the placeholder: a faint square with the id's first letter.
+#[rustfmt::skip]
 fn paint_mark(ui: &Ui, rect: Rect, id: &str) {
     let visuals = ui.visuals();
-    let painter = ui.painter();
     let side = rect.width().min(rect.height());
     let corner = ((side * 0.2).round().clamp(0.0, 255.0)) as u8;
-    painter.rect_filled(
-        rect,
-        egui::CornerRadius::same(corner),
-        visuals.faint_bg_color,
-    );
-    let letter = first_letter(id);
-    painter.text(
-        rect.center(),
-        Align2::CENTER_CENTER,
-        letter,
-        FontId::proportional(side * 0.7),
-        visuals.text_color(),
-    );
+    ui.painter().rect_filled(rect, egui::CornerRadius::same(corner), visuals.faint_bg_color);
+    ui.painter().text(rect.center(), Align2::CENTER_CENTER, first_letter(id), FontId::proportional(side * 0.7), visuals.text_color());
 }
 
 /// The letter drawn on the mark: the first character of the id,
 /// uppercased; `?` for an empty id.
 fn first_letter(id: &str) -> String {
-    match id.chars().next() {
-        Some(first) => first.to_uppercase().collect(),
-        None => "?".to_owned(),
-    }
+    id.chars()
+        .next()
+        .map(|c| c.to_uppercase().collect())
+        .unwrap_or_else(|| "?".to_owned())
 }
 
 #[cfg(test)]
@@ -252,12 +239,8 @@ mod tests {
 /// ui.add(egui::Button::new((atom, "Cut")));
 /// # });
 /// ```
-pub fn icon_atom(
-    key: &str,
-    size: f32,
-    theme: &Theme,
-    enabled: bool,
-) -> Result<Atom<'static>, UiError> {
+#[rustfmt::skip]
+pub fn icon_atom(key: &str, size: f32, theme: &Theme, enabled: bool) -> Result<Atom<'static>, UiError> {
     let size = clamp_size(size);
     let Some(entry) = table::entry(key) else {
         warn_once(
@@ -269,38 +252,23 @@ pub fn icon_atom(
     let tint = tint_for(theme, entry.tint);
     let icon = entry.icon;
     let key = key.to_owned();
-    Ok(Atom::paint(
-        Vec2::splat(size),
-        move |ui, args| match texture_for(ui, icon, tint, size) {
-            Ok(texture) => paint_texture(ui, args.rect, &texture, enabled),
-            Err(error) => {
-                warn_once(
-                    &key,
-                    &format!(
-                        "icon key `{key}` failed to rasterise ({error}); drawing the placeholder"
-                    ),
-                );
-                paint_mark(ui, args.rect, &key);
-            }
-        },
-    ))
+    Ok(Atom::paint(Vec2::splat(size), move |ui, args| {
+        paint_or_fallback(
+            ui,
+            args.rect,
+            &key,
+            texture_for(ui, icon, tint, size),
+            enabled,
+        );
+    }))
 }
 
-/// Draws the icon for an icon-map key into `rect` (ADR 0062).
+/// Draws the icon for a key into `rect`, falling back to the placeholder.
 ///
-/// Same pipeline as [`icon_atom`], for widgets that paint into a rect
-/// they already have. An unknown key or a rasterisation error draws the
-/// placeholder mark; the function then returns `Ok(())`, because the
-/// fallback is the defined result (ADR 0062). The error is logged once
-/// per key.
-pub fn draw(
-    ui: &mut Ui,
-    rect: Rect,
-    key: &str,
-    size: f32,
-    theme: &Theme,
-    enabled: bool,
-) -> Result<(), UiError> {
+/// An unknown key or a rasterisation error draws the placeholder and
+/// logs once per key; the fallback is the defined result (ADR 0062).
+#[rustfmt::skip]
+pub fn draw(ui: &mut Ui, rect: Rect, key: &str, size: f32, theme: &Theme, enabled: bool) -> Result<(), UiError> {
     let Some(entry) = table::entry(key) else {
         warn_once(
             key,
@@ -310,7 +278,19 @@ pub fn draw(
         return Ok(());
     };
     let tint = tint_for(theme, entry.tint);
-    match texture_for(ui, entry.icon, tint, size) {
+    paint_or_fallback(
+        ui,
+        rect,
+        key,
+        texture_for(ui, entry.icon, tint, size),
+        enabled,
+    );
+    Ok(())
+}
+
+#[rustfmt::skip]
+fn paint_or_fallback(ui: &Ui, rect: Rect, key: &str, texture: Result<TextureHandle, UiError>, enabled: bool) {
+    match texture {
         Ok(texture) => paint_texture(ui, rect, &texture, enabled),
         Err(error) => {
             warn_once(
@@ -320,11 +300,8 @@ pub fn draw(
             paint_mark(ui, rect, key);
         }
     }
-    Ok(())
 }
 
-/// A cache key: icon name, physical size, tint and pixels per point
-/// (ADR 0062).
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CacheKey {
     icon: String,
@@ -333,30 +310,18 @@ struct CacheKey {
     pixels_per_point_milli: u32,
 }
 
-/// A bounded least-recently-used cache with an explicit clock, so
-/// eviction is deterministic and testable.
 #[derive(Debug, Clone)]
 struct Lru<K, V> {
     entries: Vec<(K, V, u64)>,
     clock: u64,
 }
 
+#[rustfmt::skip]
 impl<K, V> Default for Lru<K, V> {
-    fn default() -> Self {
-        Self {
-            entries: Vec::new(),
-            clock: 0,
-        }
-    }
+    fn default() -> Self { Self { entries: Vec::new(), clock: 0 } }
 }
 
 impl<K: PartialEq, V: Clone> Lru<K, V> {
-    /// The number of live entries.
-    fn len(&self) -> usize {
-        self.entries.len()
-    }
-
-    /// Looks up `key`, marking it as most recently used.
     fn get(&mut self, key: &K) -> Option<V> {
         self.clock = self.clock.wrapping_add(1);
         let clock = self.clock;
@@ -369,11 +334,9 @@ impl<K: PartialEq, V: Clone> Lru<K, V> {
         None
     }
 
-    /// Inserts `value`, evicting the least recently used entry when the
-    /// cache is full.
     fn insert(&mut self, key: K, value: V) {
         self.clock = self.clock.wrapping_add(1);
-        if self.len() >= MAX_CACHE_ENTRIES {
+        if self.entries.len() >= MAX_CACHE_ENTRIES {
             let oldest = self
                 .entries
                 .iter()
@@ -388,12 +351,8 @@ impl<K: PartialEq, V: Clone> Lru<K, V> {
     }
 }
 
-/// The texture cache, kept in the egui context so each one has its own
-/// (and a fresh context never paints a stale texture id).
 type TextureCache = Lru<CacheKey, TextureHandle>;
 
-/// The texture for `icon` at `size` points, from the cache or freshly
-/// rasterised.
 fn texture_for(ui: &Ui, icon: &str, tint: Color32, size: f32) -> Result<TextureHandle, UiError> {
     let ppp = safe_pixels_per_point(ui.ctx().pixels_per_point());
     let pixels = physical_pixels(size, ppp);
@@ -404,11 +363,9 @@ fn texture_for(ui: &Ui, icon: &str, tint: Color32, size: f32) -> Result<TextureH
         pixels_per_point_milli: (ppp * 1_000.0).round() as u32,
     };
     let cache_id = egui::Id::unique("larrygram.icon-texture-cache");
-    // Look up and drop the data lock before loading a texture: loading
-    // touches other context state, and holding the data lock across it
-    // deadlocks.
+    // Drop the data lock before loading: holding it across the load deadlocks.
     let cached = ui.ctx().data_mut(|data| {
-        data.get_temp_mut_or_default::<TextureCache>(cache_id)
+        data.get_temp_mut_or_insert_with::<TextureCache>(cache_id, Lru::default)
             .get(&key)
     });
     if let Some(texture) = cached {
@@ -426,14 +383,12 @@ fn texture_for(ui: &Ui, icon: &str, tint: Color32, size: f32) -> Result<TextureH
     );
     let texture = ui.ctx().load_texture(name, image, TextureOptions::LINEAR);
     ui.ctx().data_mut(|data| {
-        data.get_temp_mut_or_default::<TextureCache>(cache_id)
+        data.get_temp_mut_or_insert_with::<TextureCache>(cache_id, Lru::default)
             .insert(key, texture.clone());
     });
     Ok(texture)
 }
 
-/// Rasterises one Tabler SVG at `pixels` square with `currentColor`
-/// replaced by `tint` (ADR 0062).
 fn rasterize(bytes: &[u8], tint: Color32, pixels: u32) -> Result<ColorImage, UiError> {
     let text = std::str::from_utf8(bytes).map_err(|error| UiError::Render {
         message: format!("icon SVG is not UTF-8: {error}"),
@@ -452,36 +407,21 @@ fn rasterize(bytes: &[u8], tint: Color32, pixels: u32) -> Result<ColorImage, UiE
     let size = tree.size();
     let scale_x = side as f32 / size.width().max(1.0);
     let scale_y = side as f32 / size.height().max(1.0);
-    resvg::render(
-        &tree,
-        resvg::tiny_skia::Transform::from_scale(scale_x, scale_y),
-        &mut pixmap.as_mut(),
-    );
+    #[rustfmt::skip]
+    resvg::render(&tree, resvg::tiny_skia::Transform::from_scale(scale_x, scale_y), &mut pixmap.as_mut());
     Ok(ColorImage::from_rgba_premultiplied(
         [side as usize, side as usize],
         pixmap.data(),
     ))
 }
 
-/// Paints `texture` into `rect`, at 40% alpha when disabled.
 fn paint_texture(ui: &Ui, rect: Rect, texture: &TextureHandle, enabled: bool) {
     let uv = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+    let alpha = if enabled { 255 } else { DISABLED_ALPHA };
     ui.painter()
-        .image(texture.id(), rect, uv, paint_tint(enabled));
+        .image(texture.id(), rect, uv, Color32::from_white_alpha(alpha));
 }
 
-/// The multiplier for a textured icon: white when enabled, white at
-/// 40% alpha when disabled (ADR 0062).
-fn paint_tint(enabled: bool) -> Color32 {
-    if enabled {
-        Color32::WHITE
-    } else {
-        Color32::from_white_alpha(DISABLED_ALPHA)
-    }
-}
-
-/// The tint for an icon row: its token, else `icon.neutral`, else the
-/// built-in neutral. An unknown or malformed token never panics.
 fn tint_for(theme: &Theme, token: Option<&str>) -> Color32 {
     let token = token.unwrap_or("icon.neutral");
     theme
@@ -491,30 +431,24 @@ fn tint_for(theme: &Theme, token: Option<&str>) -> Color32 {
         .unwrap_or(DEFAULT_TINT)
 }
 
-/// Parses `#rrggbb` or `#rrggbbaa` (the form `ui-spec/themes/*.yaml`
-/// uses).
 fn parse_hex_color(value: &str) -> Option<Color32> {
     let hex = value.trim().strip_prefix('#').unwrap_or(value.trim());
-    let channel = |pair: &str| u8::from_str_radix(pair, 16).ok();
+    let pair = |at: usize| {
+        hex.get(at..at + 2)
+            .and_then(|p| u8::from_str_radix(p, 16).ok())
+    };
     match hex.len() {
-        6 => {
-            let r = channel(hex.get(0..2)?)?;
-            let g = channel(hex.get(2..4)?)?;
-            let b = channel(hex.get(4..6)?)?;
-            Some(Color32::from_rgb(r, g, b))
-        }
-        8 => {
-            let r = channel(hex.get(0..2)?)?;
-            let g = channel(hex.get(2..4)?)?;
-            let b = channel(hex.get(4..6)?)?;
-            let a = channel(hex.get(6..8)?)?;
-            Some(Color32::from_rgba_unmultiplied(r, g, b, a))
-        }
+        6 => Some(Color32::from_rgb(pair(0)?, pair(2)?, pair(4)?)),
+        8 => Some(Color32::from_rgba_unmultiplied(
+            pair(0)?,
+            pair(2)?,
+            pair(4)?,
+            pair(6)?,
+        )),
         _ => None,
     }
 }
 
-/// The effective pixels per point: finite and in a sane range.
 fn safe_pixels_per_point(ppp: f32) -> f32 {
     if ppp.is_finite() && ppp > 0.0 {
         ppp.clamp(0.1, 16.0)
@@ -523,24 +457,17 @@ fn safe_pixels_per_point(ppp: f32) -> f32 {
     }
 }
 
-/// The texture side for `size` points: at least 1 px, at most
-/// [`MAX_ICON_PIXELS`].
 fn physical_pixels(size: f32, ppp: f32) -> u32 {
     let size = clamp_size(size);
     let ppp = safe_pixels_per_point(ppp);
     (size * ppp).round().clamp(1.0, MAX_ICON_PIXELS as f32) as u32
 }
 
-/// Logs `message` the first time `key` is seen (ADR 0062: once per
-/// key). A poisoned lock still lets the caller draw the placeholder.
+#[rustfmt::skip]
 fn warn_once(key: &str, message: &str) {
     static WARNED: OnceLock<Mutex<BTreeSet<String>>> = OnceLock::new();
     let warned = WARNED.get_or_init(|| Mutex::new(BTreeSet::new()));
-    if let Ok(mut warned) = warned.lock()
-        && warned.insert(key.to_owned())
-    {
-        log::warn!("{message}");
-    }
+    if let Ok(mut warned) = warned.lock() && warned.insert(key.to_owned()) { log::warn!("{message}"); }
 }
 
 #[cfg(test)]
@@ -582,6 +509,18 @@ mod icon_set_tests {
             ui.add(egui::Button::new((atom, "Unknown")));
             let rect = Rect::from_min_size(egui::Pos2::ZERO, Vec2::splat(16.0));
             draw(ui, rect, "no.such.icon", 16.0, &theme(), true).expect("the fallback");
+        });
+    }
+
+    #[test]
+    fn a_disabled_atom_and_an_empty_key_draw() {
+        let atom = icon_atom("edit.cut", 16.0, &theme(), false).expect("a known key");
+        let fallback = icon_atom("", 16.0, &theme(), true).expect("the fallback");
+        with_ui(|ui| {
+            ui.add(egui::Button::new((atom, "Cut")));
+            ui.add(egui::Button::new((fallback, "Unknown")));
+            let rect = Rect::from_min_size(egui::Pos2::ZERO, Vec2::splat(16.0));
+            draw(ui, rect, "", 16.0, &theme(), false).expect("the fallback");
         });
     }
 
@@ -637,7 +576,7 @@ mod icon_set_tests {
         for key in 0..(MAX_CACHE_ENTRIES as u32 + 1) {
             cache.insert(key, key);
         }
-        assert_eq!(cache.len(), MAX_CACHE_ENTRIES);
+        assert_eq!(cache.entries.len(), MAX_CACHE_ENTRIES);
         assert_eq!(cache.get(&0), None, "the first key was evicted");
         assert_eq!(
             cache.get(&(MAX_CACHE_ENTRIES as u32)),
@@ -646,7 +585,7 @@ mod icon_set_tests {
         // A hit refreshes the entry, so the next insert keeps it.
         assert_eq!(cache.get(&1), Some(1));
         cache.insert(u32::MAX, u32::MAX);
-        assert_eq!(cache.len(), MAX_CACHE_ENTRIES);
+        assert_eq!(cache.entries.len(), MAX_CACHE_ENTRIES);
         assert_eq!(
             cache.get(&2),
             None,
@@ -694,9 +633,42 @@ mod icon_set_tests {
 
     #[test]
     fn a_disabled_icon_is_painted_at_40_percent_alpha() {
-        assert_eq!(paint_tint(true), Color32::WHITE);
-        assert_eq!(paint_tint(false).a(), DISABLED_ALPHA);
+        assert_eq!(Color32::from_white_alpha(255), Color32::WHITE);
         assert_eq!(DISABLED_ALPHA, 102);
+    }
+
+    #[test]
+    fn a_rasterisation_error_falls_back_to_the_placeholder() {
+        with_ui(|ui| {
+            let rect = Rect::from_min_size(egui::Pos2::ZERO, Vec2::splat(16.0));
+            paint_or_fallback(
+                ui,
+                rect,
+                "edit.cut",
+                Err(UiError::Render {
+                    message: "test failure".to_owned(),
+                }),
+                true,
+            );
+        });
+    }
+
+    #[test]
+    fn a_missing_embedded_svg_is_an_error() {
+        with_ui(
+            |ui| match texture_for(ui, "no-such-icon", DEFAULT_TINT, 16.0) {
+                Err(UiError::Render { .. }) => {}
+                Err(other) => panic!("unexpected error: {other}"),
+                Ok(_) => panic!("the icon has no embedded SVG"),
+            },
+        );
+    }
+
+    #[test]
+    fn broken_svg_bytes_are_errors() {
+        let tint = Color32::from_rgb(0x44, 0x44, 0x44);
+        assert!(rasterize(b"\xff\xfe", tint, 16).is_err());
+        assert!(rasterize(b"not an svg", tint, 16).is_err());
     }
 
     #[test]
