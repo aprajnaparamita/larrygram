@@ -6,7 +6,7 @@ A clean-room, open-source diagramming app in pure Rust that aims to read and wri
 
 ## Build status
 
-Last full gate on `main`: **green, 2026-10-24** (commit `6ff5611`, mid Phase 7 and 8). Every merge batch since then passed the quick gate with the corpus tests (latest `51b9889`, 2026-10-25). The gate runs locally, on one machine, through a queue (`tools/gate-queue/`); there is no hosted CI.
+Last full gate on `main`: **green, 2026-10-25** (commit `dcbaca7`, mid Phase 7 and 8, with the P8-07 importer). Every merge batch since then passed the quick gate with the corpus tests (latest `3ea5b0b`, the About window). The gate runs locally, on one machine, through a queue (`tools/gate-queue/`); there is no hosted CI.
 
 | Step | Result |
 |---|---|
@@ -23,12 +23,12 @@ Line coverage per crate (`cargo xtask coverage`):
 | geom | 100.0% | text | 99.3% |
 | shapesheet | 97.0% | commands | 98.4% |
 | model | 99.7% | vsdx | 98.2% |
-| ui-spec | 99.4% | larrygram-cli | 97.8% |
-| render | 98.5% | ui | 97.2% |
+| ui-spec | 99.6% | larrygram-cli | 97.8% |
+| render | 98.5% | ui | 97.8% |
 | vsd-binary | 100.0% | larrygram-web | 77.9% |
 | larrygram (desktop) | 80.5% | | |
 
-These are the numbers from the `6ff5611` full gate. `control` has no code yet (Phase 9).
+These are the numbers from the `dcbaca7` full gate. `control` has no code yet (Phase 9).
 
 ## What works today
 
