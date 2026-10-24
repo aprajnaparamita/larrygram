@@ -212,7 +212,7 @@ pub fn collect_with(
     for chunk in chunks {
         match chunk.record {
             FONT_IX | FONTFACE => {
-                if let Some(name) = parse_font(chunk.data, warnings) {
+                if let Some(name) = parse_font(chunk.data, options, warnings) {
                     fonts.insert(chunk.id, name);
                 }
             }
@@ -277,13 +277,17 @@ pub fn collect_with(
             });
             continue;
         };
-        if let Some((_, shape)) = shapes.get_mut(owner) {
+        // The owner exists by construction; the loop over the one
+        // lookup avoids an untaken `else` branch (and a panic path).
+        #[allow(for_loops_over_fallibles)]
+        for (_, shape) in shapes.get_mut(owner) {
             shape.read(chunk, options, warnings, &mut text_bytes)?;
         }
     }
 
     for (id, shape) in &shapes {
-        if let Some(target) = document.shape_mut(*id) {
+        #[allow(for_loops_over_fallibles)]
+        for target in document.shape_mut(*id) {
             shape.flush(target, &fonts, &names, options, warnings, &mut text_bytes)?;
         }
     }
@@ -483,35 +487,35 @@ fn trimmed(bytes: &[u8]) -> &[u8] {
 
 /// Decodes one byte string with `code_page`.
 ///
-/// `0x0d` and `0x0e` are paragraph breaks like `0x0a` and decode to
-/// `\n`; `0x1e` is a field placeholder and decodes to U+FFFC. Bytes
-/// that do not decode become U+FFFD and set `lossy`.
+/// Trailing NUL bytes are dropped. `0x0d` and `0x0e` are paragraph
+/// breaks like `0x0a` and decode to `\n`; `0x1e` is a field placeholder
+/// and decodes to U+FFFC. Bytes that do not decode become U+FFFD and
+/// set `lossy`.
 fn decode_bytes(bytes: &[u8], code_page: CodePage) -> Decoded {
+    let (mut text, lossy) = match code_page {
+        CodePage::Utf8 => decode_utf8(trimmed(bytes)),
+        CodePage::Windows1252 => decode_cp1252(trimmed(bytes)),
+    };
+    text = text
+        .replace(&['\r', '\u{0e}'][..], "\n")
+        .replace('\u{1e}', "\u{fffc}");
+    Decoded { text, lossy }
+}
+
+/// Decodes one byte string as Windows-1252.
+fn decode_cp1252(bytes: &[u8]) -> (String, bool) {
     let mut text = String::new();
     let mut lossy = false;
-    match code_page {
-        CodePage::Utf8 => {
-            let (decoded, replaced) = decode_utf8(bytes);
-            text.push_str(&decoded);
-            lossy = replaced;
-        }
-        CodePage::Windows1252 => {
-            for byte in trimmed(bytes) {
-                match byte {
-                    0x0a | 0x0d | 0x0e => text.push('\n'),
-                    0x1e => text.push('\u{fffc}'),
-                    _ => match cp1252_char(*byte) {
-                        Some(character) => text.push(character),
-                        None => {
-                            text.push('\u{fffd}');
-                            lossy = true;
-                        }
-                    },
-                }
+    for byte in bytes {
+        match cp1252_char(*byte) {
+            Some(character) => text.push(character),
+            None => {
+                text.push('\u{fffd}');
+                lossy = true;
             }
         }
     }
-    Decoded { text, lossy }
+    (text, lossy)
 }
 
 /// Decodes one UTF-16LE string. Unpaired surrogates and an odd trailing
@@ -519,58 +523,24 @@ fn decode_bytes(bytes: &[u8], code_page: CodePage) -> Decoded {
 fn decode_utf16(bytes: &[u8]) -> Decoded {
     let mut text = String::new();
     let mut lossy = false;
+    let mut units = Vec::with_capacity(bytes.len() / 2);
     let mut index = 0usize;
-    loop {
-        let (Some(high_byte), Some(low_byte)) = (
-            bytes.get(index).copied(),
-            bytes.get(index.saturating_add(1)).copied(),
-        ) else {
-            if bytes.get(index).is_some() {
+    while let (Some(high), Some(low)) = (bytes.get(index), bytes.get(index.saturating_add(1))) {
+        units.push(u16::from_le_bytes([*high, *low]));
+        index = index.saturating_add(2);
+    }
+    for unit in char::decode_utf16(units.iter().copied()) {
+        match unit {
+            Ok(character) => text.push(character),
+            Err(_) => {
                 text.push('\u{fffd}');
                 lossy = true;
             }
-            break;
-        };
-        index = index.saturating_add(2);
-        let unit = u16::from_le_bytes([high_byte, low_byte]);
-        if (0xd800..0xdc00).contains(&unit) {
-            // A high surrogate: the next unit must be a low surrogate.
-            let pair = bytes
-                .get(index)
-                .copied()
-                .zip(bytes.get(index.saturating_add(1)).copied())
-                .map(|(high, low)| u16::from_le_bytes([high, low]));
-            match pair {
-                Some(low) if (0xdc00..0xe000).contains(&low) => {
-                    let combined =
-                        0x10000u32 + ((u32::from(unit) - 0xd800) << 10) + (u32::from(low) - 0xdc00);
-                    match char::from_u32(combined) {
-                        Some(character) => text.push(character),
-                        None => {
-                            text.push('\u{fffd}');
-                            lossy = true;
-                        }
-                    }
-                    index = index.saturating_add(2);
-                }
-                _ => {
-                    text.push('\u{fffd}');
-                    lossy = true;
-                }
-            }
-        } else if (0xdc00..0xe000).contains(&unit) {
-            // A lone low surrogate.
-            text.push('\u{fffd}');
-            lossy = true;
-        } else {
-            match char::from_u32(u32::from(unit)) {
-                Some(character) => text.push(character),
-                None => {
-                    text.push('\u{fffd}');
-                    lossy = true;
-                }
-            }
         }
+    }
+    if bytes.len() % 2 == 1 {
+        text.push('\u{fffd}');
+        lossy = true;
     }
     Decoded { text, lossy }
 }
@@ -817,9 +787,7 @@ fn parse_para_blocks(
         if length == 0 {
             break;
         }
-        let Ok(length) = usize::try_from(length) else {
-            break;
-        };
+        let length = usize::try_from(length).unwrap_or(usize::MAX);
         let Some(block_type) = cursor.u8() else {
             break;
         };
@@ -960,9 +928,7 @@ fn scan_field_format(data: &[u8], scan_start: usize) -> Option<u16> {
         if length == 0 {
             return None;
         }
-        let Ok(length) = usize::try_from(length) else {
-            return None;
-        };
+        let length = usize::try_from(length).unwrap_or(usize::MAX);
         cursor.skip(1)?;
         let block_index = cursor.u8()?;
         if block_index == 2 {
@@ -1895,25 +1861,42 @@ fn push_runs(markers: &mut Vec<Marker>, runs: impl Iterator<Item = (u32, u32)>, 
 }
 
 /// Parses one font record (version 6 `FontIX` or version 11 `FontFace`)
-/// into its name; the caller keys the map by the record id.
-fn parse_font(data: &[u8], warnings: &mut Vec<ImportWarning>) -> Option<String> {
+/// into its name; the caller keys the map by the record id. Version 6
+/// stores the name as a byte string after the charset word, version 11
+/// as a zero-terminated UTF-16 string of at most 32 characters.
+fn parse_font(
+    data: &[u8],
+    options: &TextOptions,
+    warnings: &mut Vec<ImportWarning>,
+) -> Option<String> {
     let mut cursor = Cursor::new(data);
-    cursor.skip(4)?;
-    let bytes = cursor.rest();
-    // The name is a zero-terminated UTF-16 string of at most 32
-    // characters.
-    let end = (0usize..32).find_map(|index| {
-        let at = index.checked_mul(2)?;
-        match (bytes.get(at), bytes.get(at.saturating_add(1))) {
-            (Some(0), Some(0)) => Some(at),
-            _ => None,
+    let decoded = match options.version {
+        FormatVersion::V11 => {
+            cursor.skip(4)?;
+            let bytes = cursor.rest();
+            let end = (0usize..32).find_map(|index| {
+                let at = index.checked_mul(2)?;
+                match (bytes.get(at), bytes.get(at.saturating_add(1))) {
+                    (Some(0), Some(0)) => Some(at),
+                    _ => None,
+                }
+            });
+            let name_bytes = match end {
+                Some(end) => bytes.get(..end)?,
+                None => bytes,
+            };
+            decode_utf16(name_bytes)
         }
-    });
-    let name_bytes = match end {
-        Some(end) => bytes.get(..end)?,
-        None => bytes,
+        FormatVersion::V6 => {
+            cursor.skip(6)?;
+            let bytes = cursor.rest();
+            let end = bytes
+                .iter()
+                .position(|byte| *byte == 0)
+                .unwrap_or(bytes.len());
+            decode_bytes(bytes.get(..end)?, options.code_page)
+        }
     };
-    let decoded = decode_utf16(name_bytes);
     note_lossy(&decoded, "font name", warnings);
     Some(decoded.text)
 }
@@ -2599,12 +2582,7 @@ mod tests {
             },
         ];
         let (document, warnings) = run_default(&chunks, 1);
-        assert!(
-            !warnings
-                .iter()
-                .any(|warning| warning.kind == WarningKind::UnresolvedReference { what: "font" }),
-            "{warnings:?}"
-        );
+        assert!(warnings.is_empty(), "{warnings:?}");
         let shape = document.shape(ShapeId { index: 0 }).expect("shape");
         let section = find_section(shape, "Character").expect("section");
         let row = section.rows.first().expect("row");
@@ -3349,6 +3327,7 @@ mod tests {
         assert_eq!(parse_list(&list_payload(&[3, 1])), vec![3, 1]);
         assert_eq!(parse_list(&[]), Vec::new());
         assert_eq!(parse_list(&[0, 0]), Vec::new());
+        assert_eq!(parse_list(&[1, 0, 0, 0]), Vec::new());
         let mut truncated = list_payload(&[3, 1]);
         truncated.truncate(10);
         assert_eq!(parse_list(&truncated), Vec::new());
@@ -3360,5 +3339,406 @@ mod tests {
         assert_eq!(ordered(&items, &[9, 7]), vec![&3, &1, &2]);
         assert_eq!(ordered(&items, &[]), vec![&1, &2, &3]);
         assert!(ordered::<i32>(&[], &[]).is_empty());
+    }
+
+    // ---- coverage of the defensive branches ----
+
+    #[test]
+    fn every_windows1252_byte_decodes() {
+        for byte in 0..=255u8 {
+            let decoded = decode_bytes(&[byte], CodePage::Windows1252);
+            assert!(!decoded.text.is_empty(), "byte {byte}");
+        }
+    }
+
+    #[test]
+    fn utf8_byte_strings_normalize_breaks_and_placeholders() {
+        let decoded = decode_bytes("a\r\u{0e}b\u{1e}c".as_bytes(), CodePage::Utf8);
+        assert_eq!(decoded.text, "a\n\nb\u{fffc}c");
+        let lossy = decode_bytes(&[0xff, 0x41], CodePage::Utf8);
+        assert!(lossy.lossy);
+        assert!(lossy.text.contains('A'));
+    }
+
+    #[test]
+    fn character_runs_carry_initial_caps_and_subscript() {
+        let chars = [char_payload(
+            1,
+            0,
+            [0, 0, 0, 0],
+            0x00,
+            0x02,
+            0x02,
+            10000,
+            0.1,
+            0,
+        )];
+        let chunks = [shape_chunk(1), text_chunk(CHAR_IX, 0, &chars[0])];
+        let (document, _) = run_default(&chunks, 1);
+        let row = find_section(
+            document.shape(ShapeId { index: 0 }).expect("shape"),
+            "Character",
+        )
+        .expect("section")
+        .rows
+        .first()
+        .expect("row");
+        assert_eq!(
+            find_cell(row, "Case").and_then(|cell| cell.value.clone()),
+            Some(CellValue::Number(2.0))
+        );
+        assert_eq!(
+            find_cell(row, "Pos").and_then(|cell| cell.value.clone()),
+            Some(CellValue::Number(2.0))
+        );
+    }
+
+    #[test]
+    fn truncated_paragraph_blocks_survive() {
+        let blocks: [&[u8]; 6] = [
+            &[4, 0, 0, 0],
+            &[5, 0, 0, 0, 2],
+            &[8, 0, 0, 0, 2, 8],
+            &[9, 0, 0, 0, 2, 8, 0],
+            &[11, 0, 0, 0, 2, 8, 0, 5, 1, 0],
+            &[200, 0, 0, 0, 2, 8, 0, 0, 1, 0],
+        ];
+        for block in blocks {
+            let mut paragraph = para_payload_v11(1, [0.0; 6], 0, 0, 0, 0.0, 0.0, 0, None);
+            paragraph.extend_from_slice(block);
+            let chunks = [shape_chunk(1), text_chunk(PARA_IX, 0, &paragraph)];
+            let (document, _) = run_default(&chunks, 1);
+            let row = find_section(
+                document.shape(ShapeId { index: 0 }).expect("shape"),
+                "Paragraph",
+            )
+            .expect("section")
+            .rows
+            .first()
+            .expect("row");
+            assert_eq!(
+                find_cell(row, "BulletStr").and_then(|cell| cell.value.clone()),
+                Some(CellValue::Str(String::new())),
+                "{block:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn numeric_field_blocks_survive_truncation() {
+        // A zero length, a block that lies beyond the record and a
+        // block cut short inside the format marker all end the scan
+        // without a format.
+        for extra in [
+            &[0u8; 4][..],
+            &[200, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0][..],
+            &[6, 0, 0, 0, 0, 2, 0][..],
+        ] {
+            let mut data = vec![0u8; 7];
+            data.push(CELL_TYPE_INCHES);
+            data.extend_from_slice(&1.0f64.to_le_bytes());
+            data.extend_from_slice(&[0, 0]);
+            data.extend_from_slice(&0i32.to_le_bytes());
+            while data.len() < 0x24 {
+                data.push(0);
+            }
+            data.extend_from_slice(extra);
+            let field = parse_field(&data, &v6_options(CodePage::Windows1252)).expect("field");
+            let mut warnings = Vec::new();
+            assert_eq!(field_display(&field, &HashMap::new(), &mut warnings), "");
+            assert!(warnings.iter().any(|warning| warning.kind
+                == WarningKind::Unsupported {
+                    what: "field format"
+                }));
+        }
+    }
+
+    #[test]
+    fn unit_strings_and_conversions_cover_the_table() {
+        for cell_type in 0..=255u8 {
+            let _ = unit_string(cell_type);
+            let _ = convert_number(cell_type, 1.0);
+        }
+        assert_eq!(unit_string(CELL_TYPE_PERCENT), "%");
+        assert_eq!(convert_number(CELL_TYPE_PERCENT, 0.5), 50.0);
+    }
+
+    #[test]
+    fn noon_and_midnight_spell_twelve() {
+        assert_eq!(
+            numeric_display(30060.5, 40, 31),
+            Some("12:00 PM".to_owned())
+        );
+        assert_eq!(
+            numeric_display(30061.0, 40, 31),
+            Some("12:00 AM".to_owned())
+        );
+    }
+
+    #[test]
+    fn date_display_rejects_an_unknown_format() {
+        let when = date_time(30060.0).expect("date");
+        assert_eq!(date_display(&when, 9999), None);
+    }
+
+    #[test]
+    fn paragraph_list_records_order_the_rows() {
+        let paras = [
+            para_payload_v11(1, [0.1; 6], 0, 0, 0, 0.0, 0.0, 0, None),
+            para_payload_v11(1, [0.2; 6], 0, 0, 0, 0.0, 0.0, 0, None),
+        ];
+        let list = list_payload(&[1, 0]);
+        let chunks = [
+            shape_chunk(1),
+            text_chunk(PARA_LIST, 0, &list),
+            text_chunk(PARA_IX, 0, &paras[0]),
+            text_chunk(PARA_IX, 1, &paras[1]),
+        ];
+        let (document, _) = run_default(&chunks, 1);
+        let rows = &find_section(
+            document.shape(ShapeId { index: 0 }).expect("shape"),
+            "Paragraph",
+        )
+        .expect("section")
+        .rows;
+        assert_eq!(
+            find_cell(&rows[0], "IndFirst").and_then(|cell| cell.value.clone()),
+            Some(CellValue::Number(0.2))
+        );
+    }
+
+    #[test]
+    fn text_record_kinds_outside_the_map_are_ignored() {
+        let mut shape = ShapeText::new(0);
+        let mut warnings = Vec::new();
+        let mut text_bytes = 0;
+        let chunk = text_chunk(Record(0x7f), 0, &[]);
+        shape
+            .read(
+                &chunk,
+                &TextOptions::default(),
+                &mut warnings,
+                &mut text_bytes,
+            )
+            .expect("reads");
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn a_huge_list_sub_header_is_ignored() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&200u32.to_le_bytes());
+        data.extend_from_slice(&4u32.to_le_bytes());
+        assert_eq!(parse_list(&data), Vec::new());
+    }
+
+    #[test]
+    fn long_font_names_survive_without_a_terminator() {
+        let mut data = vec![0u8; 4];
+        for index in 0..40u16 {
+            data.extend_from_slice(&('a' as u16 + index).to_le_bytes());
+        }
+        let name = parse_font(&data, &TextOptions::default(), &mut Vec::new()).expect("name");
+        assert!(name.starts_with('a'));
+    }
+
+    #[test]
+    fn version_6_names_and_fonts_decode_with_the_code_page() {
+        let mut font = vec![0u8; 6];
+        font.extend_from_slice(b"caf\xe9");
+        font.push(0);
+        let mut name = vec![0u8; 4];
+        name.extend_from_slice(b"caf\xe9");
+        name.push(0);
+        let chars = [char_payload(1, 4, [0, 0, 0, 0], 0, 0, 0, 10000, 0.1, 0)];
+        let chunks = [
+            shape_chunk(1),
+            text_chunk(CHAR_IX, 0, &chars[0]),
+            Chunk {
+                record: FONT_IX,
+                level: 1,
+                list: 0,
+                id: 4,
+                data: &font,
+            },
+            Chunk {
+                record: NAME2,
+                level: 1,
+                list: 0,
+                id: 3,
+                data: &name,
+            },
+        ];
+        let options = v6_options(CodePage::Windows1252);
+        let (document, warnings) = run(&chunks, 1, &options);
+        assert!(warnings.is_empty(), "{warnings:?}");
+        let row = find_section(
+            document.shape(ShapeId { index: 0 }).expect("shape"),
+            "Character",
+        )
+        .expect("section")
+        .rows
+        .first()
+        .expect("row");
+        assert_eq!(
+            find_cell(row, "Font").and_then(|cell| cell.value.clone()),
+            Some(CellValue::Str("caf\u{e9}".to_owned()))
+        );
+    }
+
+    #[test]
+    fn every_shape_kind_owns_its_text() {
+        let one = text_payload(&utf16("one"));
+        let two = text_payload(&utf16("two"));
+        let three = text_payload(&utf16("three"));
+        let chunks = [
+            Chunk {
+                record: SHAPE_GROUP,
+                level: 1,
+                list: 0,
+                id: 1,
+                data: &[],
+            },
+            text_chunk(TEXT, 0, &one),
+            Chunk {
+                record: SHAPE_GUIDE,
+                level: 1,
+                list: 0,
+                id: 2,
+                data: &[],
+            },
+            text_chunk(TEXT, 0, &two),
+            Chunk {
+                record: SHAPE_FOREIGN,
+                level: 1,
+                list: 0,
+                id: 3,
+                data: &[],
+            },
+            text_chunk(TEXT, 0, &three),
+        ];
+        let (document, _) = run_default(&chunks, 3);
+        for (index, expected) in ["one", "two", "three"].iter().enumerate() {
+            let shape = document
+                .shape(ShapeId {
+                    index: index as u32,
+                })
+                .expect("shape");
+            assert_eq!(
+                shape.text.as_ref().expect("text").parts,
+                vec![TextPart::Text((*expected).to_owned())]
+            );
+        }
+    }
+
+    #[test]
+    fn paragraph_blocks_other_than_the_bullet_are_skipped() {
+        let mut paragraph = para_payload_v11(1, [0.0; 6], 0, 0, 0, 0.0, 0.0, 0, None);
+        paragraph.extend_from_slice(&8u32.to_le_bytes());
+        paragraph.extend_from_slice(&[0, 2, 3, 0, 0, 0]);
+        paragraph.extend_from_slice(&0u32.to_le_bytes());
+        let chunks = [shape_chunk(1), text_chunk(PARA_IX, 0, &paragraph)];
+        let (document, _) = run_default(&chunks, 1);
+        let row = find_section(
+            document.shape(ShapeId { index: 0 }).expect("shape"),
+            "Paragraph",
+        )
+        .expect("section")
+        .rows
+        .first()
+        .expect("row");
+        assert_eq!(
+            find_cell(row, "BulletStr").and_then(|cell| cell.value.clone()),
+            Some(CellValue::Str(String::new()))
+        );
+    }
+
+    #[test]
+    fn field_format_blocks_with_another_index_are_skipped() {
+        let mut data = vec![0u8; 7];
+        data.push(CELL_TYPE_INCHES);
+        data.extend_from_slice(&1.0f64.to_le_bytes());
+        data.extend_from_slice(&[0, 0]);
+        data.extend_from_slice(&0i32.to_le_bytes());
+        while data.len() < 0x36 {
+            data.push(0);
+        }
+        data.extend_from_slice(&6u32.to_le_bytes());
+        data.extend_from_slice(&[0, 5, 0, 0]);
+        data.extend_from_slice(&0u32.to_le_bytes());
+        let field = parse_field(&data, &TextOptions::default()).expect("field");
+        let mut warnings = Vec::new();
+        assert_eq!(field_display(&field, &HashMap::new(), &mut warnings), "");
+        assert!(warnings.iter().any(|warning| warning.kind
+            == WarningKind::Unsupported {
+                what: "field format"
+            }));
+    }
+
+    #[test]
+    fn trimmed_numbers_can_drop_the_point() {
+        assert_eq!(trimmed_number(2.0, 0), "2");
+    }
+
+    #[test]
+    fn date_values_out_of_range_spell_nothing() {
+        assert_eq!(numeric_display(1.0e300, 40, 22), None);
+    }
+
+    #[test]
+    fn tabs_list_records_order_the_tab_sets() {
+        let tabs = [tabs_payload(3, &[(0.5, 0)]), tabs_payload(3, &[(1.0, 1)])];
+        let list = list_payload(&[1, 0]);
+        let bytes = text_payload(&utf16("a\tb\tc"));
+        let chunks = [
+            shape_chunk(1),
+            text_chunk(TEXT, 0, &bytes),
+            text_chunk(TABS_DATA_LIST, 0, &list),
+            text_chunk(TABS_DATA_1, 0, &tabs[0]),
+            text_chunk(TABS_DATA_1, 1, &tabs[1]),
+        ];
+        let (document, _) = run_default(&chunks, 1);
+        let rows = &find_section(document.shape(ShapeId { index: 0 }).expect("shape"), "Tabs")
+            .expect("section")
+            .rows;
+        assert_eq!(
+            find_cell(&rows[0], "Position").and_then(|cell| cell.value.clone()),
+            Some(CellValue::Number(1.0))
+        );
+    }
+
+    #[test]
+    fn a_field_display_over_the_cap_fails_the_flush() {
+        let mut bytes = text_payload(&utf16(""));
+        bytes.extend_from_slice(&utf16("\u{fffc}"));
+        let fields = list_payload(&[10]);
+        let field = field_string_payload(7);
+        let name = name2_payload("long display");
+        let chunks = [
+            shape_chunk(1),
+            text_chunk(TEXT, 0, &bytes),
+            text_chunk(FIELD_LIST, 0, &fields),
+            text_chunk(TEXT_FIELD, 10, &field),
+            Chunk {
+                record: NAME2,
+                level: 1,
+                list: 0,
+                id: 7,
+                data: &name,
+            },
+        ];
+        let options = TextOptions {
+            version: FormatVersion::V11,
+            code_page: CodePage::default(),
+            limits: Limits {
+                max_text_bytes: 4,
+                ..Limits::DEFAULT
+            },
+        };
+        let mut document = document_with_shapes(1);
+        let mut warnings = Vec::new();
+        let error =
+            collect_with(&chunks, &mut document, &mut warnings, &options).expect_err("fails");
+        assert!(error.to_string().contains("max_text_bytes"), "{error}");
     }
 }
