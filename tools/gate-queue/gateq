@@ -190,6 +190,21 @@ sub cmd_submit {
             push @args, $a;
         }
     }
+    # AGENTS.md section 7: wasm and fuzz run only in the master's full
+    # check, so a worker gate always skips them, whatever was asked.
+    if ($task !~ /^main(-|$)/) {
+        my @kept;
+        my %skip = (wasm => 1, fuzz => 1);
+        my $quick = 0;
+        while (@args) {
+            my $a = shift @args;
+            if ($a eq '--quick') { $quick = 1; next }
+            if ($a eq '--skip') { $skip{$_} = 1 for split /,/, (shift(@args) // ''); next }
+            if ($a =~ /^--skip=(.*)$/) { $skip{$_} = 1 for split /,/, $1; next }
+            push @kept, $a;
+        }
+        @args = $quick ? ('--quick', @kept) : ('--skip', join(',', sort keys %skip), @kept);
+    }
     $dir //= $task eq 'main' ? $MAIN_DIR : "$WORKTREES/$task";
     die_msg("$dir is not a git worktree") unless -e "$dir/.git";
     my $sha;

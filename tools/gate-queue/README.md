@@ -27,7 +27,9 @@ $G cancel P7-06                    # drop a queued job or stop a running one
   job ahead of the queue and `--idle` behind it. `--checkout REV`
   resolves `REV` in the main repository at submit time and checks that
   commit out (detached) in the job's worktree when the job starts. Other
-  arguments go to `cargo xtask gate`.
+  arguments go to `cargo xtask gate`. For every task except `main` and
+  `main-full`, `gateq` adds `--skip wasm,fuzz` (AGENTS.md section 7), so
+  a worker gate never runs those two steps.
 - The runner starts queued jobs in submit order (bumped jobs first)
   while fewer than `GATEQ_SLOTS` (default 2) gates run. A gate started
   by hand, outside the queue, still takes a slot. One task never has
