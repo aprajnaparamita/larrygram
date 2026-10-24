@@ -104,13 +104,13 @@ impl Streams {
         self.get(VISIO_DOCUMENT)
     }
 
-    /// The bytes of the [`SUMMARY_INFORMATION`] stream, or `None` when
-    /// the file has none.
+    /// The bytes of the `\u{5}SummaryInformation` stream, or `None`
+    /// when the file has none.
     pub fn summary_information(&self) -> Option<&[u8]> {
         self.get(SUMMARY_INFORMATION)
     }
 
-    /// The bytes of the [`DOCUMENT_SUMMARY_INFORMATION`] stream, or
+    /// The bytes of the `\u{5}DocumentSummaryInformation` stream, or
     /// `None` when the file has none.
     pub fn document_summary_information(&self) -> Option<&[u8]> {
         self.get(DOCUMENT_SUMMARY_INFORMATION)
@@ -144,7 +144,8 @@ pub fn read_streams(bytes: &[u8], limits: &Limits) -> Result<Streams, Error> {
     let mut total: u64 = 0;
     let mut streams = Vec::with_capacity(directory.streams.len());
     for entry in &directory.streams {
-        if entry.size > limits.max_stream_bytes {
+        // A size the platform cannot address is a cap failure too.
+        if entry.size > limits.max_stream_bytes || usize::try_from(entry.size).is_err() {
             return Err(Error::LimitExceeded {
                 limit: "max_stream_bytes",
                 value: entry.size,
@@ -592,15 +593,16 @@ fn read_mini_stream(
     if root.size == 0 {
         return Ok(Vec::new());
     }
-    if root.size > limits.max_total_uncompressed {
+    // A size the platform cannot address is a cap failure too.
+    if root.size > limits.max_total_uncompressed || usize::try_from(root.size).is_err() {
         return Err(Error::LimitExceeded {
             limit: "max_total_uncompressed",
             value: root.size,
             max: limits.max_total_uncompressed,
         });
     }
-    let size = usize::try_from(root.size)
-        .map_err(|_| Error::Invalid("the mini stream is too large for this platform".to_owned()))?;
+    // The cap above makes the size fit a `usize`.
+    let size = root.size as usize;
     let max_sectors = file_sector_count(bytes, header.sector_size);
     let chain = sector_chain(fat, root.start_sector, max_sectors)?;
     let needed = size.div_ceil(header.sector_size);
@@ -632,8 +634,8 @@ fn read_stream(
     if entry.size == 0 {
         return Ok(Vec::new());
     }
-    let size = usize::try_from(entry.size)
-        .map_err(|_| Error::Invalid("a stream is too large for this platform".to_owned()))?;
+    // The caller caps the size, so it fits a `usize`.
+    let size = entry.size as usize;
     let mut out = Vec::with_capacity(size);
     if entry.size < header.mini_cutoff {
         let max_mini_sectors = mini_stream.len() / header.mini_sector_size;
@@ -715,24 +717,31 @@ fn sector_bytes(bytes: &[u8], sector: u32, sector_size: usize) -> Option<&[u8]> 
 }
 
 /// Reads a little-endian `u16` at `offset`.
+///
+/// The `get` above fixes the length of the slice, so the chunk always
+/// fits; the default only keeps the read free of a branch that cannot
+/// be taken.
 fn read_u16(bytes: &[u8], offset: usize) -> Option<u16> {
     let slice = bytes.get(offset..offset.checked_add(2)?)?;
-    let array: [u8; 2] = slice.try_into().ok()?;
-    Some(u16::from_le_bytes(array))
+    Some(u16::from_le_bytes(
+        slice.first_chunk::<2>().copied().unwrap_or([0; 2]),
+    ))
 }
 
 /// Reads a little-endian `u32` at `offset`.
 fn read_u32(bytes: &[u8], offset: usize) -> Option<u32> {
     let slice = bytes.get(offset..offset.checked_add(4)?)?;
-    let array: [u8; 4] = slice.try_into().ok()?;
-    Some(u32::from_le_bytes(array))
+    Some(u32::from_le_bytes(
+        slice.first_chunk::<4>().copied().unwrap_or([0; 4]),
+    ))
 }
 
 /// Reads a little-endian `u64` at `offset`.
 fn read_u64(bytes: &[u8], offset: usize) -> Option<u64> {
     let slice = bytes.get(offset..offset.checked_add(8)?)?;
-    let array: [u8; 8] = slice.try_into().ok()?;
-    Some(u64::from_le_bytes(array))
+    Some(u64::from_le_bytes(
+        slice.first_chunk::<8>().copied().unwrap_or([0; 8]),
+    ))
 }
 
 /// The property id of the code page in a summary stream.

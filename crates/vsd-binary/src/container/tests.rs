@@ -1360,7 +1360,7 @@ fn a_directory_entry_without_a_start_sector_is_refused() {
 
 #[test]
 fn a_directory_entry_without_a_size_is_refused() {
-    let entry = vec![0u8; 119];
+    let entry = vec![0u8; 121];
     let err = DirEntry::parse(&entry, 3).unwrap_err();
     assert!(matches!(err, Error::Invalid(_)), "{err:?}");
 }
@@ -1398,10 +1398,12 @@ fn summary_properties_refuse_a_truncated_property_table() {
 
 #[test]
 fn summary_properties_refuse_a_truncated_vector() {
-    let stream = build_summary(
-        &FMTID_SUMMARY,
-        &[(14, typed_value(0x101E, &1u32.to_le_bytes()))],
-    );
+    // A vector with one element of two characters.
+    let mut payload = 1u32.to_le_bytes().to_vec();
+    payload.extend_from_slice(&0x001Eu32.to_le_bytes());
+    payload.extend_from_slice(&2u32.to_le_bytes());
+    payload.extend_from_slice(b"hi");
+    let stream = build_summary(&FMTID_SUMMARY, &[(14, typed_value(0x101E, &payload))]);
     let mut missing_count = stream.clone();
     missing_count.truncate(0x44);
     assert!(matches!(
