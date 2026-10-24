@@ -3,7 +3,7 @@
 //! A widget asks for a token by name; a missing or malformed token falls
 //! back to an egui default and warns once, so a theme file can never
 //! crash the app. [`apply`] maps the tokens listed in `docs/ui/themes.md`
-//! onto egui's [`Style`] and [`Visuals`], registers the bundled Selawik
+//! onto egui's [`egui::Style`] and [`egui::Visuals`], registers the bundled Selawik
 //! faces as the proportional UI font and records the active theme for
 //! the canvas.
 //!
