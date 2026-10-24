@@ -159,6 +159,49 @@ impl PanelModern {
         &self.file_view
     }
 
+    /// The id of the active core tab (task P7-09 keeps it in
+    /// `Settings::last_core_tab`).
+    ///
+    /// The active core tab is the `active_core`-nth visible core tab
+    /// (no [`ContextId`](ui_spec::v2::ContextId) of its own), so the
+    /// id is computed against the same visible list the tab strip
+    /// draws.
+    pub fn active_core_id(
+        &self,
+        layout: &LayoutV2,
+        context: crate::contexts::SelectionContext,
+    ) -> Option<String> {
+        visible_tabs(layout, context)
+            .iter()
+            .take_while(|tab| tab.shown_in.is_none())
+            .nth(self.active_core)
+            .map(|tab| tab.id.clone())
+    }
+
+    /// Makes the core tab `id` active (task P7-09 restores
+    /// [`Settings::last_core_tab`](larrygram_commands::Settings)).
+    /// Answers `false` and changes nothing when the visible core tabs
+    /// do not include `id`.
+    pub fn set_active_core_id(
+        &mut self,
+        layout: &LayoutV2,
+        context: crate::contexts::SelectionContext,
+        id: &str,
+    ) -> bool {
+        let found = visible_tabs(layout, context)
+            .iter()
+            .take_while(|tab| tab.shown_in.is_none())
+            .position(|tab| tab.id == id);
+        match found {
+            Some(index) => {
+                self.active_core = index;
+                self.active_contextual = None;
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Draws the File button row, the tab strip and the command bar
     /// (or the File view while it is open), and returns one
     /// [`Intent`] per activation.

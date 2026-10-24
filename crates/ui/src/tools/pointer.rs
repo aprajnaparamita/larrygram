@@ -99,7 +99,7 @@ pub struct PointerState {
 
 impl PointerState {
     /// The page scene for `ctx`, from the cache when the key matches.
-    fn scene(&mut self, ctx: &AppCtx) -> Result<Option<&Scene>, UiError> {
+    pub(crate) fn scene(&mut self, ctx: &AppCtx) -> Result<Option<&Scene>, UiError> {
         let Some(session) = ctx.active_document() else {
             self.scene = None;
             return Ok(None);

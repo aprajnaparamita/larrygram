@@ -976,7 +976,7 @@ mod tests {
                             None => {
                                 dynamic = sets()
                                     .get(tab_bar.borrow().kind())
-                                    .expect("the committed set");
+                                    ;
                                 dynamic
                             }
                         };
@@ -1028,7 +1028,7 @@ mod tests {
         fn committed(kind: LayoutKind) -> Self {
             Self::new(
                 kind,
-                sets().get(kind).expect("the committed set").clone(),
+                sets().get(kind).clone(),
                 Surface::CommandBar,
             )
         }
@@ -2044,7 +2044,7 @@ mod tests {
     #[test]
     fn both_layouts_render_one_widget_per_placement() {
         for kind in [LayoutKind::Panel2016, LayoutKind::Panel365] {
-            let set = sets().get(kind).expect("the committed set");
+            let set = sets().get(kind);
             let mut rig = Rig::new(kind, set.clone(), Surface::CommandBarAndQuickAccess);
             rig.set_action(Action::Emit(intent("file.save")));
             rig.run();
@@ -2107,7 +2107,7 @@ mod tests {
         for kind in [LayoutKind::Panel2016, LayoutKind::Panel365] {
             report.push_str(&counts_report(
                 kind,
-                sets().get(kind).expect("the committed set"),
+                sets().get(kind),
             ));
             report.push('\n');
         }
@@ -2121,7 +2121,7 @@ mod tests {
         // controls (ADR 0031).
         let set = sets()
             .get(LayoutKind::Panel2016)
-            .expect("the committed set");
+            ;
         let mut rig = Rig::committed(LayoutKind::Panel2016);
         rig.set_action(Action::Emit(intent("file.save")));
         rig.run();
@@ -2238,7 +2238,7 @@ mod tests {
         app.open_document(larrygram_commands::DocumentSession::new(document, None));
         for kind in [LayoutKind::Panel2016, LayoutKind::Panel365] {
             let mut bound = 0;
-            for tab in &sets().get(kind).expect("the committed set").layout.tabs {
+            for tab in &sets().get(kind).layout.tabs {
                 for group in &tab.groups {
                     for control in &group.controls {
                         let command = control.command.as_ref().map(|id| id.as_str());
@@ -2262,7 +2262,7 @@ mod tests {
         // Smoke test on the plain egui test ui (no harness).
         let set = sets()
             .get(LayoutKind::Panel365)
-            .expect("the committed set")
+            
             .clone();
         let mut tab_bar = TabBar::new(LayoutKind::Panel365);
         let registry = Registry::new();

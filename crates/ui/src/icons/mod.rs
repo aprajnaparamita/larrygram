@@ -276,6 +276,20 @@ pub fn icon_atom(
     }))
 }
 
+/// The icon atom for `key`, tinted by the theme active on `ctx`
+/// (task P7-09 wires P7-04's [`icon_atom`] into the widgets).
+///
+/// The theme comes from [`crate::theme::current`], the one the shell
+/// applied for the active layout; with no theme yet the atom draws
+/// the placeholder mark ([`icon`]). A rasterisation failure falls back
+/// the same way, never an error (AGENTS.md section 6).
+pub fn icon_themed(ctx: &egui::Context, key: &str, size: f32, enabled: bool) -> Atom<'static> {
+    match crate::theme::current(ctx) {
+        Some(theme) => icon_atom(key, size, &theme, enabled).unwrap_or_else(|_| icon(key, size)),
+        None => icon(key, size),
+    }
+}
+
 /// Draws the icon for a key into `rect`, falling back to the placeholder.
 ///
 /// An unknown key or a rasterisation error draws the placeholder and
