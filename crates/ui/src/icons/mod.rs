@@ -115,13 +115,22 @@ fn clamp_size(size: f32) -> f32 {
 }
 
 /// Paints the placeholder: a faint square with the id's first letter.
-#[rustfmt::skip]
 fn paint_mark(ui: &Ui, rect: Rect, id: &str) {
     let visuals = ui.visuals();
     let side = rect.width().min(rect.height());
     let corner = ((side * 0.2).round().clamp(0.0, 255.0)) as u8;
-    ui.painter().rect_filled(rect, egui::CornerRadius::same(corner), visuals.faint_bg_color);
-    ui.painter().text(rect.center(), Align2::CENTER_CENTER, first_letter(id), FontId::proportional(side * 0.7), visuals.text_color());
+    ui.painter().rect_filled(
+        rect,
+        egui::CornerRadius::same(corner),
+        visuals.faint_bg_color,
+    );
+    ui.painter().text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        first_letter(id),
+        FontId::proportional(side * 0.7),
+        visuals.text_color(),
+    );
 }
 
 /// The letter drawn on the mark: the first character of the id,
@@ -239,8 +248,12 @@ mod tests {
 /// ui.add(egui::Button::new((atom, "Cut")));
 /// # });
 /// ```
-#[rustfmt::skip]
-pub fn icon_atom(key: &str, size: f32, theme: &Theme, enabled: bool) -> Result<Atom<'static>, UiError> {
+pub fn icon_atom(
+    key: &str,
+    size: f32,
+    theme: &Theme,
+    enabled: bool,
+) -> Result<Atom<'static>, UiError> {
     let size = clamp_size(size);
     let Some(entry) = table::entry(key) else {
         warn_once(
@@ -267,8 +280,14 @@ pub fn icon_atom(key: &str, size: f32, theme: &Theme, enabled: bool) -> Result<A
 ///
 /// An unknown key or a rasterisation error draws the placeholder and
 /// logs once per key; the fallback is the defined result (ADR 0062).
-#[rustfmt::skip]
-pub fn draw(ui: &mut Ui, rect: Rect, key: &str, size: f32, theme: &Theme, enabled: bool) -> Result<(), UiError> {
+pub fn draw(
+    ui: &mut Ui,
+    rect: Rect,
+    key: &str,
+    size: f32,
+    theme: &Theme,
+    enabled: bool,
+) -> Result<(), UiError> {
     let Some(entry) = table::entry(key) else {
         warn_once(
             key,
@@ -288,8 +307,13 @@ pub fn draw(ui: &mut Ui, rect: Rect, key: &str, size: f32, theme: &Theme, enable
     Ok(())
 }
 
-#[rustfmt::skip]
-fn paint_or_fallback(ui: &Ui, rect: Rect, key: &str, texture: Result<TextureHandle, UiError>, enabled: bool) {
+fn paint_or_fallback(
+    ui: &Ui,
+    rect: Rect,
+    key: &str,
+    texture: Result<TextureHandle, UiError>,
+    enabled: bool,
+) {
     match texture {
         Ok(texture) => paint_texture(ui, rect, &texture, enabled),
         Err(error) => {
@@ -316,9 +340,13 @@ struct Lru<K, V> {
     clock: u64,
 }
 
-#[rustfmt::skip]
 impl<K, V> Default for Lru<K, V> {
-    fn default() -> Self { Self { entries: Vec::new(), clock: 0 } }
+    fn default() -> Self {
+        Self {
+            entries: Vec::new(),
+            clock: 0,
+        }
+    }
 }
 
 impl<K: PartialEq, V: Clone> Lru<K, V> {
@@ -400,15 +428,18 @@ fn rasterize(bytes: &[u8], tint: Color32, pixels: u32) -> Result<ColorImage, UiE
             message: format!("icon SVG parse failed: {error}"),
         },
     )?;
-    let side = pixels.clamp(1, MAX_ICON_PIXELS);
+    let side = pixels;
     let mut pixmap = resvg::tiny_skia::Pixmap::new(side, side).ok_or_else(|| UiError::Render {
         message: format!("cannot allocate a {side}x{side} icon pixmap"),
     })?;
     let size = tree.size();
     let scale_x = side as f32 / size.width().max(1.0);
     let scale_y = side as f32 / size.height().max(1.0);
-    #[rustfmt::skip]
-    resvg::render(&tree, resvg::tiny_skia::Transform::from_scale(scale_x, scale_y), &mut pixmap.as_mut());
+    resvg::render(
+        &tree,
+        resvg::tiny_skia::Transform::from_scale(scale_x, scale_y),
+        &mut pixmap.as_mut(),
+    );
     Ok(ColorImage::from_rgba_premultiplied(
         [side as usize, side as usize],
         pixmap.data(),
@@ -463,11 +494,14 @@ fn physical_pixels(size: f32, ppp: f32) -> u32 {
     (size * ppp).round().clamp(1.0, MAX_ICON_PIXELS as f32) as u32
 }
 
-#[rustfmt::skip]
 fn warn_once(key: &str, message: &str) {
     static WARNED: OnceLock<Mutex<BTreeSet<String>>> = OnceLock::new();
     let warned = WARNED.get_or_init(|| Mutex::new(BTreeSet::new()));
-    if let Ok(mut warned) = warned.lock() && warned.insert(key.to_owned()) { log::warn!("{message}"); }
+    if let Ok(mut warned) = warned.lock()
+        && warned.insert(key.to_owned())
+    {
+        log::warn!("{message}");
+    }
 }
 
 #[cfg(test)]
@@ -541,7 +575,28 @@ mod icon_set_tests {
             for side in [16, 32] {
                 let image = rasterize(bytes, tint, side).expect("the icon rasterises");
                 assert_eq!(image.size, [side as usize, side as usize], "{}", entry.icon);
+                assert!(
+                    image.pixels.iter().any(|pixel| pixel.a() > 0),
+                    "{} rasterised empty at {side} px",
+                    entry.icon
+                );
             }
+        }
+    }
+
+    #[test]
+    fn the_tint_replaces_current_color() {
+        let red = Color32::from_rgb(0xff, 0x00, 0x00);
+        let bytes = table::icon("scissors").expect("an embedded SVG");
+        let image = rasterize(bytes, red, 32).expect("the icon rasterises");
+        let opaque = image
+            .pixels
+            .iter()
+            .filter(|pixel| pixel.a() == 255)
+            .collect::<Vec<_>>();
+        assert!(!opaque.is_empty(), "the icon has fully opaque pixels");
+        for pixel in opaque {
+            assert_eq!((pixel.r(), pixel.g(), pixel.b()), (0xff, 0x00, 0x00));
         }
     }
 
@@ -655,13 +710,10 @@ mod icon_set_tests {
 
     #[test]
     fn a_missing_embedded_svg_is_an_error() {
-        with_ui(
-            |ui| match texture_for(ui, "no-such-icon", DEFAULT_TINT, 16.0) {
-                Err(UiError::Render { .. }) => {}
-                Err(other) => panic!("unexpected error: {other}"),
-                Ok(_) => panic!("the icon has no embedded SVG"),
-            },
-        );
+        with_ui(|ui| {
+            let result = texture_for(ui, "no-such-icon", DEFAULT_TINT, 16.0);
+            assert!(matches!(result, Err(UiError::Render { .. })));
+        });
     }
 
     #[test]
@@ -669,12 +721,61 @@ mod icon_set_tests {
         let tint = Color32::from_rgb(0x44, 0x44, 0x44);
         assert!(rasterize(b"\xff\xfe", tint, 16).is_err());
         assert!(rasterize(b"not an svg", tint, 16).is_err());
+        let valid = table::icon("scissors").expect("an embedded SVG");
+        assert!(rasterize(valid, tint, 0).is_err(), "no 0-px pixmap");
+    }
+
+    /// A log sink, so a test can count the warnings that fire.
+    struct CaptureLog(Mutex<Vec<String>>);
+
+    impl log::Log for CaptureLog {
+        fn enabled(&self, metadata: &log::Metadata) -> bool {
+            metadata.level() <= log::Level::Warn
+        }
+
+        fn log(&self, record: &log::Record) {
+            if self.enabled(record.metadata())
+                && let Ok(mut messages) = self.0.lock()
+            {
+                messages.push(record.args().to_string());
+            }
+        }
+
+        fn flush(&self) {}
+    }
+
+    fn capture_log() -> &'static CaptureLog {
+        static LOGGER: OnceLock<CaptureLog> = OnceLock::new();
+        let logger = LOGGER.get_or_init(|| CaptureLog(Mutex::new(Vec::new())));
+        let _ = log::set_logger(logger);
+        log::set_max_level(log::LevelFilter::Warn);
+        logger
     }
 
     #[test]
     fn one_warning_covers_a_key() {
+        let logger = capture_log();
         warn_once("test.warning.key", "first");
         warn_once("test.warning.key", "second");
         warn_once("test.warning.other", "other");
+        log::Log::flush(logger);
+        let messages = logger.0.lock().expect("the log lock");
+        assert_eq!(
+            messages
+                .iter()
+                .filter(|message| message.contains("first"))
+                .count(),
+            1,
+            "the first key logs once"
+        );
+        assert!(!messages.iter().any(|m| m.contains("second")));
+        assert_eq!(
+            messages
+                .iter()
+                .filter(|message| message.contains("other"))
+                .count(),
+            1,
+            "a distinct key logs once"
+        );
     }
 }
