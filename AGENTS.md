@@ -40,6 +40,7 @@ The main drive is small. Put everything large on `/Volumes/Dara/larrygram/`:
 - Raw downloads: `/Volumes/Dara/larrygram/reference/`. The repo's `reference/` directory is a symlink to it (gitignored). In a worktree, create the same symlink: `ln -s /Volumes/Dara/larrygram/reference reference`.
 - Corpus files: `corpus/vsdx/` and `corpus/vsd/` are gitignored and exist only in the main checkout. In a worktree, link them: `ln -s /Users/dara/larrygram/corpus/vsdx corpus/vsdx` and the same for `vsd`. If git shows the links as untracked, add them to `.git/info/exclude`, not to `.gitignore`.
 - Large builds (libvisio, corpora): `/Volumes/Dara/larrygram/`.
+- Gate queue state, logs and result prompts: `/Volumes/Dara/larrygram/gates/` (section 7).
 
 ## 4. Clean-room rules (non-negotiable)
 
@@ -117,11 +118,20 @@ Slow steps a worker adds to the hand-off gate:
 
 Skip only the untriggered steps: for example `cargo xtask gate --skip wasm,fuzz` runs coverage. If unsure, run the step. Name the steps you ran in the Result's gate summary.
 
-While iterating, do not run the gate after every commit. The machine runs up to twelve workers at once, and a full gate takes 30 minutes or more under that load:
+**Every gate goes through the gate queue** (`tools/gate-queue/README.md`). Many workers share one machine, and more than two workspace-wide builds at once exhaust its memory and disk. Never run `cargo xtask gate`, or any `--workspace` cargo command (`test`, `clippy`, `llvm-cov`, `check`), directly:
+
+```sh
+G=/Users/dara/larrygram/tools/gate-queue/gateq   # always the main checkout's copy
+$G submit <task-id> --skip wasm,fuzz            # your gate args; returns at once
+$G wait <task-id>                                # run again while it exits 3 (no result yet)
+```
+
+`wait` prints a prompt with the result, the failing lines and what to do next; follow it. Commit before you submit, and do not edit the worktree until the result arrives: the gate tests the working tree as it is when the job starts. If your session must end while waiting, the prompt stays in `/Volumes/Dara/larrygram/gates/results/<task-id>.prompt`.
 
 - After each change, check only the crates you touched: `cargo test -p <crate>` and `cargo clippy -p <crate> --all-targets --all-features -- -D warnings`.
-- Run `cargo xtask gate --quick` at milestones (before a rebase, after a large change).
-- Run the hand-off gate with its slow steps **once**, after the last code commit and the rebase. Re-run it only if code changes after that; a Result-only commit does not need it.
+- Submit `--quick` at milestones only (before a rebase, after a large change).
+- Submit the hand-off gate with its slow steps **once**, after the last code commit and the rebase. Submit again only if code changes after that; a Result-only commit does not need it.
+- The master submits the merge gate as task `main` with `--corpus`.
 
 Coverage thresholds: geom, model, vsdx, vsd-binary, shapesheet, commands, ui-spec ≥ 85%; render, text ≥ 75%; control, ui, apps ≥ 50% (UI via egui_kittest). No crate may drop below its previous-phase number (`[ratchet]` in `coverage.toml`; only the master updates it).
 
