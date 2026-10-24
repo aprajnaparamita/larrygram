@@ -1,0 +1,618 @@
+#!/usr/bin/perl
+# gateq: a machine-wide queue for `cargo xtask gate` runs.
+#
+# Workers submit their gate instead of running it, and a single
+# background runner starts at most GATEQ_SLOTS gates at once (default 2),
+# in submit order. Each finished gate leaves a log, a result file and a
+# ready-to-paste prompt for the agent that submitted it. See README.md.
+#
+# Usage:
+#   gateq submit <task> [--corpus] [--dir PATH] [--front] [gate args...]
+#   gateq wait <task> [--timeout SECS]
+#   gateq status
+#   gateq show <task>
+#   gateq bump <task>
+#   gateq cancel <task>
+#
+# Part of Larrygram (MIT). Perl 5 core modules only.
+
+use strict;
+use warnings;
+use Cwd qw(abs_path);
+use Fcntl qw(:flock O_RDWR O_CREAT);
+use File::Basename qw(basename dirname);
+use POSIX qw(setsid WNOHANG strftime);
+
+my $HOME_DIR  = $ENV{GATEQ_HOME}  // '/Volumes/Dara/larrygram/gates';
+my $SLOTS     = $ENV{GATEQ_SLOTS} // 2;
+my $MAX_SECS  = $ENV{GATEQ_MAX_SECS} // 4 * 3600;
+my $WORKTREES = '/Volumes/Dara/larrygram/worktrees';
+my $MAIN_DIR  = '/Users/dara/larrygram';
+my $MAIN_TARGET = '/Volumes/Dara/larrygram/target/main';
+my $SELF = abs_path($0);
+
+my %DIRS = map { $_ => "$HOME_DIR/$_" } qw(queue running results logs);
+
+# The open lock handles. A forked job closes them, so a running gate never
+# holds the queue mutex or the runner lock.
+my ($LOCK_FH, $RUNNER_FH);
+
+sub usage {
+    print STDERR <<'EOF';
+usage:
+  gateq submit <task> [--corpus] [--dir PATH] [--front] [gate args...]
+  gateq wait <task> [--timeout SECS]   (default 1500; exit 0 green, 1 red, 3 timeout)
+  gateq status
+  gateq show <task>
+  gateq bump <task>
+  gateq cancel <task>
+EOF
+    exit 2;
+}
+
+sub die_msg { print STDERR "gateq: $_[0]\n"; exit 2 }
+
+sub setup {
+    for my $d ($HOME_DIR, values %DIRS) {
+        next if -d $d;
+        mkdir $d or die_msg("cannot create $d: $!");
+    }
+}
+
+sub now { time }
+sub stamp { strftime('%Y-%m-%d %H:%M:%S', localtime($_[0] // time)) }
+
+sub ago {
+    my $s = now() - $_[0];
+    return sprintf('%dh%02dm', int($s / 3600), int($s % 3600 / 60)) if $s >= 3600;
+    return sprintf('%dm%02ds', int($s / 60), $s % 60);
+}
+
+# The queue mutex: every read-modify-write of queue/ and running/ holds it.
+sub with_lock {
+    my ($code) = @_;
+    sysopen(my $fh, "$HOME_DIR/lock", O_RDWR | O_CREAT) or die_msg("lock: $!");
+    flock($fh, LOCK_EX) or die_msg("flock: $!");
+    $LOCK_FH = $fh;
+    my @r = $code->();
+    $LOCK_FH = undef;
+    close $fh;
+    return wantarray ? @r : $r[0];
+}
+
+sub read_kv {
+    my ($path) = @_;
+    open(my $fh, '<', $path) or return;
+    my %h;
+    while (my $line = <$fh>) {
+        chomp $line;
+        my ($k, $v) = split /=/, $line, 2;
+        $h{$k} = $v if defined $v;
+    }
+    return \%h;
+}
+
+sub write_kv {
+    my ($path, $h) = @_;
+    my $tmp = "$path.tmp.$$";
+    open(my $fh, '>', $tmp) or die_msg("write $tmp: $!");
+    print $fh "$_=$h->{$_}\n" for sort keys %$h;
+    close $fh;
+    rename $tmp, $path or die_msg("rename $tmp: $!");
+}
+
+sub next_seq {
+    my $path = "$HOME_DIR/seq";
+    my $n = 0;
+    if (open(my $fh, '<', $path)) { $n = <$fh> // 0; chomp $n; close $fh }
+    $n = ($n =~ /^\d+$/ ? $n : 0) + 1;
+    open(my $fh, '>', $path) or die_msg("seq: $!");
+    print $fh "$n\n";
+    close $fh;
+    return $n;
+}
+
+sub queued_jobs {
+    opendir(my $dh, $DIRS{queue}) or return ();
+    my @jobs;
+    for my $f (grep { /^\d+\.job$/ } readdir $dh) {
+        my $j = read_kv("$DIRS{queue}/$f") or next;
+        $j->{_file} = "$DIRS{queue}/$f";
+        push @jobs, $j;
+    }
+    my @sorted = sort { ($b->{prio} // 0) <=> ($a->{prio} // 0) || $a->{id} <=> $b->{id} } @jobs;
+    return wantarray ? @sorted : scalar @sorted;
+}
+
+sub running_jobs {
+    opendir(my $dh, $DIRS{running}) or return ();
+    my @jobs;
+    for my $f (grep { /\.job$/ } readdir $dh) {
+        my $j = read_kv("$DIRS{running}/$f") or next;
+        $j->{_file} = "$DIRS{running}/$f";
+        push @jobs, $j;
+    }
+    my @sorted = sort { $a->{id} <=> $b->{id} } @jobs;
+    return wantarray ? @sorted : scalar @sorted;
+}
+
+sub alive { my ($pid) = @_; return $pid && kill(0, $pid) }
+
+sub valid_task {
+    my ($t) = @_;
+    die_msg("bad task id '$t'") unless defined $t && $t =~ /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+    return $t;
+}
+
+sub git_head {
+    my ($dir) = @_;
+    my $sha = `git -C '$dir' rev-parse HEAD 2>/dev/null`;
+    chomp $sha;
+    return $sha;
+}
+
+sub git_dirty {
+    my ($dir) = @_;
+    my $out = `git -C '$dir' status --porcelain --untracked-files=no 2>/dev/null`;
+    return length($out) ? 1 : 0;
+}
+
+# Gate processes that this queue did not start (a worker running the
+# gate by hand) still take a slot.
+sub external_gates {
+    return 0 if $ENV{GATEQ_IGNORE_EXTERNAL};
+    my %ours = map { ($_->{pgid} // -1) => 1 } running_jobs();
+    my $n = 0;
+    for my $line (`ps -Ao pid=,pgid=,command=`) {
+        my ($pid, $pgid, $cmd) = $line =~ /^\s*(\d+)\s+(\d+)\s+(.*)$/ or next;
+        next unless $cmd =~ m{(^|/)larrygram-xtask gate( |$)};
+        next if $ours{$pgid};
+        $n++;
+    }
+    return $n;
+}
+
+# ---------------------------------------------------------------- submit
+
+sub cmd_submit {
+    my $task = valid_task(shift @ARGV);
+    my ($corpus, $front, $dir) = (0, 0, undef);
+    my @args;
+    while (@ARGV) {
+        my $a = shift @ARGV;
+        if    ($a eq '--corpus') { $corpus = 1 }
+        elsif ($a eq '--front')  { $front = 1 }
+        elsif ($a eq '--dir')    { $dir = shift @ARGV // usage() }
+        else {
+            die_msg("unsupported gate argument '$a'") unless $a =~ /^[A-Za-z0-9,._=-]+$/;
+            push @args, $a;
+        }
+    }
+    $dir //= $task eq 'main' ? $MAIN_DIR : "$WORKTREES/$task";
+    die_msg("$dir is not a git worktree") unless -e "$dir/.git";
+    my $sha = git_head($dir) or die_msg("no HEAD in $dir");
+    my $dirty = git_dirty($dir);
+
+    my $id = with_lock(sub {
+        # A new submit replaces the task's queued job.
+        for my $j (queued_jobs()) {
+            unlink $j->{_file} if $j->{task} eq $task;
+        }
+        my $id = next_seq();
+        write_kv("$DIRS{queue}/" . sprintf('%06d', $id) . '.job', {
+            id => $id, task => $task, dir => $dir, sha => $sha,
+            args => join(' ', @args), corpus => $corpus,
+            prio => $front ? 1 : 0, submitted => now(),
+            dirty => $dirty,
+        });
+        return $id;
+    });
+
+    my @running = grep { $_->{task} eq $task } running_jobs();
+    print "gateq: queued job $id for $task at ", substr($sha, 0, 10),
+        " (cargo xtask gate", (@args ? " @args" : ''), ")",
+        ($corpus ? ' plus the corpus tests' : ''), "\n";
+    print "gateq: warning: $dir has uncommitted changes; the gate tests the working tree as it is when the job starts\n"
+        if $dirty;
+    print "gateq: a gate for $task is running; this job starts after it\n" if @running;
+    my @q = queued_jobs();
+    my ($pos) = grep { $q[$_]{id} == $id } 0 .. $#q;
+    print "gateq: position ", ($pos // 0) + 1, " in the queue; ",
+        scalar(running_jobs()), " running, $SLOTS slots\n";
+    print "gateq: wait with: $SELF wait $task\n";
+    start_runner();
+}
+
+sub start_runner {
+    my $pid = fork();
+    die_msg("fork: $!") unless defined $pid;
+    return if $pid;
+    setsid();
+    open(STDIN, '<', '/dev/null');
+    open(STDOUT, '>>', "$HOME_DIR/runner.log");
+    open(STDERR, '>&', \*STDOUT);
+    exec $^X, $SELF, 'run' or exit 1;
+}
+
+# ---------------------------------------------------------------- runner
+
+my %CHILDREN;    # pid => job file, for jobs this runner started
+
+sub cmd_run {
+    sysopen(my $rl, "$HOME_DIR/runner.lock", O_RDWR | O_CREAT) or exit 1;
+    exit 0 unless flock($rl, LOCK_EX | LOCK_NB);
+    $RUNNER_FH = $rl;
+    $| = 1;
+    print stamp(), " runner $$ up, $SLOTS slots\n";
+    while (1) {
+        reap();
+        my $started = with_lock(\&start_next);
+        my @running = running_jobs();
+        if (!@running && !queued_jobs()) {
+            print stamp(), " runner $$ idle, exiting\n";
+            close $rl;
+            # A submit may have queued a job after the check above, and its
+            # own runner may have lost the lock to us: look once more.
+            exec $^X, $SELF, 'run' if queued_jobs();
+            exit 0;
+        }
+        sleep($started ? 1 : 5);
+    }
+}
+
+sub start_next {
+    my @running = running_jobs();
+    my $busy = @running + external_gates();
+    return 0 if $busy >= $SLOTS;
+    my %active = map { $_->{task} => 1 } @running;
+    my ($job) = grep { !$active{$_->{task}} } queued_jobs();
+    return 0 unless $job;
+
+    my $sha = git_head($job->{dir}) || $job->{sha};
+    my $log = "$DIRS{logs}/$job->{task}-" . substr($sha, 0, 10) . '-' . strftime('%Y%m%d-%H%M%S', localtime) . '.log';
+    my $file = "$DIRS{running}/$job->{task}.job";
+    my %run = (
+        (map { $_ => $job->{$_} } grep { !/^_/ } keys %$job),
+        sha => $sha, pid => 0, pgid => 0, log => $log,
+        started => now(), dirty => git_dirty($job->{dir}),
+    );
+    # The running file exists before the fork, so the job can always
+    # record its own result; pid 0 means "starting".
+    write_kv($file, \%run);
+    unlink $job->{_file};
+    my $pid = fork();
+    if (!defined $pid) {
+        rename $file, $job->{_file};
+        return 0;
+    }
+    if (!$pid) {
+        # Drop this process's references to the locks (no unlock: that
+        # would release the parent's lock too).
+        close $LOCK_FH if $LOCK_FH;
+        close $RUNNER_FH if $RUNNER_FH;
+        setpgrp(0, 0);
+        run_job($job, $log, $file);    # never returns
+    }
+    write_kv($file, { %run, pid => $pid, pgid => $pid });
+    $CHILDREN{$pid} = $file;
+    print stamp(), " start job $job->{id} $job->{task} pid $pid log $log\n";
+    return 1;
+}
+
+# The job process: runs the gate (and the corpus tests) in its own
+# process group with a clean environment, writing exit lines to the log.
+sub run_job {
+    my ($job, $log, $file) = @_;
+    $0 = "gateq job $job->{task}";
+    open(STDIN, '<', '/dev/null');
+    open(STDOUT, '>', $log) or exit 1;
+    open(STDERR, '>&', \*STDOUT);
+    $| = 1;
+    chdir $job->{dir} or do { print "gateq: cannot cd to $job->{dir}: $!\ngateq: exit 125\n"; exit 1 };
+    # AGENTS.md section 2: no CARGO_* variables for worktree builds
+    # (sccache hashes them); the main checkout builds in its own target.
+    delete $ENV{$_} for grep { /^CARGO_/ || $_ eq 'RUSTC_WRAPPER' } keys %ENV;
+    $ENV{CARGO_TARGET_DIR} = $MAIN_TARGET if $job->{task} eq 'main';
+    $ENV{PATH} = "$ENV{HOME}/.cargo/bin:$ENV{PATH}" unless $ENV{PATH} =~ m{\.cargo/bin};
+
+    my @gate = ('cargo', 'xtask', 'gate', split(' ', $job->{args} // ''));
+    print "gateq: job $job->{id} task $job->{task} sha $job->{sha}\n";
+    print "gateq: dir $job->{dir}\n";
+    print "gateq: run @gate\n";
+    print "gateq: started ", stamp(), "\n\n";
+    my $code = run_cmd(@gate);
+    print "\ngateq: exit $code\n";
+    if ($job->{corpus} && $code == 0) {
+        $ENV{LARRYGRAM_REQUIRE_CORPUS} = '1';
+        my @corpus = qw(cargo test --workspace --all-features);
+        print "\ngateq: run LARRYGRAM_REQUIRE_CORPUS=1 @corpus\n\n";
+        my $c = run_cmd(@corpus);
+        print "\ngateq: corpus exit $c\n";
+    }
+    print "gateq: finished ", stamp(), "\n";
+    close STDOUT;
+    # Record the result here, so it does not depend on the runner being
+    # alive; restart the runner if it died with jobs still queued.
+    open(STDOUT, '>>', "$HOME_DIR/runner.log");
+    open(STDERR, '>&', \*STDOUT);
+    with_lock(sub { finalize($file) });
+    start_runner() if queued_jobs() && !runner_alive();
+    exit 0;
+}
+
+sub run_cmd {
+    my @cmd = @_;
+    my $pid = fork();
+    return 126 unless defined $pid;
+    if (!$pid) { exec @cmd or exit 127 }
+    # The command runs in this job's process group. A timeout or a
+    # `gateq cancel` (TERM to the group) ends the whole group; this
+    # process survives through its handler and records why.
+    my ($timed_out, $cancelled) = (0, 0);
+    local $SIG{TERM} = sub { $cancelled = 1 };
+    local $SIG{ALRM} = sub { $timed_out = 1; kill 'TERM', -getpgrp() };
+    alarm $MAX_SECS;
+    my $got;
+    do { $got = waitpid($pid, 0) } until $got == $pid || $got == -1 && !$!{EINTR};
+    my $status = $?;
+    alarm 0;
+    if ($timed_out) { print "\ngateq: timeout after ${MAX_SECS}s\n"; return 124 }
+    if ($cancelled) { print "\ngateq: cancelled\n"; return 143 }
+    return $status & 127 ? 128 + ($status & 127) : $status >> 8;
+}
+
+sub reap {
+    while ((my $pid = waitpid(-1, WNOHANG)) > 0) {
+        my $file = delete $CHILDREN{$pid} or next;
+        with_lock(sub { finalize($file) });
+    }
+    # Jobs started by an earlier runner: finish them once their process is gone.
+    for my $j (running_jobs()) {
+        next if !$j->{pid} || $CHILDREN{$j->{pid}} || alive($j->{pid});
+        with_lock(sub { finalize($j->{_file}) });
+    }
+}
+
+# ---------------------------------------------------------------- results
+
+sub parse_log {
+    my ($log) = @_;
+    my %r = (summary => [], sections => {}, fail => []);
+    open(my $fh, '<', $log) or return \%r;
+    my ($section, $in_summary);
+    while (my $line = <$fh>) {
+        chomp $line;
+        if ($line =~ /^gateq: exit (\d+)/)        { $r{exit} = $1; next }
+        if ($line =~ /^gateq: corpus exit (\d+)/) { $r{corpus} = $1; next }
+        if ($line =~ /^gateq: timeout/)           { $r{timeout} = 1; next }
+        if ($line =~ /^gateq: cancelled/)         { $r{cancelled} = 1; next }
+        if ($line =~ /^==> gate summary/)         { $in_summary = 1; $section = undef; next }
+        if ($line =~ /^==> gate: (\S+)/)          { $section = $1; $in_summary = 0; next }
+        if ($line =~ /^gateq: run LARRYGRAM_REQUIRE_CORPUS/) { $section = 'corpus'; $in_summary = 0; next }
+        if ($in_summary) {
+            if ($line =~ /^gate: /) { push @{ $r{summary} }, $line; $in_summary = 0; next }
+            push @{ $r{summary} }, $line;
+            push @{ $r{fail} }, $1 if $line =~ /^\s+FAIL\s+(\S+)/;
+            next;
+        }
+        push @{ $r{sections}{$section} }, $line if defined $section;
+    }
+    return \%r;
+}
+
+# The lines of a failed step worth showing: errors first, else its tail.
+sub excerpt {
+    my ($lines) = @_;
+    return () unless $lines && @$lines;
+    my @hits;
+    for my $i (0 .. $#$lines) {
+        next unless $lines->[$i] =~ /(^error|^warning: .*(denied|failed)|panicked|FAILED|^failures:|^test result: FAILED|^\s+FAIL\b|below|ratchet|Diff in|^thread ')/i;
+        push @hits, $i;
+    }
+    my @out;
+    if (@hits) {
+        my %seen;
+        for my $i (@hits) {
+            for my $k ($i .. ($i + 4 > $#$lines ? $#$lines : $i + 4)) {
+                push @out, $lines->[$k] unless $seen{$k}++;
+            }
+            last if @out >= 40;
+        }
+    } else {
+        my $from = @$lines > 25 ? @$lines - 25 : 0;
+        @out = @{$lines}[$from .. $#$lines];
+    }
+    splice(@out, 40) if @out > 40;
+    return @out;
+}
+
+sub finalize {
+    my ($file) = @_;
+    my $j = read_kv($file) or return;
+    my $r = parse_log($j->{log});
+    my $status;
+    if    ($r->{timeout})                           { $status = 'TIMEOUT' }
+    elsif ($r->{cancelled})                         { $status = 'CANCELLED' }
+    elsif (!defined $r->{exit})                     { $status = 'KILLED' }
+    elsif ($r->{exit} != 0)                         { $status = 'RED' }
+    elsif ($j->{corpus} && ($r->{corpus} // 1) != 0) { $status = 'RED' }
+    else                                             { $status = 'GREEN' }
+    my $finished = now();
+    my $head = git_head($j->{dir});
+    my $moved = $head && $head ne $j->{sha} ? 1 : 0;
+    my $task = $j->{task};
+    my $gate = 'cargo xtask gate' . ($j->{args} ? " $j->{args}" : '');
+    my $resubmit = "$SELF submit $task" . ($j->{corpus} ? ' --corpus' : '') . ($j->{args} ? " $j->{args}" : '');
+    my $quick = ($j->{args} // '') =~ /(^| )--quick( |$)/;
+    my $short = substr($j->{sha}, 0, 10);
+    my $took = ago($j->{started});
+
+    my @p;
+    push @p, "Gate queue result for $task: $status.";
+    push @p, "`$gate`" . ($j->{corpus} ? ' plus the corpus tests' : '') . " ran at $short in $took. Full log: $j->{log}";
+    push @p, "Warning: the worktree had uncommitted changes when the gate started." if $j->{dirty};
+    push @p, "Warning: HEAD moved to " . substr($head, 0, 10) . " during the run; this result is for $short." if $moved;
+    if (@{ $r->{summary} }) { push @p, '', 'Summary:', @{ $r->{summary} } }
+    my @failed = @{ $r->{fail} };
+    push @failed, 'corpus' if $j->{corpus} && defined $r->{corpus} && $r->{corpus} != 0;
+    for my $step (@failed) {
+        my @ex = excerpt($r->{sections}{$step});
+        push @p, '', "Failing lines from the $step step:", @ex if @ex;
+    }
+    push @p, '';
+    if ($status eq 'GREEN') {
+        if ($task eq 'main') {
+            push @p, 'Next: the merge gate on main is green; continue merging.';
+        } elsif ($quick) {
+            push @p, "Next: continue the task. When the code is done and rebased on main, submit the hand-off gate with `$SELF submit $task <args>` (AGENTS.md section 7), then run `$SELF wait $task` until it prints the result.";
+        } else {
+            push @p, "Next: fill in the Result section of docs/tasks/$task.md (name the gate steps that ran, from the summary above), commit it as the last commit on agent/$task, and stop. A Result-only commit needs no new gate. If you change code after $short, submit again.";
+        }
+    } elsif ($status eq 'CANCELLED') {
+        push @p, "The gate was cancelled. Submit again when ready: `$resubmit`.";
+    } elsif ($status eq 'KILLED') {
+        push @p, "The gate process ended without an exit status (it was killed). Submit again: `$resubmit`, then `$SELF wait $task`.";
+    } else {
+        push @p, "Next: fix the failures. Iterate with per-crate tests and clippy only. Commit, then submit again with `$resubmit` and run `$SELF wait $task` until it prints the result.";
+    }
+    my $prompt = join("\n", @p) . "\n";
+
+    my $base = "$DIRS{results}/$task";
+    if (open(my $pf, '>', "$base.prompt.tmp")) {
+        print $pf $prompt;
+        close $pf;
+        rename "$base.prompt.tmp", "$base.prompt";
+    }
+    write_kv("$base.result", {
+        id => $j->{id}, task => $task, status => $status, sha => $j->{sha},
+        args => $j->{args} // '', corpus => $j->{corpus} // 0, log => $j->{log},
+        started => $j->{started}, finished => $finished,
+    });
+    unlink $file;
+    print stamp(), " done job $j->{id} $task $status\n";
+    notify("gateq: $task $status", "$gate at $short ($took)");
+}
+
+sub notify {
+    my ($title, $text) = @_;
+    return if ($ENV{GATEQ_NOTIFY} // '1') eq '0';
+    s/["\\]//g for $title, $text;
+    system('osascript', '-e', qq{display notification "$text" with title "$title"}) if -x '/usr/bin/osascript';
+}
+
+# ---------------------------------------------------------------- queries
+
+sub latest_id_for {
+    my ($task) = @_;
+    my @ids = map { $_->{id} } grep { $_->{task} eq $task } (queued_jobs(), running_jobs());
+    return (sort { $b <=> $a } @ids)[0];
+}
+
+sub cmd_wait {
+    my $task = valid_task(shift @ARGV);
+    my $timeout = 1500;
+    while (@ARGV) {
+        my $a = shift @ARGV;
+        if ($a eq '--timeout') { $timeout = shift @ARGV // usage() } else { usage() }
+    }
+    my $target = latest_id_for($task);
+    my $deadline = now() + $timeout;
+    while (1) {
+        my $res = read_kv("$DIRS{results}/$task.result");
+        if ($res && (!defined $target || $res->{id} >= $target)) {
+            if (open(my $fh, '<', "$DIRS{results}/$task.prompt")) { print while <$fh> }
+            exit($res->{status} eq 'GREEN' ? 0 : 1);
+        }
+        if (!defined $target && !$res) { die_msg("no job or result for $task; submit first") }
+        if (now() >= $deadline) {
+            my @q = queued_jobs();
+            my ($pos) = grep { $q[$_]{task} eq $task } 0 .. $#q;
+            my ($run) = grep { $_->{task} eq $task } running_jobs();
+            print "gateq: $task is ", ($run ? 'running for ' . ago($run->{started})
+                : defined $pos ? 'queued at position ' . ($pos + 1) : 'pending'),
+                "; no result yet. Run `$SELF wait $task` again.\n";
+            exit 3;
+        }
+        # Keep a runner alive in case the last one died.
+        start_runner() if (queued_jobs() || running_jobs()) && !runner_alive();
+        sleep 15;
+    }
+}
+
+sub runner_alive {
+    sysopen(my $rl, "$HOME_DIR/runner.lock", O_RDWR | O_CREAT) or return 0;
+    if (flock($rl, LOCK_EX | LOCK_NB)) { close $rl; return 0 }
+    return 1;
+}
+
+sub cmd_status {
+    my @run = running_jobs();
+    my @q = queued_jobs();
+    my $ext = external_gates();
+    printf "slots %d, running %d, queued %d, gates outside the queue %d, runner %s\n",
+        $SLOTS, scalar @run, scalar @q, $ext, runner_alive() ? 'up' : 'down';
+    print "\nrunning:\n" if @run;
+    printf "  %-8s job %-4d %s  %-24s %s\n", $_->{task}, $_->{id}, substr($_->{sha}, 0, 10),
+        ($_->{args} || '(full)') . ($_->{corpus} ? ' +corpus' : ''), ago($_->{started}) for @run;
+    print "\nqueued:\n" if @q;
+    my $n = 0;
+    printf "  %d. %-8s job %-4d %s  %-24s waiting %s%s\n", ++$n, $_->{task}, $_->{id}, substr($_->{sha}, 0, 10),
+        ($_->{args} || '(full)') . ($_->{corpus} ? ' +corpus' : ''), ago($_->{submitted}), $_->{prio} ? ' (front)' : '' for @q;
+    opendir(my $dh, $DIRS{results}) or return;
+    my @res = sort { $b->{finished} <=> $a->{finished} }
+        grep { defined } map { read_kv("$DIRS{results}/$_") } grep { /\.result$/ } readdir $dh;
+    print "\nresults:\n" if @res;
+    printf "  %-8s %-7s %s  %-24s %s ago\n", $_->{task}, $_->{status}, substr($_->{sha}, 0, 10),
+        ($_->{args} || '(full)') . ($_->{corpus} ? ' +corpus' : ''), ago($_->{finished}) for @res;
+}
+
+sub cmd_show {
+    my $task = valid_task(shift @ARGV);
+    open(my $fh, '<', "$DIRS{results}/$task.prompt") or die_msg("no result for $task yet");
+    print while <$fh>;
+}
+
+sub cmd_bump {
+    my $task = valid_task(shift @ARGV);
+    my $found = with_lock(sub {
+        for my $j (queued_jobs()) {
+            next unless $j->{task} eq $task;
+            $j->{prio} = 1;
+            my $f = delete $j->{_file};
+            write_kv($f, $j);
+            return 1;
+        }
+        return 0;
+    });
+    die_msg("no queued job for $task") unless $found;
+    print "gateq: $task moved to the front of the queue\n";
+}
+
+sub cmd_cancel {
+    my $task = valid_task(shift @ARGV);
+    my $did = with_lock(sub {
+        my $n = 0;
+        for my $j (queued_jobs()) { if ($j->{task} eq $task) { unlink $j->{_file}; $n++ } }
+        for my $j (running_jobs()) {
+            next unless $j->{task} eq $task;
+            kill 'TERM', -$j->{pgid} if $j->{pgid};
+            $n++;
+        }
+        return $n;
+    });
+    die_msg("nothing queued or running for $task") unless $did;
+    print "gateq: cancelled $task\n";
+}
+
+# ---------------------------------------------------------------- main
+
+my $cmd = shift @ARGV // usage();
+setup();
+if    ($cmd eq 'submit') { usage() unless @ARGV; cmd_submit() }
+elsif ($cmd eq 'run')    { cmd_run() }
+elsif ($cmd eq 'wait')   { usage() unless @ARGV; cmd_wait() }
+elsif ($cmd eq 'status') { cmd_status() }
+elsif ($cmd eq 'show')   { usage() unless @ARGV; cmd_show() }
+elsif ($cmd eq 'bump')   { usage() unless @ARGV; cmd_bump() }
+elsif ($cmd eq 'cancel') { usage() unless @ARGV; cmd_cancel() }
+else                     { usage() }
