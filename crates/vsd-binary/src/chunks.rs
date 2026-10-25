@@ -2475,7 +2475,12 @@ mod tests {
             let document = streams
                 .visio_document()
                 .expect("a corpus .vsd carries its VisioDocument stream");
-            let file_version = version(document)?;
+            // The version 5 files of the corpus are out of scope (ADR
+            // 0069) and stop at the version byte with a clean error.
+            let file_version = match version(document) {
+                Err(crate::error::Error::UnsupportedVersion(5)) => continue,
+                other => other?,
+            };
             let mut blocks = Vec::new();
             let (chunks, _) = read_chunks(document, file_version, &Limits::DEFAULT, &mut blocks)?;
             assert!(!chunks.is_empty(), "{path:?} yields no chunks");

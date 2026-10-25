@@ -2,11 +2,16 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Shared helper for the libvisio oracle smoke test (P1-07, ADR 0010):
-//! how tests find and run the oracle's CLI tools.
+//! Shared helpers for the `larrygram-vsd-binary` integration tests: the
+//! libvisio oracle smoke helper (P1-07, ADR 0010) and the compound-file
+//! writer the hand-authored fixtures are built with (P8-10, ADR 0005).
 //!
-//! The helper is a copy-paste per consumer crate; there is deliberately
-//! no wrapper crate and no path dependency (ADR 0010).
+//! The oracle helper is a copy-paste per consumer crate; there is
+//! deliberately no wrapper crate and no path dependency (ADR 0010).
+
+#![allow(dead_code)] // each test binary uses a different subset of the helpers
+
+pub mod cfb;
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
