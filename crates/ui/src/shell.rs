@@ -330,6 +330,9 @@ impl Shell {
     /// failure never crashes the frame (AGENTS.md section 6).
     pub fn note_error(&mut self, error: impl Into<String>) {
         let message = error.into();
+        // The status line shows the error in every layout (P7-12
+        // major 3: the warnings only reached the Phase 4 status bar).
+        self.status = message.clone();
         if self.app.warnings.last() != Some(&message) {
             self.app.record_warning(message);
         }
@@ -3674,6 +3677,50 @@ mod tests {
         assert_eq!(opened.as_deref(), Some("context.shape_data_window"));
         let opened = right_click_target(&mut shell, crate::contexts::HitTarget::SizePositionWindow);
         assert_eq!(opened.as_deref(), Some("context.size_position_window"));
+    }
+
+    /// A failing command's error reaches the status line and the
+    /// frame keeps rendering (the "never crash" contract of AGENTS.md
+    /// section 6; P7-12 major 3: no test provoked a shell error).
+    #[test]
+    fn a_failing_command_shows_its_error_and_the_frame_survives() {
+        let (mut shell, _id) = shell_with_shape();
+        let before = shell.app.warnings.len();
+        for _ in 0..2 {
+            let command = CommandId::parse("help.welcome.next_start").expect("id");
+            let args = larrygram_commands::Args::new().with(
+                "show",
+                larrygram_commands::ArgValue::Text("maybe".to_owned()),
+            );
+            let intent = Intent::new(command, Invocation::new(args, Source::Ui));
+            let results = shell.dispatch(&[intent]).expect("the dispatch returns");
+            let Err(error) = results[0].as_ref() else {
+                panic!("the command's bad argument fails");
+            };
+            let message = error.to_string();
+            assert!(
+                message.contains("maybe"),
+                "the error names the value: {message}"
+            );
+            assert_eq!(
+                shell.app.warnings.last().map(String::as_str),
+                Some(message.as_str()),
+                "the error is the warning the status bar draws"
+            );
+            assert_eq!(
+                shell.status_line(),
+                message,
+                "the status line shows the error in every layout"
+            );
+        }
+        assert_eq!(
+            shell.app.warnings.len(),
+            before + 1,
+            "the same error warns once (ADR 0021)"
+        );
+        // The frame keeps rendering with the warning recorded.
+        shell_frame(&mut shell, Vec::new(), 2.0);
+        shell_frame(&mut shell, Vec::new(), 3.0);
     }
 
     #[test]
