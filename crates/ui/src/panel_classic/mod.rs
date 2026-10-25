@@ -13,8 +13,10 @@
 //! instance (task P7-09). The free [`show`] keeps the P7-01 stub
 //! signature and stores the state in the egui memory instead.
 //!
-//! Colours come from the egui defaults until task P7-05 merges the
-//! theme tokens.
+//! Colours come from the theme by token name (ADR 0063,
+//! [`crate::theme::color_at`]) and the sizes from the theme metrics
+//! ([`metrics::ClassicMetrics`]); with no theme applied the defaults
+//! draw.
 
 pub mod menu;
 pub(crate) mod metrics;

@@ -13,8 +13,8 @@
 //! [`PanelModern::show_qat`] for the title bar, [`PanelModern::show`]
 //! draws the File view instead of the chrome while it is open.
 //!
-//! Sizes come from [`metrics`] (the theme tokens); colours are egui
-//! defaults until task P7-05's theme wiring merges.
+//! Sizes come from [`metrics`] (the theme tokens) and colours from
+//! the theme by token name (ADR 0063, [`crate::theme::color_at`]).
 
 pub mod common;
 mod controls;
