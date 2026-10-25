@@ -656,6 +656,12 @@ impl Open {
         section.cells = std::mem::take(&mut self.section_cells);
         let mut rows = std::mem::take(&mut self.rows);
         if let Some(order) = self.order.take() {
+            // The list's trailer selects its rows and their order (the
+            // reference keeps only the rows the order names): a row no
+            // list claims is not part of the geometry (P8-15: six
+            // `InfiniteLine` rows the lists never named drew as lines
+            // across the page).
+            rows.retain(|(id, _)| order.iter().any(|wanted| wanted == id));
             rows.sort_by_key(|(id, _)| {
                 order
                     .iter()
@@ -697,6 +703,10 @@ struct Walker<'a> {
     /// The group join: arena index of a shape to the Visio id its shape
     /// record named as its parent (P8-15 goal 3).
     parents: Vec<(u32, i32)>,
+    /// The master-shape references: arena index of an instance shape to
+    /// the Visio id of the master's shape it draws when it has no
+    /// geometry of its own (P8-15).
+    master_shapes: BTreeMap<u32, u32>,
     /// The shape lists, in stream order: each names its shapes in
     /// z-order (P8-15: the paint order).
     orders: Vec<Vec<i32>>,
@@ -745,6 +755,7 @@ impl<'a> Walker<'a> {
             name_index: Vec::new(),
             styles_level: None,
             parents: Vec::new(),
+            master_shapes: BTreeMap::new(),
             orders: Vec::new(),
             current_list: None,
         }
@@ -902,7 +913,11 @@ impl<'a> Walker<'a> {
                 }),
             }
         }
-        let (master, parent) = read_shape_record(chunk.data, &mut shape, &context, warnings);
+        let (master, master_shape, parent) =
+            read_shape_record(chunk.data, &mut shape, &context, warnings);
+        if let Some(master_shape) = master_shape {
+            self.master_shapes.insert(id.index, master_shape);
+        }
         if let Some(master) = master {
             match masters
                 .iter()
@@ -1040,7 +1055,69 @@ impl<'a> Walker<'a> {
         }
         regroup(document, &self.parents);
         reorder(document, &self.orders);
+        inherit_geometry(document, &self.master_shapes);
     }
+}
+
+/// Copies the master's geometry onto the instances that draw it (P8-15).
+///
+/// A `.vsd` instance keeps only the geometry that differs from its
+/// master: a shape with no `Geometry` section of its own draws the
+/// master's shape its record names. The model's own inheritance (ADR
+/// 0013) resolves cells and the master's top-level shape, not the
+/// geometry of a named master sub-shape, so the mapping fills the
+/// instance in here; the cells stay inherited.
+fn inherit_geometry(document: &mut Document, master_shapes: &BTreeMap<u32, u32>) {
+    for (&index, &wanted) in master_shapes {
+        let Some(instance) = document.shapes.get(index as usize) else {
+            continue;
+        };
+        let has_rows = instance
+            .sheet
+            .sections
+            .iter()
+            .any(|section| section.name.as_str() == "Geometry" && !section.rows.is_empty());
+        if has_rows {
+            continue;
+        }
+        let Some(master) = instance.master else {
+            continue;
+        };
+        let Some(source) = master_shape_with_geometry(document, master, wanted) else {
+            continue;
+        };
+        let sections: Vec<Section> = source
+            .sheet
+            .sections
+            .iter()
+            .filter(|section| section.name.as_str() == "Geometry")
+            .cloned()
+            .collect();
+        if let Some(instance) = document.shapes.get_mut(index as usize) {
+            instance.sheet.sections.extend(sections);
+        }
+    }
+}
+
+/// The shape of `master` whose Visio id is `wanted`, with its sub-shape
+/// tree searched too.
+fn master_shape_with_geometry(
+    document: &Document,
+    master: MasterId,
+    wanted: u32,
+) -> Option<&Shape> {
+    let master = document.master(master)?;
+    let mut pending: Vec<ShapeId> = master.shapes.clone();
+    while let Some(id) = pending.pop() {
+        let Some(shape) = document.shape(id) else {
+            continue;
+        };
+        if u32::try_from(shape.visio_id).ok() == Some(wanted) {
+            return Some(shape);
+        }
+        pending.extend(shape.children.iter().copied());
+    }
+    None
 }
 
 /// Re-links the shapes whose records name a parent (P8-15 goal 3).
@@ -1183,28 +1260,30 @@ fn match_order(ids: &[i32], orders: &[Vec<i32>], used: &mut [bool]) -> Option<Ve
 /// The first ten bytes are flags this module does not map, then the
 /// parent id, the master page and shape ids, and the fill, line and
 /// text style ids. A reference of `0xFFFFFFFF` is no reference. The
-/// master id is returned for resolution against the master list, and
-/// the parent id for the group join (P8-15 goal 3); the style ids stay
-/// Visio ids on the shape.
+/// master and master-shape ids are returned (the first for resolution
+/// against the master list, the second names the master's shape whose
+/// geometry an instance without its own draws), and the parent id for
+/// the group join (P8-15 goal 3); the style ids stay Visio ids on the
+/// shape.
 fn read_shape_record(
     data: &[u8],
     shape: &mut Shape,
     context: &str,
     warnings: &mut Vec<ImportWarning>,
-) -> (Option<u32>, Option<i32>) {
+) -> (Option<u32>, Option<u32>, Option<i32>) {
     let mut fields = Fields::new(data);
     if fields.skip(10).is_none() {
         warnings.push(bad_value(context.to_owned(), "shape record"));
-        return (None, None);
+        return (None, None, None);
     }
     let parent = fields.u32();
     if fields.skip(4).is_none() {
         warnings.push(bad_value(context.to_owned(), "shape record"));
-        return (None, None);
+        return (None, None, None);
     }
     let master = fields.u32();
     fields.skip(4);
-    let _master_shape = fields.u32();
+    let master_shape = fields.u32();
     fields.skip(4);
     let fill = fields.u32();
     fields.skip(4);
@@ -1220,7 +1299,7 @@ fn read_shape_record(
         Some(0) | Some(u32::MAX) | None => None,
         Some(value) => i32::try_from(value).ok(),
     };
-    (reference(master), parent)
+    (reference(master), reference(master_shape), parent)
 }
 
 /// A style or master reference: `0xFFFFFFFF` means no reference.
@@ -2384,7 +2463,63 @@ mod tests {
     }
 
     #[test]
-    fn a_row_missing_from_the_order_follows_the_ordered_rows() {
+    fn an_instance_without_geometry_draws_its_master_shapes_geometry() {
+        // P8-15: a `.vsd` instance keeps only the geometry that
+        // differs from its master, and its record names the master's
+        // shape it draws (`no-bgcolor.vsd`'s icon is such a sub-shape).
+        let mut document = document_with_master();
+        document.masters[0].shapes.push(ShapeId { index: 0 });
+
+        // The master's shape (one `MoveTo` row) and the instance that
+        // names it, both mapped by the walk like the pipeline does.
+        let mut row = join(&[tagged(1.0, 32), tagged(0.0, 32)]);
+        row.insert(0, 0x80);
+        let chunks = vec![
+            chunk(
+                0x48,
+                1,
+                11,
+                shape_record(u32::MAX, u32::MAX, u32::MAX, u32::MAX, u32::MAX),
+            ),
+            chunk(0x6c, 2, 0, geom_list(&[1])),
+            chunk(0x89, 3, 0, vec![0]),
+            chunk(0x8a, 3, 1, join(&[tagged(1.0, 32), tagged(0.0, 32)])),
+            chunk(
+                0x48,
+                1,
+                5,
+                shape_record(7, 11, u32::MAX, u32::MAX, u32::MAX),
+            ),
+        ];
+        let mut warnings = Vec::new();
+        collect_with(
+            &chunks,
+            FormatVersion::V11,
+            &Limits::DEFAULT,
+            &mut document,
+            &mut warnings,
+        )
+        .expect("collect");
+        assert!(warnings.is_empty(), "{warnings:?}");
+        let instance = &document.shapes[1];
+        assert_eq!(instance.visio_id, 5);
+        let rows: usize = instance
+            .sheet
+            .sections
+            .iter()
+            .filter(|section| section.name.as_str() == "Geometry")
+            .map(|section| section.rows.len())
+            .sum();
+        assert_eq!(rows, 1, "the master's geometry is the instance's");
+    }
+
+    #[test]
+    fn a_row_missing_from_the_order_is_dropped() {
+        // P8-15: the list's trailer selects the rows (the reference
+        // keeps only the rows it names); a row no list claims is not
+        // part of the geometry. Before this rule, six `InfiniteLine`
+        // rows of `Visio6PlanWithDimensions.vsd` drew as lines across
+        // the page.
         let rows = vec![
             chunk(0x8b, 3, 1, join(&[tagged(1.0, 65), tagged(0.0, 65)])),
             chunk(0x8b, 3, 2, join(&[tagged(2.0, 65), tagged(0.0, 65)])),
@@ -2393,7 +2528,7 @@ mod tests {
         assert!(warnings.is_empty(), "{warnings:?}");
         let rows = &section(&document).rows;
         let xs: Vec<Option<f64>> = rows.iter().map(|row| number(&row.cells, "X")).collect();
-        assert_eq!(xs, [Some(2.0), Some(1.0)]);
+        assert_eq!(xs, [Some(2.0)]);
     }
 
     #[test]
