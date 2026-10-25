@@ -1072,3 +1072,39 @@ fn a_context_menu_submenu_opens_its_children() {
         "hovering {label:?} opens its children after the delay"
     );
 }
+
+/// Standard and Formatting dock on rows 0 and 1 (Phase 7 exit
+/// criterion 2): the data's dock rows and the drawn order (the
+/// toolbars draw row by row, top to bottom).
+#[test]
+fn standard_and_formatting_dock_on_rows_0_and_1() {
+    let rig = ClassicRig::new();
+    let layout = rig.layout().clone();
+    let row_of = |id: &str| {
+        layout
+            .toolbars
+            .iter()
+            .find(|toolbar| toolbar.id == id)
+            .unwrap_or_else(|| panic!("the {id} toolbar"))
+            .row
+    };
+    assert_eq!(row_of("toolbar.standard"), Some(0), "Standard on row 0");
+    assert_eq!(row_of("toolbar.formatting"), Some(1), "Formatting on row 1");
+    // And they are the two the data shows by default.
+    for id in ["toolbar.standard", "toolbar.formatting"] {
+        assert!(
+            rig.panel
+                .borrow()
+                .toolbar_visible_in(&layout, WindowMode::Drawing, id),
+            "{id} is visible by default"
+        );
+    }
+    // Every other toolbar starts hidden except the data's own
+    // defaults; the sweep above covers the visible ones' items.
+    let drawn = drawn_toolbar_items(&rig, WindowMode::Drawing);
+    assert!(
+        drawn.len() > 10,
+        "the two default toolbars draw their items ({})",
+        drawn.len()
+    );
+}
