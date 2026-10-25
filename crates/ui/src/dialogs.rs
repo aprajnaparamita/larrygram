@@ -133,12 +133,7 @@ impl FilePicker for NativeFilePicker {
     }
 
     fn save(&self, request: &SaveRequest, data: &[u8]) -> Result<Option<FileChoice>, UiError> {
-        let mut dialog = rfd::FileDialog::new()
-            .set_title(request.title.as_str())
-            .set_file_name(request.default_name.as_str());
-        if !request.extensions.is_empty() {
-            dialog = dialog.add_filter("Visio files", &request.extensions);
-        }
+        let dialog = save_dialog(request);
         save_picked(|| dialog.save_file(), data)
     }
 }
@@ -170,22 +165,86 @@ fn save_picked(
     Ok(Some(FileChoice::Path(path)))
 }
 
+/// What one native dialog asks for: the title, the "Visio files"
+/// filter and the suggested directory and file name. The spec is pure
+/// data (P7-12 major 2: the dialog wiring is testable headless), and
+/// [`open_dialog`] / [`save_dialog`] only apply it to `rfd`.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DialogSpec {
+    /// The dialog title.
+    title: String,
+    /// The filter's display name.
+    filter: &'static str,
+    /// The accepted extensions (without the dot).
+    extensions: Vec<String>,
+    /// The directory to open in, when one was suggested.
+    directory: Option<PathBuf>,
+    /// The file name to suggest, when one was suggested.
+    file_name: Option<String>,
+}
+
+/// The spec of one [`OpenRequest`]: the title, the filter and both
+/// halves of the suggested path.
+#[cfg(not(target_arch = "wasm32"))]
+fn open_spec(request: &OpenRequest) -> DialogSpec {
+    let (directory, file_name) = match &request.suggested {
+        Some(suggested) => (
+            suggested.parent().map(PathBuf::from),
+            suggested
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned()),
+        ),
+        None => (None, None),
+    };
+    DialogSpec {
+        title: request.title.clone(),
+        filter: "Visio files",
+        extensions: request.extensions.clone(),
+        directory,
+        file_name,
+    }
+}
+
+/// The spec of one [`SaveRequest`]: the title, the filter and the
+/// default file name.
+#[cfg(not(target_arch = "wasm32"))]
+fn save_spec(request: &SaveRequest) -> DialogSpec {
+    DialogSpec {
+        title: request.title.clone(),
+        filter: "Visio files",
+        extensions: request.extensions.clone(),
+        directory: None,
+        file_name: Some(request.default_name.clone()),
+    }
+}
+
+/// The rfd dialog of one [`DialogSpec`].
+#[cfg(not(target_arch = "wasm32"))]
+fn apply_spec(spec: &DialogSpec) -> rfd::FileDialog {
+    let mut dialog = rfd::FileDialog::new().set_title(spec.title.as_str());
+    if !spec.extensions.is_empty() {
+        dialog = dialog.add_filter(spec.filter, &spec.extensions);
+    }
+    if let Some(directory) = &spec.directory {
+        dialog = dialog.set_directory(directory);
+    }
+    if let Some(name) = &spec.file_name {
+        dialog = dialog.set_file_name(name.as_str());
+    }
+    dialog
+}
+
 /// The rfd dialog configured from one [`OpenRequest`].
 #[cfg(not(target_arch = "wasm32"))]
 fn open_dialog(request: &OpenRequest) -> rfd::FileDialog {
-    let mut dialog = rfd::FileDialog::new().set_title(request.title.as_str());
-    if !request.extensions.is_empty() {
-        dialog = dialog.add_filter("Visio files", &request.extensions);
-    }
-    if let Some(suggested) = &request.suggested {
-        if let Some(parent) = suggested.parent() {
-            dialog = dialog.set_directory(parent);
-        }
-        if let Some(name) = suggested.file_name() {
-            dialog = dialog.set_file_name(name.to_string_lossy().as_ref());
-        }
-    }
-    dialog
+    apply_spec(&open_spec(request))
+}
+
+/// The rfd dialog configured from one [`SaveRequest`].
+#[cfg(not(target_arch = "wasm32"))]
+fn save_dialog(request: &SaveRequest) -> rfd::FileDialog {
+    apply_spec(&save_spec(request))
 }
 
 /// The wasm picker: rfd's async upload dialog bridged to the sync
@@ -376,10 +435,14 @@ mod tests {
 
     /// The desktop seams behind the rfd calls (P4-12 coverage major
     /// 1): the pick mapping and the save body run headless; only the
-    /// `rfd::FileDialog::pick_file` / `save_file` calls themselves
-    /// need a real desktop session and stay untested.
+    /// The dialog specs (`open_spec` / `save_spec`) and the pick
+    /// seams are tested here; the `rfd::FileDialog::pick_file` /
+    /// `save_file` calls themselves need a real desktop session and
+    /// stay untested.
     #[cfg(not(target_arch = "wasm32"))]
     mod desktop {
+        use std::path::Path;
+
         use super::*;
 
         /// A scratch path under the process temp directory.
@@ -428,6 +491,66 @@ mod tests {
             let error = save_picked(|| Some(path.clone()), b"data").expect_err("the write fails");
             let message = error.to_string();
             assert!(message.starts_with("io error: cannot write "), "{message}");
+        }
+
+        /// The open dialog's spec: the request title, the "Visio
+        /// files" filter and both halves of the suggested path (P7-12
+        /// major 2: the dialog wiring is pure data and now tested).
+        #[test]
+        fn the_open_dialog_spec_carries_the_request() {
+            let request = OpenRequest {
+                title: "Open a drawing".to_owned(),
+                extensions: vec!["vsdx".to_owned(), "vsd".to_owned()],
+                suggested: Some(PathBuf::from("/tmp/drawings/house.vsdx")),
+            };
+            let spec = open_spec(&request);
+            assert_eq!(spec.title, "Open a drawing");
+            assert_eq!(spec.filter, "Visio files");
+            assert_eq!(spec.extensions, vec!["vsdx", "vsd"]);
+            assert_eq!(spec.directory.as_deref(), Some(Path::new("/tmp/drawings")));
+            assert_eq!(spec.file_name.as_deref(), Some("house.vsdx"));
+        }
+
+        /// A suggested path with no file name suggests only the
+        /// directory; no suggestion leaves both empty (the dialog
+        /// opens wherever the OS defaults).
+        #[test]
+        fn the_open_dialog_spec_handles_partial_suggestions() {
+            let request = OpenRequest {
+                title: "Open".to_owned(),
+                extensions: Vec::new(),
+                suggested: Some(PathBuf::from("/tmp/drawings")),
+            };
+            let spec = open_spec(&request);
+            assert_eq!(spec.directory.as_deref(), Some(Path::new("/tmp")));
+            assert_eq!(spec.file_name.as_deref(), Some("drawings"));
+
+            let request = OpenRequest {
+                title: "Open".to_owned(),
+                extensions: Vec::new(),
+                suggested: None,
+            };
+            let spec = open_spec(&request);
+            assert_eq!(spec.directory, None);
+            assert_eq!(spec.file_name, None);
+            assert!(spec.extensions.is_empty(), "no filter without extensions");
+        }
+
+        /// The save dialog's spec: the request title, the filter and
+        /// the default file name.
+        #[test]
+        fn the_save_dialog_spec_carries_the_default_name() {
+            let request = SaveRequest {
+                title: "Save the drawing".to_owned(),
+                default_name: "house.vsdx".to_owned(),
+                extensions: vec!["vsdx".to_owned(), "vssx".to_owned(), "vstx".to_owned()],
+            };
+            let spec = save_spec(&request);
+            assert_eq!(spec.title, "Save the drawing");
+            assert_eq!(spec.filter, "Visio files");
+            assert_eq!(spec.extensions, vec!["vsdx", "vssx", "vstx"]);
+            assert_eq!(spec.file_name.as_deref(), Some("house.vsdx"));
+            assert_eq!(spec.directory, None);
         }
     }
 }
