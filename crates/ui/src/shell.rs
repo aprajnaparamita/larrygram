@@ -42,6 +42,7 @@ use crate::panes;
 use crate::settings;
 use crate::shapes_window::{self, ShapesWindow};
 use crate::shortcuts::{self, ShortcutMap};
+use crate::splitter::{Edge, Limits, Splitter};
 use crate::tab_bar::TabBar;
 use crate::text_edit::{EditorAction, TextEditor};
 use crate::tools::{Tool, ToolMachine, stencil};
@@ -79,8 +80,30 @@ const HELP_MENU: &[&str] = &["help.welcome", "help.about"];
 /// The width of the Shape Data and Size & Position panes, in points.
 const PANES_WIDTH: f32 = 220.0;
 
-/// The largest share of the window width one side panel takes.
+/// The largest share of the window width one side panel takes by
+/// default.
 const PANE_SHARE: f32 = 0.3;
+
+/// The largest share of the window width a user may drag one side
+/// panel to (task P7-19).
+const PANE_MAX_SHARE: f32 = 0.45;
+
+/// The narrowest a docked side panel may be dragged, in points.
+const PANE_MIN_WIDTH: f32 = 120.0;
+
+/// The shortest the Shape Data or the Size & Position pane may be
+/// dragged, in points.
+const PANE_MIN_HEIGHT: f32 = 60.0;
+
+/// The settings key of the Shapes window width.
+const SHAPES_PANE: &str = "shapes";
+
+/// The settings key of the right-hand side panes' width.
+const SIDE_PANES: &str = "side_panes";
+
+/// The settings key of the Shape Data pane's height (over Size &
+/// Position).
+const SHAPE_DATA_PANE: &str = "shape_data";
 
 /// Below this width the Panel Modern status bar draws its compact set
 /// of buttons (task P7-17: at 1024 pt the full set ran into the page
@@ -146,6 +169,15 @@ pub struct Shell {
     context_menu_id: Option<String>,
     /// The Shapes window widget (ADR 0034).
     shapes: ShapesWindow,
+    /// The Shapes window's rect of the last frame (the press that
+    /// gives it the keyboard; task P7-19).
+    shapes_rect: Option<egui::Rect>,
+    /// The pane borders (task P7-19): the Shapes window, the side
+    /// panes and the Shape Data / Size & Position border.
+    splitters: [Splitter; 3],
+    /// A press landed on a splitter: the canvas ignores the pointer
+    /// until the release.
+    canvas_blocked: bool,
     /// The canvas raster cache (ADR 0033).
     cache: CanvasCache,
     /// The dialog seam (ADR 0036); tests inject a fake picker.
@@ -232,6 +264,13 @@ impl Shell {
             window_mode: contexts::WindowMode::Drawing,
             context_menu_id: None,
             shapes: ShapesWindow::new(),
+            shapes_rect: None,
+            splitters: [
+                Splitter::new(SHAPES_PANE, Edge::Right),
+                Splitter::new(SIDE_PANES, Edge::Left),
+                Splitter::new(SHAPE_DATA_PANE, Edge::Bottom),
+            ],
+            canvas_blocked: false,
             cache: CanvasCache::new(),
             picker: Box::new(NativeFilePicker),
             shortcuts,
@@ -300,6 +339,30 @@ impl Shell {
         self.canvas_rect
     }
 
+    /// The pane border stored under `key` (task P7-19): `"shapes"`,
+    /// `"side_panes"` or `"shape_data"`.
+    pub fn splitter(&self, key: &str) -> Option<&Splitter> {
+        self.splitters.iter().find(|splitter| splitter.key() == key)
+    }
+
+    /// The pane border stored under `key`, to collapse or reopen it.
+    pub fn splitter_mut(&mut self, key: &str) -> Option<&mut Splitter> {
+        self.splitters
+            .iter_mut()
+            .find(|splitter| splitter.key() == key)
+    }
+
+    /// The Shapes window widget (its selection, search and keyboard
+    /// state; task P7-19).
+    pub fn shapes_window(&self) -> &ShapesWindow {
+        &self.shapes
+    }
+
+    /// The Shapes window widget, to set the search text.
+    pub fn shapes_window_mut(&mut self) -> &mut ShapesWindow {
+        &mut self.shapes
+    }
+
     /// The commands-layer active tool (task P5-17).
     pub fn active_tool(&self) -> ActiveTool {
         self.app.active_tool
@@ -364,6 +427,10 @@ impl Shell {
             }
         });
         if let Some(pos) = pressed {
+            // The Shapes window has the keyboard after a press in it,
+            // and loses it to a press anywhere else (task P7-19).
+            self.shapes
+                .set_active(self.shapes_rect.is_some_and(|rect| rect.contains(pos)));
             if self.canvas_rect.is_some_and(|rect| rect.contains(pos)) {
                 self.focus = ShortcutScope::Page;
             } else if self.tab_bar_rect.is_some_and(|rect| rect.contains(pos)) {
@@ -428,7 +495,12 @@ impl Shell {
             // The in-place editor keeps the `Text` scope active until it
             // closes (ADR 0036, ADR 0044).
             self.focus = ShortcutScope::Text;
+        } else {
+            // The Shapes window takes its arrow keys and Enter before
+            // the shortcut table nudges shapes with them (task P7-19).
+            self.shapes.handle_keys(ui.ctx());
         }
+        self.begin_splitters(ui.ctx());
         match shortcuts::dispatch(ui.ctx(), &mut self.shortcuts, &self.app, self.focus) {
             Ok(produced) => intents.extend(produced),
             Err(error) => self.note_error(error.to_string()),
@@ -441,6 +513,7 @@ impl Shell {
                 self.show_fluent_frame(ui, &mut intents);
             }
         }
+        self.end_splitters(ui);
         self.route_context_click(ui);
         self.draw_context_menus(ui, &mut intents);
         self.show_dialogs(ui, &mut intents);
@@ -759,8 +832,64 @@ impl Shell {
         });
     }
 
+    /// Starts the frame's splitter pass (task P7-19): last frame's
+    /// zones are dropped (a frame that hides a pane registers no
+    /// zone), and a press on a splitter blocks the canvas until the
+    /// release.
+    fn begin_splitters(&mut self, ctx: &Context) {
+        let pressed = ctx.input(|input| input.pointer.button_pressed(PointerButton::Primary));
+        if pressed {
+            self.canvas_blocked = self.splitters.iter().any(|splitter| splitter.is_busy(ctx));
+        }
+        for splitter in &mut self.splitters {
+            splitter.place(egui::Rect::NOTHING);
+        }
+    }
+
+    /// Ends the frame's splitter pass: each placed zone registers over
+    /// everything drawn this frame, and a finished change is written to
+    /// the settings (task P7-19).
+    fn end_splitters(&mut self, ui: &Ui) {
+        let accent = theme::color_at(ui.ctx(), "accent");
+        for splitter in &self.splitters {
+            splitter.interact(ui, accent);
+        }
+        for splitter in &mut self.splitters {
+            splitter.commit(&mut self.app.settings.pane_sizes);
+        }
+        if !ui.input(|input| input.pointer.primary_down()) {
+            self.canvas_blocked = false;
+        }
+    }
+
+    /// The splitter stored under `key`, its size for this frame and
+    /// its collapse state, after this frame's pointer interaction.
+    fn splitter_size(&mut self, ctx: &Context, key: &str, limits: Limits) -> (f32, bool) {
+        let stored = &self.app.settings.pane_sizes;
+        match self
+            .splitters
+            .iter_mut()
+            .find(|splitter| splitter.key() == key)
+        {
+            Some(splitter) => (
+                splitter.update(ctx, stored, limits),
+                splitter.is_collapsed(),
+            ),
+            None => (limits.default, false),
+        }
+    }
+
+    /// Records where the pane of `key` drew (its splitter's zone).
+    fn place_splitter(&mut self, key: &str, rect: egui::Rect) {
+        if let Some(splitter) = self.splitter_mut(key) {
+            splitter.place(rect);
+        }
+    }
+
     /// The docked side windows: the Shapes window on the left and the
-    /// Shape Data and Size & Position panes on the right.
+    /// Shape Data and Size & Position panes on the right, each with a
+    /// splitter on its inner edge and the two right panes with one
+    /// between them (task P7-19).
     fn show_dock_panels(&mut self, ui: &mut Ui, intents: &mut Vec<Intent>, style: FrameStyle) {
         // The Shapes window takes its width from the theme
         // (`shapes_window.width`); the Phase 4 frame keeps its own.
@@ -770,21 +899,25 @@ impl Shell {
             }
             FrameStyle::Fluent => 200.0,
         };
-        // The panels keep their theme widths (task P7-17: they shrank
-        // to their content, 105 pt for the Shape Data pane), but never
-        // take more than a share of a narrow window.
         let window_width = ui.ctx().content_rect().width();
-        let cap = (window_width * PANE_SHARE).max(120.0);
-        egui::Panel::left("shell-shapes")
-            .resizable(true)
-            .default_size(shapes_width.min(cap))
-            .min_size(shapes_width.min(cap))
+        let ctx = ui.ctx().clone();
+        let (width, collapsed) =
+            self.splitter_size(&ctx, SHAPES_PANE, side_limits(shapes_width, window_width));
+        let shapes = egui::Panel::left("shell-shapes")
+            .resizable(false)
+            .exact_size(width)
             .show(ui, |ui| {
                 theme_pane(ui, "pane.background");
+                if collapsed {
+                    if collapsed_strip(ui, "Show the Shapes window", Edge::Right) {
+                        self.reopen(SHAPES_PANE);
+                    }
+                    return;
+                }
                 let produced = self.shapes.show(ui, &self.app, style.shapes_header());
                 if let Some(_picks) = self.keep(produced) {
-                    // Picking a stencil inserts a shape in Phase 5;
-                    // the Shapes window keeps the selection itself.
+                    // A click selects; a double-click or Enter drops
+                    // (below) and a drag starts the stencil tool.
                 }
                 if let Some(pick) = self.shapes.take_drag_started() {
                     stencil::begin_drag(&mut self.tools, pick.stencil, pick.master);
@@ -797,27 +930,94 @@ impl Shell {
                 self.context_rects
                     .push((HitTarget::ShapesWindow, ui.max_rect()));
             });
-        egui::Panel::right("shell-panes")
-            .resizable(true)
-            .default_size(PANES_WIDTH.min(cap))
-            .min_size(PANES_WIDTH.min(cap))
+        let shapes_rect = shapes.response.rect;
+        self.shapes_rect = Some(shapes_rect);
+        self.place_splitter(SHAPES_PANE, shapes_rect);
+        if self.shapes.take_close_requested() {
+            if let Some(splitter) = self.splitter_mut(SHAPES_PANE) {
+                splitter.collapse();
+            }
+        }
+        if let Some(pick) = self.shapes.take_drop_requested()
+            && let Some(intent) = drop_at_centre_intent(&self.app, pick)
+        {
+            intents.push(intent);
+        }
+
+        let (width, collapsed) =
+            self.splitter_size(&ctx, SIDE_PANES, side_limits(PANES_WIDTH, window_width));
+        let panes = egui::Panel::right("shell-panes")
+            .resizable(false)
+            .exact_size(width)
             .show(ui, |ui| {
                 theme_pane(ui, "pane.background");
-                let shape_data = ui.scope(|ui| panes::show_shape_data(ui, &mut self.app));
-                let shape_data_rect = shape_data.response.rect;
-                self.context_rects
-                    .push((HitTarget::ShapeDataWindow, shape_data_rect));
-                if let Some(mut more) = self.keep(shape_data.inner) {
-                    intents.append(&mut more);
+                if collapsed {
+                    if collapsed_strip(ui, "Show the side panes", Edge::Left) {
+                        self.reopen(SIDE_PANES);
+                    }
+                    return;
                 }
-                let size_position = ui.scope(|ui| panes::show_size_position(ui, &mut self.app));
-                let size_position_rect = size_position.response.rect;
-                self.context_rects
-                    .push((HitTarget::SizePositionWindow, size_position_rect));
-                if let Some(mut more) = self.keep(size_position.inner) {
-                    intents.append(&mut more);
-                }
+                self.show_side_panes(ui, intents);
             });
+        self.place_splitter(SIDE_PANES, panes.response.rect);
+    }
+
+    /// The Shape Data pane over the Size & Position pane, each in its
+    /// own scroll area, with a splitter between them (task P7-19).
+    fn show_side_panes(&mut self, ui: &mut Ui, intents: &mut Vec<Intent>) {
+        let total = ui.available_height();
+        let width = ui.available_width();
+        let limits = Limits::new(
+            PANE_MIN_HEIGHT,
+            (total - PANE_MIN_HEIGHT).max(PANE_MIN_HEIGHT),
+            (total * 0.55).round(),
+        );
+        let ctx = ui.ctx().clone();
+        let (height, collapsed) = self.splitter_size(&ctx, SHAPE_DATA_PANE, limits);
+        let top = egui::Rect::from_min_size(ui.cursor().min, egui::vec2(width, height));
+        ui.scope_builder(egui::UiBuilder::new().max_rect(top), |ui| {
+            ui.set_clip_rect(top.intersect(ui.clip_rect()));
+            if collapsed {
+                if collapsed_strip(ui, "Show the Shape Data window", Edge::Bottom) {
+                    self.reopen(SHAPE_DATA_PANE);
+                }
+                return;
+            }
+            egui::ScrollArea::vertical()
+                .id_salt("shape-data-scroll")
+                .auto_shrink([false, false])
+                .max_height(height)
+                .show(ui, |ui| {
+                    let produced = panes::show_shape_data(ui, &mut self.app);
+                    if let Some(mut more) = self.keep(produced) {
+                        intents.append(&mut more);
+                    }
+                });
+        });
+        ui.advance_cursor_after_rect(top);
+        self.context_rects.push((HitTarget::ShapeDataWindow, top));
+        self.place_splitter(SHAPE_DATA_PANE, top);
+        let rest = ui.available_rect_before_wrap();
+        ui.scope_builder(egui::UiBuilder::new().max_rect(rest), |ui| {
+            egui::ScrollArea::vertical()
+                .id_salt("size-position-scroll")
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    let produced = panes::show_size_position(ui, &mut self.app);
+                    if let Some(mut more) = self.keep(produced) {
+                        intents.append(&mut more);
+                    }
+                });
+        });
+        self.context_rects
+            .push((HitTarget::SizePositionWindow, rest));
+    }
+
+    /// Reopens the collapsed pane of `key` at its remembered size.
+    fn reopen(&mut self, key: &str) {
+        if let Some(splitter) = self.splitter_mut(key) {
+            splitter.reopen();
+        }
     }
 
     /// The status bar and the page-tab strip below the drawing, in
@@ -1138,6 +1338,11 @@ impl Shell {
                     }
                 });
             }
+        }
+        if self.canvas_blocked {
+            // The press landed on a splitter (task P7-19): no marquee
+            // or selection change under the border being dragged.
+            events.clear();
         }
         let had_events = !events.is_empty();
         if stencil::is_dragging(&self.tools) {
@@ -1954,6 +2159,83 @@ fn menu_item(
     } else {
         None
     }
+}
+
+/// The width limits of a docked side panel (task P7-19): the default
+/// is the theme width, capped at [`PANE_SHARE`] of a narrow window (task
+/// P7-17), the range runs from [`PANE_MIN_WIDTH`] to
+/// [`PANE_MAX_SHARE`] of the window.
+fn side_limits(theme_width: f32, window_width: f32) -> Limits {
+    let cap = (window_width * PANE_SHARE).max(PANE_MIN_WIDTH);
+    let default = theme_width.min(cap);
+    let min = PANE_MIN_WIDTH.min(default);
+    let max = (window_width * PANE_MAX_SHARE).max(default);
+    Limits::new(min, max, default)
+}
+
+/// Draws a collapsed pane's strip (task P7-19): a small arrow pointing
+/// where the pane opens, and the whole strip as the reopen button.
+/// Returns whether it was clicked.
+fn collapsed_strip(ui: &mut Ui, tooltip: &str, edge: Edge) -> bool {
+    let rect = ui.max_rect();
+    let id = ui.scope_id().with("collapsed-strip");
+    let response = ui
+        .interact(rect, id, egui::Sense::click())
+        .on_hover_text(tooltip);
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::accesskit::Role::Button, true, tooltip));
+    let color = if response.hovered() {
+        theme::color_at(ui.ctx(), "accent")
+    } else {
+        theme::color_at(ui.ctx(), "chrome.text")
+    };
+    if response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    let centre = match edge {
+        Edge::Bottom => rect.center(),
+        Edge::Right | Edge::Left => egui::pos2(rect.center().x, rect.min.y + 24.0),
+    };
+    let half = 3.5;
+    let points = match edge {
+        Edge::Right => vec![
+            centre + egui::vec2(-half * 0.6, -half),
+            centre + egui::vec2(half * 0.8, 0.0),
+            centre + egui::vec2(-half * 0.6, half),
+        ],
+        Edge::Left => vec![
+            centre + egui::vec2(half * 0.6, -half),
+            centre + egui::vec2(-half * 0.8, 0.0),
+            centre + egui::vec2(half * 0.6, half),
+        ],
+        Edge::Bottom => vec![
+            centre + egui::vec2(-half, -half * 0.6),
+            centre + egui::vec2(half, -half * 0.6),
+            centre + egui::vec2(0.0, half * 0.8),
+        ],
+    };
+    ui.painter().add(egui::Shape::convex_polygon(
+        points,
+        color,
+        egui::Stroke::NONE,
+    ));
+    response.clicked()
+}
+
+/// The `insert.shape` intent that drops `pick` at the centre of the
+/// active page (task P7-19: Enter or a double-click on a tile), or
+/// `None` without an open page.
+fn drop_at_centre_intent(app: &AppCtx, pick: shapes_window::StencilPick) -> Option<Intent> {
+    let session = app.active_document()?;
+    let page = session.active_page?;
+    let (width, height) = canvas::page_size(&session.document, Some(page));
+    let args = larrygram_commands::Args::new()
+        .with("stencil", ArgValue::Text(pick.stencil.to_owned()))
+        .with("master", ArgValue::Text(pick.master.to_owned()))
+        .with("x", ArgValue::Number(width * 0.5))
+        .with("y", ArgValue::Number(height * 0.5));
+    let command = CommandId::parse("insert.shape").ok()?;
+    Some(Intent::new(command, Invocation::new(args, Source::Ui)))
 }
 
 /// Paints one window region from the theme (ADR 0063): the `fill`

@@ -26,13 +26,13 @@
 //! the `units` parameter of [`show_rulers`].
 
 use egui::{
-    Align2, Color32, ColorImage, Context, FontId, PointerButton, Pos2, Rect, Sense, Stroke,
-    StrokeKind, TextureHandle, TextureId, TextureOptions, Ui,
+    Align2, Color32, ColorImage, Context, CursorIcon, FontId, PointerButton, Pos2, Rect, Sense,
+    Stroke, StrokeKind, TextureHandle, TextureId, TextureOptions, Ui,
 };
 use larrygram_commands::{
     AppCtx, CommandId, DisplayUnits, DocumentSession, Invocation, SessionId, Source,
 };
-use larrygram_geom::{Point, Rect as PageRect};
+use larrygram_geom::{Angle, Point, Rect as PageRect};
 use larrygram_model::{CellName, CellReader, Document, Page, PageId, SheetRef};
 use larrygram_render::{
     BuildOptions, MAX_DEVICE_EXTENT, Overlay, OverlayMark, RasterImage, RasterOptions, build_scene,
@@ -40,7 +40,7 @@ use larrygram_render::{
 };
 use larrygram_ui_spec::v2::Theme;
 
-use crate::handles::rotated_corners;
+use crate::handles::{HandleKind, ResizeEdge, rotated_corners};
 use crate::text_edit::{self, EditorAction, TextEditor};
 use crate::tools::{Modifiers, ToolEvent};
 use crate::{Intent, UiError, theme};
@@ -171,6 +171,9 @@ pub struct CanvasCache {
     /// Whether the primary button went down on the canvas (the tool
     /// event stream's own state, not part of the raster key).
     pointer_down: bool,
+    /// The cursor of the handle the press landed on, kept until the
+    /// release (task P7-19: the cursor shows the operation).
+    drag_cursor: Option<CursorIcon>,
 }
 
 /// The cache key of a raster attempt that failed (P4-16 review minor
@@ -212,6 +215,7 @@ impl CanvasCache {
             last_warning: None,
             failed: None,
             pointer_down: false,
+            drag_cursor: None,
         }
     }
 
@@ -228,6 +232,7 @@ impl CanvasCache {
         self.last_warning = None;
         self.failed = None;
         self.pointer_down = false;
+        self.drag_cursor = None;
     }
 
     /// Whether no raster is cached.
@@ -300,6 +305,7 @@ impl PartialEq for CanvasCache {
             && self.last_warning == other.last_warning
             && self.failed == other.failed
             && self.pointer_down == other.pointer_down
+            && self.drag_cursor == other.drag_cursor
     }
 }
 
@@ -347,8 +353,9 @@ const HANDLE_FILL: Color32 = Color32::WHITE;
 const SNAP_GUIDE: Color32 = Color32::from_rgb(220, 80, 60);
 /// The marquee fill and stroke (our own choice).
 const MARQUEE_FILL: Color32 = Color32::from_rgba_premultiplied(31, 111, 235, 24);
-/// The handle square's half side, in screen points.
-const HANDLE_HALF: f32 = 3.0;
+/// The handle square's half side, in screen points (the hit test's
+/// [`crate::handles::HANDLE_HALF_PX`]).
+const HANDLE_HALF: f32 = crate::handles::HANDLE_HALF_PX as f32;
 
 /// Draws the canvas area: grid, page raster, pan and zoom input (ADR
 /// 0033), and pointer events for the active tool (ADR 0042).
@@ -418,6 +425,15 @@ pub fn show_with_overlay(
     } else {
         cache.pointer_down = false;
     }
+    handle_cursor(
+        ui,
+        &response,
+        viewport,
+        session,
+        cache,
+        page_height,
+        overlay,
+    );
 
     // Paint: backdrop, then the page, the grid on the page, the page
     // raster, then the overlay. The grid sits on the page only, under
@@ -554,12 +570,13 @@ fn tool_events(
     cache: &mut CanvasCache,
     page_height: f64,
 ) -> Vec<ToolEvent> {
-    let (pressed, released, down, pos, modifiers) = ui.input(|input| {
+    let (pressed, released, down, pos, origin, modifiers) = ui.input(|input| {
         (
             input.pointer.button_pressed(PointerButton::Primary),
             input.pointer.button_released(PointerButton::Primary),
             input.pointer.primary_down(),
             input.pointer.interact_pos(),
+            input.pointer.press_origin(),
             input.modifiers,
         )
     });
@@ -571,18 +588,13 @@ fn tool_events(
         ctrl: modifiers.ctrl || modifiers.command,
         alt: modifiers.alt,
     };
-    let zoom = safe_zoom(session.view.zoom);
-    let k = points_per_inch(zoom);
     let mut events = Vec::new();
-    let to_page = |screen: Pos2| {
-        Point::new(
-            (f64::from(screen.x) - f64::from(viewport.min.x)) / k - session.view.pan.x,
-            page_height
-                - ((f64::from(screen.y) - f64::from(viewport.min.y)) / k - session.view.pan.y),
-        )
-    };
+    let to_page = |screen: Pos2| screen_to_page(viewport, session, page_height, screen);
     if pressed {
-        if let Some(screen) = pos
+        // The press lands where the button went down, not where the
+        // pointer moved to later in the same frame (task P7-19: a fast
+        // press-and-move on a handle missed it).
+        if let Some(screen) = origin.or(pos)
             && viewport.contains(screen)
         {
             cache.pointer_down = true;
@@ -621,6 +633,125 @@ fn tool_events(
     events
 }
 
+/// The page point of a screen point in the canvas viewport.
+fn screen_to_page(
+    viewport: Rect,
+    session: &DocumentSession,
+    page_height: f64,
+    screen: Pos2,
+) -> Point {
+    let k = points_per_inch(safe_zoom(session.view.zoom));
+    Point::new(
+        (f64::from(screen.x) - f64::from(viewport.min.x)) / k - session.view.pan.x,
+        page_height - ((f64::from(screen.y) - f64::from(viewport.min.y)) / k - session.view.pan.y),
+    )
+}
+
+/// The selection handle under `point` in the overlay's handle frame.
+fn handle_under(overlay: &Overlay, point: Point, zoom: f64) -> Option<HandleKind> {
+    overlay.marks.iter().find_map(|mark| match mark {
+        OverlayMark::Handles { bounds, angle } => {
+            crate::handles::handle_at(point, *bounds, *angle, zoom)
+                .ok()
+                .flatten()
+        }
+        _ => None,
+    })
+}
+
+/// The handle frame's angle in the overlay (the resize cursors turn
+/// with the shape).
+fn handle_angle(overlay: &Overlay) -> Angle {
+    overlay
+        .marks
+        .iter()
+        .find_map(|mark| match mark {
+            OverlayMark::Handles { angle, .. } => Some(*angle),
+            _ => None,
+        })
+        .unwrap_or_default()
+}
+
+/// The cursor of one handle (task P7-19): the move cross, the resize
+/// arrow along the handle's direction turned with the shape, or the
+/// grab hand of the rotate handle.
+pub(crate) fn cursor_for(kind: HandleKind, angle: Angle, dragging: bool) -> CursorIcon {
+    let (dx, dy) = match kind {
+        HandleKind::Move => return CursorIcon::Move,
+        HandleKind::Rotate => {
+            return if dragging {
+                CursorIcon::Grabbing
+            } else {
+                CursorIcon::Grab
+            };
+        }
+        HandleKind::Resize(edge) => match edge {
+            ResizeEdge::North | ResizeEdge::South => (0.0, 1.0),
+            ResizeEdge::East | ResizeEdge::West => (1.0, 0.0),
+            ResizeEdge::NorthEast | ResizeEdge::SouthWest => (1.0, 1.0),
+            ResizeEdge::NorthWest | ResizeEdge::SouthEast => (-1.0, 1.0),
+        },
+    };
+    let raw = f64::atan2(dy, dx) + angle.radians();
+    let raw = if raw.is_finite() { raw } else { 0.0 };
+    // The direction modulo a half turn, in eighths of a turn.
+    let eighths = (raw.rem_euclid(core::f64::consts::PI) / core::f64::consts::FRAC_PI_4).round();
+    match eighths as i64 {
+        1 => CursorIcon::ResizeNeSw,
+        2 => CursorIcon::ResizeVertical,
+        3 => CursorIcon::ResizeNwSe,
+        _ => CursorIcon::ResizeHorizontal,
+    }
+}
+
+/// Shows the cursor of the handle under the pointer, and keeps the
+/// pressed handle's cursor until the release (task P7-19).
+fn handle_cursor(
+    ui: &Ui,
+    response: &egui::Response,
+    viewport: Rect,
+    session: &DocumentSession,
+    cache: &mut CanvasCache,
+    page_height: f64,
+    overlay: &Overlay,
+) {
+    let (pressed, down) = ui.input(|input| {
+        (
+            input.pointer.button_pressed(PointerButton::Primary),
+            input.pointer.primary_down(),
+        )
+    });
+    let zoom = safe_zoom(session.view.zoom);
+    let angle = handle_angle(overlay);
+    let hovered = response
+        .hover_pos()
+        .filter(|screen| viewport.contains(*screen))
+        .and_then(|screen| {
+            handle_under(
+                overlay,
+                screen_to_page(viewport, session, page_height, screen),
+                zoom,
+            )
+        });
+    if pressed {
+        cache.drag_cursor = if cache.pointer_down {
+            hovered.map(|kind| cursor_for(kind, angle, true))
+        } else {
+            None
+        };
+    } else if !down {
+        cache.drag_cursor = None;
+    }
+    let cursor = if down {
+        cache.drag_cursor
+    } else {
+        hovered.map(|kind| cursor_for(kind, angle, false))
+    };
+    if let Some(cursor) = cursor {
+        ui.ctx().set_cursor_icon(cursor);
+    }
+}
+
 /// Draws the transient overlay marks over the cached raster (ADR 0042).
 fn draw_overlay(
     painter: &egui::Painter,
@@ -649,9 +780,21 @@ fn draw_overlay(
                 }
             }
             OverlayMark::Handles { bounds, angle } => {
-                if let Ok(handles) = crate::handles::handles_for(*bounds, *angle) {
-                    for (_, point) in handles {
+                let zoom = k / POINTS_PER_INCH;
+                if let Ok(handles) = crate::handles::handles_for(*bounds, *angle, zoom) {
+                    for (kind, point) in handles {
                         let center = to_screen(point);
+                        if kind == HandleKind::Rotate {
+                            // The rotate handle is round, on a stem
+                            // from the top edge (task P7-19).
+                            painter.circle(
+                                center,
+                                HANDLE_HALF + 0.5,
+                                HANDLE_FILL,
+                                Stroke::new(1.0, SELECTION),
+                            );
+                            continue;
+                        }
                         let rect = Rect::from_center_size(
                             center,
                             egui::vec2(HANDLE_HALF * 2.0, HANDLE_HALF * 2.0),
@@ -936,7 +1079,7 @@ fn active_page_label(session: &DocumentSession) -> String {
 
 /// The page size in inches: `PageWidth`/`PageHeight` when positive, the
 /// scene builder's fallback otherwise.
-fn page_size(doc: &Document, page: Option<PageId>) -> (f64, f64) {
+pub(crate) fn page_size(doc: &Document, page: Option<PageId>) -> (f64, f64) {
     let Some(page) = page else {
         return FALLBACK_PAGE_SIZE;
     };
