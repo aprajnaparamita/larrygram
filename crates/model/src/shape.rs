@@ -36,6 +36,10 @@ pub struct Shape {
     pub children: Vec<ShapeId>,
     /// The shape's text (`Text` element), mapped read-side (ADR 0019).
     pub text: Option<TextContent>,
+    /// Whether the shape is a guide (`Type="Guide"` in `.vsdx`, a
+    /// guide shape record in `.vsd`). Visio draws guides on screen
+    /// only: they never print or export, so the renderer skips them.
+    pub is_guide: bool,
     /// The ShapeSheet content of this shape.
     pub sheet: Sheet,
     /// Unmapped attributes and children of the `Shape` element kept verbatim
@@ -59,6 +63,7 @@ impl Shape {
             parent: None,
             children: Vec::new(),
             text: None,
+            is_guide: false,
             sheet: Sheet::new(),
             preserved: Preserved::new(),
         }
