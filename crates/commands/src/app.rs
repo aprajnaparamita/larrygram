@@ -81,16 +81,33 @@ pub struct ViewState {
     pub show_grid: bool,
     /// Whether the rulers are drawn (ADR 0033).
     pub show_rulers: bool,
+    /// Whether the guides are drawn (task P7-20, the `view.guides`
+    /// toggle; our own view toggle beside the grid and rulers, so the
+    /// per-document rule stays the same).
+    pub show_guides: bool,
+    /// Whether the page breaks are drawn (task P7-20, the
+    /// `view.page.breaks` toggle; the same per-document rule).
+    pub show_page_breaks: bool,
+    /// The canvas rectangle in points (`width`, `height`), as the host
+    /// last measured it (task P7-20): the fit commands
+    /// (`view.zoom.fit`, `view.fit.in.window`, `view.zoom.page.width`)
+    /// use it when the invocation carries no `width`/`height`.
+    /// `None` until a host records it.
+    pub viewport: Option<(f64, f64)>,
 }
 
 impl ViewState {
-    /// The default view: no pan, 100% zoom, grid and rulers on.
+    /// The default view: no pan, 100% zoom, grid, rulers, guides and
+    /// page breaks on, no measured viewport.
     pub fn new() -> Self {
         Self {
             pan: larrygram_geom::Point::new(0.0, 0.0),
             zoom: 1.0,
             show_grid: true,
             show_rulers: true,
+            show_guides: true,
+            show_page_breaks: true,
+            viewport: None,
         }
     }
 
@@ -414,6 +431,11 @@ pub struct AppCtx {
     /// The active interaction tool (task P5-17; `ui` mirrors it into
     /// its `ToolMachine` each frame).
     pub active_tool: ActiveTool,
+    /// Whether the app is in full screen (task P7-20, the
+    /// `view.full_screen_mode` command). Like `active_tool`, it is a
+    /// window-state flag the shell reads each frame: the command sets
+    /// it, the shell draws the window accordingly.
+    pub full_screen: bool,
     /// The undo-recording gate (ADR 0040 rule 2): set while an
     /// [`Edit`]'s `apply`/`revert` runs. While it is set,
     /// [`AppCtx::push_edit`] drops the edit and warns instead of
@@ -436,6 +458,7 @@ impl AppCtx {
             warnings: Vec::new(),
             clipboard: Clipboard::new(),
             active_tool: ActiveTool::Pointer,
+            full_screen: false,
             undo_suspended: false,
         }
     }
@@ -599,7 +622,19 @@ mod tests {
         assert_eq!(view.pan, larrygram_geom::Point::new(0.0, 0.0));
         assert!(view.show_grid);
         assert!(view.show_rulers);
+        assert!(view.show_guides);
+        assert!(view.show_page_breaks);
+        assert_eq!(view.viewport, None);
         assert_eq!(view, ViewState::default());
+    }
+
+    /// The P7-20 additions: the full-screen flag starts off and the
+    /// viewport starts unmeasured.
+    #[test]
+    fn app_state_starts_windowed_without_a_viewport() {
+        let ctx = AppCtx::new(Settings::default());
+        assert!(!ctx.full_screen);
+        assert!(ctx.active_document().is_none());
     }
 
     /// The ADR 0032 amendment: a new session's toggles come from the

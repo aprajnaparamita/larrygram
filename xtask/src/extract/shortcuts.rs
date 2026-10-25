@@ -37,6 +37,26 @@ pub const SNAPSHOT_URL: &str = "https://web.archive.org/web/20251205120214id_/ht
 /// The pinned source identifier recorded in the file header.
 pub const SOURCE_REVISION: &str = "web snapshot 20251205120214 (2025-12-05)";
 
+/// Our own bindings (task P7-20), appended to the page-derived rows.
+///
+/// The chords come from the committed Panel Classic layout data
+/// (`shortcut:` on the menu and toolbar items, our own compiled data
+/// of `ui-spec/layouts/panel-classic.yaml`), not from the page: the
+/// page does not list them. No Microsoft content is involved
+/// (AGENTS.md section 4). Each entry is `(command, scope, group,
+/// chord)`; the chord is one chord of key tokens.
+pub const OWN_SHORTCUTS: &[(&str, &str, &str, &[&str])] = &[
+    ("file.new.blank.drawing", "global", "Common", &["Ctrl", "N"]),
+    ("file.open", "global", "Common", &["Ctrl", "O"]),
+    ("file.save", "global", "Common", &["Ctrl", "S"]),
+    (
+        "page.reorder_pages",
+        "global",
+        "Common",
+        &["Ctrl", "Alt", "P"],
+    ),
+];
+
 /// Normalised action phrase -> Larrygram command id, keyed by the
 /// lowercase hex sha256 of the normalised phrase (F2). The value must
 /// exist in `ui-spec/commands.yaml` (the unit test
@@ -609,6 +629,13 @@ fn run_with_tables<K: AsRef<str>, V: AsRef<str>, H: AsRef<str>, G: AsRef<str>, S
         entries.push(shortcut_value(&command, &sequence, &group, &scope));
     }
 
+    // Our own bindings (task P7-20): the chords the committed Panel
+    // Classic layout data advertises and the page does not list.
+    for (command, scope, group, chord) in OWN_SHORTCUTS {
+        let sequence: Vec<Vec<String>> = vec![chord.iter().map(|key| (*key).to_string()).collect()];
+        entries.push(shortcut_value(command, &sequence, group, scope));
+    }
+
     // Deterministic order: command, then the key sequence, then the
     // section heading.
     entries.sort_by_cached_key(sort_key);
@@ -1120,6 +1147,11 @@ fn render_shortcuts_yaml(entries: &[Value]) -> ExtractResult<String> {
     out.push_str("# recorded here; no page prose is committed.\n");
     out.push_str(&format!("# Snapshot URL: {SNAPSHOT_URL}\n"));
     out.push_str(&format!("# Source commit: {SOURCE_REVISION}\n"));
+    out.push_str(
+        "# The Ctrl+N, Ctrl+O, Ctrl+S and Ctrl+Alt+P bindings\n\
+         # (OWN_SHORTCUTS, task P7-20) are our own, from the committed Panel Classic\n\
+         # layout data; the page does not list them.\n",
+    );
     out.push_str(&text);
     Ok(out)
 }
@@ -1459,6 +1491,42 @@ mod tests {
                 ids.contains(cmd),
                 "action {action:?} -> unknown command {cmd}"
             );
+        }
+    }
+
+    /// The own bindings (task P7-20) name real commands and use the
+    /// fixed scope vocabulary; the chord is never empty.
+    #[test]
+    fn own_shortcuts_use_real_commands_and_the_vocabulary() {
+        const SCOPES: [&str; 6] = [
+            "global",
+            "page",
+            "text",
+            "command_bar",
+            "selection",
+            "window",
+        ];
+        for (command, scope, group, chord) in OWN_SHORTCUTS {
+            assert!(SCOPES.contains(scope), "unknown scope {scope}");
+            assert_eq!(*group, "Common", "own bindings group under Common");
+            assert!(!chord.is_empty(), "empty chord for {command}");
+        }
+        let path = crate::util::root().join("ui-spec").join("commands.yaml");
+        if !path.is_file() {
+            eprintln!("commands.yaml not present; skipping the id check");
+            return;
+        }
+        let text = std::fs::read_to_string(&path).unwrap();
+        let value: Value = serde_saphyr::from_str(&text).unwrap();
+        let empty = Vec::new();
+        let ids: std::collections::BTreeSet<&str> = value
+            .as_array()
+            .unwrap_or(&empty)
+            .iter()
+            .filter_map(|e| e.get("id").and_then(Value::as_str))
+            .collect();
+        for (command, _, _, _) in OWN_SHORTCUTS {
+            assert!(ids.contains(command), "unknown command {command}");
         }
     }
 

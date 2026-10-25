@@ -5,6 +5,9 @@
 # recorded here; no page prose is committed.
 # Snapshot URL: https://web.archive.org/web/20251205120214id_/https://support.microsoft.com/en-us/office/keyboard-shortcuts-for-visio-ee952f31-7e3e-4564-8116-f3ecbb733cc1
 # Source commit: web snapshot 20251205120214 (2025-12-05)
+# The Ctrl+N, Ctrl+O, Ctrl+S and Ctrl+Alt+P bindings
+# (OWN_SHORTCUTS, task P7-20) are our own, from the committed Panel Classic
+# layout data; the page does not list them.
 - command: arrange.align_objects
   scope: selection
   section: Shapes
@@ -241,12 +244,30 @@
   sequence:
     - - Alt
       - F4
+- command: file.new.blank.drawing
+  scope: global
+  section: Common
+  sequence:
+    - - Ctrl
+      - "N"
+- command: file.open
+  scope: global
+  section: Common
+  sequence:
+    - - Ctrl
+      - O
 - command: file.print
   scope: global
   section: Common
   sequence:
     - - Ctrl
       - P
+- command: file.save
+  scope: global
+  section: Common
+  sequence:
+    - - Ctrl
+      - S
 - command: format.text.align_bottom
   scope: text
   section: Text
@@ -401,6 +422,13 @@
   section: Views
   sequence:
     - - F1
+- command: page.reorder_pages
+  scope: global
+  section: Common
+  sequence:
+    - - Ctrl
+      - Alt
+      - P
 - command: shape.arc
   scope: global
   section: Shapes

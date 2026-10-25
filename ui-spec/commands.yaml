@@ -478,12 +478,6 @@
   mapping_confidence: inferred
   visuicmd: visCmdIncreaseIndent
 - fluent_ids:
-    - LineTool
-  id: format.line
-  label: Line
-  mapping_confidence: inferred
-  visuicmd: visCmdFormatLine
-- fluent_ids:
     - FillColorGallery
   id: format.set.fill.color
   label: Fill Color
@@ -683,6 +677,12 @@
   label: Left Button Icon Color
   mapping_confidence: inferred
   visuicmd: visCmdIconLeftColor
+- fluent_ids:
+    - LineTool
+  id: shape.line
+  label: Line
+  mapping_confidence: inferred
+  visuicmd: visCmdDRLineTool
 - fluent_ids:
     - ContainerLock
   id: shape.lock.container
@@ -1907,6 +1907,11 @@
   mapping_confidence: unknown
   visuicmd: null
 - fluent_ids: []
+  id: edit.paste.in.place
+  label: Paste in Place
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
   id: edit.paste.link
   label: Link
   mapping_confidence: unknown
@@ -2632,6 +2637,11 @@
   label: Dlg
   mapping_confidence: unknown
   visuicmd: visCmdFormatInkDlg
+- fluent_ids: []
+  id: format.line
+  label: Line
+  mapping_confidence: unknown
+  visuicmd: visCmdFormatLine
 - fluent_ids: []
   id: format.line_color.no_line
   label: No Line
@@ -3656,11 +3666,6 @@
   label: Toolbar
   mapping_confidence: unknown
   visuicmd: visCmdShapeLayerToolbar
-- fluent_ids: []
-  id: shape.line
-  label: Line
-  mapping_confidence: unknown
-  visuicmd: visCmdDRLineTool
 - fluent_ids: []
   id: shape.master.add_to_my_shapes.add_to_existing_stencil
   label: Add To Existing Stencil...
