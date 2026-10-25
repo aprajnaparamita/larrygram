@@ -201,7 +201,11 @@ fn the_insert_page_button_adds_a_page() {
     rig.run();
     let shell = rig.shell.borrow();
     let session = shell.app.active_document().expect("a document");
-    assert_eq!(session.document.pages.len(), 3, "the \u{2295} button runs page.add");
+    assert_eq!(
+        session.document.pages.len(),
+        3,
+        "the \u{2295} button runs page.add"
+    );
 }
 
 #[test]
