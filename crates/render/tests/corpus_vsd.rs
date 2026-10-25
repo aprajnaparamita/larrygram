@@ -13,7 +13,9 @@
 //! imported corpus drawings (every page of each file that draws,
 //! named `<name>-p<N>.png`), compared with
 //! the ADR 0027 metric as `tests/golden.rs` implements it (a local
-//! copy: test binaries cannot share code). A background page (P8-15:
+//! copy: test binaries cannot share code). A file in [`NO_GOLDEN`]
+//! renders without a golden: it is Microsoft sample content and no
+//! picture of it may be committed. A background page (P8-15:
 //! `tdf76829-datetime-format.vsd`'s `VHintergrund`) has no golden of
 //! its own: it draws composited behind its foreground page, as Visio
 //! draws it. Regenerate with
@@ -39,6 +41,29 @@ use larrygram_render::{PngOptions, SvgOptions, render_png, render_svg};
 use larrygram_vsd_binary::{Error, Limits as VsdLimits, import};
 use larrygram_vsdx::{Limits, Package, read_document, write_document};
 use tiny_skia::{Pixmap, PremultipliedColorU8};
+
+/// Files that render but carry no golden picture (clean-room, the
+/// master's P8-13 F1 ruling). The tests still import and render every
+/// page of them; they compare no picture, because no picture of them
+/// may be committed.
+///
+/// - `tdf76829-datetime-format.vsd`: Microsoft sample content (a stock
+///   template, a sample company and long-form sample text).
+const NO_GOLDEN: &[&str] = &["tdf76829-datetime-format.vsd"];
+
+/// The structural numbers that pin the import of every file in
+/// [`NO_GOLDEN`] in place of its picture: page count, each page's size
+/// in inches (the model's `PageWidth`/`PageHeight`) and the shape
+/// count. Numbers only; the drawing's content never enters the repo.
+const NO_GOLDEN_NUMBERS: &[(&str, usize, &[(f64, f64)], usize)] = &[(
+    "tdf76829-datetime-format.vsd",
+    2,
+    &[
+        (11.692_913_385_826_772, 8.267_716_535_433_07),
+        (11.692_913_385_826_772, 8.267_716_535_433_07),
+    ],
+    188,
+)];
 
 /// The largest per-channel difference, of 255 (ADR 0027).
 const MAX_CHANNEL_DELTA: u8 = 2;
@@ -475,6 +500,34 @@ fn text_of(content: Option<&larrygram_model::TextContent>) -> String {
         .collect()
 }
 
+/// Pins the import of a file in [`NO_GOLDEN`] by its numbers (page
+/// count, page sizes in inches, shape count) in place of its picture.
+fn assert_no_golden_numbers(name: &str, document: &larrygram_model::Document) {
+    let Some((_, pages, sizes, shapes)) = NO_GOLDEN_NUMBERS
+        .iter()
+        .find(|(file, ..)| *file == name)
+        .copied()
+    else {
+        return;
+    };
+    assert_eq!(document.pages.len(), pages, "{name}: the page count");
+    assert_eq!(document.shapes.len(), shapes, "{name}: the shape count");
+    let mut reader = larrygram_model::CellReader::new(document);
+    for (page, (width, height)) in document.pages.iter().zip(sizes.iter()) {
+        let sheet = larrygram_model::SheetRef::Page(page.id);
+        let got_width = reader
+            .number(sheet, &larrygram_model::CellName::from_static("PageWidth"))
+            .unwrap_or(f64::NAN);
+        let got_height = reader
+            .number(sheet, &larrygram_model::CellName::from_static("PageHeight"))
+            .unwrap_or(f64::NAN);
+        assert!(
+            (got_width - width).abs() < 1e-6 && (got_height - height).abs() < 1e-6,
+            "{name}: page size {got_width}x{got_height}"
+        );
+    }
+}
+
 /// The golden images of the imported corpus drawings: every page of
 /// each importable corpus file, in `tests/golden/vsd/` as
 /// `<name>-p<N>.png` (page numbers from 1).
@@ -495,6 +548,9 @@ fn golden_images_of_the_imported_corpus_drawings() {
             continue;
         };
         let stem = name.strip_suffix(".vsd").unwrap_or(&name);
+        if NO_GOLDEN.contains(&name.as_str()) {
+            assert_no_golden_numbers(&name, &imported.document);
+        }
         for (index, scene) in drawing_scenes(&imported.document).iter().enumerate() {
             let rendered = render_png(
                 scene,
@@ -504,6 +560,11 @@ fn golden_images_of_the_imported_corpus_drawings() {
                 },
             )
             .unwrap_or_else(|e| panic!("{name} page {}: render_png: {e}", index + 1));
+            if NO_GOLDEN.contains(&name.as_str()) {
+                // Rendered (no panic), but no picture of it is
+                // compared or committed (clean-room; [`NO_GOLDEN`]).
+                continue;
+            }
             let golden_name = format!("{stem}-p{}.png", index + 1);
             let path = golden_vsd_dir().join(&golden_name);
             if update {
