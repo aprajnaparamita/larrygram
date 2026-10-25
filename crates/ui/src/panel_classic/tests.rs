@@ -141,7 +141,11 @@ fn layout() -> LayoutV2 {
                 {"id": "context.shape.cut", "kind": "button", "label": "Cut", "command": "edit.cut",
                  "access": "t"},
                 {"id": "context.shape.copy", "kind": "button", "label": "Copy", "command": "edit.copy",
-                 "access": "o"}
+                 "access": "o"},
+                {"id": "context.shape.more", "kind": "submenu", "label": "More", "items": [
+                    {"id": "context.shape.more.paste", "kind": "button", "label": "Paste Here",
+                     "command": "edit.paste"}
+                ]}
             ]}
         ]
     }))
@@ -340,6 +344,12 @@ impl Rig {
     fn settle(&mut self) {
         self.run();
         self.harness.run_steps(2);
+    }
+
+    /// Runs frames for longer than the submenu delays (the hover open
+    /// and the pointer-leave close, 0.4 s each) at kittest's step.
+    fn wait_past_the_submenu_delay(&mut self) {
+        self.harness.run_steps(40);
     }
 
     /// Moves the pointer away from every widget and runs one frame
@@ -1200,20 +1210,84 @@ fn shift_f10_opens_the_mapped_context_menu() {
     );
 }
 
+/// Opens File > New from the keyboard with the pointer resting outside
+/// the menus (Alt+F, ArrowDown to New, ArrowRight), and lets the
+/// leave delay pass.
+fn open_new_by_keyboard(rig: &mut Rig) {
+    rig.away();
+    rig.key_mod(Modifiers::ALT, Key::F);
+    rig.key(Key::ArrowDown);
+    rig.key(Key::ArrowRight);
+    rig.wait_past_the_submenu_delay();
+}
+
 #[test]
 fn escape_closes_the_deepest_open_level_first() {
     let mut rig = Rig::new();
-    rig.click(Role::Button, "File");
-    rig.click(Role::MenuItem, "New");
+    open_new_by_keyboard(&mut rig);
     assert!(rig.has(Role::MenuItem, "New Drawing"));
-    rig.away();
-    assert!(rig.has(Role::MenuItem, "New Drawing"), "the hover keeps it");
+    assert!(
+        rig.has(Role::MenuItem, "New Drawing"),
+        "a resting pointer outside keeps a keyboard-opened submenu"
+    );
     rig.key(Key::Escape);
     assert!(
         !rig.has(Role::MenuItem, "New Drawing"),
         "the submenu closes"
     );
     assert!(rig.has(Role::MenuItem, "Open..."), "the menu stays open");
+}
+
+#[test]
+fn a_submenu_closes_when_the_pointer_leaves_the_menus() {
+    // Task P7-17: an open submenu closes once the pointer has moved
+    // off every menu level and stayed off for the delay; the top menu
+    // stays open.
+    let mut rig = Rig::new();
+    rig.click(Role::Button, "File");
+    rig.click(Role::MenuItem, "New");
+    assert!(rig.has(Role::MenuItem, "New Drawing"));
+    rig.away();
+    rig.wait_past_the_submenu_delay();
+    assert!(
+        !rig.has(Role::MenuItem, "New Drawing"),
+        "the submenu closes after the pointer left"
+    );
+    assert!(rig.has(Role::MenuItem, "Open..."), "the menu stays open");
+}
+
+#[test]
+fn a_context_submenu_closes_when_the_pointer_leaves_and_the_menu_on_a_click_outside() {
+    // Task P7-17: open-then-leave leaves no popup open.
+    let mut rig = Rig::with_context_trigger();
+    rig.click_secondary(Role::Button, "shape");
+    rig.click(Role::MenuItem, "More");
+    assert!(rig.has(Role::MenuItem, "Paste Here"), "the submenu opens");
+    rig.away();
+    rig.wait_past_the_submenu_delay();
+    assert!(
+        rig.has(Role::MenuItem, "Cut"),
+        "the context menu stays open"
+    );
+    assert!(
+        !rig.has(Role::MenuItem, "Paste Here"),
+        "the submenu closes after the pointer left"
+    );
+    rig.harness.hover_at(egui::Pos2::new(1200.0, 820.0));
+    rig.harness.event(egui::Event::PointerButton {
+        pos: egui::Pos2::new(1200.0, 820.0),
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: Modifiers::NONE,
+    });
+    rig.harness.event(egui::Event::PointerButton {
+        pos: egui::Pos2::new(1200.0, 820.0),
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: Modifiers::NONE,
+    });
+    rig.settle();
+    assert!(!rig.has(Role::MenuItem, "Cut"), "a click outside closes it");
 }
 
 #[test]
@@ -1231,9 +1305,8 @@ fn escape_leaves_the_menu_bar() {
 #[test]
 fn arrow_left_closes_a_submenu_then_cycles_the_titles() {
     let mut rig = Rig::new();
-    rig.click(Role::Button, "File");
-    rig.click(Role::MenuItem, "New");
-    rig.away();
+    open_new_by_keyboard(&mut rig);
+    assert!(rig.has(Role::MenuItem, "New Drawing"));
     rig.key(Key::ArrowLeft);
     assert!(
         !rig.has(Role::MenuItem, "New Drawing"),

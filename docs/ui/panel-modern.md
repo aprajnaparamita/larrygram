@@ -44,7 +44,10 @@ From top to bottom:
    - on the left, "PAGE n OF m" and the document language;
    - on the right, a presentation-mode button, the zoom slider with −
      and + buttons, the zoom percentage, fit-page-to-window and
-     switch-window buttons.
+     switch-window buttons. The buttons draw flat on the bar;
+   - the right side lays out first and the texts on the left get the
+     room it leaves. On a bar under 760 px the switch-window button
+     is left out and fit-page-to-window reads "Fit".
 
 ## Tabs
 
@@ -56,8 +59,8 @@ From top to bottom:
     over the drawing. It closes again after a command runs or on a
     click elsewhere.
   - Another double-click pins it open again.
-- **Contextual tabs** (ADR 0064) appear to the right of View, under a
-  caption with the tab-set name:
+- **Contextual tabs** (ADR 0064) appear to the right of View, with the
+  tab-set name in small text in front of the tab's label:
 
   | Tab set | Tab | Shown in | Colour |
   |---|---|---|---|
@@ -65,12 +68,34 @@ From top to bottom:
   | Container Tools | Format | `container_selected` | orange |
   | ShapeSheet Tools | Design | `shapesheet_window` | green |
 
-  - The caption area and the tab get the set's `fill`, with a 4 px
-    `band` across the top. The caption and tab label use the set's
-    `text` colour.
+  - The tab gets the set's `fill`, with a 4 px `band` across the top.
+    The tab-set name uses the set's `text` colour. (The name sits in
+    the tab, not above it: the 25 px strip has no room for a caption
+    row, and drawn over the label the two were unreadable.)
   - A contextual tab is not selected automatically.
   - If its context ends while it is selected, the command bar returns to the
     last core tab used.
+
+## Narrow windows
+
+The command bar fits its groups into the window's width, with the ^
+button's corner kept free. Every group starts at the size the data
+gives it. While the groups do not fit, they shrink one stage at a
+time, from the rightmost group leftwards; only when every group has
+reached a stage does the next stage start:
+
+1. **Medium**: large controls become medium (icon beside the label)
+   and the controls pack three to a column in their slot order.
+2. **Small**: every control with an icon shows only its icon; combos,
+   check boxes and controls with no icon stay medium.
+3. **Collapsed**: the group is one large button with the group's
+   caption and its first control's icon. It opens the whole group, at
+   full size, as a popup that closes after a command runs, on a click
+   outside it, or on Esc.
+
+Once the groups fit, any room left goes back to the groups from the
+left, one stage at a time. `rows` groups (Font, Paragraph) skip the
+medium and small stages and only collapse.
 
 ## Groups and controls
 
@@ -99,18 +124,24 @@ Controls in detail:
   - the icon part runs `command`; the arrow part opens the menu;
   - large splits divide horizontally (icon above, label and ▾ below);
   - medium and small splits divide vertically, with a 12 px arrow.
-- **Dropdowns** open their `items` as a menu under the control. In
-  that menu:
+- **Dropdowns** open their `items` as a menu under the control. A
+  dropdown or split whose own command is not available still opens
+  when an entry of its menu runs. In that menu:
   - entries with icons use the same 24 px gutter as Panel Classic menus;
   - `options` show as text rows;
-  - a `list` shows as rows, or as a grid for galleries.
+  - a `list` shows as rows, or as a grid for galleries;
+  - a submenu opens on hover or click. Hovering another row closes it,
+    and so does moving the pointer off every menu for 400 ms (the
+    Panel Classic rule); the menu itself stays open until a click
+    outside or Esc.
 - **Galleries** (Quick Styles, Themes, Variants, Backgrounds, Borders &
   Titles, Data Graphics, Change Shape, Container Styles) open a grid of
   thumbnails filled from their `list`. Phase 7 shows Larrygram's own
   entries, which may be none yet.
 - **Combos**: Font (107 px) and Font Size (52 px). They behave as in
   Panel Classic.
-- **Launchers** open the group's dialog (Font, Paragraph, Shape
+- **Launchers** are a 16 x 17 px arrow in the caption's corner; they
+  open the group's dialog (Font, Paragraph, Shape
   Format, Page Setup, Layout and Routing, Show, Visual Aids, Adjust).
   Their tooltip names the dialog.
 - **Disabled controls** draw text in `chrome.text_disabled` and icons
@@ -145,7 +176,7 @@ Controls in detail:
   | Entry | Kind | Behaviour |
   |---|---|---|
   | Info | page | Document properties, the file path and protection status |
-  | New | page | Template tiles: Larrygram's own templates, plus Blank Drawing |
+  | New | page | Blank Drawing (runs `file.new`), then Larrygram's own template tiles; no tile when there are none |
   | Open | page | Recent files, then Browse… (native dialog or upload) |
   | Save | command | Runs `file.save` and closes the view |
   | Save As | page | Browse… (native dialog or download) |

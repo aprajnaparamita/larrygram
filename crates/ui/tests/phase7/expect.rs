@@ -286,6 +286,31 @@ pub fn modern_control_entries(item: &Item, registry: &Registry, app: &AppCtx) ->
 }
 
 /// The activation of a Panel Modern control button itself.
+///
+/// A dropdown, gallery or palette whose own command does not run
+/// still opens when an entry of its menu dispatches (task P7-17,
+/// `controls::menu_reachable`): it expects [`Expect::Submenu`] with
+/// those entries instead of [`Expect::Disabled`].
 pub fn modern_control(item: &Item, registry: &Registry, app: &AppCtx) -> Expect {
-    resolve(item, registry, app, None)
+    let own = resolve(item, registry, app, None);
+    let opens_menu = matches!(
+        item.kind,
+        ItemKind::Dropdown | ItemKind::Gallery | ItemKind::Palette
+    );
+    if opens_menu && matches!(own, Expect::Disabled { .. }) {
+        let entries = modern_entries(&item.items, registry, app, Some(item));
+        if entries.iter().any(dispatches) {
+            return Expect::Submenu(entries);
+        }
+    }
+    own
+}
+
+/// Whether an entry, or an entry of its submenu, dispatches.
+fn dispatches(entry: &Entry) -> bool {
+    match &entry.expect {
+        Expect::Dispatch { .. } => true,
+        Expect::Submenu(entries) => entries.iter().any(dispatches),
+        _ => false,
+    }
 }

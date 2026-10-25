@@ -179,6 +179,16 @@ pub(crate) fn finish(response: egui::Response, action: &Action, tip: &str, out: 
     }
 }
 
+/// The icon key a control draws: its own `icon`, or, for a split or
+/// dropdown with none, the icon of its first child that has one (the
+/// tool it runs; task P7-17: the Tools group's drawing-tools split
+/// drew an empty button).
+pub(crate) fn icon_key(item: &Item) -> Option<&str> {
+    item.icon
+        .as_deref()
+        .or_else(|| item.items.iter().find_map(|child| child.icon.as_deref()))
+}
+
 /// Which way a painted arrow points (egui's bundled fonts have no
 /// triangle or arrow glyph; ADR 0030).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -189,19 +189,36 @@ impl ShapesWindow {
                             .on_disabled_hover_text("Not yet implemented");
                     });
                 });
+                // The label above the box: on one row they pushed the
+                // window to 440 px, past its 190 px (task P7-17).
+                ui.label("Search for Shapes:");
                 ui.horizontal(|ui| {
-                    ui.label("Search for Shapes:");
-                    ui.add(egui::TextEdit::singleline(&mut self.search).hint_text("type a word"));
+                    let go = ui.spacing().interact_size.x;
+                    let width = (ui.available_width() - go - ui.spacing().item_spacing.x).max(40.0);
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.search)
+                            .hint_text("type a word")
+                            .desired_width(width),
+                    );
                     ui.add_enabled_ui(false, |ui| ui.small_button("Go"))
                         .inner
                         .on_disabled_hover_text("Not yet implemented");
                 });
             }
             Header::Modern => {
-                ui.heading(egui::RichText::new("Shapes").color(title_text));
+                // The large pane title (`pane_title`, 22 px).
+                ui.label(
+                    egui::RichText::new("Shapes")
+                        .size(PANE_TITLE_SIZE)
+                        .color(title_text),
+                );
                 ui.label(egui::RichText::new("STENCILS").color(title_text));
                 ui.label(egui::RichText::new("SEARCH").color(title_text));
-                ui.add(egui::TextEdit::singleline(&mut self.search).hint_text("Search for shapes"));
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.search)
+                        .hint_text("Search for shapes")
+                        .desired_width(ui.available_width()),
+                );
             }
         }
         ui.separator();
@@ -239,16 +256,43 @@ impl ShapesWindow {
     }
 }
 
+/// The size of the Panel Modern pane title (the theme's `pane_title`
+/// font, `docs/ui/panel-modern.md`: a large "Shapes" title).
+const PANE_TITLE_SIZE: f32 = 22.0;
+
+/// The margin around a preview's master, as a share of its larger
+/// side: the outline's stroke straddles the shape's edge, and on a
+/// page exactly the master's size its outer half was cut off (task
+/// P7-17: Ellipse and Arc lost their top edge).
+const PREVIEW_MARGIN: f64 = 0.05;
+
+/// The margin of one master's preview, in inches.
+fn preview_margin(master: &MasterDef) -> f64 {
+    master.width.max(master.height) * PREVIEW_MARGIN
+}
+
 /// The one-master document a preview rasterizes: the instance
-/// [`stencils::instantiate`] places, on a page the master's size so the
-/// raster is a close crop (ADR 0034).
+/// [`stencils::instantiate`] places, moved in by [`preview_margin`], on
+/// a page the master's size plus the margin on each side, so the
+/// raster is a close crop with the whole outline (ADR 0034).
 fn preview_document(master: &MasterDef) -> Document {
     let mut document = Document::new();
-    stencils::instantiate(&mut document, master);
+    let id = stencils::instantiate(&mut document, master);
+    let margin = preview_margin(master);
+    if let Some(shape) = document.shape_mut(id) {
+        for cell in &mut shape.sheet.cells {
+            if matches!(cell.name.as_str(), "PinX" | "PinY")
+                && let Some(CellValue::Number(value)) = cell.value
+            {
+                cell.value = Some(CellValue::Number(value + margin));
+                cell.formula = None;
+            }
+        }
+    }
     let mut width = Cell::new(CellName::from_static("PageWidth"));
-    width.value = Some(CellValue::Number(master.width));
+    width.value = Some(CellValue::Number(master.width + 2.0 * margin));
     let mut height = Cell::new(CellName::from_static("PageHeight"));
-    height.value = Some(CellValue::Number(master.height));
+    height.value = Some(CellValue::Number(master.height + 2.0 * margin));
     if let Some(page) = document.pages.first_mut() {
         page.sheet.cells.push(width);
         page.sheet.cells.push(height);
@@ -261,7 +305,8 @@ fn preview_document(master: &MasterDef) -> Document {
 fn preview_image(master: &MasterDef) -> Option<ColorImage> {
     let document = preview_document(master);
     let page = larrygram_model::PageId { index: 0 };
-    let scale = f64::from(PREVIEW_PX) / master.width.max(master.height);
+    let scale =
+        f64::from(PREVIEW_PX) / (master.width.max(master.height) + 2.0 * preview_margin(master));
     let mut options = BuildOptions::new();
     options.scale = scale;
     let scene = build_scene(&document, page, &options).ok()?;
@@ -389,7 +434,7 @@ mod tests {
     }
 
     #[test]
-    fn a_preview_document_holds_the_instance_on_a_page_the_master_size() {
+    fn a_preview_document_holds_the_instance_on_a_page_the_master_size_plus_its_margin() {
         let master = stencils::basic_shapes().masters[0].clone();
         let document = preview_document(&master);
         assert_eq!(document.pages.len(), 1);
@@ -406,8 +451,29 @@ mod tests {
                 })
                 .expect("page size cell")
         };
-        assert_eq!(cells("PageWidth"), master.width);
-        assert_eq!(cells("PageHeight"), master.height);
+        // The master plus the margin on each side (task P7-17), the
+        // instance moved in by the margin.
+        let margin = preview_margin(&master);
+        assert!(margin > 0.0);
+        assert_eq!(cells("PageWidth"), master.width + 2.0 * margin);
+        assert_eq!(cells("PageHeight"), master.height + 2.0 * margin);
+        let shape = document
+            .shape(document.pages[0].shapes[0])
+            .expect("the instance");
+        let pin = |name: &str| {
+            shape
+                .sheet
+                .cells
+                .iter()
+                .find(|cell| cell.name.as_str() == name)
+                .and_then(|cell| match cell.value {
+                    Some(CellValue::Number(value)) => Some(value),
+                    _ => None,
+                })
+                .expect("pin cell")
+        };
+        assert_eq!(pin("PinX"), master.width * 0.5 + margin);
+        assert_eq!(pin("PinY"), master.height * 0.5 + margin);
     }
 
     #[test]

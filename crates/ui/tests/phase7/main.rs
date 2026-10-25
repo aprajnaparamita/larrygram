@@ -21,12 +21,16 @@
 
 mod expect;
 mod first_run;
+mod fit;
 mod golden;
 mod layouts;
 mod menus;
 mod modern;
 mod placement;
+mod popups;
+mod review;
 mod surfaces;
+mod windows;
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -198,12 +202,21 @@ impl ShellRig {
     /// A shell over caller-chosen application state (open documents,
     /// a selection, ...).
     pub fn with_app(app: AppCtx) -> Self {
+        Self::with_app_at(app, egui::vec2(1600.0, 900.0), 1.0)
+    }
+
+    /// A shell over caller-chosen application state in a window of
+    /// `size` logical pixels at `pixels_per_point` (the display scale;
+    /// task P7-17 runs every layout check at three window sizes and
+    /// scales 1 and 2).
+    pub fn with_app_at(app: AppCtx, size: egui::Vec2, pixels_per_point: f32) -> Self {
         let registry: Registry =
             larrygram_commands::builtins::registry().expect("the registry builds");
         let shell = Rc::new(RefCell::new(Shell::new(registry, sets().clone(), app)));
         let harness_shell = Rc::clone(&shell);
         let harness = Harness::builder()
-            .with_size(egui::vec2(1600.0, 900.0))
+            .with_size(size)
+            .with_pixels_per_point(pixels_per_point)
             .with_context_setup(|ctx| {
                 // The apps install the image loaders at start-up
                 // (ADR 0067); without them the brand images draw as
@@ -221,6 +234,11 @@ impl ShellRig {
     /// Draws one frame.
     pub fn run(&mut self) {
         self.harness.run();
+    }
+
+    /// The harness itself (pointer, key and size events).
+    pub fn harness(&mut self) -> &mut Harness<'static> {
+        &mut self.harness
     }
 
     /// Renders the last frame (the golden images; the `wgpu` feature
