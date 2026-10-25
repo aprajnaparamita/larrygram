@@ -235,6 +235,60 @@ fn the_file_button_opens_the_backstage_with_its_entries() {
     assert!(!entries.is_empty());
 }
 
+/// The backstage page rows switch pages (P7-12 major 7: the page
+/// rows of `TabBar::show_backstage` were drawn but never clicked).
+#[test]
+fn the_backstage_page_rows_switch_pages() {
+    let tabs = &sets().get(LayoutKind::Panel2016).layout.backstage.tabs;
+    assert!(tabs.len() > 1, "the backstage has pages ({})", tabs.len());
+    let first = tabs[0].label.clone();
+    let second = tabs[1].label.clone();
+    let second_control = tabs[1]
+        .controls
+        .iter()
+        .map(|control| control.label.clone())
+        .find(|label| {
+            !label.is_empty()
+                && *label != first
+                && *label != second
+                && !tabs[0]
+                    .controls
+                    .iter()
+                    .any(|control| &control.label == label)
+        })
+        .expect("a control only the second page draws");
+
+    // Open the backstage (two "File" buttons; a fresh rig per
+    // attempt, as the test above documents).
+    let mut opened = None;
+    for nth in 0..3 {
+        let mut attempt = ShellRig::large();
+        if !attempt.try_click_nth(Role::Button, "File", nth) {
+            continue;
+        }
+        let names = attempt.names();
+        if names.contains_key(&first) && names.contains_key(&second) {
+            opened = Some(attempt);
+            break;
+        }
+    }
+    let mut rig = opened.expect("the File button opens the backstage");
+    {
+        let names = rig.names();
+        assert!(
+            !names.contains_key(&second_control),
+            "{second_control:?} is page-two-only: {names:?}"
+        );
+    }
+    // The rows switch the active page.
+    rig.click(Role::Button, &second);
+    let names = rig.names();
+    assert!(
+        names.contains_key(&second_control),
+        "the second page's controls draw: {names:?}"
+    );
+}
+
 #[test]
 fn clicking_the_qat_new_button_opens_a_document() {
     let mut rig = ShellRig::large();
