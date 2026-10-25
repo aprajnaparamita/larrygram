@@ -62,6 +62,41 @@ Developer ID to check, so **the first launch needs an explicit OK**:
 After that the app opens normally. Replacing the app with a new build
 may ask again.
 
+## Opening documents (task R8)
+
+Three routes open a document in the running app; all of them end in the
+same `file.open` command as the File > Open menu item, and a path that
+does not open is the same status-line error as a failed dialog pick:
+
+- `Larrygram.app/Contents/MacOS/larrygram <path>...` (or any other way
+  of starting the binary with paths as arguments): each path opens at
+  startup, in order, and the last one is the active document.
+- `open -a Larrygram.app <path>...` in Terminal: the same Apple event a
+  **Finder double-click** sends, at launch or while the app runs.
+- Dropping files on the Larrygram **Dock icon**: the same event with
+  several URLs.
+
+Opening a second document never replaces the first one and never asks
+about unsaved changes: every file becomes its own document session and
+the last opened is active, exactly as `file.open` from the menu does.
+
+The check the maintainer runs after each `cargo xtask dist mac` build
+that touches opening:
+
+```sh
+D=/Volumes/Dara/larrygram/dist/Larrygram.app
+open "$D"                                    # start the app
+open -a "$D" /path/to/drawing.vsdx           # Finder-style open
+"$D/Contents/MacOS/larrygram" /path/to/drawing.vsdx   # command line
+open -a "$D" /path/to/one.vsdx /path/to/two.vsd       # several files
+```
+
+Each one must show the drawing on the page and the file's name in the
+title strip, with no dialog and no crash. The Dock-icon drop is the
+same event as `open -a`; a real Finder double-click additionally needs
+the app to be the LaunchServices handler for the extension, which the
+testers' check list covers on the mounted `.dmg`.
+
 ## Testers' check list
 
 Do this on the mounted `.dmg`, before copying the app anywhere:
@@ -70,10 +105,16 @@ Do this on the mounted `.dmg`, before copying the app anywhere:
 - [ ] Open `Larrygram.app` from the mounted image (right-click, Open,
       the first time; see "Signing" above).
 - [ ] Open a `.vsdx` drawing by double-clicking it in Finder: the app
-      comes to the front with the drawing on the page.
+      comes to the front with the drawing on the page. (If another app
+      owns the `.vsdx` extension on your Mac, choose **Open With >
+      Larrygram** once and **Always**; a double-click opens the
+      extension's default app, whatever that is.)
 - [ ] Open a `.vsd` drawing by double-clicking it: the drawing opens,
       and the status line may list import warnings (the binary format
       is read-only import).
+- [ ] Open a drawing with `open -a Larrygram.app <file>` from Terminal,
+      and one by dropping it on the Larrygram icon in the Dock: both
+      open the same way (task R8).
 - [ ] Make an edit, save, close the window and reopen the file: the
       edit is still there.
 - [ ] Quit with Cmd+Q: the app exits cleanly, no dialog, no crash.
