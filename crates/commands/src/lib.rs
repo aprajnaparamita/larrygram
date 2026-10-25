@@ -26,7 +26,7 @@ pub mod registry;
 pub mod undo;
 
 pub use app::{
-    ActiveTool, AppCtx, DisplayUnits, DocumentSession, Selection, SessionId, Settings,
+    ActiveTool, AppCtx, DisplayUnits, DocumentSession, PaneSize, Selection, SessionId, Settings,
     SettingsStore, ViewState,
 };
 pub use clipboard::{Clipboard, ClipboardContent, ClipboardKind};
