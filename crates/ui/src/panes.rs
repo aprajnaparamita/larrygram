@@ -95,6 +95,11 @@ const FORMULA_REFUSAL: &str = "is a formula cell; formulas are read-only in this
 /// The width of a typed field, in points.
 const FIELD_WIDTH: f32 = 140.0;
 
+/// How far a text box insets its text (egui's default `TextEdit`
+/// margin): read-only values start that far in to line up with typed
+/// ones.
+const FIELD_TEXT_INSET: f32 = 4.0;
+
 /// One label/value row of a pane (ADR 0035).
 #[derive(Debug, Clone, PartialEq)]
 pub struct PaneRow {
@@ -951,6 +956,9 @@ fn show_value(ui: &mut Ui, entry: &Entry) -> Vec<Intent> {
             Vec::new()
         }
         _ => {
+            // In line with the text of the typed fields beside it (a
+            // text box insets its text by its margin; task P7-17).
+            ui.add_space(FIELD_TEXT_INSET);
             ui.label(entry.row.value.as_str());
             Vec::new()
         }
@@ -978,7 +986,7 @@ fn edit_field(ui: &mut Ui, app: &mut AppCtx, title: &str, entry: &Entry) -> Vec<
     let mut text = state.text.clone();
     let response = ui.add(
         egui::TextEdit::singleline(&mut text)
-            .desired_width(FIELD_WIDTH)
+            .desired_width(ui.available_width().clamp(40.0, FIELD_WIDTH))
             .hint_text(entry.row.label.as_str()),
     );
     state.text = text;
