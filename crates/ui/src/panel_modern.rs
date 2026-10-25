@@ -317,11 +317,19 @@ impl PanelModern {
     ) -> Result<(), UiError> {
         let label = display_label(item, app);
         let action = resolve(item);
+        // A display-only menu opener (the customise dropdown) draws
+        // enabled whatever its command says: the click opens its
+        // menu, it does not run a command (P7-14's ruling on P7-10
+        // finding 2, the Panel Classic split arrow's rule).
+        let opens_display_menu = item.kind == ItemKind::Dropdown;
         let button = Button::new(label.as_str()).small();
         let response = ui
             .push_id(item.id.as_str(), |ui| {
-                ui.add_enabled_ui(matches!(action, Action::Emit(_)), |ui| ui.add(button))
-                    .inner
+                ui.add_enabled_ui(
+                    matches!(action, Action::Emit(_)) || opens_display_menu,
+                    |ui| ui.add(button),
+                )
+                .inner
             })
             .inner
             .accessible_name(label.as_str());
@@ -359,10 +367,15 @@ impl PanelModern {
             }
             ItemKind::Dropdown => {
                 // The ▾ customise menu: the current items, checked and
-                // disabled (customisation is out of scope).
-                finish(response.clone(), &action, &tooltip_text(&label, item), out);
-                // The customise menu is display-only: the current
-                // items, checked and disabled.
+                // disabled (customisation is out of scope). The
+                // button opens it even while `view.qat.customize` is
+                // a stub (P7-14: opening a display-only menu is not
+                // running a command).
+                if matches!(action, Action::Emit(_)) {
+                    finish(response.clone(), &action, &tooltip_text(&label, item), out);
+                } else {
+                    response.clone().on_hover_text(label.as_str());
+                }
                 let _ = egui::Popup::menu(&response).show(|ui| {
                     for entry in &layout.quick_access_toolbar {
                         let name = entry.label.clone().unwrap_or_default();
