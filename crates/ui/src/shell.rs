@@ -1487,6 +1487,11 @@ impl Shell {
             match outcome {
                 about::Outcome::Close => self.about_open = false,
                 about::Outcome::WatchVideo => {
+                    // Unreachable in the tests on purpose: `egui`
+                    // hands the URL to the platform browser and
+                    // kittest cannot observe that (P7-12 minor 1).
+                    // The outcome value itself is pinned in
+                    // `tests/about`.
                     ui.ctx().open_url(egui::OpenUrl::new_tab(about::VIDEO_URL));
                 }
                 about::Outcome::Open => {}
@@ -3414,6 +3419,10 @@ mod tests {
         app.open_document(DocumentSession::new(Document::new(), None));
         let id = CommandId::parse("file.opens_and_edits").expect("id");
         dispatch_one(&registry, &mut app, &id, Invocation::empty(Source::Test)).expect("run");
+        // The edit's no-op halves run through the undo stack (P7-12
+        // minor 6: `apply` and `revert` were never exercised).
+        NoopEdit.apply(&mut app).expect("apply");
+        NoopEdit.revert(&mut app).expect("revert");
         assert_eq!(app.documents.len(), 2);
         assert!(
             app.documents[0].undo.can_undo(),
