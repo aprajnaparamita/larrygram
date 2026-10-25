@@ -15,7 +15,7 @@ use larrygram_ui_spec::v2::{ControlSize, Item, ItemKind};
 
 use super::common::{
     Action, Arrow, DROPDOWN_TIP, MAX_DEPTH, Resolve, Toggles, arrow_atom, display_label, finish,
-    spacer, too_deep, tooltip_text,
+    spacer, too_deep, tooltip_text, with_value,
 };
 use super::metrics::Metrics;
 use super::place::Placed;
@@ -272,7 +272,8 @@ fn split(
         .accessible_name(DROPDOWN_TIP)
         .on_hover_text(DROPDOWN_TIP);
     if let Some(inner) = Popup::menu(&response).show(|ui| -> Result<(), UiError> {
-        show_menu(ui, &item.items, draw, resolve, out, depth + 1)
+        let inherited = inherited_resolve(item, resolve);
+        show_menu(ui, &item.items, draw, &inherited, out, depth + 1)
     }) {
         inner.inner?;
     }
@@ -310,7 +311,8 @@ fn dropdown(
         if item.kind == ItemKind::Gallery {
             show_gallery(ui, item, draw, resolve, out, depth + 1)?;
         }
-        show_menu(ui, &item.items, draw, resolve, out, depth + 1)
+        let inherited = inherited_resolve(item, resolve);
+        show_menu(ui, &item.items, draw, &inherited, out, depth + 1)
     }) {
         inner.inner?;
     }
@@ -329,6 +331,17 @@ fn palette(
     depth: u32,
 ) -> Result<(), UiError> {
     dropdown(ui, item, placed, draw, resolve, out, depth)
+}
+
+/// The resolver for a popup's child rows: an `options` or `list` row
+/// with no command of its own picks the opener's command, so a
+/// dropdown's choice dispatches the dropdown's command with its
+/// `value` argument (P7-14's dispatch-argument fix).
+fn inherited_resolve<'a>(opener: &'a Item, resolve: Resolve<'a>) -> impl Fn(&Item) -> Action + 'a {
+    move |child: &Item| match child.kind {
+        ItemKind::Options | ItemKind::List if child.command.is_none() => resolve(opener),
+        _ => resolve(child),
+    }
 }
 
 /// The entries of a dropdown, split or gallery menu.
@@ -443,7 +456,7 @@ fn show_list_rows(
 ) -> Result<(), UiError> {
     let name = item.list.clone().unwrap_or_default();
     for entry in entry_rows(draw.lists, &name) {
-        let action = resolve(item);
+        let action = with_value(&resolve(item), entry.text.as_str());
         let widget = Button::new(entry.text.as_str()).frame(false);
         let response = ui
             .add_enabled_ui(enabled(&action) && !entry.placeholder, |ui| ui.add(widget))
@@ -475,7 +488,7 @@ fn show_options(
         return show_menu(ui, &item.items, draw, resolve, out, depth);
     }
     for option in &item.options {
-        let action = resolve(item);
+        let action = with_value(&resolve(item), option);
         let widget = Button::new(option.as_str()).frame(false);
         let response = ui
             .add_enabled_ui(enabled(&action), |ui| ui.add(widget))
@@ -502,7 +515,7 @@ fn show_gallery(
     let name = item.list.clone().unwrap_or_default();
     ui.horizontal_wrapped(|ui| {
         for entry in entry_rows(draw.lists, &name) {
-            let action = resolve(item);
+            let action = with_value(&resolve(item), entry.text.as_str());
             let widget = Button::new(entry.text.as_str()).min_size(Vec2::new(64.0, 24.0));
             let response = ui
                 .add_enabled_ui(enabled(&action) && !entry.placeholder, |ui| ui.add(widget))

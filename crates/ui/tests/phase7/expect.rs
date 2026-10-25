@@ -207,12 +207,16 @@ pub fn classic_level(items: &[Item], registry: &Registry, app: &AppCtx) -> Vec<E
 
 /// The entries one **Panel Modern** dropdown, split or gallery popup
 /// draws for `items` (`panel_modern::controls::show_menu`), with empty
-/// run-time lists.
-///
-/// Panel Modern option rows dispatch the item's command with no
-/// `value` argument (task P7-09's "not yours" list records the gap),
-/// so the expectation carries no value either.
-pub fn modern_entries(items: &[Item], registry: &Registry, app: &AppCtx) -> Vec<Entry> {
+/// run-time lists. `opener` is the control whose popup it is: an
+/// `options` or `list` row with no command of its own dispatches the
+/// opener's command with the choice as its `value` argument (P7-14's
+/// dispatch-argument fix, the Panel Classic contract).
+pub fn modern_entries(
+    items: &[Item],
+    registry: &Registry,
+    app: &AppCtx,
+    opener: Option<&Item>,
+) -> Vec<Entry> {
     let mut out = Vec::new();
     for item in items {
         if item.hidden {
@@ -226,9 +230,10 @@ pub fn modern_entries(items: &[Item], registry: &Registry, app: &AppCtx) -> Vec<
             ItemKind::List => out.push(none_row(false)),
             ItemKind::Options => {
                 for option in &item.options {
+                    let parented = opener.filter(|_| item.command.is_none()).unwrap_or(item);
                     out.push(Entry {
                         label: option.clone(),
-                        expect: resolve(item, registry, app, None),
+                        expect: resolve(parented, registry, app, Some(option.clone())),
                     });
                 }
             }
@@ -241,7 +246,7 @@ pub fn modern_entries(items: &[Item], registry: &Registry, app: &AppCtx) -> Vec<
             {
                 out.push(Entry {
                     label: item.label.clone().unwrap_or_default(),
-                    expect: Expect::Submenu(modern_entries(&item.items, registry, app)),
+                    expect: Expect::Submenu(modern_entries(&item.items, registry, app, Some(item))),
                 });
             }
             _ => out.push(Entry {
@@ -264,19 +269,19 @@ pub fn modern_control_entries(item: &Item, registry: &Registry, app: &AppCtx) ->
             .iter()
             .map(|option| Entry {
                 label: option.clone(),
-                expect: resolve(item, registry, app, None),
+                expect: resolve(item, registry, app, Some(option.clone())),
             })
             .collect(),
         // A gallery draws its `list` rows above its `items`; an empty
         // run-time list shows the "(none)" placeholder.
         ItemKind::Gallery => {
             let mut out = vec![none_row(false)];
-            out.extend(modern_entries(&item.items, registry, app));
+            out.extend(modern_entries(&item.items, registry, app, Some(item)));
             out
         }
         // A dropdown or split opens its `items` (its `options` are not
         // drawn, as `show_menu` reads `items` only).
-        _ => modern_entries(&item.items, registry, app),
+        _ => modern_entries(&item.items, registry, app, Some(item)),
     }
 }
 
