@@ -344,6 +344,10 @@ pub struct PanelClassic {
     context_hover: Option<(usize, usize, f64)>,
     /// When the pointer left the context-menu levels.
     context_left: Option<f64>,
+    /// The context menu opened this frame: the click that opened it is
+    /// not a click outside it (task P7-17: a right-click opened the
+    /// menu and closed it in the same frame).
+    context_fresh: bool,
     /// The open toolbar-popup submenu chain (the `context_chain`
     /// rules, P7-12 major 4): one row index per open level.
     popup_chain: Vec<usize>,
@@ -383,6 +387,7 @@ impl Default for PanelClassic {
             context_chain: Vec::new(),
             context_hover: None,
             context_left: None,
+            context_fresh: false,
             popup_chain: Vec::new(),
             popup_hover: None,
             popup_left: None,
@@ -440,6 +445,14 @@ impl PanelClassic {
         self.context_chain.clear();
         self.context_hover = None;
         self.context_left = None;
+        self.context_fresh = true;
+    }
+
+    /// [`PanelClassic::open_context_menu`] with the menu's top-left
+    /// corner at `pos` (the right-click that opened it).
+    pub fn open_context_menu_at(&mut self, menu_id: impl Into<String>, pos: Pos2) {
+        self.context_pos = pos;
+        self.open_context_menu(menu_id);
     }
 
     /// Draws the chrome (the menu bar and the toolbars) and returns
@@ -477,6 +490,7 @@ impl PanelClassic {
         {
             self.context = Some(menu_id.to_owned());
             self.context_pos = trigger.rect.center();
+            self.context_fresh = true;
         }
         if self.context.as_deref() != Some(menu_id) {
             return Ok(intents);
@@ -558,9 +572,11 @@ impl PanelClassic {
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.close_context_menu();
         }
+        let fresh = std::mem::take(&mut self.context_fresh);
         if let Some(pointer) = ui.input(|i| i.pointer.interact_pos())
             && ui.input(|i| i.pointer.any_click())
             && !area.contains(pointer)
+            && !fresh
         {
             self.close_context_menu();
         }

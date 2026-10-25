@@ -1056,21 +1056,26 @@ impl Shell {
             return;
         };
         if let Some(target) = topmost_target(&self.context_rects, pos) {
-            self.open_context_menu(target);
+            self.open_context_menu(target, Some(pos));
         }
     }
 
     /// Opens the context menu for a right-clicked target (task P7-09
     /// Goal 4): [`contexts::menu_for`] maps the hit target to the
     /// active layout's menu, and the Panel Classic menu widget draws
-    /// it in every layout.
-    fn open_context_menu(&mut self, target: HitTarget) {
+    /// it in every layout, at `pos` (the right-click; task P7-17: the
+    /// shell's menus drew at the window's corner) or where the last
+    /// one opened.
+    fn open_context_menu(&mut self, target: HitTarget, pos: Option<egui::Pos2>) {
         let kind = self.app.settings.ui_layout;
         let set = self.layouts.get(kind);
         if let Some(menu) = contexts::menu_for(&set.v2, target) {
             let id = menu.id.clone();
             self.context_menu_id = Some(id.clone());
-            self.panel_classic.open_context_menu(id);
+            match pos {
+                Some(pos) => self.panel_classic.open_context_menu_at(id, pos),
+                None => self.panel_classic.open_context_menu(id),
+            }
         }
     }
 
@@ -1212,7 +1217,7 @@ impl Shell {
                 return;
             }
             if self.editor.is_active() {
-                self.open_context_menu(HitTarget::TextEditing);
+                self.open_context_menu(HitTarget::TextEditing, Some(pos));
                 return;
             }
             match self.shape_under(ui, pos, rect) {
@@ -1222,9 +1227,9 @@ impl Shell {
                     {
                         intents.push(intent);
                     }
-                    self.open_context_menu(HitTarget::Shape);
+                    self.open_context_menu(HitTarget::Shape, Some(pos));
                 }
-                None => self.open_context_menu(HitTarget::Page),
+                None => self.open_context_menu(HitTarget::Page, Some(pos)),
             }
         } else if shift_f10 {
             let target = if self.editor.is_active() {
@@ -1234,7 +1239,7 @@ impl Shell {
             } else {
                 HitTarget::Shape
             };
-            self.open_context_menu(target);
+            self.open_context_menu(target, Some(rect.center()));
         }
     }
 
@@ -3993,13 +3998,13 @@ mod tests {
         // does not define; the shell then keeps the previous menu
         // (task P7-09 Goal 4).
         let mut shell = full_shell();
-        shell.open_context_menu(HitTarget::Page);
+        shell.open_context_menu(HitTarget::Page, None);
         assert_eq!(
             shell.context_menu_id.as_deref(),
             Some("context.page"),
             "Panel Modern defines the empty-page menu"
         );
-        shell.open_context_menu(HitTarget::CommentMark);
+        shell.open_context_menu(HitTarget::CommentMark, None);
         assert_eq!(
             shell.context_menu_id.as_deref(),
             Some("context.page"),
