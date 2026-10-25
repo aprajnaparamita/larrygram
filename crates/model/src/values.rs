@@ -2687,6 +2687,59 @@ mod tests {
     }
 
     #[test]
+    fn two_character_rows_keep_their_own_colour_and_text() {
+        // P8-15: the name-only "own entry" search must not answer for a
+        // repeated-section row: two `Character` rows with different
+        // colours and texts keep their own values.
+        let (mut doc, shape) = document_with_shape();
+        let mut section =
+            crate::section::Section::new(crate::name::SectionName::from_static("Character"));
+        for (red, text) in [(3u8, "first"), (7, "second")] {
+            let mut row = crate::section::Row::new();
+            let mut color = Cell::new(CellName::from_static("Color"));
+            color.value = Some(CellValue::Color(Color::new(red, 0, 0)));
+            row.cells.push(color);
+            let mut font = Cell::new(CellName::from_static("Font"));
+            font.value = Some(CellValue::Str(text.to_owned()));
+            row.cells.push(font);
+            section.rows.push(row);
+        }
+        doc.shape_mut(shape)
+            .expect("shape")
+            .sheet
+            .sections
+            .push(section);
+        let mut reader = CellReader::new(&doc);
+        for (index, (red, text)) in [(3u8, "first"), (7, "second")].into_iter().enumerate() {
+            let row = RowTarget::at(index);
+            assert_eq!(
+                reader
+                    .row_color(
+                        SheetRef::Shape(shape),
+                        "Character",
+                        row,
+                        &CellName::from_static("Color")
+                    )
+                    .expect("reads"),
+                Color::new(red, 0, 0),
+                "row {index}"
+            );
+            assert_eq!(
+                reader
+                    .row_text(
+                        SheetRef::Shape(shape),
+                        "Character",
+                        row,
+                        &CellName::from_static("Font")
+                    )
+                    .expect("reads"),
+                text,
+                "row {index}"
+            );
+        }
+    }
+
+    #[test]
     fn a_row_snapshot_is_the_value() {
         // A geometry row's own `Inh` snapshot is the value (the P3-15
         // gap): the row is matched by position here.
