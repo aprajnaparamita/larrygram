@@ -77,7 +77,7 @@ Phase 8: binary `.vsd`, `.vss` and `.vst` import, read-only, in `crates/vsd-bina
 | [P8-18](tasks/P8-18.md) | researcher | P8-16 | D+ | merged (risk facts per file, 849 of 5 075 flagged; `scout select`; 32 gate proposals and 206 export rows, none flagged) | 8c6b64b |
 | [P8-19](tasks/P8-19.md) | implementer | P8-16 | D+ | merged (placeholder ids, currency and NaN literals, empty page parts; 1 993 wide-corpus packages open and round trip, was 1 899; P8-11 F6 fixed) | 02d2a88 |
 | [P8-20](tasks/P8-20.md) | implementer | P8-19 | D++ | merged (the windows part on write, BackPage targets marked, fixtures rebuilt, completeness test; ADR 0073) | 758e695 |
-| [P8-21](tasks/P8-21.md) | test-engineer | P8-17, P8-18 | D++ | ready (the wide twin sweep: drawing units in the comparison, 77 twins, a local picture page, empty drawings out of the selection) | — |
+| [P8-21](tasks/P8-21.md) | test-engineer | P8-17, P8-18 | D++ | merged (drawing units in the comparison; 77 wide twins, 96.1% of cells agree, 0 panics; empty drawings out of the selection; fault classes for later fidelity work) | 33a4bf6 |
 | [R6](tasks/R6.md) | master | Phase 7 and 8 gates | boundary | waiting (remove the Microsoft sample goldens from history; nothing may run; the user's force-push follows) | — |
 | [R7](tasks/R7.md) | implementer | R6, the user's manual test | boundary | merged (`cargo xtask dist mac`: the .app and the .dmg; double-click open left to R8; the .dmg goes to testers after R8, R6 and the user's manual test) | 69a5ec3 |
 | [R8](tasks/R8.md) | implementer | R7 | boundary | merged (path arguments and the macOS open-documents event; ADR 0074) | 90e301b |
