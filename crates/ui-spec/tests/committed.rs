@@ -88,9 +88,14 @@ const PIN_365: LayoutCounts = LayoutCounts {
 // rows and drops the two rows that only held a moved Fluent id
 // (`tools.objects.ungroup` and `help.about.visio`). P7-14 adds
 // `help.welcome.next_start` (the Options dialog's welcome row, the
-// `OUR_COMMANDS` list of `xtask/src/extract/commands.rs`).
-const COMMANDS: usize = 1128;
-const SHORTCUTS: usize = 90;
+// `OUR_COMMANDS` list of `xtask/src/extract/commands.rs`). P7-20 adds
+// `edit.paste.in.place` (Paste in Place) and moves the `LineTool`
+// Fluent id from `format.line` onto `shape.line` (the drawing Line
+// tool).
+const COMMANDS: usize = 1129;
+// 90 rows from the source page; P7-20 adds the four `OWN_SHORTCUTS`
+// bindings (Ctrl+N, Ctrl+O, Ctrl+S, Ctrl+Alt+P).
+const SHORTCUTS: usize = 94;
 
 #[test]
 fn committed_data_loads_and_counts_are_pinned() {
