@@ -272,6 +272,45 @@ pub(super) fn run_units(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, C
     Ok(outcome(format!("Units: {}", units.name()), Vec::new()))
 }
 
+/// `help.welcome.next_start`: sets whether the welcome wizard opens on
+/// the next start, from the `show` argument (`"on"` or `"off"`).
+///
+/// A settings flag, not a document action: it carries no undo, like
+/// the other Options dialog rows (ADR 0032 amendment). A missing or
+/// unknown value is [`CommandError::InvalidArgs`] naming the accepted
+/// values; the command itself is always enabled.
+pub(super) fn run_welcome_next_start(
+    ctx: &mut AppCtx,
+    inv: &Invocation,
+) -> Result<Outcome, CommandError> {
+    let show = match inv.args.get("show") {
+        None => {
+            return Err(CommandError::invalid_args(
+                "show is required; expected one of on, off".to_owned(),
+            ));
+        }
+        Some(crate::ArgValue::Text(text)) => match text.as_str() {
+            "on" => true,
+            "off" => false,
+            _ => {
+                return Err(CommandError::invalid_args(format!(
+                    "unknown show value {text:?}; expected one of on, off"
+                )));
+            }
+        },
+        Some(_) => {
+            return Err(CommandError::invalid_args(
+                "show must be text; expected one of on, off".to_owned(),
+            ));
+        }
+    };
+    ctx.settings.welcome_seen = !show;
+    Ok(outcome(
+        format!("Welcome wizard on next start {}", on_off_word(show)),
+        Vec::new(),
+    ))
+}
+
 /// `app.office.center.options`: asks the dispatcher to open the
 /// View/Options dialog (ADR 0032 amendment: the dialog body dispatches
 /// commands; this handler just requests the dialog, never opens one).
@@ -405,6 +444,51 @@ mod tests {
         assert_eq!(outcome.message.as_deref(), Some("Nothing to undo"));
         let outcome = run_redo(&mut ctx, &invocation).expect("redo");
         assert_eq!(outcome.message.as_deref(), Some("Nothing to redo"));
+    }
+
+    /// One `help.welcome.next_start` invocation with `show` set.
+    fn welcome_invocation(show: &str) -> Invocation {
+        let args = crate::Args::new().with("show", crate::ArgValue::Text(show.to_owned()));
+        Invocation::new(args, crate::Source::Test)
+    }
+
+    #[test]
+    fn welcome_next_start_sets_the_flag_from_show() {
+        let mut ctx = AppCtx::new(Settings::default());
+        ctx.settings.welcome_seen = true;
+        let outcome = run_welcome_next_start(&mut ctx, &welcome_invocation("on")).expect("on");
+        assert!(!ctx.settings.welcome_seen, "on: the wizard opens again");
+        assert_eq!(
+            outcome.message.as_deref(),
+            Some("Welcome wizard on next start on")
+        );
+        let outcome = run_welcome_next_start(&mut ctx, &welcome_invocation("off")).expect("off");
+        assert!(ctx.settings.welcome_seen, "off: the wizard stays seen");
+        assert_eq!(
+            outcome.message.as_deref(),
+            Some("Welcome wizard on next start off")
+        );
+    }
+
+    #[test]
+    fn welcome_next_start_names_the_accepted_values() {
+        let mut ctx = AppCtx::new(Settings::default());
+        let error = run_welcome_next_start(&mut ctx, &Invocation::empty(crate::Source::Test))
+            .expect_err("show is required");
+        assert!(
+            error.to_string().contains("on, off"),
+            "the error names the values: {error}"
+        );
+        let error = run_welcome_next_start(&mut ctx, &welcome_invocation("maybe"))
+            .expect_err("unknown value");
+        assert!(
+            error.to_string().contains("maybe"),
+            "the error names the value: {error}"
+        );
+        let args = crate::Args::new().with("show", crate::ArgValue::Flag(true));
+        let error = run_welcome_next_start(&mut ctx, &Invocation::new(args, crate::Source::Test))
+            .expect_err("not a flag");
+        assert!(error.to_string().contains("must be text"), "{error}");
     }
 
     #[test]

@@ -772,6 +772,7 @@ pub const OUR_COMMANDS: &[(&str, &str)] = &[
     ("help.about", "About Larrygram"),
     ("help.sample_diagrams", "Sample Diagrams"),
     ("help.welcome", "Welcome"),
+    ("help.welcome.next_start", "Welcome wizard on next start"),
     ("insert.drawing.ellipse", "Ellipse"),
     ("insert.drawing.line", "Line"),
     ("insert.drawing.rectangle", "Rectangle"),

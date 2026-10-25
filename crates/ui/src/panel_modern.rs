@@ -13,8 +13,8 @@
 //! [`PanelModern::show_qat`] for the title bar, [`PanelModern::show`]
 //! draws the File view instead of the chrome while it is open.
 //!
-//! Sizes come from [`metrics`] (the theme tokens); colours are egui
-//! defaults until task P7-05's theme wiring merges.
+//! Sizes come from [`metrics`] (the theme tokens) and colours from
+//! the theme by token name (ADR 0063, [`crate::theme::color_at`]).
 
 pub mod common;
 mod controls;
@@ -317,11 +317,19 @@ impl PanelModern {
     ) -> Result<(), UiError> {
         let label = display_label(item, app);
         let action = resolve(item);
+        // A display-only menu opener (the customise dropdown) draws
+        // enabled whatever its command says: the click opens its
+        // menu, it does not run a command (P7-14's ruling on P7-10
+        // finding 2, the Panel Classic split arrow's rule).
+        let opens_display_menu = item.kind == ItemKind::Dropdown;
         let button = Button::new(label.as_str()).small();
         let response = ui
             .push_id(item.id.as_str(), |ui| {
-                ui.add_enabled_ui(matches!(action, Action::Emit(_)), |ui| ui.add(button))
-                    .inner
+                ui.add_enabled_ui(
+                    matches!(action, Action::Emit(_)) || opens_display_menu,
+                    |ui| ui.add(button),
+                )
+                .inner
             })
             .inner
             .accessible_name(label.as_str());
@@ -359,10 +367,15 @@ impl PanelModern {
             }
             ItemKind::Dropdown => {
                 // The ▾ customise menu: the current items, checked and
-                // disabled (customisation is out of scope).
-                finish(response.clone(), &action, &tooltip_text(&label, item), out);
-                // The customise menu is display-only: the current
-                // items, checked and disabled.
+                // disabled (customisation is out of scope). The
+                // button opens it even while `view.qat.customize` is
+                // a stub (P7-14: opening a display-only menu is not
+                // running a command).
+                if matches!(action, Action::Emit(_)) {
+                    finish(response.clone(), &action, &tooltip_text(&label, item), out);
+                } else {
+                    response.clone().on_hover_text(label.as_str());
+                }
                 let _ = egui::Popup::menu(&response).show(|ui| {
                     for entry in &layout.quick_access_toolbar {
                         let name = entry.label.clone().unwrap_or_default();
@@ -425,7 +438,12 @@ impl PanelModern {
             Rect::from_min_size(strip.min, Vec2::new(m.file_button_width, strip.height()));
         let response = ui
             .push_id("file_button", |ui| {
-                ui.put(file_rect, Button::new(file_label.as_str()))
+                let text = egui::RichText::new(file_label.as_str())
+                    .color(crate::theme::color_at(ui.ctx(), "accent.text"));
+                ui.put(
+                    file_rect,
+                    Button::new(text).fill(crate::theme::color_at(ui.ctx(), "accent")),
+                )
             })
             .inner
             .accessible_name(file_label.as_str())
@@ -435,12 +453,12 @@ impl PanelModern {
         }
 
         // The tabs, left to right, with the contextual sets grouped.
-        let mut x = file_rect.max.x;
+        let slots = tab_slots(ui, tabs, &m, file_rect.max.x);
         let active = self.active_index(tabs);
         for (index, tab) in tabs.iter().enumerate() {
             let caption = tab.label.clone().unwrap_or_default();
             let shown = caption.to_uppercase();
-            let tab_width = text_width(ui, &shown) + 2.0 * m.tab_padding_x;
+            let (x, tab_width) = slots.get(index).copied().unwrap_or((file_rect.max.x, 0.0));
             let rect = Rect::from_min_size(
                 egui::pos2(x, strip.min.y),
                 Vec2::new(tab_width, strip.height()),
@@ -451,9 +469,16 @@ impl PanelModern {
             }
             let response = ui
                 .push_id(tab.id.as_str(), |ui| {
+                    let token = if active == Some(index) {
+                        "tab.selected.text"
+                    } else {
+                        "tab.text"
+                    };
+                    let text = egui::RichText::new(shown.as_str())
+                        .color(crate::theme::color_at(ui.ctx(), token));
                     ui.put(
                         rect,
-                        Button::new(shown.as_str())
+                        Button::new(text)
                             .selected(active == Some(index))
                             .frame(true),
                     )
@@ -474,7 +499,6 @@ impl PanelModern {
                     self.overlay_open = true;
                 }
             }
-            x += tab_width;
         }
 
         // The tab-set captions, one per visible contextual set.
@@ -522,17 +546,24 @@ impl PanelModern {
     fn paint_tab_set_captions(&self, ui: &Ui, tabs: &[&Tab], strip: Rect, start_x: f32) {
         let m = &self.metrics;
         let painter = ui.painter();
-        let mut set_x = start_x;
-        for tab in tabs.iter().filter(|tab| tab.shown_in.is_some()) {
-            let caption = tab.label.clone().unwrap_or_default();
-            let shown = caption.to_uppercase();
-            let tab_width = text_width(ui, &shown) + 2.0 * m.tab_padding_x;
+        let slots = tab_slots(ui, tabs, m, start_x);
+        for (index, tab) in tabs
+            .iter()
+            .enumerate()
+            .filter(|(_, tab)| tab.shown_in.is_some())
+        {
+            let (set_x, tab_width) = slots.get(index).copied().unwrap_or((start_x, 0.0));
             let set_name = tab.tab_set.clone().unwrap_or_default();
+            let (band_token, _, text_token) = contextual_tokens(
+                set_family(ui.ctx(), &set_name)
+                    .as_deref()
+                    .unwrap_or_default(),
+            );
             // The caption block sits above the tab, inside the strip:
             // a 4 px band across the top, then the set name.
             let band =
                 Rect::from_min_size(egui::pos2(set_x, strip.min.y), Vec2::new(tab_width, 4.0));
-            painter.rect_filled(band, 0.0, ui.visuals().selection.bg_fill);
+            painter.rect_filled(band, 0.0, crate::theme::color_at(ui.ctx(), band_token));
             let caption_rect = Rect::from_min_size(
                 egui::pos2(set_x, strip.min.y + 4.0),
                 Vec2::new(tab_width, strip.height() - 4.0),
@@ -542,9 +573,8 @@ impl PanelModern {
                 egui::Align2::LEFT_TOP,
                 set_name,
                 egui::FontId::proportional(9.0),
-                ui.visuals().text_color(),
+                crate::theme::color_at(ui.ctx(), text_token),
             );
-            set_x += tab_width;
         }
     }
 
@@ -596,7 +626,7 @@ impl PanelModern {
                 egui::pos2(bar.min.x, bar.max.y),
                 egui::pos2(bar.max.x, bar.max.y),
             ],
-            egui::Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color),
+            egui::Stroke::new(1.0, crate::theme::color_at(ui.ctx(), "chrome.border")),
         );
         let inner = Rect::from_min_size(
             egui::pos2(bar.min.x, bar.min.y + m.command_bar_padding_top),
@@ -653,7 +683,7 @@ impl PanelModern {
             ],
             egui::Stroke::new(
                 m.group_separator_width,
-                ui.visuals().widgets.noninteractive.bg_stroke.color,
+                crate::theme::color_at(ui.ctx(), "group.separator"),
             ),
         );
     }
@@ -710,7 +740,7 @@ impl PanelModern {
             egui::Align2::CENTER_CENTER,
             text,
             egui::FontId::proportional(12.0),
-            ui.visuals().widgets.noninteractive.fg_stroke.color,
+            crate::theme::color_at(ui.ctx(), "group.caption.text"),
         );
         if let Some(launcher) = &group.launcher {
             let item = launcher_item(group, launcher);
@@ -809,6 +839,22 @@ impl PanelModern {
     }
 }
 
+/// Where each tab draws in the strip: `(x, width)` in tab order,
+/// starting at `start_x`. The tab buttons and the contextual set
+/// captions read the same table, so a caption block sits exactly
+/// above its tab (P7-14).
+fn tab_slots(ui: &Ui, tabs: &[&Tab], m: &Metrics, start_x: f32) -> Vec<(f32, f32)> {
+    let mut out = Vec::with_capacity(tabs.len());
+    let mut x = start_x;
+    for tab in tabs {
+        let shown = tab.label.clone().unwrap_or_default().to_uppercase();
+        let width = text_width(ui, &shown) + 2.0 * m.tab_padding_x;
+        out.push((x, width));
+        x += width;
+    }
+    out
+}
+
 /// The tabs a context shows: the core tabs, then the contextual tabs
 /// whose `shown_in` matches (ADR 0064).
 fn visible_tabs(layout: &LayoutV2, context: crate::contexts::SelectionContext) -> Vec<&Tab> {
@@ -900,35 +946,99 @@ fn launcher_item(
 }
 
 /// The widths one control takes, by kind and size: combos use their
-/// `width`, small controls the fixed icon width, the rest their label.
-fn measure_widths(ui: &Ui, items: &[&Item], m: &Metrics) -> Vec<f32> {
+/// `width` (at least their label), small controls the icon width, the
+/// rest the widest atom row the widget draws (the icon-over-label
+/// stack of a large control, the icon-and-label row of a medium one,
+/// the label-and-\u{25be} row of a large split's arrow part).
+///
+/// The constants are the frame and inter-atom spacing egui adds on
+/// top of the glyph and icon widths (calibrated against the atoms'
+/// preferred size, `panel_modern`'s tests). Under-measuring wraps the
+/// label one letter per line (P7-10's finding);
+/// `placement::every_drawn_control_fits_its_label` pins the rendered
+/// side. The widgets render at exactly these widths
+/// (`place::place`), so a caller can assert the fit.
+pub fn measure_widths(ui: &Ui, items: &[&Item], m: &Metrics) -> Vec<f32> {
     items
         .iter()
-        .map(|item| match item.kind {
-            ItemKind::Combo => (item.width.unwrap_or(107.0) as f32).clamp(16.0, 400.0),
-            ItemKind::Check => {
-                let label = item.label.clone().unwrap_or_default();
-                m.check_size + 4.0 + text_width(ui, &label) + 4.0
-            }
-            _ => {
-                let label = item.label.clone().unwrap_or_default();
-                let text = text_width(ui, &label);
-                if place::is_large(item) {
-                    (text + 8.0).clamp(m.large_min_width, 3.0 * m.large_min_width)
-                } else if item.size == Some(larrygram_ui_spec::v2::ControlSize::Small) {
-                    m.small_width
-                } else {
-                    let icon = if item.icon.is_some() {
-                        m.medium_icon + 4.0
+        .map(|item| {
+            let label = item.label.clone().unwrap_or_default();
+            let text = text_width(ui, &label);
+            let arrow = if matches!(
+                item.kind,
+                ItemKind::Dropdown | ItemKind::Gallery | ItemKind::Palette
+            ) {
+                ARROW_EXTRA
+            } else {
+                0.0
+            };
+            match item.kind {
+                ItemKind::Combo => (item.width.unwrap_or(107.0) as f32)
+                    .clamp(16.0, 400.0)
+                    .max(text + COMBO_EXTRA),
+                ItemKind::Check => m.check_size + 4.0 + text + CHECK_FRAME,
+                _ => {
+                    let split = matches!(item.kind, ItemKind::Split | ItemKind::SplitRecent);
+                    if place::is_large(item) {
+                        // The icon row and the label row (and, for a
+                        // split, the label-and-\u{25be} row of the arrow
+                        // part) all fit the column.
+                        let below = text + if split { ARROW_EXTRA } else { arrow };
+                        // The cap bounds a malformed label (400 px,
+                        // the combo cap): inside it no word is split.
+                        (m.large_icon.max(below) + LARGE_FRAME)
+                            .clamp(m.large_min_width, MAX_LABEL_W)
+                    } else if item.size == Some(larrygram_ui_spec::v2::ControlSize::Small) {
+                        // Icon only, with the arrow part of a split
+                        // beside it.
+                        let arrow_part = if split { m.split_arrow_width } else { arrow };
+                        (m.small_icon + SMALL_FRAME + arrow_part).max(m.small_width)
                     } else {
-                        0.0
-                    };
-                    text + icon + 12.0
+                        let icon = if item.icon.is_some() {
+                            m.medium_icon + ICON_EXTRA
+                        } else {
+                            0.0
+                        };
+                        let arrow_part = if split { m.split_arrow_width } else { arrow };
+                        (text + icon + arrow_part + ATOM_FRAME).min(MAX_LABEL_W)
+                    }
                 }
             }
         })
         .collect()
 }
+
+/// The width of a \u{25be} arrow in the command bar (`arrow_atom(10.0, ...)`)
+/// plus its spacing.
+const ARROW_EXTRA: f32 = 20.0;
+
+/// The icon's width allowance over the label on the same row (the
+/// icon plus its spacing).
+const ICON_EXTRA: f32 = 28.0;
+
+/// The frame and atom spacing of a medium command-bar button (plus
+/// the slack that keeps a text atom from shrinking into a wrap).
+const ATOM_FRAME: f32 = 36.0;
+
+/// The frame and atom spacing of a large button (the icon-over-label
+/// stack), plus the same slack.
+const LARGE_FRAME: f32 = 38.0;
+
+/// The frame and atom spacing of a small (icon-only) button.
+const SMALL_FRAME: f32 = 32.0;
+
+/// The frame and atom spacing of a check box with its label, plus
+/// slack.
+const CHECK_FRAME: f32 = 18.0;
+
+/// The space a combo takes around its label (padding and the arrow),
+/// plus slack.
+const COMBO_EXTRA: f32 = 30.0;
+
+/// The widest a measured control gets: a malformed label (or a huge
+/// theme font) cannot take the whole command bar (AGENTS.md section
+/// 6: bounded allocations on input-derived values).
+const MAX_LABEL_W: f32 = 400.0;
 
 /// The width of `text` in the UI font, in logical pixels.
 fn text_width(ui: &Ui, text: &str) -> f32 {
@@ -944,9 +1054,38 @@ fn text_width(ui: &Ui, text: &str) -> f32 {
 
 /// Paints the contextual-tab look of one tab: the set's fill behind
 /// the caption (the band is painted by the set caption block).
-fn paint_contextual_tab(ui: &Ui, rect: Rect, _tab: &Tab) {
+fn paint_contextual_tab(ui: &Ui, rect: Rect, tab: &Tab) {
+    let set_name = tab.tab_set.clone().unwrap_or_default();
+    let (_, fill_token, _) = contextual_tokens(
+        set_family(ui.ctx(), &set_name)
+            .as_deref()
+            .unwrap_or_default(),
+    );
     ui.painter()
-        .rect_filled(rect, 0.0, ui.visuals().faint_bg_color);
+        .rect_filled(rect, 0.0, crate::theme::color_at(ui.ctx(), fill_token));
+}
+
+/// The colour family of one contextual tab set (`contextual_tab_sets`
+/// in the theme; ADR 0064).
+fn set_family(ctx: &egui::Context, set_name: &str) -> Option<String> {
+    crate::theme::current(ctx).and_then(|theme| theme.contextual_tab_sets.get(set_name).cloned())
+}
+
+/// The three colour tokens of one contextual family: band, fill and
+/// text (`contextual.<family>.*`). An unknown family draws as green.
+fn contextual_tokens(family: &str) -> (&'static str, &'static str, &'static str) {
+    match family {
+        "orange" => (
+            "contextual.orange.band",
+            "contextual.orange.fill",
+            "contextual.orange.text",
+        ),
+        _ => (
+            "contextual.green.band",
+            "contextual.green.fill",
+            "contextual.green.text",
+        ),
+    }
 }
 
 #[cfg(test)]

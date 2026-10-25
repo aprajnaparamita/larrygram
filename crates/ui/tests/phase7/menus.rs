@@ -1108,3 +1108,210 @@ fn standard_and_formatting_dock_on_rows_0_and_1() {
         drawn.len()
     );
 }
+
+/// A toolbar popup's submenu rows open their children and the chain
+/// stays open while the pointer moves into them (P7-12 major 4: the
+/// popups opened their child level on a stateless hover, so moving
+/// the pointer into the child closed it — the bug the context-menu
+/// `context_chain` fix addressed).
+#[test]
+fn a_toolbar_popup_submenu_stays_open_when_the_pointer_moves_into_it() {
+    use larrygram_ui_spec::v2::ItemKind;
+
+    let mut rig = ClassicRig::new();
+    hide_floating(&mut rig);
+    let layout = rig.layout().clone();
+    // The fixture: the first toolbar item whose popup has a nested
+    // row with named children (the Reviewing toolbar's Delete Markup
+    // split in the committed data).
+    let (toolbar_id, opener) = layout
+        .toolbars
+        .iter()
+        .find_map(|toolbar| {
+            toolbar
+                .items
+                .iter()
+                .find(|item| {
+                    matches!(
+                        item.kind,
+                        ItemKind::Split
+                            | ItemKind::SplitRecent
+                            | ItemKind::Dropdown
+                            | ItemKind::Palette
+                    ) && item.items.iter().any(|child| {
+                        !child.items.is_empty()
+                            && child.items.iter().any(|grand| grand.label.is_some())
+                    })
+                })
+                .map(|item| (toolbar.id.clone(), item))
+        })
+        .expect("a toolbar item with a nested row");
+    let nested = opener
+        .items
+        .iter()
+        .find(|child| {
+            !child.items.is_empty() && child.items.iter().any(|grand| grand.label.is_some())
+        })
+        .expect("the nested row");
+    let grandchild = nested
+        .items
+        .iter()
+        .find(|item| item.label.is_some())
+        .expect("a named grandchild");
+    let opener_label = opener.label.clone().unwrap_or_default();
+    let nested_label = nested.label.clone().unwrap_or_default();
+    let grandchild_label = grandchild.label.clone().unwrap_or_default();
+
+    // The fixture toolbar may start hidden; show it and open the
+    // popup from the split's arrow part ("{label} menu").
+    rig.panel.borrow_mut().set_toolbar_visible_in(
+        larrygram_ui::panel_classic::WindowMode::Drawing,
+        &toolbar_id,
+        true,
+    );
+    rig.run();
+    rig.click(Role::Button, &format!("{opener_label} menu"));
+    assert!(
+        rig.names().contains(&nested_label),
+        "the popup draws {nested_label:?}"
+    );
+    // A hover opens the nested row's children after the delay.
+    rig.hover_nth(Role::MenuItem, &nested_label, 0);
+    for _ in 0..30 {
+        rig.run();
+    }
+    assert!(
+        rig.names().contains(&grandchild_label),
+        "hovering {nested_label:?} opens its children"
+    );
+    // The chain stays open while the pointer moves into the child
+    // level (the regression pin: a stateless hover closed it here).
+    rig.hover_nth(Role::MenuItem, &grandchild_label, 0);
+    for _ in 0..5 {
+        rig.run();
+    }
+    assert!(
+        rig.names().contains(&grandchild_label),
+        "the child level stays open while the pointer is inside it"
+    );
+}
+
+// --- the hand-written known-menu fixture (P7-12 major 9) ----------
+
+/// The File menu's 19 top-level rows, as they are in Visio 2007 (a
+/// hand-written fixture, not derived from the committed data).
+const KNOWN_FILE: &[(&str, &str)] = &[
+    ("New", "submenu"),
+    ("Open...", "button"),
+    ("Close", "button"),
+    ("Save", "button"),
+    ("Save As...", "button"),
+    ("Save as Web Page...", "button"),
+    ("Publish as PDF or XPS...", "button"),
+    ("Remove Hidden Information...", "button"),
+    ("Check In", "button"),
+    ("Check Out", "button"),
+    ("Discard Check Out", "button"),
+    ("Shapes", "submenu"),
+    ("Page Setup...", "button"),
+    ("Print Preview", "button"),
+    ("Print...", "button"),
+    ("Send To", "submenu"),
+    ("Properties", "button"),
+    ("", "list"), // the recent-files list draws its entries
+    ("Exit", "button"),
+];
+
+/// The Edit menu's 18 top-level rows.
+const KNOWN_EDIT: &[(&str, &str)] = &[
+    ("Undo", "button"),
+    ("Redo", "button"),
+    ("Cut", "button"),
+    ("Copy", "button"),
+    ("Paste", "button"),
+    ("Paste Special...", "button"),
+    ("Paste as Hyperlink", "button"),
+    ("Clear", "button"),
+    ("Select All", "button"),
+    ("Select by Type...", "button"),
+    ("Duplicate", "button"),
+    ("Delete Pages...", "button"),
+    ("Find...", "button"),
+    ("Replace...", "button"),
+    ("Reconvert", "button"),
+    ("Go To", "submenu"),
+    ("Links...", "button"),
+    ("Object...", "button"),
+];
+
+/// The View menu's 20 top-level rows.
+const KNOWN_VIEW: &[(&str, &str)] = &[
+    ("Shapes Window", "button"),
+    ("Pan & Zoom Window", "button"),
+    ("Shape Data Window", "button"),
+    ("Size & Position Window", "button"),
+    ("Drawing Explorer Window", "button"),
+    ("Master Explorer Window", "button"),
+    ("External Data Window", "button"),
+    ("Task Pane", "button"),
+    ("Toolbars", "submenu"),
+    ("View Direction", "submenu"),
+    ("Rulers", "check"),
+    ("Grid", "check"),
+    ("Guides", "check"),
+    ("Connection Points", "check"),
+    ("Page Breaks", "check"),
+    ("Header and Footer...", "button"),
+    ("Markup", "button"),
+    ("Layer Properties...", "button"),
+    ("Full Screen", "button"),
+    ("Zoom", "submenu"),
+];
+
+/// The committed File, Edit and View menus match the hand-written
+/// fixture row for row (P7-12 major 9: the ADR 0065 sweep's
+/// expectations derive from the same data the widgets read, so a rule
+/// wrong in both passed every sweep. This fixture is our own
+/// transcription and cannot drift with the data).
+#[test]
+fn the_known_menus_match_the_hand_written_fixture() {
+    use larrygram_ui_spec::v2::ItemKind;
+
+    let layout = &sets().get(LayoutKind::PanelClassic).v2;
+    let bar = layout
+        .menu_bars
+        .iter()
+        .find(|bar| bar.id == "drawing")
+        .expect("the drawing menu bar");
+    for (menu_id, known) in [
+        ("drawing.file", KNOWN_FILE),
+        ("drawing.edit", KNOWN_EDIT),
+        ("drawing.view", KNOWN_VIEW),
+    ] {
+        let menu = bar
+            .menus
+            .iter()
+            .find(|menu| menu.id == menu_id)
+            .unwrap_or_else(|| panic!("the {menu_id} menu"));
+        let rows: Vec<(&str, &str)> = menu
+            .items
+            .iter()
+            .map(|item| {
+                let kind = match item.kind {
+                    ItemKind::Button | ItemKind::Toggle | ItemKind::Palette => "button",
+                    ItemKind::Submenu => "submenu",
+                    ItemKind::Check => "check",
+                    ItemKind::List => "list",
+                    ItemKind::Options => "options",
+                    ItemKind::Heading => "heading",
+                    ItemKind::Combo => "combo",
+                    ItemKind::Split | ItemKind::SplitRecent => "split",
+                    ItemKind::Dropdown | ItemKind::Gallery => "dropdown",
+                    ItemKind::Launcher => "launcher",
+                };
+                (item.label.as_deref().unwrap_or_default(), kind)
+            })
+            .collect();
+        assert_eq!(rows, known, "{menu_id} matches the known menu");
+    }
+}

@@ -174,10 +174,15 @@ impl ShapesWindow {
     /// window and searching the catalog are later work); the button
     /// draws disabled so it never pretends to act.
     fn show_header(&mut self, ui: &mut Ui, header: Header) {
+        let title_fill = crate::theme::color_at(ui.ctx(), "pane.title.fill");
+        let title_text = crate::theme::color_at(ui.ctx(), "pane.title.text");
+        let band =
+            egui::Rect::from_min_size(ui.cursor().min, egui::vec2(ui.available_width(), 24.0));
+        ui.painter().rect_filled(band, 0.0, title_fill);
         match header {
             Header::Classic => {
                 ui.horizontal(|ui| {
-                    ui.label("Shapes");
+                    ui.label(egui::RichText::new("Shapes").color(title_text));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.add_enabled_ui(false, |ui| ui.small_button("x"))
                             .inner
@@ -193,9 +198,9 @@ impl ShapesWindow {
                 });
             }
             Header::Modern => {
-                ui.heading("Shapes");
-                ui.label("STENCILS");
-                ui.label("SEARCH");
+                ui.heading(egui::RichText::new("Shapes").color(title_text));
+                ui.label(egui::RichText::new("STENCILS").color(title_text));
+                ui.label(egui::RichText::new("SEARCH").color(title_text));
                 ui.add(egui::TextEdit::singleline(&mut self.search).hint_text("Search for shapes"));
             }
         }

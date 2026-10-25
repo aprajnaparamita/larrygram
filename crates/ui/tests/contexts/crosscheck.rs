@@ -48,6 +48,7 @@ const NO_ROW: &[&str] = &[
     "file.save_as",
     "help.about",
     "help.welcome",
+    "help.welcome.next_start",
     "insert.drawing.ellipse",
     "insert.drawing.line",
     "insert.drawing.rectangle",

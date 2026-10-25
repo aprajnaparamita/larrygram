@@ -1053,10 +1053,17 @@ fn hovering_a_popup_row_with_children_opens_its_submenu() {
             .expect("the Custom row");
         custom.hover();
     }
-    rig.run();
+    // A hover opens the child level after the submenu delay (the
+    // chain rules, P7-12 major 4: the popup used to open its child
+    // level on a stateless hover).
+    // `Harness::run` never settles while a popup repaints (P7-10
+    // open issue 7); step the frames instead.
+    for _ in 0..30 {
+        rig.harness.run_steps(1);
+    }
     assert!(
         rig.has(Role::MenuItem, "More Colors..."),
-        "the hover opens the child level"
+        "the hover opens the child level after the delay"
     );
 }
 

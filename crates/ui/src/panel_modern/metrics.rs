@@ -4,9 +4,8 @@
 //! [`Metrics::from_theme`] reads them from any [`Theme`] so task P7-09
 //! can pass the loaded theme in. A token that is missing, non-finite or
 //! non-positive keeps its default: a theme file can never crash the
-//! app (AGENTS.md section 6). Colours are not read here: task P7-05
-//! owns the colour tokens and the widgets use egui defaults until it
-//! merges.
+//! app (AGENTS.md section 6). Colours are not read here: the widgets
+//! ask [`crate::theme::color_at`] for those by token name.
 
 use egui::Vec2;
 use larrygram_ui_spec::v2::{Metric, Theme};

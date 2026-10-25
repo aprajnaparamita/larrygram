@@ -3,8 +3,9 @@
 //! grippers, split buttons, `split_recent`, palettes, colour
 //! dropdowns and combos.
 //!
-//! Colours come from the egui defaults until task P7-05 merges the
-//! theme tokens; the metrics below are the layout's numbers.
+//! Colours come from the theme by token name (ADR 0063,
+//! [`crate::theme::color_at`]) and the sizes from
+//! [`ClassicMetrics`]; with no theme applied the defaults draw.
 
 use egui::{Id, Pos2, Rect, Sense, Ui, Vec2, WidgetInfo};
 
@@ -14,20 +15,9 @@ use larrygram_ui_spec::v2::{DisplayMode, Dock, Item, ItemKind};
 use crate::Intent;
 use crate::icons;
 use crate::panel_classic::menu::{self, MenuOutcome};
+use crate::panel_classic::metrics::ClassicMetrics;
 use crate::panel_classic::rows::{self, Activation, Row};
 use crate::panel_classic::{MAX_DEPTH, PanelClassic, PanelInput};
-
-/// Height of one toolbar row (`docs/ui/panel-classic.md`).
-pub(crate) const ROW: f32 = 26.0;
-
-/// Height of a toolbar button.
-const BUTTON_HEIGHT: f32 = 22.0;
-
-/// Width of a toolbar gripper.
-const GRIPPER: f32 = 7.0;
-
-/// Width of a split button's arrow part.
-const SPLIT_ARROW: f32 = 11.0;
 
 /// The id of the right-click toolbar list popup.
 const TOOLBAR_LIST: &str = "panel_classic.toolbar_list";
@@ -55,7 +45,7 @@ pub(crate) fn draw_toolbars(
     by_row.sort_by_key(|(row, _)| *row);
     for (_, row_toolbars) in by_row {
         ui.horizontal_wrapped(|ui| {
-            ui.set_min_height(ROW);
+            ui.set_min_height(ClassicMetrics::for_ctx(ui.ctx()).toolbar_row_height);
             for toolbar in row_toolbars {
                 draw_gripper(ui, &toolbar.id);
                 for item in &toolbar.items {
@@ -67,7 +57,11 @@ pub(crate) fn draw_toolbars(
             }
         });
     }
-    // Floating toolbars (`dock: floating`) as small tool windows.
+    // Floating toolbars (`dock: floating`) as small tool windows,
+    // clear of the docked rows (P7-12 minor 8: they used to land on
+    // top of the rows and eat the clicks).
+    let below_rows = ui.cursor().min.y;
+    let mut floating_index = 0_usize;
     for toolbar in input
         .layout
         .toolbars
@@ -81,9 +75,13 @@ pub(crate) fn draw_toolbars(
         let label = toolbar.label.clone().unwrap_or_else(|| toolbar.id.clone());
         egui::Window::new(label)
             .id(Id::unique(("panel_classic_floating", toolbar.id.clone())))
-            // Near the top left of the drawing, clear of the menu bar
-            // and the docked rows (`docs/ui/panel-classic.md`).
-            .default_pos(Pos2::new(300.0, 120.0))
+            // Below the docked rows, near the top left of the
+            // drawing, cascaded so the windows do not cover each
+            // other (`docs/ui/panel-classic.md`).
+            .default_pos(Pos2::new(
+                300.0,
+                below_rows + 8.0 + 28.0 * floating_index as f32,
+            ))
             .collapsible(false)
             .resizable(false)
             .open(&mut open)
@@ -98,6 +96,7 @@ pub(crate) fn draw_toolbars(
         if !open {
             state.set_toolbar_visible_in(input.mode, &toolbar.id, false);
         }
+        floating_index += 1;
     }
     if secondary {
         state.open_popup = Some(TOOLBAR_LIST.to_owned());
@@ -126,9 +125,13 @@ fn toolbars_for<'a>(
 
 /// The 7 px gripper at the start of every toolbar.
 fn draw_gripper(ui: &mut Ui, id: &str) {
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(GRIPPER, BUTTON_HEIGHT), Sense::hover());
+    let m = ClassicMetrics::for_ctx(ui.ctx());
+    let (rect, _) = ui.allocate_exact_size(
+        Vec2::new(m.toolbar_gripper_width, m.toolbar_button.y),
+        Sense::hover(),
+    );
     let painter = ui.painter();
-    let color = ui.visuals().widgets.noninteractive.bg_stroke.color;
+    let color = crate::theme::color_at(ui.ctx(), "chrome.separator");
     for offset in [0.0, 3.0] {
         painter.line_segment(
             [
@@ -152,14 +155,22 @@ fn draw_item(
     anchor: &mut Rect,
 ) {
     if item.begin_group {
-        let (rect, _) = ui.allocate_exact_size(Vec2::new(7.0, BUTTON_HEIGHT), Sense::hover());
+        let m = ClassicMetrics::for_ctx(ui.ctx());
+        let margin = m.toolbar_separator_margin;
+        let (rect, _) = ui.allocate_exact_size(
+            Vec2::new(m.toolbar_separator_width + 2.0 * margin, m.toolbar_button.y),
+            Sense::hover(),
+        );
         let y = rect.center().y;
         ui.painter().line_segment(
             [
                 Pos2::new(rect.center().x, y - 8.0),
                 Pos2::new(rect.center().x, y + 8.0),
             ],
-            egui::Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color),
+            egui::Stroke::new(
+                m.toolbar_separator_width,
+                crate::theme::color_at(ui.ctx(), "chrome.separator"),
+            ),
         );
     }
     match item.kind {
@@ -189,17 +200,19 @@ fn draw_button(
     let enabled = !matches!(activation, Activation::Disabled { .. });
     let label = item.label.clone().unwrap_or_default();
     let checked = rows::item_check(item, input, state, false).unwrap_or(false);
-    let response = match button_content(ui.ctx(), item, &label, checked) {
+    let m = ClassicMetrics::for_ctx(ui.ctx());
+    let response = match button_content(ui.ctx(), item, &label, checked, enabled) {
         Some(button) => {
-            ui.add_enabled_ui(enabled, |ui| {
-                ui.add_sized(Vec2::new(23.0, BUTTON_HEIGHT), button)
-            })
-            .inner
+            ui.add_enabled_ui(enabled, |ui| ui.add_sized(m.toolbar_button, button))
+                .inner
         }
         None => {
             let button = egui::Button::new(label.clone()).selected(checked);
             ui.add_enabled_ui(enabled, |ui| {
-                ui.add_sized(Vec2::new(48.0, BUTTON_HEIGHT), button)
+                ui.add_sized(
+                    Vec2::new(2.0 * m.toolbar_button.x, m.toolbar_button.y),
+                    button,
+                )
             })
             .inner
         }
@@ -222,16 +235,18 @@ fn button_content(
     item: &Item,
     label: &str,
     checked: bool,
+    enabled: bool,
 ) -> Option<egui::Button<'static>> {
+    let icon_size = ClassicMetrics::for_ctx(ctx).icon_small;
     let display = item.display.unwrap_or(DisplayMode::Icon);
     match (display, item.icon.as_deref()) {
         (DisplayMode::Text, _) | (_, None) => None,
         (DisplayMode::Icon, Some(icon)) => Some(
-            egui::Button::new(icons::icon_themed(ctx, icon, menu::ICON, true)).selected(checked),
+            egui::Button::new(icons::icon_themed(ctx, icon, icon_size, enabled)).selected(checked),
         ),
         (DisplayMode::IconText, Some(icon)) => Some(
             egui::Button::new((
-                icons::icon_themed(ctx, icon, menu::ICON, true),
+                icons::icon_themed(ctx, icon, icon_size, enabled),
                 label.to_owned(),
             ))
             .selected(checked),
@@ -305,17 +320,16 @@ fn draw_split(
     let enabled = !matches!(main_activation, Activation::Disabled { .. });
     let main_label = main_item.label.clone().unwrap_or_else(|| label.clone());
     let main_checked = rows::item_check(&main_item, input, state, false).unwrap_or(false);
-    let response = match button_content(ui.ctx(), &main_item, &main_label, main_checked) {
+    let m = ClassicMetrics::for_ctx(ui.ctx());
+    let response = match button_content(ui.ctx(), &main_item, &main_label, main_checked, enabled) {
         Some(button) => {
-            ui.add_enabled_ui(enabled, |ui| {
-                ui.add_sized(Vec2::new(23.0, BUTTON_HEIGHT), button)
-            })
-            .inner
+            ui.add_enabled_ui(enabled, |ui| ui.add_sized(m.toolbar_button, button))
+                .inner
         }
         None => {
             ui.add_enabled_ui(enabled, |ui| {
                 ui.add_sized(
-                    Vec2::new(48.0, BUTTON_HEIGHT),
+                    Vec2::new(2.0 * m.toolbar_button.x, m.toolbar_button.y),
                     egui::Button::new(main_label.clone()),
                 )
             })
@@ -332,9 +346,9 @@ fn draw_split(
         anchor,
     );
     // The arrow part.
-    let arrow = egui::Button::new(icons::dropdown_arrow(menu::ICON))
-        .min_size(Vec2::new(SPLIT_ARROW, BUTTON_HEIGHT));
-    let response = ui.add_sized(Vec2::new(SPLIT_ARROW, BUTTON_HEIGHT), arrow);
+    let arrow_size = Vec2::new(m.toolbar_split_arrow_width, m.toolbar_button.y);
+    let arrow = egui::Button::new(icons::dropdown_arrow(m.icon_small)).min_size(arrow_size);
+    let response = ui.add_sized(arrow_size, arrow);
     response.widget_info(|| {
         WidgetInfo::labeled(egui::accesskit::Role::Button, true, format!("{label} menu"))
     });
@@ -360,17 +374,24 @@ fn draw_dropdown(
     let label = item.label.clone().unwrap_or_default();
     let activation = rows::button_activation(item, input, Source::Ui, Args::new());
     let enabled = !matches!(activation, Activation::Disabled { .. });
+    let m = ClassicMetrics::for_ctx(ui.ctx());
     let content = egui::Button::new((
         icons::icon_themed(
             ui.ctx(),
             item.icon.as_deref().unwrap_or(&item.id),
-            menu::ICON,
-            true,
+            m.icon_small,
+            enabled,
         ),
         icons::dropdown_arrow(10.0),
     ));
     let response = ui.add_enabled_ui(enabled, |ui| {
-        ui.add_sized(Vec2::new(34.0, BUTTON_HEIGHT), content)
+        ui.add_sized(
+            Vec2::new(
+                m.toolbar_button.x + m.toolbar_split_arrow_width,
+                m.toolbar_button.y,
+            ),
+            content,
+        )
     });
     let mut response = response.inner;
     response
@@ -403,11 +424,15 @@ fn draw_combo(
         rows::combo_activation(item, input, Source::Ui, String::new()),
         Activation::Disabled { .. }
     );
-    let width = item.width.unwrap_or(86.0) as f32;
+    let m = ClassicMetrics::for_ctx(ui.ctx());
+    let width = item
+        .width
+        .map(|width| width as f32)
+        .unwrap_or_else(|| combo_width(&item.id, &m));
     let response = ui
         .add_enabled_ui(enabled, |ui| {
             ui.add_sized(
-                Vec2::new(width, BUTTON_HEIGHT),
+                Vec2::new(width, m.toolbar_button.y),
                 egui::TextEdit::singleline(&mut buffer).hint_text(label.clone()),
             )
         })
@@ -436,11 +461,23 @@ fn draw_combo(
     }
 }
 
+/// The themed width of one toolbar combo (`combo.font.width`,
+/// `combo.font_size.width` and `combo.zoom.width`): the item id's last
+/// segment names the combo.
+fn combo_width(id: &str, m: &ClassicMetrics) -> f32 {
+    match id.rsplit('.').next() {
+        Some("font") => m.combo_font_width,
+        Some("zoom") => m.combo_zoom_width,
+        _ => m.combo_font_size_width,
+    }
+}
+
 /// Opens or closes the popup of a toolbar item.
 fn toggle_popup(state: &mut PanelClassic, item: &Item, rect: Rect) {
     if state.open_popup.as_deref() == Some(item.id.as_str()) {
-        state.open_popup = None;
+        state.close_popup();
     } else {
+        state.close_popup();
         state.open_popup = Some(item.id.clone());
         state.popup_rect = rect;
     }
@@ -458,13 +495,13 @@ fn draw_popup(
         return;
     };
     if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-        state.open_popup = None;
+        state.close_popup();
         return;
     }
     let mut clicked: Option<(String, Activation)> = None;
     if open == TOOLBAR_LIST {
         let rows = toolbar_list_rows(input, state);
-        clicked = draw_popup_level(ui, &rows, state.popup_rect.left_bottom(), 0);
+        clicked = draw_popup_levels(ui, &rows, state.popup_rect.left_bottom(), state);
     } else {
         let items = input
             .layout
@@ -480,7 +517,7 @@ fn draw_popup(
             });
         if let Some(item) = items {
             let rows = rows::rows(&item.items, input, state, Source::Ui, false, 0);
-            clicked = draw_popup_level(ui, &rows, state.popup_rect.left_bottom(), 0);
+            clicked = draw_popup_levels(ui, &rows, state.popup_rect.left_bottom(), state);
             // `split_recent`: the pick becomes the main button.
             if let Some((row_id, _)) = &clicked
                 && item.kind == ItemKind::SplitRecent
@@ -488,14 +525,14 @@ fn draw_popup(
                 state.split_recent.insert(item.id.clone(), row_id.clone());
             }
         } else {
-            state.open_popup = None;
+            state.close_popup();
         }
     }
     if let Some((_, activation)) = clicked {
         match activation {
             Activation::Intent(intent) => {
                 intents.push(intent);
-                state.open_popup = None;
+                state.close_popup();
             }
             Activation::ToolbarToggle { toolbar, intent } => {
                 if let Some(intent) = intent {
@@ -503,7 +540,7 @@ fn draw_popup(
                 }
                 let visible = state.toolbar_visible_in(input.layout, input.mode, &toolbar);
                 state.set_toolbar_visible_in(input.mode, &toolbar, !visible);
-                state.open_popup = None;
+                state.close_popup();
             }
             _ => {}
         }
@@ -513,7 +550,7 @@ fn draw_popup(
         && !state.popup_hit_rect().contains(pointer)
         && !state.popup_rect.contains(pointer)
     {
-        state.open_popup = None;
+        state.close_popup();
     }
 }
 
@@ -547,52 +584,80 @@ fn toolbar_list_rows(input: &PanelInput<'_>, state: &PanelClassic) -> Vec<Row> {
         .collect()
 }
 
-/// One popup level and its hovered submenus; returns the id and the
-/// activation of the row the user clicked (submenus open on hover).
-fn draw_popup_level(
+/// The open popup's levels and their chain state; returns the id and
+/// the activation of the row the user clicked.
+///
+/// The chain is state (`PanelClassic::popup_chain`), so a submenu
+/// stays open while the pointer moves into it — the `context_chain`
+/// rule of the context menus (P7-12 major 4; the old stateless hover
+/// closed a child level the moment the pointer left the parent row).
+fn draw_popup_levels(
     ui: &mut Ui,
     rows: &[Row],
     pos: Pos2,
-    depth: u32,
+    state: &mut PanelClassic,
 ) -> Option<(String, Activation)> {
-    if depth >= MAX_DEPTH {
-        return None;
+    let mut levels = vec![rows.to_vec()];
+    for link in state.popup_chain.iter().copied().take(MAX_DEPTH as usize) {
+        let Some(row) = levels
+            .last()
+            .and_then(|level| level.get(link))
+            .filter(|row| row.has_children())
+        else {
+            break;
+        };
+        levels.push(row.children.clone());
     }
-    let width = menu::menu_width(ui, rows);
-    let mut outcome = MenuOutcome::default();
-    egui::Area::new(Id::unique((
-        "panel_classic_popup",
-        depth,
-        pos.x.to_bits(),
-        pos.y.to_bits(),
-    )))
-    .order(egui::Order::Foreground)
-    .fixed_pos(pos)
-    .show(ui.ctx(), |ui| {
-        egui::Frame::popup(ui.style()).show(ui, |ui| {
-            outcome = menu::draw_menu(ui, rows, width, None, false);
-        });
-    });
-    let mut activated = None;
-    if let Some(index) = outcome.hovered
-        && let Some(row) = rows.get(index)
-        && row.has_children()
-        && let Some(rect) = outcome.rects.get(index)
-    {
-        activated = draw_popup_level(
-            ui,
-            &row.children,
-            Pos2::new(rect.right(), rect.top()),
-            depth + 1,
-        );
+    let mut pos = pos;
+    let mut activated: Option<(usize, usize)> = None;
+    let mut open_child: Option<(usize, usize)> = None;
+    let mut hover: Option<(usize, usize)> = None;
+    for (level, level_rows) in levels.iter().enumerate() {
+        let width = menu::menu_width(ui, level_rows);
+        let mut outcome = MenuOutcome::default();
+        egui::Area::new(Id::unique(("panel_classic_popup", level)))
+            .order(egui::Order::Foreground)
+            .fixed_pos(pos)
+            .show(ui.ctx(), |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    outcome = menu::draw_menu(ui, level_rows, width, None, false);
+                });
+            });
+        if let Some(index) = outcome.clicked {
+            if level_rows.get(index).is_some_and(Row::has_children) {
+                open_child = Some((level, index));
+            } else {
+                activated = Some((level, index));
+            }
+        }
+        if let Some(index) = outcome.hovered {
+            hover = Some((level, index));
+        }
+        // The next level draws beside the open submenu row.
+        if let Some(link) = state.popup_chain.get(level).copied()
+            && let Some(rect) = outcome.rects.get(link).copied()
+        {
+            pos = rect.right_top();
+        }
     }
-    if let Some(index) = outcome.clicked
-        && let Some(row) = rows.get(index)
-        && !row.has_children()
-    {
-        activated = Some((row.id.clone(), row.activation.clone()));
+    super::update_chain_hover(
+        ui,
+        &levels,
+        hover,
+        &mut state.popup_chain,
+        &mut state.popup_hover,
+    );
+    if let Some((level, index)) = open_child {
+        state.popup_chain.truncate(level);
+        state.popup_chain.push(index);
+        state.popup_hover = None;
     }
-    activated
+    activated.and_then(|(level, index)| {
+        levels
+            .get(level)
+            .and_then(|level| level.get(index))
+            .map(|row| (row.id.clone(), row.activation.clone()))
+    })
 }
 
 /// The items of a menu tree, searched by placement id.

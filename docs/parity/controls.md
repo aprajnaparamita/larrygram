@@ -777,6 +777,7 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | file.save_as | Save As | implemented |
 | help.about | About Larrygram | implemented |
 | help.welcome | Welcome | implemented |
+| help.welcome.next_start | Welcome wizard on next start | implemented |
 | insert.drawing.ellipse | Ellipse | implemented |
 | insert.drawing.line | Line | implemented |
 | insert.drawing.rectangle | Rectangle | implemented |

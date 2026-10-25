@@ -1081,6 +1081,10 @@ const NON_EDITING: &[(&str, &str)] = &[
     ("view.toggle_grid", "view state only (ADR 0040 rule 3)"),
     ("view.rulers", "view state only (ADR 0040 rule 3)"),
     ("view.units", "view state only (ADR 0040 rule 3)"),
+    (
+        "help.welcome.next_start",
+        "settings flag only (P7-14; the Options rows carry no undo)",
+    ),
     ("view.ui_layout.panel_2016", "layout choice only (ADR 0032)"),
     ("view.ui_layout.panel_365", "layout choice only (ADR 0032)"),
     (

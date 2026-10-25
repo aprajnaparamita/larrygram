@@ -126,3 +126,32 @@ fn help_about_and_help_welcome_work_in_every_layout() {
         );
     }
 }
+
+/// The Panel Modern title-bar Help menu opens and its entries reach
+/// the registry (P7-12 major 1: only the direct dispatches were
+/// tested, never the interactive menu path).
+#[test]
+fn the_modern_help_menu_opens_and_its_entries_dispatch() {
+    let mut rig = ShellRig::new(settings_for(LayoutKind::PanelModern));
+    rig.click(Role::Button, "Help");
+    rig.run();
+    {
+        let names = rig.names();
+        assert!(
+            names.contains_key("Welcome"),
+            "the Help menu draws Welcome: {names:?}"
+        );
+        assert!(
+            names.contains_key("About Larrygram"),
+            "the Help menu draws About: {names:?}"
+        );
+    }
+    // Click the entry: its command runs through the registry and the
+    // wizard opens (the same outcome `help.welcome` has).
+    rig.click_named("Welcome");
+    rig.run();
+    assert!(
+        rig.has(WIZARD_TITLE),
+        "the menu entry's command reached the registry"
+    );
+}
