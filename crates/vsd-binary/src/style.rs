@@ -529,7 +529,12 @@ fn style_reference(
 }
 
 /// Maps a line record to the style's line cells.
-fn map_line(data: &[u8], sheet: &mut Sheet, context: &str, warnings: &mut Vec<ImportWarning>) {
+pub(crate) fn map_line(
+    data: &[u8],
+    sheet: &mut Sheet,
+    context: &str,
+    warnings: &mut Vec<ImportWarning>,
+) {
     let reader = Reader::new(data);
     let Some(width) = reader.f64(1) else {
         warn(
@@ -574,7 +579,11 @@ fn map_line(data: &[u8], sheet: &mut Sheet, context: &str, warnings: &mut Vec<Im
     {
         set_cell(sheet, cell);
     }
-    if let Some(begin) = reader.byte(24)
+    // The arrow and cap bytes follow the rounding value's format byte:
+    // 24 is the format byte of the rounding double, so the markers sit
+    // at 25, 26 and 27 (P8-15 regression: reading 24 drew an arrowhead
+    // on every outline).
+    if let Some(begin) = reader.byte(25)
         && let Some(cell) = number_cell(
             "BeginArrow",
             f64::from(begin),
@@ -585,12 +594,12 @@ fn map_line(data: &[u8], sheet: &mut Sheet, context: &str, warnings: &mut Vec<Im
     {
         set_cell(sheet, cell);
     }
-    if let Some(end) = reader.byte(25)
+    if let Some(end) = reader.byte(26)
         && let Some(cell) = number_cell("EndArrow", f64::from(end), context, warnings, "end arrow")
     {
         set_cell(sheet, cell);
     }
-    if let Some(cap) = reader.byte(26)
+    if let Some(cap) = reader.byte(27)
         && let Some(cell) = number_cell("LineCap", f64::from(cap), context, warnings, "line cap")
     {
         set_cell(sheet, cell);
@@ -598,7 +607,12 @@ fn map_line(data: &[u8], sheet: &mut Sheet, context: &str, warnings: &mut Vec<Im
 }
 
 /// Maps a fill-and-shadow record to the style's fill and shadow cells.
-fn map_fill(data: &[u8], sheet: &mut Sheet, context: &str, warnings: &mut Vec<ImportWarning>) {
+pub(crate) fn map_fill(
+    data: &[u8],
+    sheet: &mut Sheet,
+    context: &str,
+    warnings: &mut Vec<ImportWarning>,
+) {
     let reader = Reader::new(data);
     let Some(foreground_index) = reader.byte(0) else {
         warn(
@@ -700,7 +714,7 @@ fn map_fill(data: &[u8], sheet: &mut Sheet, context: &str, warnings: &mut Vec<Im
 }
 
 /// Maps a text block record to the style's text block cells.
-fn map_text_block(
+pub(crate) fn map_text_block(
     data: &[u8],
     sheet: &mut Sheet,
     context: &str,
@@ -1102,9 +1116,9 @@ mod tests {
         data[10..14].copy_from_slice(&color);
         data[14] = pattern;
         data[16..24].copy_from_slice(&0.25f64.to_le_bytes());
-        data[24] = 2;
-        data[25] = 3;
-        data[26] = 1;
+        data[25] = 2;
+        data[26] = 3;
+        data[27] = 1;
         data
     }
 
@@ -1398,6 +1412,22 @@ mod tests {
             row_value(&style.sheet, "Paragraph", 0, "Bullet"),
             number(2.0)
         );
+    }
+
+    #[test]
+    fn the_arrow_and_cap_bytes_follow_the_rounding_format_byte() {
+        // P8-15: byte 24 is the rounding value's format byte. Reading
+        // the markers there drew an arrowhead on every outline.
+        let sheet = style_sheet(u32::MAX, u32::MAX, u32::MAX);
+        let mut line = line_record(0.25, [1, 2, 3, 0], 2);
+        line[24] = 7;
+        let chunks = style_chunks(&sheet, &[(0x85, 1, &line)]);
+        let (document, warnings) = collect(&chunks);
+        assert!(warnings.is_empty(), "{warnings:?}");
+        let style = &document.stylesheet.styles[0];
+        assert_eq!(value(&style.sheet, "BeginArrow"), number(2.0));
+        assert_eq!(value(&style.sheet, "EndArrow"), number(3.0));
+        assert_eq!(value(&style.sheet, "LineCap"), number(1.0));
     }
 
     #[test]

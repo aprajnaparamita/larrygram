@@ -133,9 +133,9 @@ fn shape_of(
         .ok()
         .map(rgb);
     let stroke_width = number(reader, "LineWeight");
-    let shadow = number(reader, "ShadowPattern").map(|pattern| pattern.round() as i64 != 0);
+    let shadow = number(reader, "ShdwPattern").map(|pattern| pattern.round() as i64 != 0);
     let shadow_color = reader
-        .color(sheet, &CellName::from_static("ShadowForegnd"))
+        .color(sheet, &CellName::from_static("ShdwForegnd"))
         .ok()
         .map(rgb);
 

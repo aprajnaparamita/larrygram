@@ -340,6 +340,12 @@ fn shape_node(
         managed.push("Master");
         push(&mut node, "Master", master.visio_id.to_string());
     }
+    if shape.is_guide {
+        // A guide draws on screen only (P8-15: it never prints or
+        // exports), and the type is regenerated here, never preserved.
+        managed.push("Type");
+        push(&mut node, "Type", "Guide".to_owned());
+    }
     for (local, reference) in [
         ("LineStyle", shape.line_style),
         ("FillStyle", shape.fill_style),
