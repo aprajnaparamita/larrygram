@@ -603,6 +603,16 @@ fn check_popup(rig: &mut ModernRig, entries: &[Entry], opener: &Named) {
                     "the row {:?} dispatches its command",
                     entry.label
                 );
+                // The dispatch argument (P7-12 major 5): an option
+                // row carries its `value`, as the Panel Classic rows
+                // do.
+                let expected = expect::args_of(&entry.expect);
+                assert_eq!(
+                    intents[0].invocation.args.text("value"),
+                    expected.text("value"),
+                    "the row {:?} dispatches its value argument",
+                    entry.label
+                );
                 assert_eq!(ints_source(&intents[0]), Source::CommandBar);
             }
             Expect::Submenu(children) => {

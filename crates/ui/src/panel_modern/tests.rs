@@ -416,6 +416,12 @@ impl Rig {
         self.run();
     }
 
+    /// The full intents of every frame so far (the dispatch
+    /// arguments, P7-14).
+    fn raw_intents(&self) -> Vec<Intent> {
+        self.intents.borrow().clone()
+    }
+
     /// The intents of every frame so far.
     fn intents(&self) -> Vec<String> {
         self.intents
@@ -1627,4 +1633,41 @@ fn a_contextual_tab_slot_sits_after_the_core_tabs() {
         .expect("the layout has a contextual tab");
     let (x, _) = slots[first_contextual];
     assert!(x > 59.0, "the contextual tab is right of the File button");
+}
+
+/// A dropdown's `options` row with no command of its own dispatches
+/// the opener's command with the choice as its `value` argument
+/// (P7-14's dispatch-argument fix, the Panel Classic contract).
+#[test]
+fn a_dropdown_choice_dispatches_its_value() {
+    let mut options = item("pick.options", ItemKind::Options, "Options", None);
+    options.options = vec!["Portrait".to_owned(), "Landscape".to_owned()];
+    let mut dropdown = item("pick", ItemKind::Dropdown, "Pick", Some("file.save"));
+    dropdown.items = vec![options];
+    let layout = hand_built(
+        vec![tab("tab", "Home", vec![group("g", vec![dropdown])])],
+        Vec::new(),
+    );
+    let mut rig = Rig::build_on(
+        Surface::Chrome,
+        SelectionContext::EmptyPage,
+        egui::vec2(1200.0, 600.0),
+        layout,
+        ListData::new(),
+        AppCtx::new(Settings::default()),
+        Resolving::Test(Rc::new(always)),
+    );
+    rig.click_entry("Pick", "Landscape");
+    let intents = rig.raw_intents();
+    // The opener dispatches its own command too (a dropdown
+    // dispatches and opens); the choice's intent carries the value.
+    let picked = intents
+        .iter()
+        .find(|intent| intent.invocation.args.text("value").is_some())
+        .expect("the choice dispatches the opener's command");
+    assert_eq!(
+        picked.invocation.args.text("value"),
+        Some("Landscape"),
+        "the choice arrives as the `value` argument"
+    );
 }

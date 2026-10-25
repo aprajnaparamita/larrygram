@@ -8,7 +8,9 @@
 
 use std::collections::BTreeSet;
 
-use larrygram_commands::{AppCtx, CommandId, CommandStatus, Invocation, Registry, Source};
+use larrygram_commands::{
+    AppCtx, ArgValue, Args, CommandId, CommandStatus, Invocation, Registry, Source,
+};
 use larrygram_ui_spec::embedded::is_out_of_scope;
 use larrygram_ui_spec::v2::Item;
 
@@ -43,6 +45,24 @@ pub(crate) enum Action {
         /// The tooltip text (ours, never Microsoft's).
         reason: String,
     },
+}
+
+/// The same action with its `value` argument set to `value`: the
+/// choice of a combo, a list row or an `options` row dispatches
+/// `value` like the Panel Classic rows do (P7-14's dispatch-argument
+/// fix).
+pub(crate) fn with_value(action: &Action, value: &str) -> Action {
+    match action {
+        Action::Emit(intent) => {
+            let mut intent = intent.clone();
+            let args = Args::new().with("value", ArgValue::Text(value.to_owned()));
+            intent.invocation = Invocation::new(args, intent.invocation.source);
+            Action::Emit(intent)
+        }
+        Action::Disabled { reason } => Action::Disabled {
+            reason: reason.clone(),
+        },
+    }
 }
 
 /// How the widgets resolve a control to its [`Action`].
