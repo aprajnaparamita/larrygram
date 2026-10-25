@@ -26,12 +26,12 @@
 //!
 //! The callback only queues the paths;
 //! `crate::open_documents` dispatches them as `file.open` on the UI
-//! thread. This is the one `unsafe` module of the app (ADR 0073), and
+//! thread. This is the one `unsafe` module of the app (ADR 0074), and
 //! nothing in it may unwind across the AppKit callback (AGENTS.md
 //! section 6): the body runs inside `std::panic::catch_unwind`, and a
 //! failure is logged and dropped.
 
-#![allow(unsafe_code)] // ADR 0073: one Objective-C method injection.
+#![allow(unsafe_code)] // ADR 0074: one Objective-C method injection.
 
 use std::ffi::CString;
 use std::path::PathBuf;
@@ -104,7 +104,7 @@ fn file_paths(urls: &NSArray<NSURL>) -> Vec<PathBuf> {
 fn open_urls_imp() -> Imp {
     // SAFETY: `open_urls` has exactly the signature of
     // `application:openURLs:`, which [`open_urls_types`] spells out
-    // for the registration below (ADR 0073).
+    // for the registration below (ADR 0074).
     unsafe { std::mem::transmute::<OpenUrls, Imp>(open_urls) }
 }
 
@@ -136,7 +136,7 @@ fn add_hook(class: &AnyClass) -> Result<(), AppError> {
     // `application:openURLs:` (`void (id, SEL, NSApplication *,
     // NSArray<NSURL *> *)`), and `types` is that signature in
     // `@encode` spelling; `class_addMethod` copies the encoding
-    // (ADR 0073).
+    // (ADR 0074).
     let added = unsafe {
         ffi::class_addMethod(
             class as *const AnyClass as *mut AnyClass,

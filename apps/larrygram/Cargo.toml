@@ -47,7 +47,7 @@ larrygram-render = { path = "../../crates/render" }
 # of the saved and reopened documents (ADR 0049, task P5-10).
 larrygram-model = { path = "../../crates/model" }
 
-# The macOS open-documents delegate (task R8, ADR 0073): the same
+# The macOS open-documents delegate (task R8, ADR 0074): the same
 # objc2 family and versions eframe 0.37 already uses, so the features
 # unify in one build. MIT OR Apache-2.0 (checked by cargo deny).
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -65,7 +65,7 @@ objc2-foundation = { version = "0.3", default-features = false, features = [
     "NSURL",
 ] }
 
-# The workspace lint list, with one exception (ADR 0073): `unsafe`
+# The workspace lint list, with one exception (ADR 0074): `unsafe`
 # is denied rather than forbidden, so the one macOS delegate module
 # (`macos_open_urls.rs`) can carry its own `#![allow(unsafe_code)]`.
 # Cargo forbids mixing `lints.workspace = true` with overrides, so the
