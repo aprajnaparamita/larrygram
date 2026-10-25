@@ -406,15 +406,97 @@ fn encode(scene: &Scene, format: Format, scale: f64) -> Result<Vec<u8>, CommandE
 // The commands
 // ---------------------------------------------------------------------------
 
-/// `file.new`: an empty document session, which becomes active.
+/// The page size of a new blank drawing (task P7-20).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BlankSize {
+    /// The documented page defaults (the plain New Drawing).
+    Default,
+    /// A4 portrait, 210 x 297 mm (New Drawing (Metric)).
+    Metric,
+    /// US Letter portrait (New Drawing (US Units)).
+    Us,
+}
+
+impl BlankSize {
+    /// The page size in inches (`width`, `height`), or `None` for the
+    /// documented defaults.
+    fn page_size(self) -> Option<(f64, f64)> {
+        match self {
+            // A4 portrait: 210 x 297 mm at 25.4 mm per inch.
+            BlankSize::Metric => Some((8.2677, 11.6929)),
+            BlankSize::Us => Some((8.5, 11.0)),
+            BlankSize::Default => None,
+        }
+    }
+
+    /// The status-line message of the run.
+    fn message(self) -> &'static str {
+        match self {
+            BlankSize::Default => "New drawing",
+            BlankSize::Metric => "New drawing (Metric)",
+            BlankSize::Us => "New drawing (US Units)",
+        }
+    }
+}
+
+/// Opens a new blank drawing: one page named `Page-1`, the session's
+/// view toggles seeded from the settings defaults (ADR 0032
+/// amendment, P4-15 review major 1).
 ///
-/// The session's view toggles are seeded from the settings defaults
-/// (ADR 0032 amendment, P4-15 review major 1).
-pub(super) fn run_new(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandError> {
-    let mut session = DocumentSession::new(Document::new(), None);
+/// Task P7-20: the drawing gets its one page here (a document with no
+/// pages cannot be drawn on), and the `metric` / `us` variants set the
+/// page size (the measurement units follow in a later task; the P7-17
+/// note).
+fn open_blank(ctx: &mut AppCtx, size: BlankSize) -> Result<Outcome, CommandError> {
+    let mut document = Document::new();
+    let page = document.add_page("Page-1").map_err(super::model_error)?;
+    if let Some((width, height)) = size.page_size() {
+        for (cell, value) in [("PageWidth", width), ("PageHeight", height)] {
+            document
+                .write_cell(
+                    SheetRef::Page(page),
+                    &larrygram_model::CellName::from_static(cell),
+                    &larrygram_model::CellWrite::new(
+                        super::edit::number_literal(value),
+                        CellValue::Number(value),
+                    ),
+                )
+                .map_err(super::model_error)?;
+        }
+    }
+    let mut session = DocumentSession::new(document, None);
     session.view = ViewState::from_settings(&ctx.settings);
     ctx.open_document(session);
-    Ok(outcome("New drawing", Vec::new()))
+    Ok(outcome(size.message(), Vec::new()))
+}
+
+/// `file.new`: a new blank drawing (task P7-20: one page, so the
+/// drawing is usable immediately).
+pub(super) fn run_new(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandError> {
+    open_blank(ctx, BlankSize::Default)
+}
+
+/// `file.new.blank.drawing`: New Drawing (Classic's File > New menu
+/// and the Standard toolbar; the P7-17 open issue).
+pub(super) fn run_new_blank(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandError> {
+    open_blank(ctx, BlankSize::Default)
+}
+
+/// `file.new.blank.drawing.metric`: New Drawing (Metric), an A4 page.
+pub(super) fn run_new_blank_metric(
+    ctx: &mut AppCtx,
+    _inv: &Invocation,
+) -> Result<Outcome, CommandError> {
+    open_blank(ctx, BlankSize::Metric)
+}
+
+/// `file.new.blank.drawing.us`: New Drawing (US Units), a US Letter
+/// page.
+pub(super) fn run_new_blank_us(
+    ctx: &mut AppCtx,
+    _inv: &Invocation,
+) -> Result<Outcome, CommandError> {
+    open_blank(ctx, BlankSize::Us)
 }
 
 /// `file.open`: reads `path` (or `name` + `data` on wasm, ADR 0036)
@@ -543,6 +625,9 @@ fn save_document(
         session.path = Some(path.clone());
     }
     session.dirty = false;
+    // A saved file is a recent file too (task P7-20: the recent list
+    // follows what the user actually worked on, as in Visio).
+    remember_recent(&mut ctx.settings, path.clone());
     Ok(outcome(format!("Saved {}", path.display()), Vec::new()))
 }
 
@@ -1487,5 +1572,68 @@ mod tests {
         assert!(message.contains("cannot read input:"), "{message}");
         assert!(message.contains("unsupported file version 5"), "{message}");
         assert!(ctx.active_document().is_none());
+    }
+
+    /// Task P7-20: `file.new` and the three New Drawing ids open a
+    /// usable blank drawing — one page named `Page-1` — and the unit
+    /// variants set the page size.
+    #[test]
+    fn the_new_drawing_commands_open_one_page() {
+        use super::super::view::page_size;
+
+        let mut ctx = AppCtx::new(crate::Settings::default());
+        let outcome = run_new(&mut ctx, &Invocation::empty(Source::Test)).expect("new");
+        assert_eq!(outcome.message.as_deref(), Some("New drawing"));
+        let session = ctx.active_document().expect("session");
+        assert_eq!(session.document.pages.len(), 1, "one blank page");
+        assert_eq!(session.document.pages[0].name, "Page-1");
+
+        let mut ctx = AppCtx::new(crate::Settings::default());
+        let outcome = run_new_blank(&mut ctx, &Invocation::empty(Source::Test)).expect("blank");
+        assert_eq!(outcome.message.as_deref(), Some("New drawing"));
+        assert_eq!(
+            ctx.active_document().expect("session").document.pages.len(),
+            1
+        );
+
+        let mut ctx = AppCtx::new(crate::Settings::default());
+        let outcome =
+            run_new_blank_metric(&mut ctx, &Invocation::empty(Source::Test)).expect("metric");
+        assert_eq!(outcome.message.as_deref(), Some("New drawing (Metric)"));
+        let session = ctx.active_document().expect("session");
+        let (width, height) = page_size(&session.document.pages[0]);
+        assert!((width - 8.2677).abs() < 0.001, "A4 width, got {width}");
+        assert!((height - 11.6929).abs() < 0.001, "A4 height, got {height}");
+
+        let mut ctx = AppCtx::new(crate::Settings::default());
+        let outcome = run_new_blank_us(&mut ctx, &Invocation::empty(Source::Test)).expect("us");
+        assert_eq!(outcome.message.as_deref(), Some("New drawing (US Units)"));
+        let session = ctx.active_document().expect("session");
+        let (width, height) = page_size(&session.document.pages[0]);
+        assert!((width - 8.5).abs() < 0.001, "Letter width, got {width}");
+        assert!((height - 11.0).abs() < 0.001, "Letter height, got {height}");
+    }
+
+    /// Task P7-20: saving records the file in the recent list, most
+    /// recent first and de-duplicated (the open path already did).
+    #[test]
+    fn saving_records_recent_files() {
+        let dir = scratch_dir();
+        let path = dir.join("plan.vsdx");
+        let mut ctx = AppCtx::new(crate::Settings::default());
+        run_new(&mut ctx, &Invocation::empty(Source::Test)).expect("new");
+        let invocation = Invocation::new(
+            Args::new().with("path", ArgValue::Path(path.clone())),
+            Source::Ui,
+        );
+        run_save_as(&mut ctx, &invocation).expect("save as");
+        assert_eq!(ctx.settings.recent_files, vec![path.clone()]);
+        run_save(&mut ctx, &Invocation::empty(Source::Ui)).expect("save");
+        assert_eq!(
+            ctx.settings.recent_files,
+            vec![path.clone()],
+            "one entry, not two"
+        );
+        std::fs::remove_dir_all(&dir).expect("clean up");
     }
 }
