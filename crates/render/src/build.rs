@@ -463,8 +463,8 @@ fn page_nodes(ctx: &mut Ctx<'_>, page: PageId, depth: usize) -> Vec<Node> {
 
 /// One shape as a scene node: a group for a shape with sub-shapes, a shape
 /// node otherwise, and `None` when the shape draws nothing (an invisible
-/// layer, an empty geometry without text, a repeat in a cyclic children
-/// list).
+/// layer, a guide, an empty geometry without text, a repeat in a cyclic
+/// children list).
 fn shape_node(
     ctx: &mut Ctx<'_>,
     page: PageId,
@@ -478,6 +478,12 @@ fn shape_node(
     }
     visited.push(id);
     if hidden_by_layer(ctx, page, id) {
+        return None;
+    }
+    // A guide draws on screen only: Visio never prints or exports one,
+    // so it has no scene node (P8-15: `Visio6PlanWithDimensions.vsd`'s
+    // six dimension guides drew as lines across the page).
+    if ctx.doc.shape(id).is_some_and(|shape| shape.is_guide) {
         return None;
     }
     let (children, has_children) = {
@@ -2711,6 +2717,24 @@ mod tests {
             Some(Node::Shape(shape)) => assert_eq!(shape.stroke, None),
             _ => panic!("expected a shape"),
         }
+    }
+
+    #[test]
+    fn a_guide_shape_draws_nothing() {
+        // P8-15: Visio draws guides on screen only; they never print or
+        // export, so a guide has no scene node.
+        let (mut doc, _page, shape) = document_with_shape();
+        {
+            let entity = doc.shape_mut(shape).expect("shape");
+            entity.is_guide = true;
+        }
+        with_geometry(
+            &mut doc,
+            shape,
+            vec![grow("MoveTo", &[("X", 0.0), ("Y", 0.0)])],
+        );
+        let scene = build(&doc);
+        assert!(scene.nodes.is_empty(), "{:?}", scene.nodes);
     }
 
     #[test]
