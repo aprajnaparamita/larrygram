@@ -6,7 +6,7 @@ A clean-room, open-source diagramming app in pure Rust that aims to read and wri
 
 ## Build status
 
-Last full gate on `main`: **green, 2026-10-25** (commit `dcbaca7`, mid Phase 7 and 8, with the P8-07 importer). Every merge batch since then passed the quick gate with the corpus tests (latest `3ea5b0b`, the About window). The gate runs locally, on one machine, through a queue (`tools/gate-queue/`); there is no hosted CI.
+Last full gate on `main`: **green, 2026-10-25** (commit `a09fc18`, late Phase 7 and 8: the `.vsd` fidelity work, the wide-corpus sweeps, the rejected-package fixes and the macOS `.dmg` tooling). Every merge batch passes the quick gate with the corpus tests first. The gate runs locally, on one machine, through a queue (`tools/gate-queue/`); there is no hosted CI.
 
 | Step | Result |
 |---|---|
