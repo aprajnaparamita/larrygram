@@ -506,7 +506,6 @@ mod tests {
     #[test]
     fn queued_paths_open_in_the_next_frame() {
         // Task R8 Goal 2: the drain runs `file.open` per queued path.
-        // This is the only test that uses the app queue.
         let path = fixture();
         let mut app = LarrygramApp::new(
             build_shell(
@@ -517,6 +516,9 @@ mod tests {
             )
             .expect("shell"),
         );
+        let _serialised = open_documents::QUEUE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         open_documents::QUEUED.queue_paths([path.clone()]);
         app.open_queued_paths();
         let session = app.shell.app.active_document().expect("the document opens");
