@@ -143,11 +143,13 @@ const CT_PAGES: &str = "application/vnd.ms-visio.pages+xml";
 const CT_PAGE: &str = "application/vnd.ms-visio.page+xml";
 const CT_MASTERS: &str = "application/vnd.ms-visio.masters+xml";
 const CT_MASTER: &str = "application/vnd.ms-visio.master+xml";
+const CT_WINDOWS: &str = "application/vnd.ms-visio.windows+xml";
 const REL_DOCUMENT: &str = "http://schemas.microsoft.com/visio/2010/relationships/document";
 const REL_PAGES: &str = "http://schemas.microsoft.com/visio/2010/relationships/pages";
 const REL_PAGE: &str = "http://schemas.microsoft.com/visio/2010/relationships/page";
 const REL_MASTERS: &str = "http://schemas.microsoft.com/visio/2010/relationships/masters";
 const REL_MASTER: &str = "http://schemas.microsoft.com/visio/2010/relationships/master";
+const REL_WINDOWS: &str = "http://schemas.microsoft.com/visio/2010/relationships/windows";
 
 /// One archive entry: name, bytes and compression method.
 struct Entry {
@@ -309,8 +311,8 @@ fn build_malformed(malformed: Malformed) -> Vec<u8> {
 
 /// The part set of one well-formed package (ADR 0016): content types,
 /// package and document relationships, `document.xml`, `pages.xml` (empty for
-/// a stencil), `page1.xml` (drawings and templates) and the master parts
-/// (stencils and templates).
+/// a stencil), `page1.xml` (drawings and templates), the master parts
+/// (stencils and templates) and the windows part (task P8-20).
 fn package_entries(kind: DocKind) -> Vec<Entry> {
     let has_pages_contents = kind != DocKind::Stencil;
     let has_masters = kind != DocKind::Drawing;
@@ -371,7 +373,31 @@ fn package_entries(kind: DocKind) -> Vec<Entry> {
             method: stored,
         });
     }
+    entries.push(Entry {
+        name: "visio/windows.xml".to_owned(),
+        data: windows_xml().into_bytes(),
+        method: stored,
+    });
     entries
+}
+
+/// The next free `rId` for the ids a relationships part already uses.
+fn next_rel_id(used: &[&str]) -> String {
+    let mut n: u32 = 1;
+    loop {
+        let id = format!("rId{n}");
+        if !used.contains(&id.as_str()) {
+            return id;
+        }
+        n = n.saturating_add(1);
+    }
+}
+
+/// The windows part: an empty `Windows` root (task P8-20: an empty element
+/// is what Visio accepts; the element names are structural facts recorded in
+/// `docs/vsdx-inventory.md`, the values are ours).
+fn windows_xml() -> String {
+    format!("{XML_DECL}\n<Windows xmlns=\"{XMLNS_VISIO}\" xmlns:r=\"{XMLNS_R}\"/>")
 }
 
 fn content_types(kind: DocKind, has_pages_contents: bool, has_masters: bool) -> String {
@@ -398,6 +424,7 @@ fn content_types(kind: DocKind, has_pages_contents: bool, has_masters: bool) -> 
         override_decl(&mut s, "/visio/masters/masters.xml", CT_MASTERS);
         override_decl(&mut s, "/visio/masters/master1.xml", CT_MASTER);
     }
+    override_decl(&mut s, "/visio/windows.xml", CT_WINDOWS);
     s.push_str("</Types>");
     s
 }
@@ -432,11 +459,17 @@ fn document_rels(has_masters: bool) -> String {
     s.push_str(&format!(
         "<Relationship Id=\"rId1\" Type=\"{REL_PAGES}\" Target=\"pages/pages.xml\"/>"
     ));
+    let mut used = vec!["rId1"];
     if has_masters {
         s.push_str(&format!(
             "<Relationship Id=\"rId2\" Type=\"{REL_MASTERS}\" Target=\"masters/masters.xml\"/>"
         ));
+        used.push("rId2");
     }
+    s.push_str(&format!(
+        "<Relationship Id=\"{}\" Type=\"{REL_WINDOWS}\" Target=\"windows.xml\"/>",
+        next_rel_id(&used)
+    ));
     s.push_str("</Relationships>");
     s
 }
@@ -731,6 +764,11 @@ fn render_entries(feature: Feature) -> Vec<Entry> {
             method: stored,
         });
     }
+    entries.push(Entry {
+        name: "visio/windows.xml".to_owned(),
+        data: windows_xml().into_bytes(),
+        method: stored,
+    });
     entries
 }
 
@@ -758,6 +796,7 @@ fn render_content_types(feature: Feature) -> String {
     if feature == Feature::Theme {
         override_decl(&mut s, "/visio/theme/theme1.xml", CT_THEME);
     }
+    override_decl(&mut s, "/visio/windows.xml", CT_WINDOWS);
     s.push_str("</Types>");
     s
 }
@@ -770,16 +809,23 @@ fn render_document_rels(feature: Feature) -> String {
     s.push_str(&format!(
         "<Relationship Id=\"rId1\" Type=\"{REL_PAGES}\" Target=\"pages/pages.xml\"/>"
     ));
+    let mut used = vec!["rId1"];
     if feature == Feature::MasterInheritance {
         s.push_str(&format!(
             "<Relationship Id=\"rId2\" Type=\"{REL_MASTERS}\" Target=\"masters/masters.xml\"/>"
         ));
+        used.push("rId2");
     }
     if feature == Feature::Theme {
         s.push_str(&format!(
             "<Relationship Id=\"rId3\" Type=\"{REL_THEME}\" Target=\"theme/theme1.xml\"/>"
         ));
+        used.push("rId3");
     }
+    s.push_str(&format!(
+        "<Relationship Id=\"{}\" Type=\"{REL_WINDOWS}\" Target=\"windows.xml\"/>",
+        next_rel_id(&used)
+    ));
     s.push_str("</Relationships>");
     s
 }
@@ -831,7 +877,7 @@ fn render_pages_xml(feature: Feature) -> String {
     );
     if feature == Feature::BackgroundPages {
         pages.push_str(
-            "<Page ID=\"1\" NameU=\"Page-2\" Name=\"Background\">\
+            "<Page ID=\"1\" NameU=\"Page-2\" Name=\"Background\" Background=\"1\">\
              <PageSheet LineStyle=\"0\" FillStyle=\"0\" TextStyle=\"0\">\
              <Cell N=\"PageWidth\" V=\"8.5\"/><Cell N=\"PageHeight\" V=\"11\"/>\
              </PageSheet><Rel r:id=\"rId2\"/></Page>",
