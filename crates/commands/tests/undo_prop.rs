@@ -689,6 +689,43 @@ fn run_paste(ctx: &mut AppCtx, registry: &Registry, id: &'static str, pick: u32)
     );
 }
 
+/// `edit.paste.in.place` (task P7-20): copies its subject first, then
+/// pastes with no arguments (the command takes neither `x` nor `y`).
+fn run_paste_in_place(ctx: &mut AppCtx, registry: &Registry, id: &'static str, _pick: u32) {
+    select_tops(ctx, 1);
+    try_dispatch(ctx, registry, "edit.copy", Args::new());
+    try_dispatch(ctx, registry, id, Args::new());
+}
+
+/// `tools.backgrounds` (task P7-20): the other seed page as the
+/// background page of the active one.
+fn run_set_background(ctx: &mut AppCtx, registry: &Registry, id: &'static str, _pick: u32) {
+    let mut args = numbers(&[]);
+    args.set("background", ArgValue::Text("Page-2".to_owned()));
+    try_dispatch(ctx, registry, id, args);
+}
+
+/// `format.set.page.orientation` (task P7-20): always `landscape`, so
+/// the run swaps the seed page's sides and pushes its one edit (the
+/// pick cannot vary the value: `portrait` is a no-op on the portrait
+/// seed and pushes nothing).
+fn run_orientation(ctx: &mut AppCtx, registry: &Registry, id: &'static str, _pick: u32) {
+    let mut args = numbers(&[]);
+    args.set("orientation", ArgValue::Text("landscape".to_owned()));
+    try_dispatch(ctx, registry, id, args);
+}
+
+/// `tools.options.page.setup` and `page.size.dlg` (task P7-20): a page
+/// size from the pick.
+fn run_page_size(ctx: &mut AppCtx, registry: &Registry, id: &'static str, pick: u32) {
+    try_dispatch(
+        ctx,
+        registry,
+        id,
+        numbers(&[("width", size(pick, 3)), ("height", size(pick, 4))]),
+    );
+}
+
 /// `insert.shape`: a catalog master instance (the first drop also
 /// materialises the master, a known difference of the undo contract).
 fn run_insert_shape(ctx: &mut AppCtx, registry: &Registry, id: &'static str, pick: u32) {
@@ -1055,6 +1092,60 @@ const CASES: &[Case] = &[
         id: "text.commit",
         run: run_text,
     },
+    // The task P7-20 basic set: the aliases run the same runner as the
+    // handler they alias (one action, one undo contract).
+    Case {
+        id: "edit.clear",
+        run: run_delete,
+    },
+    Case {
+        id: "edit.paste.in.place",
+        run: run_paste_in_place,
+    },
+    Case {
+        id: "edit.paste.duplicate",
+        run: run_duplicate,
+    },
+    Case {
+        id: "edit.duplicate.page",
+        run: run_page_plain,
+    },
+    Case {
+        id: "insert.new.background.page",
+        run: run_page_plain,
+    },
+    Case {
+        id: "tools.backgrounds",
+        run: run_set_background,
+    },
+    Case {
+        id: "tools.options.page.setup",
+        run: run_page_size,
+    },
+    Case {
+        id: "page.size.dlg",
+        run: run_page_size,
+    },
+    Case {
+        id: "format.set.page.orientation",
+        run: run_orientation,
+    },
+    Case {
+        id: "tools.options.new.page",
+        run: run_page_named,
+    },
+    Case {
+        id: "tools.blank.page.insert",
+        run: run_page_named,
+    },
+    Case {
+        id: "tools.blank.page.insert.visio",
+        run: run_page_named,
+    },
+    Case {
+        id: "page.reorder_pages",
+        run: run_page_reorder,
+    },
 ];
 
 /// Every implemented registry id that produces no undoable edit, with
@@ -1067,6 +1158,18 @@ const NON_EDITING: &[(&str, &str)] = &[
     ("help.about", "opens a dialog (UiRequest)"),
     ("help.welcome", "opens a dialog (UiRequest)"),
     ("file.new", "replaces the active document, no undo (P4-02)"),
+    (
+        "file.new.blank.drawing",
+        "opens a new document, no undo (P7-20)",
+    ),
+    (
+        "file.new.blank.drawing.metric",
+        "opens a new document, no undo (P7-20)",
+    ),
+    (
+        "file.new.blank.drawing.us",
+        "opens a new document, no undo (P7-20)",
+    ),
     ("file.open", "reads a file, no undo (P4-02)"),
     ("file.save", "writes a file (ADR 0048)"),
     ("file.save_as", "writes a file (ADR 0048)"),
@@ -1078,6 +1181,25 @@ const NON_EDITING: &[(&str, &str)] = &[
     ("view.zoom.in", "view state only (ADR 0040 rule 3)"),
     ("view.zoom.out", "view state only (ADR 0040 rule 3)"),
     ("view.zoom.fit", "view state only (ADR 0040 rule 3)"),
+    ("view.fit.in.window", "view state only (ADR 0040 rule 3)"),
+    ("view.zoom.page.width", "view state only (ADR 0040 rule 3)"),
+    ("view.zoom.dialog", "view state only (ADR 0040 rule 3)"),
+    ("view.custom", "view state only (ADR 0040 rule 3)"),
+    ("shape.draw.zoom", "view state only (ADR 0040 rule 3)"),
+    ("view.view50", "view state only (ADR 0040 rule 3)"),
+    ("view.view75", "view state only (ADR 0040 rule 3)"),
+    ("view.view100", "view state only (ADR 0040 rule 3)"),
+    ("view.view150", "view state only (ADR 0040 rule 3)"),
+    ("view.view200", "view state only (ADR 0040 rule 3)"),
+    ("view.view400", "view state only (ADR 0040 rule 3)"),
+    ("view.guides", "view state only (ADR 0040 rule 3)"),
+    ("view.toggle_guides", "view state only (ADR 0040 rule 3)"),
+    ("view.show.page.breaks", "view state only (ADR 0040 rule 3)"),
+    ("view.page.breaks", "view state only (ADR 0040 rule 3)"),
+    (
+        "view.full_screen_mode",
+        "window-mode flag only (P7-20, the tool pattern)",
+    ),
     ("view.toggle_grid", "view state only (ADR 0040 rule 3)"),
     ("view.rulers", "view state only (ADR 0040 rule 3)"),
     ("view.units", "view state only (ADR 0040 rule 3)"),
@@ -1097,6 +1219,10 @@ const NON_EDITING: &[(&str, &str)] = &[
     ),
     ("page.next", "active-page navigation, no edit"),
     ("page.previous", "active-page navigation, no edit"),
+    (
+        "tools.options.go.to.drawing",
+        "active-page navigation, no edit (P7-20)",
+    ),
     ("edit.select", "selection only (P5-16)"),
     ("edit.select_all", "selection only (P5-16)"),
     ("edit.deselect", "selection only (P5-16)"),
