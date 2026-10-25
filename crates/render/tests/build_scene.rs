@@ -395,11 +395,14 @@ fn ellipse_draws_a_closed_curve() {
 }
 
 #[test]
-fn infinite_line_draws_the_row_segment() {
-    // P8-15: the row's two points are the shape's own extent. The
-    // reference pictures draw the finite axis of a dimension line,
-    // never a line across the page.
-    let (mut doc, _page, shape) = document_with_shape();
+fn infinite_line_clips_to_the_page() {
+    let (mut doc, page, shape) = document_with_shape();
+    if let Some(entity) = doc.pages.get_mut(page.index as usize) {
+        entity.sheet.cells = vec![
+            number_cell("PageWidth", 10.0),
+            number_cell("PageHeight", 8.0),
+        ];
+    }
     with_geometry(
         &mut doc,
         shape,
@@ -411,8 +414,8 @@ fn infinite_line_draws_the_row_segment() {
     assert_eq!(
         first_path(&build(&doc)),
         vec![
-            Segment::MoveTo(Point::new(-5.0, 4.0)),
-            Segment::LineTo(Point::new(15.0, 4.0)),
+            Segment::MoveTo(Point::new(0.0, 4.0)),
+            Segment::LineTo(Point::new(10.0, 4.0)),
         ]
     );
 }
@@ -1266,10 +1269,10 @@ fn a_background_page_the_document_lacks_draws_an_empty_group() {
 }
 
 #[test]
-fn an_infinite_line_row_never_poisons_the_path() {
-    // The row draws its own segment (P8-15); a zero-length direction
-    // draws a zero-length one, and no case can put NaN points in the
-    // path.
+fn a_degenerate_infinite_line_row_draws_no_segment() {
+    // `clip_infinite_line` degrades to "no segment": a line that misses
+    // the page and a zero-length direction both draw nothing instead of
+    // poisoning the path with NaN points.
     let cases: [[(&str, f64); 4]; 3] = [
         // Parallel above the page: the line never crosses it.
         [("X", 0.0), ("Y", 50.0), ("A", 1.0), ("B", 50.0)],
@@ -1298,18 +1301,10 @@ fn an_infinite_line_row_never_poisons_the_path() {
             ],
         );
         let scene = build(&doc);
-        let points: Vec<Point> = first_path(&scene)
-            .into_iter()
-            .map(|segment| match segment {
-                Segment::MoveTo(point) | Segment::LineTo(point) => point,
-                _ => Point::new(0.0, 0.0),
-            })
-            .collect();
-        assert!(
-            points
-                .iter()
-                .all(|point| point.x.is_finite() && point.y.is_finite()),
-            "{cells:?}"
+        assert_eq!(
+            first_path(&scene),
+            vec![Segment::MoveTo(Point::new(0.0, 0.0))],
+            "the row draws nothing: {cells:?}"
         );
     }
 }
