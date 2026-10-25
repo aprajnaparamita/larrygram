@@ -21,15 +21,20 @@
 //! The fixes also exposed two writer round-trip faults (`src/write/**`,
 //! listed in the task's Result): a short `Connect` spelling was dropped
 //! and rebuilt with the omitted attributes, and a `U` code the reader
-//! kept preserved was written over. Both are pinned here too.
+//! kept preserved was written over. Both are pinned here too. The
+//! master's follow-up from P8-11 F6 (a non-Guide `Type` value dropped
+//! on a save from the model alone) is pinned at the end.
 
 // The never-crash lints apply to non-test code only (clippy.toml).
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
 use std::io::Write as _;
 
-use larrygram_model::{Cell, XmlNode, diff};
-use larrygram_vsdx::{Error, Limits, Package, PartData, read_package, to_model, write_document};
+use larrygram_model::{Cell, Document, XmlChild, XmlNode, diff};
+use larrygram_vsdx::{
+    Error, Limits, Package, PartData, from_model, read_package, to_model, write_document,
+    write_package,
+};
 use zip::CompressionMethod;
 use zip::write::{SimpleFileOptions, ZipWriter};
 
@@ -123,6 +128,38 @@ fn preserved_attribute(cell: &Cell, name: &str, value: &str) -> bool {
         .attributes
         .iter()
         .any(|attribute| attribute.name.local == name && attribute.value == value)
+}
+
+/// The attributes of the first `Shape` element of the page contents
+/// part after a save from the model alone (the generate path of
+/// [`from_model`], where preserved content must write back verbatim).
+fn generated_shape_attributes(document: &Document) -> Vec<(String, String)> {
+    let package = from_model(document).expect("generates");
+    let written = write_package(&package).expect("writes");
+    let reparsed = read_package(&written, &Limits::DEFAULT).expect("written package reads");
+    let part = reparsed
+        .parts
+        .iter()
+        .find(|part| part.name.as_str().ends_with("page1.xml"))
+        .expect("the page contents part");
+    let PartData::Xml(root) = &part.data else {
+        panic!("the page contents part is XML");
+    };
+    fn first_shape(node: &XmlNode) -> Option<&XmlNode> {
+        if node.name.local == "Shape" {
+            return Some(node);
+        }
+        node.children.iter().find_map(|child| match child {
+            XmlChild::Element(element) => first_shape(element),
+            _ => None,
+        })
+    }
+    let shape = first_shape(root).expect("a shape element");
+    shape
+        .attributes
+        .iter()
+        .map(|attribute| (attribute.name.local.clone(), attribute.value.clone()))
+        .collect()
 }
 
 /// Round-trips one package: read, write, re-read and re-write (the
@@ -331,6 +368,56 @@ fn a_highly_compressible_part_still_round_trips() {
     );
     let bytes = drawing(&page);
     assert_round_trip("compressible part", &bytes);
+}
+
+/// A non-Guide `Type` value is not something the model holds: it stays
+/// in `Preserved` and writes back verbatim, including on a save from the
+/// model alone (P8-19 follow-up from P8-11 F6: that save used to drop
+/// it, because only a guide's `Type` is regenerated).
+#[test]
+fn a_group_type_shape_keeps_its_type() {
+    let page = "<PageContents xmlns=\"http://schemas.microsoft.com/office/visio/2012/main\" xml:space=\"preserve\"><Shapes><Shape ID=\"1\" Type=\"Group\"/></Shapes></PageContents>";
+    let bytes = drawing(page);
+    let document = to_model(&read_package(&bytes, &Limits::DEFAULT).expect("reads")).expect("maps");
+    let shape = &document.shapes[0];
+    assert!(!shape.is_guide);
+    assert!(
+        shape
+            .preserved
+            .attributes
+            .iter()
+            .any(|a| a.name.local == "Type" && a.value == "Group"),
+        "the type is preserved: {:?}",
+        shape.preserved.attributes
+    );
+    assert_round_trip("group type", &bytes);
+    assert!(
+        generated_shape_attributes(&document).contains(&("Type".to_owned(), "Group".to_owned()))
+    );
+}
+
+/// An unknown `Type` value is kept the same way.
+#[test]
+fn an_unknown_type_shape_keeps_its_type() {
+    let page = "<PageContents xmlns=\"http://schemas.microsoft.com/office/visio/2012/main\" xml:space=\"preserve\"><Shapes><Shape ID=\"1\" Type=\"Frobnicate\"/></Shapes></PageContents>";
+    let bytes = drawing(page);
+    let document = to_model(&read_package(&bytes, &Limits::DEFAULT).expect("reads")).expect("maps");
+    let shape = &document.shapes[0];
+    assert!(!shape.is_guide);
+    assert!(
+        shape
+            .preserved
+            .attributes
+            .iter()
+            .any(|a| a.name.local == "Type" && a.value == "Frobnicate"),
+        "the type is preserved: {:?}",
+        shape.preserved.attributes
+    );
+    assert_round_trip("unknown type", &bytes);
+    assert!(
+        generated_shape_attributes(&document)
+            .contains(&("Type".to_owned(), "Frobnicate".to_owned()))
+    );
 }
 
 /// A zip that is not a Visio package at all keeps its clean, specific

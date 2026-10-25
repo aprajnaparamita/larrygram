@@ -659,9 +659,16 @@ impl Mapper<'_> {
                 "Type" => {
                     // A guide (Visio draws guides on screen only; they
                     // never print or export, so the renderer skips
-                    // them). The attribute is mapped, not preserved:
-                    // the write side regenerates it from the field.
-                    shape.is_guide = attribute.value == "Guide";
+                    // them). `Guide` is mapped, not preserved: the write
+                    // side regenerates it from the field. Any other
+                    // value (`Group`, `Shape`, ...) is not something the
+                    // model holds: it stays in `Preserved` and writes
+                    // back verbatim (P8-19 follow-up from P8-11 F6).
+                    if attribute.value == "Guide" {
+                        shape.is_guide = true;
+                    } else {
+                        shape.preserved.attributes.push(attribute.clone());
+                    }
                 }
                 "Master" => {
                     if master.is_none() {
