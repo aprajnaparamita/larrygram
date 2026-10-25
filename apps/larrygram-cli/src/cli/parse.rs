@@ -46,6 +46,9 @@ Options:
   --strict          Exit with the warnings code when warnings occurred.
   -h, --help        Print this help.
 
+Input files: .vsdx, .vssx, .vstx or the binary .vsd, .vss, .vst
+(read-only formats, imported into the model).
+
 Exit codes:
   0  success
   1  usage error (bad arguments)
