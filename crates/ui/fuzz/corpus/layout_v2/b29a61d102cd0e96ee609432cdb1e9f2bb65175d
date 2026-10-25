@@ -1,0 +1,23 @@
+# Test gixture for crates/ui-spec. Not real Microsoft data.
+schema_version: 2
+id: panel-modern
+name: Panel Modern
+kind: panel-modern
+theme: panel-modnrewi
+ndow:
+  regions:
+  - id: drawing
+    edge: fill
+quick_access_toolbar:
+- id: qat.save
+  kind: button
+  label: Save
+  command: file.save
+  new_command: true
+  icon: file.save
+file_button:
+  label: File
+  opens: file_view
+tabs:
+- id: tab.home
+  lab

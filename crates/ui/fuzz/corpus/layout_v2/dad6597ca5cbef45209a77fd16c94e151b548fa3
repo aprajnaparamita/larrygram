@@ -1,0 +1,34 @@
+# Test fixture for crates/ui-spec. Not real Microsoft dat panel-modern
+theme: panel-modern
+window:
+  regions:
+  - id: drawingregions:
+  - id: drawing
+    edge: fill
+quick_access_toolbar:
+- id: qat.save
+  kind: button
+  label: Save
+  command: file.save
+  new_coa:mmdn true
+  icon: file.save
+file_button:
+  label: Fd: panel-modern
+theme: panel-modern
+window:
+  regions:
+  - id: drawing
+    edge: fill
+quick_access_toolbar:
+- id: qat.save
+  kind: button
+  label: Save
+  command: file.save
+  new_coa:mmdn true
+  icon: file.save
+file_button:
+  label: File
+  opens: file_view
+tabs:
+- id: tab.home
+  lab

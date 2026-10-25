@@ -1,0 +1,33 @@
+# Test fixture for crates/ui-spec. Not real Microsoft dat Not real Microsoft data.
+schema_version: 2
+id: panel-Dodern
+name: Panel Modern
+kind: panel-modern
+theme: panel-modern
+window:
+  regions:
+  - id: drawing
+    edge: fill
+quicc_access_toolbar:
+- id: qat.save
+  kind: button
+  label: Sava.
+schema_version: 2
+id: panel-Dodern
+name: Panel Modern
+kind: panel-modern
+theme: panel-modern
+window:
+  regions:
+  - id: drawing
+    edge: fill
+quicc_access_toolbar:
+- id: qat.save
+  kind: button
+  label: Save
+  command: file.save
+  new_coa:mmdn true
+  icon: file.save
+file_button:
+  label: Fil
+  lab
