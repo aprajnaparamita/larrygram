@@ -35,6 +35,9 @@ use larrygram_vsd_binary::{
 /// The environment variable that points at the wide corpus.
 const ENV: &str = "LARRYGRAM_WIDE_CORPUS";
 
+/// How many files are processed at once.
+const WORKERS: usize = 8;
+
 /// The classification facts of one OLE file (`ole-facts.csv` rows).
 #[derive(Debug, Default, PartialEq, Eq)]
 struct OleFacts {
@@ -500,19 +503,30 @@ fn run_classify(dir: &Path) -> Ran {
     }
     files.sort();
     let rows = Mutex::new(Vec::new());
-    for (blob_id, path) in &files {
-        let Ok(bytes) = fs::read(path) else {
-            continue;
-        };
-        let name = path
-            .file_name()
-            .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        let facts = classify_ole(&bytes, blob_id, &name);
-        rows.lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .push(ole_line(&facts));
-    }
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    std::thread::scope(|scope| {
+        for _ in 0..WORKERS {
+            scope.spawn(|| {
+                loop {
+                    let i = next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    let Some((blob_id, path)) = files.get(i) else {
+                        break;
+                    };
+                    let Ok(bytes) = fs::read(path) else {
+                        continue;
+                    };
+                    let name = path
+                        .file_name()
+                        .map(|s| s.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    let facts = classify_ole(&bytes, blob_id, &name);
+                    rows.lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .push(ole_line(&facts));
+                }
+            });
+        }
+    });
     let mut rows = rows.into_inner().unwrap_or_default();
     rows.sort();
     let mut text = format!("{}\n", ole_header());
@@ -537,21 +551,32 @@ fn run_sweep(dir: &Path) -> Ran {
     }
     let lines = Mutex::new(BTreeMap::new());
     let kinds = Mutex::new(Vec::new());
-    for row in &rows {
-        let bytes = match fs::read(file_path(dir, row)) {
-            Ok(bytes) => bytes,
-            Err(_) => continue,
-        };
-        let (sweep, details) = sweep_one(&bytes, row, "");
-        lines
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(row.blob_id.clone(), sweep_line(&sweep));
-        kinds
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .extend(details);
-    }
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    std::thread::scope(|scope| {
+        for _ in 0..WORKERS {
+            scope.spawn(|| {
+                loop {
+                    let i = next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    let Some(row) = rows.get(i) else {
+                        break;
+                    };
+                    let bytes = match fs::read(file_path(dir, row)) {
+                        Ok(bytes) => bytes,
+                        Err(_) => continue,
+                    };
+                    let (sweep, details) = sweep_one(&bytes, row, "");
+                    lines
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .insert(row.blob_id.clone(), sweep_line(&sweep));
+                    kinds
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .extend(details);
+                }
+            });
+        }
+    });
     let lines = lines.into_inner().unwrap_or_default();
     let mut kinds = kinds.into_inner().unwrap_or_default();
     kinds.sort();

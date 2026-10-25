@@ -24,6 +24,9 @@ use larrygram_vsdx::{Error, Limits, read_document};
 /// The environment variable that points at the wide corpus.
 const ENV: &str = "LARRYGRAM_WIDE_CORPUS";
 
+/// How many files are processed at once.
+const WORKERS: usize = 8;
+
 /// How a run ended.
 #[derive(Debug, PartialEq, Eq)]
 enum Ran {
@@ -265,17 +268,28 @@ fn run_sweep(dir: &Path) -> Ran {
         return Ran::Skipped;
     }
     let lines = Mutex::new(BTreeMap::new());
-    for row in &rows {
-        let bytes = match fs::read(file_path(dir, row)) {
-            Ok(bytes) => bytes,
-            Err(_) => continue,
-        };
-        let sweep = sweep_one(&bytes, row);
-        lines
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(row.blob_id.clone(), sweep_line(&sweep));
-    }
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    std::thread::scope(|scope| {
+        for _ in 0..WORKERS {
+            scope.spawn(|| {
+                loop {
+                    let i = next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    let Some(row) = rows.get(i) else {
+                        break;
+                    };
+                    let bytes = match fs::read(file_path(dir, row)) {
+                        Ok(bytes) => bytes,
+                        Err(_) => continue,
+                    };
+                    let sweep = sweep_one(&bytes, row);
+                    lines
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .insert(row.blob_id.clone(), sweep_line(&sweep));
+                }
+            });
+        }
+    });
     let lines = lines.into_inner().unwrap_or_default();
     let mut text = format!("{}\n", sweep_header());
     for line in lines.values() {
