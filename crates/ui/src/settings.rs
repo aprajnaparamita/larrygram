@@ -17,9 +17,8 @@
 //! [`Settings`] (the ADR 0032 amendment): it returns the [`Intent`]s
 //! for the rows the user changed and the shell dispatches them
 //! through the command registry (`view.ui_layout.*`,
-//! `view.toggle_grid`, `view.rulers`, `view.units`); the welcome row
-//! has no command id and comes back as an [`OptionsChange`] flag the
-//! shell writes into `Settings::welcome_seen`.
+//! `view.toggle_grid`, `view.rulers`, `view.units` and
+//! `help.welcome.next_start` for the welcome row, P7-14).
 
 use egui::Ui;
 use larrygram_commands::{
@@ -129,17 +128,13 @@ pub fn save_settings(store: &mut dyn SettingsStore, settings: &Settings) -> Resu
 
 /// What one Options dialog frame changed (ADR 0032 as amended).
 ///
-/// The command rows come back as [`Intent`]s the shell dispatches;
-/// the "Show the welcome wizard on next start" row has no command id,
-/// so it comes back as a flag the shell writes into
-/// [`Settings::welcome_seen`](larrygram_commands::Settings) (task
-/// P7-09).
+/// Every row comes back as an [`Intent`] the shell dispatches through
+/// the registry, the welcome row included (`help.welcome.next_start`,
+/// P7-14: every user action is a command, AGENTS.md section 6).
 #[derive(Debug, Clone, PartialEq)]
 pub struct OptionsChange {
-    /// One dispatch request per command-backed row the user changed.
+    /// One dispatch request per row the user changed.
     pub intents: Vec<Intent>,
-    /// `Some(on)` when the welcome-wizard row changed this frame.
-    pub show_wizard_next_start: Option<bool>,
 }
 
 impl OptionsChange {
@@ -147,7 +142,6 @@ impl OptionsChange {
     pub fn none() -> Self {
         Self {
             intents: Vec::new(),
-            show_wizard_next_start: None,
         }
     }
 }
@@ -194,23 +188,23 @@ pub fn show_options(ui: &mut Ui, settings: &Settings) -> Result<OptionsChange, U
     });
     ui.separator();
     ui.checkbox(&mut show_wizard, "Show the welcome wizard on next start");
+    // The row maps onto `Settings::welcome_seen` (checked = the wizard
+    // opens on the next start = not seen yet), so the change comes
+    // back as its registry command like every other row.
+    draft.welcome_seen = !show_wizard;
 
     let intents = option_changes(settings, &draft)?;
-    // The row changed when the wanted state (`show_wizard`) no
-    // longer matches the stored one (`welcome_seen`).
-    let show_wizard_next_start = (show_wizard == settings.welcome_seen).then_some(show_wizard);
-    Ok(OptionsChange {
-        intents,
-        show_wizard_next_start,
-    })
+    Ok(OptionsChange { intents })
 }
 
 /// The dispatch requests for the Options rows `after` changed against
 /// `before` (ADR 0032 amendment): the layout radios dispatch
 /// `view.ui_layout.panel_2016` / `view.ui_layout.panel_365`, the grid
 /// and rulers checkboxes dispatch `view.toggle_grid` / `view.rulers`,
-/// and the units combo dispatches `view.units` with its `units`
-/// argument. All are `Source::Ui` (the dialog is interactive).
+/// the units combo dispatches `view.units` with its `units` argument,
+/// and the welcome row dispatches `help.welcome.next_start` with its
+/// `show` argument (`"on"` / `"off"`, P7-14). All are `Source::Ui`
+/// (the dialog is interactive) and carry no undo (settings).
 pub fn option_changes(before: &Settings, after: &Settings) -> Result<Vec<Intent>, UiError> {
     let mut intents = Vec::new();
     if before.ui_layout != after.ui_layout {
@@ -233,6 +227,13 @@ pub fn option_changes(before: &Settings, after: &Settings) -> Result<Vec<Intent>
     if before.units != after.units {
         let args = Args::new().with("units", ArgValue::Text(after.units.name().to_owned()));
         let mut changed = intent("view.units")?;
+        changed.invocation = Invocation::new(args, Source::Ui);
+        intents.push(changed);
+    }
+    if before.welcome_seen != after.welcome_seen {
+        let show = if after.welcome_seen { "off" } else { "on" };
+        let args = Args::new().with("show", ArgValue::Text(show.to_owned()));
+        let mut changed = intent("help.welcome.next_start")?;
         changed.invocation = Invocation::new(args, Source::Ui);
         intents.push(changed);
     }
@@ -346,7 +347,6 @@ mod tests {
         with_ui(|ui| {
             let changed = show_options(ui, &settings).expect("the dialog draws");
             assert!(changed.intents.is_empty());
-            assert_eq!(changed.show_wizard_next_start, None);
         });
     }
 
@@ -399,6 +399,7 @@ mod tests {
         after.show_grid = false;
         after.show_rulers = false;
         after.units = DisplayUnits::Feet;
+        after.welcome_seen = true;
         let intents = option_changes(&before, &after).expect("intents");
         let ids: Vec<&str> = intents
             .iter()
@@ -410,7 +411,8 @@ mod tests {
                 "view.ui_layout.panel_365",
                 "view.toggle_grid",
                 "view.rulers",
-                "view.units"
+                "view.units",
+                "help.welcome.next_start"
             ]
         );
         let units = &intents[3].invocation.args;
@@ -419,6 +421,27 @@ mod tests {
             Some("Feet"),
             "`view.units` takes its `units` argument"
         );
+        // The welcome row dispatches its command with the `show`
+        // argument (P7-14: every Options row is a command).
+        let welcome = &intents[4].invocation.args;
+        assert_eq!(
+            welcome.text("show"),
+            Some("off"),
+            "welcome_seen means the wizard does not open again"
+        );
+        assert_eq!(intents[4].invocation.source, larrygram_commands::Source::Ui);
+    }
+
+    #[test]
+    fn the_welcome_row_carries_no_undo() {
+        let mut before = Settings::default();
+        before.welcome_seen = true;
+        let after = Settings::default();
+        let intents = option_changes(&before, &after).expect("intents");
+        assert_eq!(intents.len(), 1);
+        let intent = &intents[0];
+        assert_eq!(intent.command.as_str(), "help.welcome.next_start");
+        assert_eq!(intent.invocation.args.text("show"), Some("on"));
     }
 
     #[test]
@@ -567,7 +590,7 @@ mod welcome_row_tests {
     }
 
     #[test]
-    fn the_welcome_row_clears_welcome_seen() {
+    fn the_welcome_row_dispatches_its_command() {
         use egui::accesskit::Role;
         use egui_kittest::{Harness, kittest::Queryable};
 
@@ -575,16 +598,14 @@ mod welcome_row_tests {
         {
             settings.borrow_mut().welcome_seen = true;
         }
-        let changes = Rc::new(RefCell::new(Vec::new()));
+        let changes: Rc<RefCell<Vec<Intent>>> = Rc::new(RefCell::new(Vec::new()));
         let mut harness = Harness::builder().build_ui({
             let settings = Rc::clone(&settings);
             let changes = Rc::clone(&changes);
             move |ui| {
                 let settings = settings.borrow();
-                let changed = show_options(ui, &settings).expect("the dialog draws");
-                if let Some(show) = changed.show_wizard_next_start {
-                    changes.borrow_mut().push(show);
-                }
+                let mut changed = show_options(ui, &settings).expect("the dialog draws");
+                changes.borrow_mut().append(&mut changed.intents);
             }
         });
         harness.run();
@@ -600,13 +621,18 @@ mod welcome_row_tests {
             node.click();
         }
         harness.run();
+        let changes = changes.borrow();
+        assert_eq!(changes.len(), 1, "checking the row changes one row");
+        let intent = &changes[0];
         assert_eq!(
-            changes.borrow().as_slice(),
-            &[true],
-            "checking the row asks for the wizard on the next start"
+            intent.command.as_str(),
+            "help.welcome.next_start",
+            "the row dispatches its registry command (P7-14: every \
+             user action is a command)"
         );
-        // The dialog writes nothing itself: the shell writes
-        // `welcome_seen = !show` (task P7-09).
+        assert_eq!(intent.invocation.args.text("show"), Some("on"));
+        // The dialog writes nothing itself: the command sets
+        // `welcome_seen` when the shell dispatches it.
         assert!(settings.borrow().welcome_seen);
     }
 

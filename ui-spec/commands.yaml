@@ -2895,6 +2895,11 @@
   mapping_confidence: unknown
   visuicmd: null
 - fluent_ids: []
+  id: help.welcome.next_start
+  label: Welcome wizard on next start
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
   id: insert.acquire.images
   label: Images
   mapping_confidence: unknown
