@@ -15,7 +15,7 @@ Task board. Only the master agent edits this file, on `main`.
 
 - Gate queue: `tools/gate-queue/gateq` (AGENTS.md section 7). Merge gates are `main --quick --corpus`; the idle full check is `main-full` in `/Volumes/Dara/larrygram/worktrees/main-full`.
 - Merged today: P8-04, P8-02, P8-05, P7-02 (merge gate green at `d156f9c`). P7-08 started; P7-06 and P7-07 resumed.
-- P7-03, P7-06, P7-07 and P8-07 merged (`5e6259f`, `d9c7490`, `5fe8f19`, `cb66c6c`). P7-16, P8-08 and P8-10 merged (the 12 new corpus files fetched into main). P7-09 merged. P8-09 and P8-16 merged. In progress: P7-10, P8-15. Ready: P8-18, P8-19. The Phase 8 audits wait for P8-15; P8-16's curated corpus rows go into the manifest after it.
+- P7-03, P7-06, P7-07 and P8-07 merged (`5e6259f`, `d9c7490`, `5fe8f19`, `cb66c6c`). P7-16, P8-08 and P8-10 merged (the 12 new corpus files fetched into main). P7-09 merged. P8-09, P8-16 and P7-10 merged; the Phase 7 audits P7-11, P7-12, P7-13 are ready. In progress: P7-10, P8-15. Ready: P8-18, P8-19. The Phase 8 audits wait for P8-15; P8-16's curated corpus rows go into the manifest after it.
 - Merged since the restart: P8-06, P7-05, P7-15, P8-03, P7-04, P7-08; P8-07 ready; P7-09 waits for P7-06 and P7-07; P8-03 RED at `51ce31e7`, resubmitted at `fc3fec7b`. Queued (paused for the iTerm2 restart): P7-06, P7-05, P7-03, P7-07, P7-08, P8-03, P7-04, then `main-full` at `13942e0`.
 - Queued, not started: P7-16, P8-08.
 - Master items: the parity matrix's one column per layout (P7-02 open issue); `UiRequest::ShowWelcome` in the shell (P7-09); P8-02/P8-04/P8-05 open issues for P8-03, P8-07, P8-08, P8-10 (in their Result sections); the remote still holds the pre-R4 history until the user force-pushes, and the three backup files wait for that.
@@ -38,10 +38,10 @@ Phase 7: Panel and Classic layouts, the Larrygram rename and the welcome wizard.
 | [P7-15](tasks/P7-15.md) | implementer | boundary | 1 | merged (welcome wizard, both pages, kittest flow tests) | 96dbcc1 |
 | [P7-16](tasks/P7-16.md) | implementer | boundary | 1 | merged (About window, window icon and favicon from `icon.svg`) | 7444b7e |
 | [P7-09](tasks/P7-09.md) | implementer | P7-05..P7-08, P7-15, P7-16 | C | merged (frame from window regions, four-layout switch, Panel Modern default, wizard and About wired, theme, icons, lists; open: 2016/365 keep v1 widgets, unrouted right-click targets, status bar gaps) | e011474 |
-| [P7-10](tasks/P7-10.md) | test-engineer | P7-09 | D | ready (tests, golden images) | — |
-| [P7-11](tasks/P7-11.md) | reviewer | P7-10 | E | waiting | — |
-| [P7-12](tasks/P7-12.md) | coverage-auditor | P7-10 | E | waiting | — |
-| [P7-13](tasks/P7-13.md) | cleanroom-auditor | P7-10 | E | waiting | — |
+| [P7-10](tasks/P7-10.md) | test-engineer | P7-09 | D | merged (ADR 0065 sweeps, submenu fix, Panel Classic theme tokens, icon pins, 7 goldens, layout_v2 fuzz target; findings for P7-14) | 71074aa |
+| [P7-11](tasks/P7-11.md) | reviewer | P7-10 | E | ready | — |
+| [P7-12](tasks/P7-12.md) | coverage-auditor | P7-10 | E | ready | — |
+| [P7-13](tasks/P7-13.md) | cleanroom-auditor | P7-10 | E | ready | — |
 | [P7-14](tasks/P7-14.md) | implementer | P7-11..P7-13 | F | waiting (fixes, phase report) | — |
 
 Tasks start as soon as their own dependencies merge (no whole-group waits); run at most twelve workers at once across Phase 7 and Phase 8.
