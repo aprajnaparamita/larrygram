@@ -342,6 +342,9 @@ pub const FLUENT_JOINS: &[(&str, &str)] = &[
     ("ConnectorsGallery", "connector.style"),
     // The Shape Data dialog, not the data link.
     ("ShapeData", "format.cust.prop.edit"),
+    // The drawing Line tool, not the Format > Line dialog (task
+    // P7-20: the Panel Modern Tools split's Line child).
+    ("LineTool", "shape.line"),
 ];
 
 /// Control-type words stripped from a Fluent name before word-set
@@ -751,6 +754,9 @@ pub const OUR_COMMANDS: &[(&str, &str)] = &[
         "Delete or Inherit Section",
     ),
     ("edit.deselect", "Deselect"),
+    // Paste at the recorded coordinates (task P7-20): our own id, the
+    // layouts have no control for it yet.
+    ("edit.paste.in.place", "Paste in Place"),
     ("edit.paste_shortcut", "Paste Shortcut"),
     ("edit.reconvert", "Reconvert"),
     ("edit.select", "Select"),
