@@ -224,6 +224,11 @@ pub struct PanelClassic {
     context: Option<String>,
     /// Where the open context menu draws.
     context_pos: Pos2,
+    /// The open context-menu submenu chain: one row index per open
+    /// level below the top menu.
+    context_chain: Vec<usize>,
+    /// A pending context-menu submenu hover: (level, row, start time).
+    context_hover: Option<(usize, usize, f64)>,
     /// The context menu Shift+F10 opens (P7-08's hit-target mapping).
     context_target: Option<String>,
     /// The help search box text ("Type a question for help").
@@ -251,6 +256,8 @@ impl Default for PanelClassic {
             popup_rect: Rect::NOTHING,
             context: None,
             context_pos: Pos2::ZERO,
+            context_chain: Vec::new(),
+            context_hover: None,
             context_target: None,
             help_search: String::new(),
         }
@@ -302,6 +309,8 @@ impl PanelClassic {
     /// Opens the context menu `menu_id` at the pointer (Shift+F10).
     pub fn open_context_menu(&mut self, menu_id: impl Into<String>) {
         self.context = Some(menu_id.into());
+        self.context_chain.clear();
+        self.context_hover = None;
     }
 
     /// Draws the chrome (the menu bar and the toolbars) and returns
@@ -352,36 +361,139 @@ impl PanelClassic {
             self.context = None;
             return Ok(intents);
         };
-        let rows = rows::rows(&context.items, input, self, Source::Menu, false, 0);
-        let width = menu::menu_width(ui, &rows);
-        let pos = self.context_pos;
-        let id = Id::unique(("panel_classic_context", menu_id));
-        let mut outcome = MenuOutcome::default();
-        let inner = egui::Area::new(id)
-            .order(egui::Order::Foreground)
-            .fixed_pos(pos)
-            .show(ui.ctx(), |ui| {
-                egui::Frame::popup(ui.style()).show(ui, |ui| {
-                    outcome = menu::draw_menu(ui, &rows, width, None, true);
+        // The open levels: the top menu, then one level per open chain
+        // link (bounded by [`MAX_DEPTH`], AGENTS.md section 6). The
+        // chain is state, so a submenu stays open while the pointer
+        // moves into it (the menu bars' rule).
+        let mut levels = vec![rows::rows(
+            &context.items,
+            input,
+            self,
+            Source::Menu,
+            false,
+            0,
+        )];
+        for link in self.context_chain.iter().copied().take(MAX_DEPTH as usize) {
+            let Some(row) = levels
+                .last()
+                .and_then(|level| level.get(link))
+                .filter(|row| row.has_children())
+            else {
+                break;
+            };
+            levels.push(row.children.clone());
+        }
+        let mut pos = self.context_pos;
+        let mut area = egui::Rect::NOTHING;
+        let mut activated: Option<(usize, usize)> = None;
+        let mut open_child: Option<(usize, usize)> = None;
+        let mut hover: Option<(usize, usize)> = None;
+        for (level, rows) in levels.iter().enumerate() {
+            let width = menu::menu_width(ui, rows);
+            let mut outcome = MenuOutcome::default();
+            let id = Id::unique(("panel_classic_context", menu_id, level));
+            let inner = egui::Area::new(id)
+                .order(egui::Order::Foreground)
+                .fixed_pos(pos)
+                .show(ui.ctx(), |ui| {
+                    egui::Frame::popup(ui.style()).show(ui, |ui| {
+                        outcome = menu::draw_menu(ui, rows, width, None, true);
+                    });
                 });
-            });
-        let area = inner.response.rect;
+            area = area.union(inner.response.rect);
+            if let Some(index) = outcome.clicked {
+                if rows.get(index).is_some_and(Row::has_children) {
+                    open_child = Some((level, index));
+                } else {
+                    activated = Some((level, index));
+                }
+            }
+            if let Some(index) = outcome.hovered {
+                hover = Some((level, index));
+            }
+            // The next level draws beside the open submenu row.
+            if let Some(link) = self.context_chain.get(level).copied()
+                && let Some(rect) = outcome.rects.get(link).copied()
+            {
+                pos = rect.right_top();
+            }
+        }
+        self.update_context_hover(ui, &levels, hover);
+        if let Some((level, index)) = open_child {
+            self.context_chain.truncate(level);
+            self.context_chain.push(index);
+            self.context_hover = None;
+        }
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-            self.context = None;
+            self.close_context_menu();
         }
         if let Some(pointer) = ui.input(|i| i.pointer.interact_pos())
             && ui.input(|i| i.pointer.any_click())
             && !area.contains(pointer)
         {
-            self.context = None;
+            self.close_context_menu();
         }
-        if let Some(index) = outcome.clicked {
-            if let Some(row) = rows.get(index) {
-                self.activate(row, input, &mut intents);
+        if let Some((level, index)) = activated {
+            let row = levels.get(level).and_then(|level| level.get(index));
+            match row {
+                Some(row) if self.activate(row, input, &mut intents) => {
+                    self.close_context_menu();
+                }
+                Some(_) => {}
+                None => self.close_context_menu(),
             }
-            self.context = None;
         }
         Ok(intents)
+    }
+
+    /// Closes the open context menu and its submenu chain.
+    fn close_context_menu(&mut self) {
+        self.context = None;
+        self.context_chain.clear();
+        self.context_hover = None;
+    }
+
+    /// The context-menu hover rules (the menu bars' [`Self::update_hover`]
+    /// rule): a submenu opens after [`SUBMENU_DELAY`], any other row
+    /// closes the deeper levels.
+    fn update_context_hover(
+        &mut self,
+        ui: &Ui,
+        levels: &[Vec<Row>],
+        hover: Option<(usize, usize)>,
+    ) {
+        let Some((level, index)) = hover else {
+            self.context_hover = None;
+            return;
+        };
+        let has_children = levels
+            .get(level)
+            .and_then(|level| level.get(index))
+            .is_some_and(Row::has_children);
+        let open_here = self.context_chain.get(level).copied() == Some(index)
+            && self.context_chain.len() > level + 1;
+        if !has_children {
+            if self.context_chain.len() > level {
+                self.context_chain.truncate(level);
+            }
+            self.context_hover = None;
+            return;
+        }
+        if open_here {
+            self.context_hover = None;
+            return;
+        }
+        let now = ui.input(|i| i.time);
+        match self.context_hover {
+            Some((l, r, start)) if l == level && r == index => {
+                if now - start >= SUBMENU_DELAY {
+                    self.context_chain.truncate(level);
+                    self.context_chain.push(index);
+                    self.context_hover = None;
+                }
+            }
+            _ => self.context_hover = Some((level, index, now)),
+        }
     }
 
     /// Activates one row: dispatches its intent and closes the menus,
