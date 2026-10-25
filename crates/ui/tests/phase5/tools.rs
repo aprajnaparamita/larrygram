@@ -26,7 +26,7 @@ use larrygram_ui_spec::Loader;
 
 use crate::{PAGE_HEIGHT, app_with_one_shape};
 
-const RULER: f32 = 18.0;
+const RULER: f32 = 16.0;
 /// The shell canvas shows the whole page at this zoom.
 const SHELL_ZOOM: f64 = 0.25;
 

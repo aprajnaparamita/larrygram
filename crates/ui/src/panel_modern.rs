@@ -425,7 +425,12 @@ impl PanelModern {
             Rect::from_min_size(strip.min, Vec2::new(m.file_button_width, strip.height()));
         let response = ui
             .push_id("file_button", |ui| {
-                ui.put(file_rect, Button::new(file_label.as_str()))
+                let text = egui::RichText::new(file_label.as_str())
+                    .color(crate::theme::color_at(ui.ctx(), "accent.text"));
+                ui.put(
+                    file_rect,
+                    Button::new(text).fill(crate::theme::color_at(ui.ctx(), "accent")),
+                )
             })
             .inner
             .accessible_name(file_label.as_str())
@@ -451,9 +456,16 @@ impl PanelModern {
             }
             let response = ui
                 .push_id(tab.id.as_str(), |ui| {
+                    let token = if active == Some(index) {
+                        "tab.selected.text"
+                    } else {
+                        "tab.text"
+                    };
+                    let text = egui::RichText::new(shown.as_str())
+                        .color(crate::theme::color_at(ui.ctx(), token));
                     ui.put(
                         rect,
-                        Button::new(shown.as_str())
+                        Button::new(text)
                             .selected(active == Some(index))
                             .frame(true),
                     )
@@ -528,11 +540,16 @@ impl PanelModern {
             let shown = caption.to_uppercase();
             let tab_width = text_width(ui, &shown) + 2.0 * m.tab_padding_x;
             let set_name = tab.tab_set.clone().unwrap_or_default();
+            let (band_token, _, text_token) = contextual_tokens(
+                set_family(ui.ctx(), &set_name)
+                    .as_deref()
+                    .unwrap_or_default(),
+            );
             // The caption block sits above the tab, inside the strip:
             // a 4 px band across the top, then the set name.
             let band =
                 Rect::from_min_size(egui::pos2(set_x, strip.min.y), Vec2::new(tab_width, 4.0));
-            painter.rect_filled(band, 0.0, ui.visuals().selection.bg_fill);
+            painter.rect_filled(band, 0.0, crate::theme::color_at(ui.ctx(), band_token));
             let caption_rect = Rect::from_min_size(
                 egui::pos2(set_x, strip.min.y + 4.0),
                 Vec2::new(tab_width, strip.height() - 4.0),
@@ -542,7 +559,7 @@ impl PanelModern {
                 egui::Align2::LEFT_TOP,
                 set_name,
                 egui::FontId::proportional(9.0),
-                ui.visuals().text_color(),
+                crate::theme::color_at(ui.ctx(), text_token),
             );
             set_x += tab_width;
         }
@@ -596,7 +613,7 @@ impl PanelModern {
                 egui::pos2(bar.min.x, bar.max.y),
                 egui::pos2(bar.max.x, bar.max.y),
             ],
-            egui::Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color),
+            egui::Stroke::new(1.0, crate::theme::color_at(ui.ctx(), "chrome.border")),
         );
         let inner = Rect::from_min_size(
             egui::pos2(bar.min.x, bar.min.y + m.command_bar_padding_top),
@@ -653,7 +670,7 @@ impl PanelModern {
             ],
             egui::Stroke::new(
                 m.group_separator_width,
-                ui.visuals().widgets.noninteractive.bg_stroke.color,
+                crate::theme::color_at(ui.ctx(), "group.separator"),
             ),
         );
     }
@@ -710,7 +727,7 @@ impl PanelModern {
             egui::Align2::CENTER_CENTER,
             text,
             egui::FontId::proportional(12.0),
-            ui.visuals().widgets.noninteractive.fg_stroke.color,
+            crate::theme::color_at(ui.ctx(), "group.caption.text"),
         );
         if let Some(launcher) = &group.launcher {
             let item = launcher_item(group, launcher);
@@ -944,9 +961,38 @@ fn text_width(ui: &Ui, text: &str) -> f32 {
 
 /// Paints the contextual-tab look of one tab: the set's fill behind
 /// the caption (the band is painted by the set caption block).
-fn paint_contextual_tab(ui: &Ui, rect: Rect, _tab: &Tab) {
+fn paint_contextual_tab(ui: &Ui, rect: Rect, tab: &Tab) {
+    let set_name = tab.tab_set.clone().unwrap_or_default();
+    let (_, fill_token, _) = contextual_tokens(
+        set_family(ui.ctx(), &set_name)
+            .as_deref()
+            .unwrap_or_default(),
+    );
     ui.painter()
-        .rect_filled(rect, 0.0, ui.visuals().faint_bg_color);
+        .rect_filled(rect, 0.0, crate::theme::color_at(ui.ctx(), fill_token));
+}
+
+/// The colour family of one contextual tab set (`contextual_tab_sets`
+/// in the theme; ADR 0064).
+fn set_family(ctx: &egui::Context, set_name: &str) -> Option<String> {
+    crate::theme::current(ctx).and_then(|theme| theme.contextual_tab_sets.get(set_name).cloned())
+}
+
+/// The three colour tokens of one contextual family: band, fill and
+/// text (`contextual.<family>.*`). An unknown family draws as green.
+fn contextual_tokens(family: &str) -> (&'static str, &'static str, &'static str) {
+    match family {
+        "orange" => (
+            "contextual.orange.band",
+            "contextual.orange.fill",
+            "contextual.orange.text",
+        ),
+        _ => (
+            "contextual.green.band",
+            "contextual.green.fill",
+            "contextual.green.text",
+        ),
+    }
 }
 
 #[cfg(test)]

@@ -97,7 +97,11 @@ impl FileView {
             area.min,
             Vec2::new(metrics.file_view_nav_width, area.height()),
         );
-        ui.painter().rect_filled(nav, 0.0, ui.visuals().panel_fill);
+        ui.painter().rect_filled(
+            nav,
+            0.0,
+            crate::theme::color_at(ui.ctx(), "file_view.nav.background"),
+        );
         let mut y = nav.min.y;
         if view.back_button {
             let rect = Rect::from_min_size(
@@ -130,12 +134,17 @@ impl FileView {
             );
             let selected = entry.id == self.page && entry.kind == FileViewEntryKind::Page;
             if selected {
-                ui.painter()
-                    .rect_filled(rect, 0.0, ui.visuals().selection.bg_fill);
+                ui.painter().rect_filled(
+                    rect,
+                    0.0,
+                    crate::theme::color_at(ui.ctx(), "file_view.nav.selected"),
+                );
             }
             let response = ui
                 .push_id(entry.id.as_str(), |ui| {
-                    ui.put(rect, Button::new(entry.label.as_str()).frame(false))
+                    let text = egui::RichText::new(entry.label.as_str())
+                        .color(crate::theme::color_at(ui.ctx(), "file_view.nav.text"));
+                    ui.put(rect, Button::new(text).frame(false))
                 })
                 .inner
                 .accessible_name(entry.label.as_str())
@@ -161,7 +170,11 @@ impl FileView {
             egui::pos2(nav.max.x, area.min.y),
             Vec2::new((area.max.x - nav.max.x).max(0.0), area.height()),
         );
-        ui.painter().rect_filled(page, 0.0, ui.visuals().panel_fill);
+        ui.painter().rect_filled(
+            page,
+            0.0,
+            crate::theme::color_at(ui.ctx(), "file_view.background"),
+        );
         let page_id = self.page.clone();
         ui.scope_builder(
             UiBuilder::new().max_rect(page.shrink(12.0)),

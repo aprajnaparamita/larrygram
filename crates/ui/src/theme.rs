@@ -52,14 +52,15 @@ pub fn apply(ctx: &Context, theme: &Theme) -> Result<(), UiError> {
         style.visuals = visuals;
         style.text_styles = text_styles;
     });
-    ctx.data_mut(|data| data.insert_temp(active_theme_id(), theme.clone()));
+    ctx.data_mut(|data| data.insert_temp(active_theme_id(), Arc::new(theme.clone())));
     Ok(())
 }
 
 /// The theme applied to `ctx` most recently, when one was applied.
 ///
-/// The canvas uses it to read its background, page and ruler colours.
-pub fn current(ctx: &Context) -> Option<Theme> {
+/// The widgets use it to read their tokens by name (ADR 0063); the
+/// handle is shared, so a widget asking for a token clones no maps.
+pub fn current(ctx: &Context) -> Option<Arc<Theme>> {
     ctx.data(|data| data.get_temp(active_theme_id()))
 }
 
@@ -281,6 +282,19 @@ fn visuals(theme: &Theme) -> Visuals {
     visuals
 }
 
+/// The colour for `token` on `ctx`, with an egui-default fallback.
+///
+/// The widget seam of ADR 0063: a widget asks for a token by name and
+/// paints what comes back. The theme is the one [`apply`] recorded for
+/// `ctx`; with none yet the fallback draws (and warns once per token
+/// when the theme lacks the name).
+pub fn color_at(ctx: &Context, token: &str) -> Color32 {
+    match current(ctx) {
+        Some(theme) => color(&theme, token),
+        None => fallback_color(token),
+    }
+}
+
 /// The first present token in `tokens`, else `fallback` with one warning.
 fn color_or(theme: &Theme, tokens: &[&str], fallback: Color32) -> Color32 {
     for token in tokens {
@@ -348,12 +362,43 @@ fn fallback_color(token: &str) -> Color32 {
         "button.pressed.border" => Color32::from_gray(190),
         "menu.background" | "tooltip.background" => Color32::from_gray(248),
         "menu.border" | "tooltip.border" => Color32::from_gray(190),
-        "field.background" | "page.background" => Color32::WHITE,
+        "field.background" | "page.background" | "file_view.background" => Color32::WHITE,
         "canvas.background" => Color32::from_rgb(204, 204, 204),
         "page.border" => Color32::from_rgb(169, 176, 184),
         "page.shadow" => Color32::from_rgb(234, 234, 234),
         "ruler.background" => Color32::from_rgb(232, 232, 232),
         "ruler.ticks" => Color32::from_rgb(120, 120, 120),
+        "chrome.title_bar" => Color32::WHITE,
+        "chrome.separator" => Color32::from_gray(190),
+        "menu.gutter" => Color32::from_gray(233),
+        "menu.separator" => Color32::from_gray(154),
+        "menu.highlight.fill" => Color32::from_rgb(255, 231, 162),
+        "menu.highlight.border" => Color32::from_rgb(255, 189, 105),
+        "menu.bar.open.fill" => Color32::from_rgb(181, 209, 245),
+        "menu.bar.open.border" => Color32::from_rgb(101, 147, 207),
+        "pane.background" => Color32::from_gray(238),
+        "pane.title.fill" => Color32::from_rgb(184, 207, 233),
+        "pane.title.text" => Color32::from_gray(64),
+        "pane.border" => Color32::from_rgb(118, 153, 199),
+        "accent" => Color32::from_rgb(0x39, 0x55, 0xa3),
+        "accent.text" => Color32::WHITE,
+        "group.separator" => Color32::from_gray(225),
+        "group.caption.text" => Color32::from_gray(102),
+        "tab.text" => Color32::from_gray(68),
+        "tab.selected.text" => Color32::from_rgb(0x39, 0x55, 0xa3),
+        "contextual.green.band" => Color32::from_rgb(0x49, 0xa3, 0x49),
+        "contextual.green.fill" => Color32::from_rgb(0xe6, 0xf3, 0xe6),
+        "contextual.green.text" => Color32::from_rgb(0x06, 0x70, 0x06),
+        "contextual.orange.band" => Color32::from_rgb(0xff, 0x9d, 0x00),
+        "contextual.orange.fill" => Color32::from_rgb(0xff, 0xf8, 0xed),
+        "contextual.orange.text" => Color32::from_rgb(0xc4, 0x53, 0x00),
+        "status_bar.background" => Color32::from_rgb(0x39, 0x55, 0xa3),
+        "status_bar.text" => Color32::WHITE,
+        "page_tab.text" => Color32::from_gray(68),
+        "page_tab.active.text" => Color32::from_rgb(0x39, 0x55, 0xa3),
+        "file_view.nav.background" => Color32::from_rgb(0x39, 0x55, 0xa3),
+        "file_view.nav.text" => Color32::WHITE,
+        "file_view.nav.selected" => Color32::from_rgb(0x4d, 0x6a, 0xb8),
         _ => Color32::GRAY,
     }
 }

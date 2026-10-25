@@ -39,8 +39,8 @@ pub const WIDTH: f32 = 800.0;
 pub const HEIGHT: f32 = 600.0;
 /// The zoom of every test (page 8.5 x 11 in fits the viewport).
 pub const ZOOM: f64 = 0.5;
-/// The ruler band width (mirrors `canvas::RULER_WIDTH`).
-pub const RULER: f32 = 18.0;
+/// The ruler band width (the `ruler.size` metric default).
+pub const RULER: f32 = 16.0;
 /// The harness's outer frame margin (egui_kittest's central panel).
 pub const MARGIN: f32 = 8.0;
 /// The page height in inches (the fixture pages).

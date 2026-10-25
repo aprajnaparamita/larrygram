@@ -17,6 +17,7 @@
 //! theme tokens.
 
 pub mod menu;
+pub(crate) mod metrics;
 pub(crate) mod rows;
 pub mod toolbar;
 
@@ -51,7 +52,7 @@ pub(crate) const MAX_DEPTH: u32 = 8;
 /// (`docs/ui/panel-classic.md`: "about 400 ms").
 const SUBMENU_DELAY: f64 = 0.4;
 
-/// Height of the menu bar (`docs/ui/panel-classic.md`).
+/// Height of the menu bar with no theme applied (`menu_bar.height`).
 const MENU_BAR: f32 = 24.0;
 
 /// Which window is active: it selects the menu bar and the mode
@@ -565,7 +566,10 @@ impl PanelClassic {
         let underlines = self.bar_focused || self.open.is_some();
         let mut rects = Vec::new();
         ui.horizontal(|ui| {
-            ui.set_height(MENU_BAR);
+            let menu_bar = metrics::ClassicMetrics::for_ctx(ui.ctx())
+                .menu_bar_height
+                .max(MENU_BAR * 0.5);
+            ui.set_height(menu_bar);
             for (index, menu) in menus.iter().enumerate() {
                 let open = self.open == Some(index);
                 let response = menu::draw_title(ui, &menu.label, menu.access, open, underlines);

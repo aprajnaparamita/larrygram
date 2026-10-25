@@ -22,9 +22,11 @@ use super::place::Placed;
 use super::{ListData, ListEntries};
 use crate::{Intent, UiError};
 
-/// The menu gutter: icons sit in a 24 px column (the Panel Classic
-/// menu gutter, `docs/ui/panel-modern.md`).
-const GUTTER: f32 = 24.0;
+/// The gutter width of this frame (the shared `menu.gutter.width`
+/// token: icons sit in a gutter column, `docs/ui/panel-modern.md`).
+fn gutter(ctx: &egui::Context) -> f32 {
+    crate::panel_classic::metrics::ClassicMetrics::for_ctx(ctx).menu_gutter_width
+}
 
 /// What the controls draw from: run-time lists, sizes, toggle state
 /// and the application state behind the dynamic labels.
@@ -607,7 +609,7 @@ fn menu_row_atoms(ctx: &egui::Context, item: &Item, label: &str, enabled: bool) 
             .push(egui_ui_icon(ctx, item, 16.0, enabled))
             .push(spacer(6.0));
     } else {
-        builder = builder.push(spacer(GUTTER - 4.0));
+        builder = builder.push(spacer(gutter(ctx) - 4.0));
     }
     builder = builder.text(label).push(Atom::grow());
     if let Some(shortcut) = &item.shortcut {

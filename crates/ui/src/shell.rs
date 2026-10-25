@@ -435,7 +435,9 @@ impl Shell {
     fn sync_layout_widgets(&mut self, ctx: &Context) {
         let kind = self.app.settings.ui_layout;
         let theme = self.layouts.get(kind).theme.clone();
-        if theme::current(ctx).as_ref() != Some(&theme)
+        if theme::current(ctx)
+            .map(|active| active.id != theme.id)
+            .unwrap_or(true)
             && let Err(error) = theme::apply(ctx, &theme)
         {
             self.note_error(error.to_string());
@@ -535,8 +537,12 @@ impl Shell {
     /// the Shapes window, the drawing with its page-tab strip and the
     /// status bar (docs/ui/panel-classic.md, "Window").
     fn show_classic_frame(&mut self, ui: &mut Ui, intents: &mut Vec<Intent>) {
-        // Title bar (23 px): the document name and the app name.
+        // Title bar (`title_bar.height`): the document name and the
+        // app name on the `chrome.title_bar` colour.
         egui::Panel::top("shell-title").show(ui, |ui| {
+            let height =
+                crate::panel_classic::metrics::ClassicMetrics::for_ctx(ui.ctx()).title_bar_height;
+            theme_strip(ui, "chrome.title_bar", "chrome.text", height);
             ui.horizontal(|ui| {
                 ui.label(self.title_text());
                 ui.separator();
@@ -586,8 +592,12 @@ impl Shell {
     fn show_modern_frame(&mut self, ui: &mut Ui, intents: &mut Vec<Intent>) {
         let context = self.selection_context();
         let lists = self.list_data();
-        // Title bar (25 px): QAT left, document title, help right.
+        // Title bar (`title_bar.height`): QAT left, document title,
+        // help right.
         egui::Panel::top("shell-title").show(ui, |ui| {
+            let height =
+                crate::panel_classic::metrics::ClassicMetrics::for_ctx(ui.ctx()).title_bar_height;
+            theme_strip(ui, "chrome.title_bar", "chrome.text", height);
             ui.horizontal(|ui| {
                 let mut produced = Vec::new();
                 let mut errors = Vec::new();
@@ -731,15 +741,19 @@ impl Shell {
     /// The docked side windows: the Shapes window on the left and the
     /// Shape Data and Size & Position panes on the right.
     fn show_dock_panels(&mut self, ui: &mut Ui, intents: &mut Vec<Intent>, style: FrameStyle) {
+        // The Shapes window takes its width from the theme
+        // (`shapes_window.width`); the Phase 4 frame keeps its own.
         let shapes_width = match style {
-            FrameStyle::Classic => 190.0,
-            FrameStyle::Modern => 262.0,
+            FrameStyle::Classic | FrameStyle::Modern => {
+                crate::panel_classic::metrics::ClassicMetrics::for_ctx(ui.ctx()).shapes_window_width
+            }
             FrameStyle::Fluent => 200.0,
         };
         egui::Panel::left("shell-shapes")
             .resizable(true)
             .default_size(shapes_width)
             .show(ui, |ui| {
+                theme_pane(ui, "pane.background");
                 let produced = self.shapes.show(ui, &self.app, style.shapes_header());
                 if let Some(_picks) = self.keep(produced) {
                     // Picking a stencil inserts a shape in Phase 5;
@@ -759,6 +773,7 @@ impl Shell {
             .resizable(true)
             .default_size(220.0)
             .show(ui, |ui| {
+                theme_pane(ui, "pane.background");
                 let shape_data = panes::show_shape_data(ui, &mut self.app);
                 if let Some(mut more) = self.keep(shape_data) {
                     intents.append(&mut more);
@@ -774,18 +789,30 @@ impl Shell {
     /// the active layout's look (the `status_bar` and `page_tabs`
     /// regions).
     fn show_bottom_panels(&mut self, ui: &mut Ui, intents: &mut Vec<Intent>, style: FrameStyle) {
-        egui::Panel::bottom("shell-status").show(ui, |ui| match style {
-            FrameStyle::Fluent => {
-                let produced = canvas::show_status_bar(ui, &self.app);
-                let _ = self.keep(produced);
+        egui::Panel::bottom("shell-status").show(ui, |ui| {
+            if let FrameStyle::Classic | FrameStyle::Modern = style {
+                let height = crate::panel_classic::metrics::ClassicMetrics::for_ctx(ui.ctx())
+                    .status_bar_height;
+                theme_strip(ui, "status_bar.background", "status_bar.text", height);
             }
-            FrameStyle::Modern => {
-                let mut more = self.show_modern_status(ui);
-                intents.append(&mut more);
+            match style {
+                FrameStyle::Fluent => {
+                    let produced = canvas::show_status_bar(ui, &self.app);
+                    let _ = self.keep(produced);
+                }
+                FrameStyle::Modern => {
+                    let mut more = self.show_modern_status(ui);
+                    intents.append(&mut more);
+                }
+                FrameStyle::Classic => self.show_classic_status(ui),
             }
-            FrameStyle::Classic => self.show_classic_status(ui),
         });
         egui::Panel::bottom("shell-tabs").show(ui, |ui| {
+            if let FrameStyle::Classic | FrameStyle::Modern = style {
+                let height = crate::panel_classic::metrics::ClassicMetrics::for_ctx(ui.ctx())
+                    .page_tabs_height;
+                theme_strip(ui, "pane.background", "chrome.text", height);
+            }
             if self.app.active.is_some() {
                 let session = self.app.active_document_mut();
                 if let Some(session) = session {
@@ -1072,7 +1099,7 @@ impl Shell {
                 self.open_context_menu(HitTarget::TextEditing);
                 return;
             }
-            match self.shape_under(pos, rect) {
+            match self.shape_under(ui, pos, rect) {
                 Some(shape) => {
                     if self.app.selection.anchor != Some(shape)
                         && let Some(intent) = select_intent(&self.app, shape)
@@ -1097,9 +1124,9 @@ impl Shell {
 
     /// The topmost shape under a screen point in the canvas, through
     /// the pointer tool's cached page scene (task P7-09).
-    fn shape_under(&mut self, screen: egui::Pos2, rect: egui::Rect) -> Option<ShapeId> {
+    fn shape_under(&mut self, ui: &Ui, screen: egui::Pos2, rect: egui::Rect) -> Option<ShapeId> {
         let session = self.app.active_document()?;
-        let page = canvas::page_position(rect, session, screen)?;
+        let page = canvas::page_position(rect, session, screen, canvas::ruler_width(ui))?;
         let zoom = session.view.zoom;
         self.tools
             .state
@@ -1196,10 +1223,9 @@ impl Shell {
         let Some(screen) = pos else {
             return;
         };
-        let page = self
-            .app
-            .active_document()
-            .and_then(|session| canvas::page_position(rect, session, screen));
+        let page = self.app.active_document().and_then(|session| {
+            canvas::page_position(rect, session, screen, canvas::ruler_width(ui))
+        });
         if !self.stencil_down {
             match page {
                 Some(page) if down => {
@@ -1769,6 +1795,30 @@ fn menu_item(
     }
 }
 
+/// Paints one window region from the theme (ADR 0063): the `fill`
+/// behind the region, `text` as its text colour and `height` as its
+/// minimum height.
+fn theme_strip(ui: &mut Ui, fill: &str, text: &str, height: f32) {
+    let fill = crate::theme::color_at(ui.ctx(), fill);
+    ui.painter().rect_filled(ui.max_rect(), 0.0, fill);
+    ui.style_mut().visuals.override_text_color = Some(crate::theme::color_at(ui.ctx(), text));
+    ui.set_min_height(height);
+}
+
+/// Paints one docked pane from the theme: `fill` behind the pane and
+/// `pane.border` around it.
+fn theme_pane(ui: &mut Ui, fill: &str) {
+    let fill = crate::theme::color_at(ui.ctx(), fill);
+    let border = crate::theme::color_at(ui.ctx(), "pane.border");
+    ui.painter().rect_filled(ui.max_rect(), 0.0, fill);
+    ui.painter().rect_stroke(
+        ui.max_rect(),
+        0.0,
+        egui::Stroke::new(1.0, border),
+        egui::StrokeKind::Inside,
+    );
+}
+
 /// Which layout family draws the frame (task P7-09).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FrameStyle {
@@ -1843,8 +1893,15 @@ fn modern_page_tabs(ui: &mut Ui, session: &mut DocumentSession) -> Result<Vec<In
     let mut add = false;
     ui.horizontal_wrapped(|ui| {
         for (id, label) in &pages {
+            let token = if active == Some(*id) {
+                "page_tab.active.text"
+            } else {
+                "page_tab.text"
+            };
+            let text =
+                egui::RichText::new(label.as_str()).color(crate::theme::color_at(ui.ctx(), token));
             let response = ui
-                .selectable_label(active == Some(*id), label)
+                .selectable_label(active == Some(*id), text)
                 .on_hover_text("Show this page");
             if response.clicked() {
                 clicked = Some(*id);
@@ -3396,7 +3453,8 @@ mod tests {
         // click becomes the shape's pin.
         let page = {
             let session = shell.app.active_document().expect("a document");
-            canvas::page_position(rect, session, pos).expect("a page position")
+            let ruler = crate::panel_classic::metrics::ClassicMetrics::default().ruler_size;
+            canvas::page_position(rect, session, pos, ruler).expect("a page position")
         };
         {
             let session = shell.app.active_document_mut().expect("a document");
