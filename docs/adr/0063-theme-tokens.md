@@ -60,3 +60,24 @@ without hard-coding numbers.
   `command_bar.padding_top`.
 - The seam is `crates/ui/src/theme.rs`; `theme::apply` is an
   interface stub until P7-05 implements it.
+
+## Amendments (task P7-18, the design pass)
+
+- One design language for both layouts (`docs/ui/design.md`, approved
+  by the user on 2026-10-26). `ui-spec/themes/base.yaml` holds every
+  colour and font role and the shared metrics; `panel-modern.yaml` and
+  `panel-classic.yaml` hold only what their structure adds. The loader
+  derives each layout theme from the base and refuses a layout file
+  that sets a colour or a font.
+- The palette is neutral (a light grey chrome, white content) with one
+  accent, `#1f5bc4`. Every text and icon pair meets WCAG 2.2 AA; the
+  ratios are in the design document.
+- The font roles are a type scale (`caption`, `ui`, `strong`, `lead`,
+  `title`, `display`) the widgets ask for by name. Panel Modern tab
+  captions are no longer upper-cased; the `transform` field is unused.
+- A missing token falls back to its base-theme value, not to an egui
+  default.
+- Disabled icons are tinted `chrome.text_disabled` instead of drawn at
+  40% alpha (ADR 0062 said 40% alpha).
+- A test fails when a widget paints a colour outside the theme tokens
+  (`crates/ui/tests/phase7/palette.rs`).

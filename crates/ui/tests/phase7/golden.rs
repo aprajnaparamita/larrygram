@@ -139,6 +139,9 @@ fn shell_golden(kind: LayoutKind, name: &str, prepare: impl FnOnce(&mut ShellRig
 /// brand image loaders installed (as the apps do at start-up).
 fn window_golden(size: egui::Vec2, body: impl FnMut(&mut egui::Ui) + 'static) -> image::RgbaImage {
     let mut harness = Harness::builder()
+        // The app draws in egui's light theme (`theme::apply`); the
+        // harness defaults to dark.
+        .with_theme(egui::Theme::Light)
         .with_size(size)
         .with_context_setup(|ctx| {
             larrygram_ui::install_image_loaders(ctx);
@@ -236,6 +239,9 @@ fn golden_the_wizard_welcome_page() {
 fn golden_the_wizard_layout_page() {
     let state = std::rc::Rc::new(std::cell::RefCell::new(wizard::State::new()));
     let mut harness = Harness::builder()
+        // The app draws in egui's light theme (`theme::apply`); the
+        // harness defaults to dark.
+        .with_theme(egui::Theme::Light)
         .with_size(egui::vec2(1000.0, 700.0))
         .with_context_setup(|ctx| {
             larrygram_ui::install_image_loaders(ctx);

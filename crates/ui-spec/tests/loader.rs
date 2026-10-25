@@ -59,6 +59,7 @@ fn copy_good_v2(dir: &Path) {
     for sub in [
         "layouts/panel-modern.yaml",
         "layouts/panel-classic.yaml",
+        "themes/base.yaml",
         "themes/panel-modern.yaml",
         "themes/panel-classic.yaml",
     ] {

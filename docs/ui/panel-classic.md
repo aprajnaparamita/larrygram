@@ -97,7 +97,7 @@ choices for each mode are remembered separately.
   - a latched tool or toggle (the active Pointer Tool, or Align Center
     while it applies) draws `button.pressed.fill` and
     `button.pressed.border`;
-  - disabled buttons draw the icon at 40% alpha.
+  - disabled buttons draw the icon in `chrome.text_disabled`.
 - **Display.** `display: text` items show only their label (the colour
   palette entries); `icon_text` shows both (Theme). Every button has a
   tooltip with the label and, if there is one, the shortcut in

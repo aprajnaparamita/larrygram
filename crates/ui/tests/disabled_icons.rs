@@ -1,9 +1,11 @@
-//! A disabled control draws its icon at 40% alpha (ADR 0062).
+//! A disabled control draws its icon in the disabled text colour
+//! (`chrome.text_disabled`; task P7-18 replaced ADR 0062's 40% alpha so
+//! a disabled icon matches a disabled label, docs/ui/design.md).
 //!
 //! The rule lives in `icons::draw` / `icons::icon_themed` behind their
 //! `enabled` parameter; this test renders one icon in both states over
-//! a white background and asserts the disabled pixels are the 40%
-//! blend of the enabled ones (the P7-11 F2 regression pin).
+//! a white background and asserts the disabled glyph core is the
+//! disabled colour (the P7-11 F2 regression pin, updated).
 
 // The never-crash lints apply to non-test code only (clippy.toml).
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
@@ -12,7 +14,7 @@ use egui_kittest::Harness;
 use larrygram_ui::icons;
 use larrygram_ui_spec::{LayoutKind, LayoutSets, Loader};
 
-/// The largest per-channel difference of the 40% blend, of 255
+/// The largest per-channel difference from the disabled colour, of 255
 /// (rendering and rounding noise).
 const MAX_DELTA: u8 = 6;
 
@@ -56,23 +58,25 @@ fn darkest(image: &image::RgbaImage) -> [u8; 3] {
 }
 
 #[test]
-fn a_disabled_icon_draws_at_40_percent_alpha() {
+fn a_disabled_icon_draws_in_the_disabled_text_colour() {
     let enabled = render("edit.cut", true);
     let disabled = render("edit.cut", false);
     let on = darkest(&enabled);
     let off = darkest(&disabled);
-    // The glyph core is painted in both renders.
+    // The glyph core is painted in both renders, and differently.
     assert!(
         on.iter().any(|c| *c < 128),
         "the enabled icon paints: {on:?}"
     );
+    assert_ne!(on, off, "the disabled icon changes colour");
+    let expected = larrygram_ui::theme::color(&theme(), "chrome.text_disabled");
+    let expected = [expected.r(), expected.g(), expected.b()];
     for channel in 0..3 {
-        let expected = (f32::from(on[channel]) * 0.4 + 255.0 * 0.6).round() as u8;
-        let delta = expected.abs_diff(off[channel]);
+        let delta = expected[channel].abs_diff(off[channel]);
         assert!(
             delta <= MAX_DELTA,
-            "channel {channel}: expected {expected} (40% of {:?} over white), got {}",
-            on[channel],
+            "channel {channel}: expected {} (chrome.text_disabled), got {}",
+            expected[channel],
             off[channel]
         );
     }

@@ -444,12 +444,10 @@ impl PanelModern {
             Rect::from_min_size(strip.min, Vec2::new(m.file_button_width, strip.height()));
         let response = ui
             .push_id("file_button", |ui| {
-                let text = egui::RichText::new(file_label.as_str())
-                    .color(crate::theme::color_at(ui.ctx(), "accent.text"));
-                ui.put(
-                    file_rect,
-                    Button::new(text).fill(crate::theme::color_at(ui.ctx(), "accent")),
-                )
+                // The one accent-filled control of the window
+                // (docs/ui/design.md).
+                crate::theme::accent_controls(ui);
+                ui.put(file_rect, Button::new(file_label.as_str()))
             })
             .inner
             .accessible_name(file_label.as_str())
@@ -463,7 +461,8 @@ impl PanelModern {
         let active = self.active_index(tabs);
         for (index, tab) in tabs.iter().enumerate() {
             let caption = tab.label.clone().unwrap_or_default();
-            let shown = caption.to_uppercase();
+            // Title case, as the data has it (task P7-18).
+            let shown = caption.clone();
             let (x, tab_width) = slots.get(index).copied().unwrap_or((file_rect.max.x, 0.0));
             let rect = Rect::from_min_size(
                 egui::pos2(x, strip.min.y),
@@ -482,6 +481,9 @@ impl PanelModern {
                     };
                     let text = egui::RichText::new(shown.as_str())
                         .color(crate::theme::color_at(ui.ctx(), token));
+                    // The selected tab shows by its accent caption and
+                    // underline, not by the selected-button fill.
+                    ui.visuals_mut().selection.bg_fill = egui::Color32::TRANSPARENT;
                     // A contextual tab carries its tab-set name in
                     // front of its label (task P7-17: drawn over the
                     // label, the two were unreadable).
@@ -499,6 +501,9 @@ impl PanelModern {
                 .inner
                 .accessible_name(caption.as_str())
                 .on_hover_text(caption.as_str());
+            if active == Some(index) {
+                paint_tab_underline(ui, rect);
+            }
             if response.double_clicked() {
                 self.set_collapsed(!self.collapsed);
             } else if response.clicked() {
@@ -1017,7 +1022,7 @@ fn paint_caption(ui: &Ui, group: &larrygram_ui_spec::v2::Group, rect: Rect, m: &
         caption.center(),
         egui::Align2::CENTER_CENTER,
         group.label.clone().unwrap_or_default(),
-        egui::FontId::proportional(12.0),
+        crate::theme::font_at(ui.ctx(), "caption"),
         crate::theme::color_at(ui.ctx(), "group.caption.text"),
     );
     caption
@@ -1031,14 +1036,14 @@ fn tab_slots(ui: &Ui, tabs: &[&Tab], m: &Metrics, start_x: f32) -> Vec<(f32, f32
     let mut out = Vec::with_capacity(tabs.len());
     let mut x = start_x;
     for tab in tabs {
-        let shown = tab.label.clone().unwrap_or_default().to_uppercase();
+        let shown = tab.label.clone().unwrap_or_default();
         let caption = match tab.shown_in {
             Some(_) => {
                 let name = tab.tab_set.clone().unwrap_or_default();
                 ui.painter()
                     .layout_no_wrap(
                         name,
-                        egui::FontId::proportional(TAB_SET_SIZE),
+                        crate::theme::font_at(ui.ctx(), "caption"),
                         egui::Color32::WHITE,
                     )
                     .rect
@@ -1252,9 +1257,6 @@ fn text_width(ui: &Ui, text: &str) -> f32 {
         .width()
 }
 
-/// The size of a contextual tab's tab-set name, in points.
-const TAB_SET_SIZE: f32 = 10.0;
-
 /// The tab-set name of a contextual tab, small and in the set's text
 /// colour, or `None` for a core tab.
 fn tab_set_caption(ctx: &egui::Context, tab: &Tab) -> Option<egui::RichText> {
@@ -1264,9 +1266,27 @@ fn tab_set_caption(ctx: &egui::Context, tab: &Tab) -> Option<egui::RichText> {
         contextual_tokens(set_family(ctx, &name).as_deref().unwrap_or_default());
     Some(
         egui::RichText::new(name)
-            .size(TAB_SET_SIZE)
+            .font(crate::theme::font_at(ctx, "caption"))
             .color(crate::theme::color_at(ctx, text_token)),
     )
+}
+
+/// Paints the selected tab's accent underline along the bottom of
+/// `rect` (`tab.underline` thick, inset by `tab.padding_x` less a few
+/// pixels so it spans the caption; docs/ui/design.md).
+fn paint_tab_underline(ui: &Ui, rect: Rect) {
+    let ctx = ui.ctx();
+    let thickness = crate::theme::metric_at(ctx, "tab.underline", 2.0);
+    let inset = (crate::theme::metric_at(ctx, "tab.padding_x", 12.0) - 4.0).max(0.0);
+    let line = Rect::from_min_max(
+        egui::pos2(rect.min.x + inset, rect.max.y - thickness),
+        egui::pos2(rect.max.x - inset, rect.max.y),
+    );
+    ui.painter().rect_filled(
+        line,
+        crate::theme::metric_at(ctx, "radius.control", 0.0).min(thickness / 2.0),
+        crate::theme::color_at(ctx, "accent"),
+    );
 }
 
 /// Paints the contextual-tab look of one tab: the set's fill behind

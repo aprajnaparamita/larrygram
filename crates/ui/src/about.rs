@@ -57,9 +57,8 @@ pub enum Outcome {
 pub fn show(ui: &mut Ui) -> Result<Outcome, UiError> {
     use crate::window_size::{GAP, fit_aspect, split_footer, text_scale};
 
-    /// The body text size at a text scale of 1, in points.
-    const BODY_SIZE: f32 = 14.0;
-
+    // Close and the video button are standard framed controls.
+    crate::theme::raise_controls(ui);
     let rect = ui.available_rect_before_wrap();
     ui.allocate_rect(rect, egui::Sense::hover());
     let (body, footer) = split_footer(rect);
@@ -88,7 +87,9 @@ pub fn show(ui: &mut Ui) -> Result<Outcome, UiError> {
             .max_rect(text)
             .layout(egui::Layout::top_down(egui::Align::Min)),
     );
-    let body_text = |text: &str| egui::RichText::new(text).size(BODY_SIZE * scale);
+    // The body text is the theme's `lead` role, grown with the window.
+    let body_font = crate::theme::scaled_font(ui.ctx(), "lead", scale);
+    let body_text = |text: &str| egui::RichText::new(text).font(body_font.clone());
     column.label(body_text(DEDICATION).strong());
     column.add_space(GAP * 0.75);
     column.label(body_text(STORY));

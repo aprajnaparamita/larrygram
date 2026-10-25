@@ -116,14 +116,18 @@ fn draw_row(
     ui.painter()
         .rect_filled(gutter, 0.0, crate::theme::color_at(ui.ctx(), "menu.gutter"));
     if highlighted || response.hovered() {
+        // The highlight sits inset from the menu edge with the control
+        // radius (docs/ui/design.md).
+        let radius = crate::theme::metric_at(ui.ctx(), "radius.control", 0.0);
+        let rect = rect.shrink2(Vec2::new(2.0, 0.0));
         ui.painter().rect_filled(
             rect,
-            0.0,
+            radius,
             crate::theme::color_at(ui.ctx(), "menu.highlight.fill"),
         );
         ui.painter().rect_stroke(
             rect,
-            0.0,
+            radius,
             Stroke::new(
                 1.0,
                 crate::theme::color_at(ui.ctx(), "menu.highlight.border"),
@@ -233,15 +237,16 @@ pub(crate) fn draw_title(
         m.menu_bar_height,
     );
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+    let radius = crate::theme::metric_at(ui.ctx(), "radius.control", 0.0);
     if open {
         ui.painter().rect_filled(
             rect,
-            0.0,
+            radius,
             crate::theme::color_at(ui.ctx(), "menu.bar.open.fill"),
         );
         ui.painter().rect_stroke(
             rect,
-            0.0,
+            radius,
             Stroke::new(
                 1.0,
                 crate::theme::color_at(ui.ctx(), "menu.bar.open.border"),
@@ -251,7 +256,7 @@ pub(crate) fn draw_title(
     } else if response.hovered() {
         ui.painter().rect_filled(
             rect,
-            0.0,
+            radius,
             crate::theme::color_at(ui.ctx(), "button.hover.fill"),
         );
     }
