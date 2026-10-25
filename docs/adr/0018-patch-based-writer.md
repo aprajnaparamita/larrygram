@@ -144,3 +144,18 @@ open issue 7), so the tree wins.
 - **Patch, but rewrite every attribute canonically.** Rejected: re-spelling
   unchanged values (`2.0` to `2`, `true` to `1`) turns a no-op write into a
   noisy diff and risks comparisons that are not numeric under `diff`.
+
+## Amendment (task P8-20, ADR 0073)
+
+Two additions to the writer, both outside the mapped surface this ADR
+covers; see ADR 0073 for the decisions and their citations:
+
+- every written package carries the windows part, its relationship and its
+  content-type override (added when the package has none, byte-for-byte kept
+  when it has one);
+- every page a `BackPage` attribute names is marked `Background="1"` on
+  write ("mark it"), and the reader consumes that derived mark.
+
+The round-trip criterion's "same part list, content types and relationships"
+grows one tolerance: the written package may add the windows entries to a
+source that had none.

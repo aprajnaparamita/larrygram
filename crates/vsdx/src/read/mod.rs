@@ -82,6 +82,10 @@
 //!   kept verbatim, like every other unmapped element;
 //! - a `Master` or `BackPage` reference that names nothing stays in
 //!   `Preserved` instead of being resolved;
+//! - a `Background` attribute on a page another page references through
+//!   `BackPage` is consumed (task P8-20, ADR 0073): it is the writer's
+//!   derived mark and the model holds the reference; on a page nobody
+//!   references the attribute is preserved like any other;
 //! - a `Connect` element with text, a comment or a processing instruction is
 //!   kept verbatim rather than modeled; its other unmapped attributes and
 //!   children go to [`Connect::preserved`](larrygram_model::Connect);
@@ -523,6 +527,26 @@ impl Mapper<'_> {
             // something else stays preserved as before.
             if let Some(page) = self.document.pages.get_mut(position) {
                 drop_rel_child(&mut page.preserved, rel.slot);
+            }
+        }
+        // A `Background` attribute on a page another page references through
+        // `BackPage` is the writer's derived mark (task P8-20, ADR 0073):
+        // the model holds the reference and the writer writes the mark
+        // again, so it is consumed here rather than preserved. On a page
+        // nobody references the mark is content the model cannot derive and
+        // it stays preserved.
+        let referenced: Vec<u32> = self
+            .document
+            .pages
+            .iter()
+            .filter_map(|page| page.background.map(|background| background.index))
+            .collect();
+        for index in referenced {
+            let position = usize::try_from(index).unwrap_or(usize::MAX);
+            if let Some(page) = self.document.pages.get_mut(position) {
+                page.preserved
+                    .attributes
+                    .retain(|attribute| attribute.name.local != "Background");
             }
         }
         Ok(())
