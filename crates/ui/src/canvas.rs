@@ -902,7 +902,7 @@ fn zoom_percent(zoom: f64) -> String {
 }
 
 /// The label of a page: its `Name`, else its `NameU`, else `Page N`.
-fn page_label(page: &Page, index: usize) -> String {
+pub(crate) fn page_label(page: &Page, index: usize) -> String {
     if !page.name.is_empty() {
         page.name.clone()
     } else if !page.name_u.is_empty() {

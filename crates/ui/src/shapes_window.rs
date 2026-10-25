@@ -21,6 +21,19 @@ use crate::UiError;
 /// One preview box edge, in egui points.
 const PREVIEW_PX: f32 = 40.0;
 
+/// The Shapes window header, per layout (task P7-09 owns the header
+/// and look).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Header {
+    /// Panel Classic: a "Shapes" title row with a close button, then
+    /// "Search for Shapes:" (docs/ui/panel-classic.md).
+    #[default]
+    Classic,
+    /// Panel Modern: a large "Shapes" title with the STENCILS and
+    /// SEARCH headings (docs/ui/panel-modern.md).
+    Modern,
+}
+
 /// A picked stencil master (ADR 0034).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StencilPick {
@@ -50,6 +63,8 @@ pub struct ShapesWindow {
     /// The master whose row drag started this frame (task P5-17): the
     /// shell takes it and calls `stencil::begin_drag`.
     drag_started: Option<StencilPick>,
+    /// The search box text (look only; task P7-09).
+    search: String,
 }
 
 impl std::fmt::Debug for ShapesWindow {
@@ -100,16 +115,22 @@ impl ShapesWindow {
         self.drag_started.take()
     }
 
-    /// Draws the stencil sections and master list with previews
-    /// (ADR 0034).
+    /// Draws the header, the stencil sections and the master list
+    /// with previews (ADR 0034; the header per layout, task P7-09).
     ///
     /// Returns the picks the user made this frame. A master whose
     /// preview cannot be rasterized draws a placeholder box and still
     /// lists and selects.
-    pub fn show(&mut self, ui: &mut Ui, app: &AppCtx) -> Result<Vec<StencilPick>, UiError> {
+    pub fn show(
+        &mut self,
+        ui: &mut Ui,
+        app: &AppCtx,
+        header: Header,
+    ) -> Result<Vec<StencilPick>, UiError> {
         // `app` is reserved for Phase 5 (dropping a master into the
         // active document); the listing and previews need no state.
         let _ = app;
+        self.show_header(ui, header);
         let mut picks = Vec::new();
         for stencil in stencils::catalog() {
             egui::CollapsingHeader::new(stencil.name)
@@ -145,6 +166,40 @@ impl ShapesWindow {
     /// Selects one master.
     fn select(&mut self, pick: StencilPick) {
         self.selected = Some(pick);
+    }
+
+    /// The window header of the active layout (task P7-09): the
+    /// classic title row and search box, or the modern titles. The
+    /// close button and the search box are look only (hiding the
+    /// window and searching the catalog are later work); the button
+    /// draws disabled so it never pretends to act.
+    fn show_header(&mut self, ui: &mut Ui, header: Header) {
+        match header {
+            Header::Classic => {
+                ui.horizontal(|ui| {
+                    ui.label("Shapes");
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.add_enabled_ui(false, |ui| ui.small_button("x"))
+                            .inner
+                            .on_disabled_hover_text("Not yet implemented");
+                    });
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Search for Shapes:");
+                    ui.add(egui::TextEdit::singleline(&mut self.search).hint_text("type a word"));
+                    ui.add_enabled_ui(false, |ui| ui.small_button("Go"))
+                        .inner
+                        .on_disabled_hover_text("Not yet implemented");
+                });
+            }
+            Header::Modern => {
+                ui.heading("Shapes");
+                ui.label("STENCILS");
+                ui.label("SEARCH");
+                ui.add(egui::TextEdit::singleline(&mut self.search).hint_text("Search for shapes"));
+            }
+        }
+        ui.separator();
     }
 
     /// Draws the preview of one master, rasterizing and caching it on
@@ -273,7 +328,7 @@ mod tests {
         let texts = painted_text(|ui| {
             let mut window = ShapesWindow::new();
             let app = AppCtx::new(larrygram_commands::Settings::default());
-            let picks = window.show(ui, &app).expect("show");
+            let picks = window.show(ui, &app, Header::Classic).expect("show");
             assert!(picks.is_empty(), "no clicks in a scratch frame");
         });
         for stencil in stencils::catalog() {
@@ -301,7 +356,7 @@ mod tests {
         };
         with_ui(|ui| {
             let app = AppCtx::new(larrygram_commands::Settings::default());
-            window.show(ui, &app).expect("show");
+            window.show(ui, &app, Header::Classic).expect("show");
         });
         window.select(pick);
         assert_eq!(window.selected(), Some(&pick));
@@ -316,10 +371,10 @@ mod tests {
         let mut window = ShapesWindow::new();
         with_ui(|ui| {
             let app = AppCtx::new(larrygram_commands::Settings::default());
-            window.show(ui, &app).expect("show");
+            window.show(ui, &app, Header::Classic).expect("show");
             // A second frame reuses the cached slots (or the failed
             // placeholder) instead of rasterizing again.
-            window.show(ui, &app).expect("show again");
+            window.show(ui, &app, Header::Classic).expect("show again");
         });
         let expected: usize = stencils::catalog()
             .iter()

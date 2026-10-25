@@ -27,9 +27,6 @@ larrygram-ui-spec = { path = "../ui-spec" }
 # The settings slot format (ADR 0032): `Settings` as JSON in the
 # eframe storage key. MIT OR Apache-2.0 (already in the tree).
 serde_json = "1"
-# `serde` derives for the settings seams (`WelcomeSettings`, task
-# P7-01). MIT OR Apache-2.0 (already in the tree).
-serde = { version = "1", features = ["derive"] }
 # The image loaders for the brand art and the icon set (ADR 0067):
 # `svg` draws SVGs through resvg, `image` decodes raster images through
 # the `image` crate, here PNG only. No file or HTTP loader: every image

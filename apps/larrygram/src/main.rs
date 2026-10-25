@@ -65,7 +65,7 @@ struct Options {
     help: bool,
 }
 
-/// Parses the command line (`--ui-layout 2016|365`, `--help`).
+/// Parses the command line (`--ui-layout <layout>`, `--help`).
 fn parse_args(args: &[String]) -> Result<Options, AppError> {
     let mut options = Options::default();
     let mut index = 0;
@@ -93,24 +93,28 @@ fn parse_args(args: &[String]) -> Result<Options, AppError> {
     Ok(options)
 }
 
-/// The `--ui-layout` value: `panel-2016` or `panel-365` (ADR 0032).
+/// The `--ui-layout` values (ADR 0032, task P7-09 Goal 2).
+const LAYOUT_VALUES: &str = "panel-modern|panel-classic|panel-2016|panel-365";
+
+/// The `--ui-layout` value: one of [`LAYOUT_VALUES`] (ADR 0032).
 ///
-/// The pre-rename values (`2016`, `365`)
-/// are rejected like any unknown value, with a message naming the
-/// current ones.
+/// The pre-rename values (`2016`, `365`) are rejected like any
+/// unknown value, with a message naming the current ones.
 fn parse_layout(value: &str) -> Result<LayoutKind, AppError> {
     match value {
+        "panel-modern" => Ok(LayoutKind::PanelModern),
+        "panel-classic" => Ok(LayoutKind::PanelClassic),
         "panel-2016" => Ok(LayoutKind::Panel2016),
         "panel-365" => Ok(LayoutKind::Panel365),
         other => Err(AppError::new(format!(
-            "unknown layout {other:?}; expected panel-2016 or panel-365"
+            "unknown layout {other:?}; expected {LAYOUT_VALUES}"
         ))),
     }
 }
 
 /// The one-line usage, printed by `--help`.
 fn help_text() -> &'static str {
-    "usage: larrygram [--ui-layout panel-2016|panel-365] [--help]"
+    "usage: larrygram [--ui-layout panel-modern|panel-classic|panel-2016|panel-365] [--help]"
 }
 
 /// The app icon source: the single `icon.svg` brand asset (ADR 0067).
@@ -227,7 +231,10 @@ fn build_shell(
     let mut settings = larrygram_ui::settings::load_settings(&mut slot)
         .map_err(|error| AppError::new(error.to_string()))?;
     if let Some(kind) = cli_layout {
+        // The flag wins over the persisted value (ADR 0032) and the
+        // default layout stays in step (task P7-09 Goal 6).
         settings.ui_layout = kind;
+        settings.default_layout = kind;
     }
     let mut app = AppCtx::new(settings);
     if let Some(warning) = slot.take_warning() {
@@ -342,12 +349,19 @@ mod tests {
 
     #[test]
     fn the_command_line_parses_the_layout_flag() {
-        let options = parse_args(&strings(&["--ui-layout", "panel-365"])).expect("args");
-        assert_eq!(options.ui_layout, Some(LayoutKind::Panel365));
-        assert!(!options.help);
-
-        let options = parse_args(&strings(&["--ui-layout=panel-2016"])).expect("args");
-        assert_eq!(options.ui_layout, Some(LayoutKind::Panel2016));
+        // The four values of task P7-09 Goal 2, with and without `=`.
+        for (value, kind) in [
+            ("panel-modern", LayoutKind::PanelModern),
+            ("panel-classic", LayoutKind::PanelClassic),
+            ("panel-2016", LayoutKind::Panel2016),
+            ("panel-365", LayoutKind::Panel365),
+        ] {
+            let options = parse_args(&strings(&["--ui-layout", value])).expect("args");
+            assert_eq!(options.ui_layout, Some(kind), "{value}");
+            assert!(!options.help);
+            let options = parse_args(&strings(&[&format!("--ui-layout={value}")])).expect("args");
+            assert_eq!(options.ui_layout, Some(kind), "--ui-layout={value}");
+        }
 
         let options = parse_args(&[]).expect("args");
         assert_eq!(options, Options::default());
@@ -365,17 +379,13 @@ mod tests {
         let error = parse_args(&strings(&["--nope"])).expect_err("unknown flag");
         assert!(error.to_string().contains("--nope"), "{error}");
         let error = parse_args(&strings(&["--ui-layout"])).expect_err("missing value");
-        assert!(
-            error.to_string().contains("panel-2016 or panel-365"),
-            "{error}"
-        );
+        assert!(error.to_string().contains(LAYOUT_VALUES), "{error}");
         let error = parse_args(&strings(&["--ui-layout", "95"])).expect_err("bad layout");
         assert!(error.to_string().contains("95"), "{error}");
         let error = parse_args(&strings(&["--ui-layout=nope"])).expect_err("bad layout");
-        assert!(
-            error.to_string().contains("panel-2016 or panel-365"),
-            "{error}"
-        );
+        let shown = error.to_string();
+        assert!(shown.contains("nope"), "{shown}");
+        assert!(shown.contains(LAYOUT_VALUES), "{shown}");
     }
 
     #[test]
@@ -476,7 +486,15 @@ mod tests {
             });
             output.textures_delta.clear();
         }
-        assert_eq!(app.saved_settings, app.shell.app.settings);
+        // The frame records the per-layout state (task P7-09 Goal 3):
+        // the last core tab is remembered and nothing else changes.
+        assert_eq!(
+            app.shell.app.settings.last_core_tab,
+            Some("tab.home".to_owned())
+        );
+        let mut unchanged = app.shell.app.settings.clone();
+        unchanged.last_core_tab = None;
+        assert_eq!(app.saved_settings, unchanged);
     }
 
     #[test]

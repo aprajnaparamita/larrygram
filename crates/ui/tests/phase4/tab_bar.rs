@@ -271,7 +271,7 @@ fn menu_control(
 #[test]
 fn every_placement_of_both_layouts_renders_by_accessible_name() {
     for kind in [LayoutKind::Panel2016, LayoutKind::Panel365] {
-        let set = sets().get(kind).expect("the committed set").clone();
+        let set = sets().get(kind).clone();
 
         // Every command-bar tab: the tab labels, the group labels and the
         // placements of the active tab's groups.
@@ -420,7 +420,7 @@ fn a_context_menu_renders_exactly_its_placements() {
     // The committed menus (currently empty, P4-03): exactly their
     // placements, nothing else.
     for kind in [LayoutKind::Panel2016, LayoutKind::Panel365] {
-        let set = sets().get(kind).expect("the committed set").clone();
+        let set = sets().get(kind).clone();
         assert!(
             !set.layout.context_menus.is_empty(),
             "{kind:?} has context menus to walk"
@@ -451,7 +451,7 @@ fn the_raw_placement_counts_are_pinned() {
     let line = |label: &str, value: usize| format!("{label}: {value}");
     let mut report = String::new();
     for kind in [LayoutKind::Panel2016, LayoutKind::Panel365] {
-        let layout = &sets().get(kind).expect("the committed set").layout;
+        let layout = &sets().get(kind).layout;
         let mut tab_bar_controls = 0usize;
         let mut tab_bar_nested = 0usize;
         let mut tab_bar_ids: BTreeSet<&str> = BTreeSet::new();

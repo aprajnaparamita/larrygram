@@ -19,7 +19,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use egui::accesskit::Role;
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::{Harness, Node};
-use larrygram_commands::app::{AppCtx, DocumentSession, Settings};
+use larrygram_commands::app::{AppCtx, DocumentSession};
 use larrygram_commands::{
     Command, CommandError, CommandId, CommandMeta, CommandStatus, Enabled, Invocation, Outcome,
     Registry, builtins,
@@ -33,7 +33,7 @@ fn app_with_two_pages() -> AppCtx {
     let mut doc = Document::new();
     doc.add_page("Page-1").expect("page one");
     doc.add_page("Page-2").expect("page two");
-    let mut app = AppCtx::new(Settings::default());
+    let mut app = AppCtx::new(crate::phase5_settings());
     app.open_document(DocumentSession::new(doc, None));
     app
 }

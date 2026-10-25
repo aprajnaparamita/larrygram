@@ -126,11 +126,23 @@ pub struct ShellRig {
     harness: Harness<'static>,
 }
 
+/// The settings of the Phase 4 suites: the Panel (2016 data) layout
+/// (the v1 widgets these tests pin) and the welcome wizard already
+/// seen (task P7-09 flips both defaults: new stores start on Panel
+/// Modern and open the wizard on the first launch).
+pub fn phase4_settings() -> Settings {
+    let mut settings = Settings::default();
+    settings.ui_layout = larrygram_ui_spec::LayoutKind::Panel2016;
+    settings.default_layout = larrygram_ui_spec::LayoutKind::Panel2016;
+    settings.welcome_seen = true;
+    settings
+}
+
 impl ShellRig {
     /// A shell over the builtin registry, the committed layouts and
-    /// default settings.
+    /// the Phase 4 settings.
     pub fn new() -> Self {
-        Self::with_app(AppCtx::new(Settings::default()))
+        Self::with_app(AppCtx::new(phase4_settings()))
     }
 
     /// A shell over the builtin registry and the committed layouts,
@@ -158,7 +170,7 @@ impl ShellRig {
             Shell::new(
                 larrygram_commands::builtins::registry().expect("the registry builds"),
                 sets().clone(),
-                AppCtx::new(Settings::default()),
+                AppCtx::new(phase4_settings()),
             ),
             egui::vec2(12000.0, 4000.0),
         )
@@ -172,6 +184,10 @@ impl ShellRig {
             .with_context_setup({
                 let egui_ctx = Rc::clone(&egui_ctx);
                 move |ctx| {
+                    // The apps install the image loaders at start-up;
+                    // the rig does the same (ADR 0067), or the brand
+                    // images draw as broken-image marks.
+                    larrygram_ui::install_image_loaders(ctx);
                     *egui_ctx.borrow_mut() = Some(ctx.clone());
                 }
             })

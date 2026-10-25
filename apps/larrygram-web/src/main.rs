@@ -296,6 +296,14 @@ mod tests {
             });
             output.textures_delta.clear();
         }
-        assert_eq!(app.saved_settings, app.shell.app.settings);
+        // The frame records the per-layout state (task P7-09 Goal 3):
+        // the last core tab is remembered and nothing else changes.
+        assert_eq!(
+            app.shell.app.settings.last_core_tab,
+            Some("tab.home".to_owned())
+        );
+        let mut unchanged = app.shell.app.settings.clone();
+        unchanged.last_core_tab = None;
+        assert_eq!(app.saved_settings, unchanged);
     }
 }

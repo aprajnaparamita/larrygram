@@ -4,7 +4,7 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
-use larrygram_commands::app::{AppCtx, DocumentSession, Settings};
+use larrygram_commands::app::{AppCtx, DocumentSession};
 use larrygram_geom::{Point, SnapKind};
 use larrygram_model::{CellName, CellValue, CellWrite, ShapeId, SheetRef, stencils};
 use larrygram_render::OverlayMark;
@@ -36,7 +36,7 @@ fn resized_master_instance() -> (AppCtx, ShapeId) {
             )
             .expect("resize the instance");
     }
-    let mut app = AppCtx::new(Settings::default());
+    let mut app = AppCtx::new(crate::phase5_settings());
     app.open_document(DocumentSession::new(document, None));
     (app, shape)
 }
