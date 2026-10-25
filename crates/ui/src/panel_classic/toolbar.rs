@@ -3,8 +3,9 @@
 //! grippers, split buttons, `split_recent`, palettes, colour
 //! dropdowns and combos.
 //!
-//! Colours come from the egui defaults until task P7-05 merges the
-//! theme tokens; the metrics below are the layout's numbers.
+//! Colours come from the theme by token name (ADR 0063,
+//! [`crate::theme::color_at`]) and the sizes from
+//! [`ClassicMetrics`]; with no theme applied the defaults draw.
 
 use egui::{Id, Pos2, Rect, Sense, Ui, Vec2, WidgetInfo};
 
