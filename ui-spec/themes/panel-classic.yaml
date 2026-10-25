@@ -36,6 +36,7 @@ colors:
   canvas.background: '#9b9ab3'        # area around the page
   page.background: '#ffffff'
   page.border: '#000000'
+  page.shadow: '#eaeaea'              # the drop shadow beside and below the page
   ruler.background: '#ffffff'
   ruler.ticks: '#000000'
   scroll.track: '#cdcdcd'
@@ -75,3 +76,30 @@ metrics:
   status_bar.height: 20
   icon.small: 16
   icon.large: 32
+  # The Panel Modern metrics `Metrics::from_theme` reads (the shell
+  # runs it against every theme). The values are the widget defaults
+  # (`crates/ui/src/panel_modern/metrics.rs`), so a Panel Classic
+  # theme changes no geometry: the Panel Modern chrome draws with the
+  # same numbers its fallbacks would give.
+  tab_strip.height: 25
+  tab.padding_x: 12
+  file_button.width: 59
+  command_bar.height: 92
+  command_bar.padding_top: 2
+  group.padding_x: 4
+  group.caption.height: 17
+  group.separator.width: 1
+  launcher: {width: 16, height: 17}
+  button.large: {min_width: 42, height: 69, icon: 32}
+  button.medium: {height: 23, icon: 16}
+  button.small: {width: 22, height: 23, icon: 16}
+  split.arrow.width: 12
+  stack.rows: 3
+  stack.row.height: 23
+  rows.row.height: 23
+  rows.gap: 8
+  combo.height: 23
+  check.size: 13
+  file_view.nav.width: 123
+  file_view.nav.row.height: 38
+  qat.button: {width: 22, height: 22}
