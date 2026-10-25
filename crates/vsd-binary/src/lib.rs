@@ -43,6 +43,7 @@ mod error;
 mod limits;
 mod pages;
 mod pipeline;
+mod scale;
 mod shape;
 mod style;
 mod text;
