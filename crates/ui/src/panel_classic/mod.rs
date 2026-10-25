@@ -90,6 +90,51 @@ impl WindowMode {
     }
 }
 
+/// The submenu hover rules of one row chain (the menu bars' rule, as
+/// `PanelClassic::update_context_hover` documents): a submenu opens
+/// after [`SUBMENU_DELAY`], any other row closes the deeper levels.
+/// The chain stays open while the pointer moves into a child level
+/// (P7-12 major 4).
+pub(crate) fn update_chain_hover(
+    ui: &Ui,
+    levels: &[Vec<Row>],
+    hover: Option<(usize, usize)>,
+    chain: &mut Vec<usize>,
+    pending: &mut Option<(usize, usize, f64)>,
+) {
+    let Some((level, index)) = hover else {
+        *pending = None;
+        return;
+    };
+    let has_children = levels
+        .get(level)
+        .and_then(|level| level.get(index))
+        .is_some_and(Row::has_children);
+    let open_here = chain.get(level).copied() == Some(index) && chain.len() > level + 1;
+    if !has_children {
+        if chain.len() > level {
+            chain.truncate(level);
+        }
+        *pending = None;
+        return;
+    }
+    if open_here {
+        *pending = None;
+        return;
+    }
+    let now = ui.input(|i| i.time);
+    match pending {
+        Some((l, r, start)) if *l == level && *r == index => {
+            if now - *start >= SUBMENU_DELAY {
+                chain.truncate(level);
+                chain.push(index);
+                *pending = None;
+            }
+        }
+        _ => *pending = Some((level, index, now)),
+    }
+}
+
 /// The `checked` state of a toggle or check command.
 ///
 /// The command registry has no checked-state seam yet (the P5-17
@@ -232,6 +277,11 @@ pub struct PanelClassic {
     context_chain: Vec<usize>,
     /// A pending context-menu submenu hover: (level, row, start time).
     context_hover: Option<(usize, usize, f64)>,
+    /// The open toolbar-popup submenu chain (the `context_chain`
+    /// rules, P7-12 major 4): one row index per open level.
+    popup_chain: Vec<usize>,
+    /// A pending toolbar-popup submenu hover: (level, row, start time).
+    popup_hover: Option<(usize, usize, f64)>,
     /// The context menu Shift+F10 opens (P7-08's hit-target mapping).
     context_target: Option<String>,
     /// The help search box text ("Type a question for help").
@@ -261,6 +311,8 @@ impl Default for PanelClassic {
             context_pos: Pos2::ZERO,
             context_chain: Vec::new(),
             context_hover: None,
+            popup_chain: Vec::new(),
+            popup_hover: None,
             context_target: None,
             help_search: String::new(),
         }
@@ -456,6 +508,13 @@ impl PanelClassic {
         self.context_hover = None;
     }
 
+    /// Closes the open toolbar popup and its submenu chain.
+    pub(crate) fn close_popup(&mut self) {
+        self.open_popup = None;
+        self.popup_chain.clear();
+        self.popup_hover = None;
+    }
+
     /// The context-menu hover rules (the menu bars' [`Self::update_hover`]
     /// rule): a submenu opens after [`SUBMENU_DELAY`], any other row
     /// closes the deeper levels.
@@ -465,38 +524,13 @@ impl PanelClassic {
         levels: &[Vec<Row>],
         hover: Option<(usize, usize)>,
     ) {
-        let Some((level, index)) = hover else {
-            self.context_hover = None;
-            return;
-        };
-        let has_children = levels
-            .get(level)
-            .and_then(|level| level.get(index))
-            .is_some_and(Row::has_children);
-        let open_here = self.context_chain.get(level).copied() == Some(index)
-            && self.context_chain.len() > level + 1;
-        if !has_children {
-            if self.context_chain.len() > level {
-                self.context_chain.truncate(level);
-            }
-            self.context_hover = None;
-            return;
-        }
-        if open_here {
-            self.context_hover = None;
-            return;
-        }
-        let now = ui.input(|i| i.time);
-        match self.context_hover {
-            Some((l, r, start)) if l == level && r == index => {
-                if now - start >= SUBMENU_DELAY {
-                    self.context_chain.truncate(level);
-                    self.context_chain.push(index);
-                    self.context_hover = None;
-                }
-            }
-            _ => self.context_hover = Some((level, index, now)),
-        }
+        update_chain_hover(
+            ui,
+            levels,
+            hover,
+            &mut self.context_chain,
+            &mut self.context_hover,
+        );
     }
 
     /// Activates one row: dispatches its intent and closes the menus,

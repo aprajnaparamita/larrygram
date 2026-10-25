@@ -1108,3 +1108,90 @@ fn standard_and_formatting_dock_on_rows_0_and_1() {
         drawn.len()
     );
 }
+
+/// A toolbar popup's submenu rows open their children and the chain
+/// stays open while the pointer moves into them (P7-12 major 4: the
+/// popups opened their child level on a stateless hover, so moving
+/// the pointer into the child closed it — the bug the context-menu
+/// `context_chain` fix addressed).
+#[test]
+fn a_toolbar_popup_submenu_stays_open_when_the_pointer_moves_into_it() {
+    use larrygram_ui_spec::v2::ItemKind;
+
+    let mut rig = ClassicRig::new();
+    hide_floating(&mut rig);
+    let layout = rig.layout().clone();
+    // The fixture: the first toolbar item whose popup has a nested
+    // row with named children (the Reviewing toolbar's Delete Markup
+    // split in the committed data).
+    let (toolbar_id, opener) = layout
+        .toolbars
+        .iter()
+        .find_map(|toolbar| {
+            toolbar
+                .items
+                .iter()
+                .find(|item| {
+                    matches!(
+                        item.kind,
+                        ItemKind::Split
+                            | ItemKind::SplitRecent
+                            | ItemKind::Dropdown
+                            | ItemKind::Palette
+                    ) && item.items.iter().any(|child| {
+                        !child.items.is_empty()
+                            && child.items.iter().any(|grand| grand.label.is_some())
+                    })
+                })
+                .map(|item| (toolbar.id.clone(), item))
+        })
+        .expect("a toolbar item with a nested row");
+    let nested = opener
+        .items
+        .iter()
+        .find(|child| {
+            !child.items.is_empty() && child.items.iter().any(|grand| grand.label.is_some())
+        })
+        .expect("the nested row");
+    let grandchild = nested
+        .items
+        .iter()
+        .find(|item| item.label.is_some())
+        .expect("a named grandchild");
+    let opener_label = opener.label.clone().unwrap_or_default();
+    let nested_label = nested.label.clone().unwrap_or_default();
+    let grandchild_label = grandchild.label.clone().unwrap_or_default();
+
+    // The fixture toolbar may start hidden; show it and open the
+    // popup from the split's arrow part ("{label} menu").
+    rig.panel.borrow_mut().set_toolbar_visible_in(
+        larrygram_ui::panel_classic::WindowMode::Drawing,
+        &toolbar_id,
+        true,
+    );
+    rig.run();
+    rig.click(Role::Button, &format!("{opener_label} menu"));
+    assert!(
+        rig.names().contains(&nested_label),
+        "the popup draws {nested_label:?}"
+    );
+    // A hover opens the nested row's children after the delay.
+    rig.hover_nth(Role::MenuItem, &nested_label, 0);
+    for _ in 0..30 {
+        rig.run();
+    }
+    assert!(
+        rig.names().contains(&grandchild_label),
+        "hovering {nested_label:?} opens its children"
+    );
+    // The chain stays open while the pointer moves into the child
+    // level (the regression pin: a stateless hover closed it here).
+    rig.hover_nth(Role::MenuItem, &grandchild_label, 0);
+    for _ in 0..5 {
+        rig.run();
+    }
+    assert!(
+        rig.names().contains(&grandchild_label),
+        "the child level stays open while the pointer is inside it"
+    );
+}
