@@ -19,7 +19,10 @@
 //! the parts actually written. Unknown parts are copied verbatim.
 //! [`Document::kind`] selects the main part's content type and the part set
 //! (ADR 0016): a generated stencil has no pages part. The package writer
-//! (P2-05) emits the standard UTF-8 XML declaration on every XML part.
+//! (P2-05) emits the standard UTF-8 XML declaration on every XML part. Two
+//! rules of ADR 0073 run on every written package: the windows part triple
+//! is added when the package has none, and every page a `BackPage` names is
+//! marked `Background="1"`.
 
 mod emit;
 mod patch;
@@ -27,7 +30,9 @@ mod patch;
 // which codes it must preserve (task P6-16).
 pub(crate) mod value;
 
-use larrygram_model::{Document, DocumentKind, Master, Page, Preserved, XmlNode};
+use larrygram_model::{
+    Document, DocumentKind, Master, Page, Preserved, QName, XmlAttribute, XmlChild, XmlNode,
+};
 
 use crate::Error;
 use crate::package::discovery::{
@@ -49,11 +54,15 @@ const CT_PAGE: &str = "application/vnd.ms-visio.page+xml";
 const CT_MASTERS: &str = "application/vnd.ms-visio.masters+xml";
 /// The content type of a master contents part.
 const CT_MASTER: &str = "application/vnd.ms-visio.master+xml";
+/// The content type of the windows part.
+const CT_WINDOWS: &str = "application/vnd.ms-visio.windows+xml";
 
 /// The page list part.
 const PAGES_PART: &str = "/visio/pages/pages.xml";
 /// The master list part.
 const MASTERS_PART: &str = "/visio/masters/masters.xml";
+/// The windows part (task P8-20, ADR 0073).
+const WINDOWS_PART: &str = "/visio/windows.xml";
 /// The core document properties part.
 const CORE_PROPS_PART: &str = "/docProps/core.xml";
 /// The extended document properties part.
@@ -69,6 +78,8 @@ const REL_PAGE: &str = "http://schemas.microsoft.com/visio/2010/relationships/pa
 const REL_MASTERS: &str = "http://schemas.microsoft.com/visio/2010/relationships/masters";
 /// The master contents relationship type.
 const REL_MASTER: &str = "http://schemas.microsoft.com/visio/2010/relationships/master";
+/// The windows relationship type.
+const REL_WINDOWS: &str = "http://schemas.microsoft.com/visio/2010/relationships/windows";
 
 /// Maps a document back to package parts.
 ///
@@ -175,6 +186,7 @@ fn patch_package(
     });
 
     patch_lists(&mut package, &ctx, main)?;
+    ensure_windows_part(&mut package, main, &style);
     refresh_content_types(&mut package, document, main);
     Ok(package)
 }
@@ -210,7 +222,8 @@ fn patch_lists(package: &mut Package, ctx: &Ctx, main: &PartName) -> Result<(), 
             emit::pages_part,
         )?;
         patch_root(package, &pages_index, |root| {
-            patch::patch_pages_root(root, ctx, &rel_ids)
+            patch::patch_pages_root(root, ctx, &rel_ids);
+            ensure_background_marks(root);
         });
         let mut keep: Vec<PartName> = Vec::new();
         for (index, page) in ctx.document.pages.iter().enumerate() {
@@ -473,6 +486,145 @@ fn ensure_relationship(
     });
 }
 
+/// The windows part of the package: the part named [`WINDOWS_PART`], else a
+/// part whose content type is the windows content type (task P8-20).
+fn windows_part(package: &Package) -> Option<PartName> {
+    let named = PartName::new(WINDOWS_PART);
+    if package.part(&named).is_some() {
+        return Some(named);
+    }
+    package
+        .parts
+        .iter()
+        .find(|part| part.content_type.as_str() == CT_WINDOWS)
+        .map(|part| part.name.clone())
+}
+
+/// Makes the package carry the windows part, its relationship and its
+/// content-type override (task P8-20, ADR 0073): a package without one does
+/// not open in Visio. A package that already has a windows part keeps it
+/// exactly as it is; only a missing relationship or declaration is added.
+fn ensure_windows_part(package: &mut Package, main: &PartName, style: &NameStyle) {
+    let name = match windows_part(package) {
+        Some(existing) => existing,
+        None => {
+            add_part(
+                package,
+                PartName::new(WINDOWS_PART),
+                CT_WINDOWS,
+                emit::visio_root(style, "Windows"),
+            );
+            PartName::new(WINDOWS_PART)
+        }
+    };
+    let has_rel = package.relationships_from(main).any(|relationship| {
+        relationship.target_mode == TargetMode::Internal
+            && rel_type_local(&relationship.rel_type) == "windows"
+    });
+    if !has_rel {
+        let used: Vec<String> = package
+            .relationships_from(main)
+            .map(|relationship| relationship.id.as_str().to_owned())
+            .collect();
+        ensure_relationship(
+            package,
+            main,
+            REL_WINDOWS,
+            &windows_target(main, &name),
+            fresh_rel_id_from(&used),
+        );
+    }
+    // An `Override` of its own for the windows part, unless the source
+    // already names the part in its declarations (kept as it is spelled).
+    let has_override = package.content_types.iter().any(|decl| {
+        decl.kind == ContentTypeKind::Override && normalize(&decl.name) == normalize(name.as_str())
+    });
+    if !has_override {
+        package.content_types.push(ContentTypeDecl {
+            kind: ContentTypeKind::Override,
+            name: normalize(name.as_str()),
+            content_type: CT_WINDOWS.to_owned(),
+        });
+    }
+}
+
+/// The relationship target naming `name` from the main part: `windows.xml`
+/// for the standard part, else the shortest spelling that resolves back.
+fn windows_target(main: &PartName, name: &PartName) -> String {
+    let directory = main
+        .as_str()
+        .rsplit_once('/')
+        .map_or("", |(directory, _)| directory);
+    let prefix = format!("{directory}/");
+    name.as_str()
+        .strip_prefix(&prefix)
+        .map_or_else(|| name.as_str().to_owned(), str::to_owned)
+}
+
+/// Marks every page a `BackPage` attribute names as a background page (task
+/// P8-20, ADR 0073): [MS-VSDX] requires `BackPage` to name a page whose
+/// `Background` attribute is true, and a reference to an unmarked page is
+/// silently ignored by Visio, so the writer makes the pair consistent. A
+/// repeated `ID` is resolved the way the reader resolves it: the first
+/// element with that `ID` takes the mark.
+fn ensure_background_marks(root: &mut XmlNode) {
+    let mut referenced: Vec<i32> = Vec::new();
+    for child in &root.children {
+        let XmlChild::Element(element) = child else {
+            continue;
+        };
+        if element.name.local == "Page"
+            && let Some(back_page) = attribute_int(element, "BackPage")
+        {
+            referenced.push(back_page);
+        }
+    }
+    let mut marked: Vec<i32> = Vec::new();
+    for child in &mut root.children {
+        let XmlChild::Element(element) = child else {
+            continue;
+        };
+        if element.name.local != "Page" {
+            continue;
+        }
+        if let Some(id) = attribute_int(element, "ID")
+            && referenced.contains(&id)
+            && !marked.contains(&id)
+        {
+            mark_background(element);
+            marked.push(id);
+        }
+    }
+}
+
+/// Sets the `Background` attribute of one element to true, keeping a true
+/// spelling the source already has.
+fn mark_background(element: &mut XmlNode) {
+    match element
+        .attributes
+        .iter_mut()
+        .find(|attribute| attribute.name.local == "Background")
+    {
+        Some(attribute) => {
+            if attribute.value != "1" && attribute.value != "true" {
+                attribute.value = "1".to_owned();
+            }
+        }
+        None => element.attributes.push(XmlAttribute {
+            name: QName::local("Background"),
+            value: "1".to_owned(),
+        }),
+    }
+}
+
+/// The integer value of the element's attribute, if it has one and it parses.
+fn attribute_int(node: &XmlNode, local: &str) -> Option<i32> {
+    node.attributes
+        .iter()
+        .find(|attribute| attribute.name.local == local)
+        .and_then(|attribute| attribute.value.trim().parse::<i32>().ok())
+}
+
 /// The part a `Rel` points at: the part of the relationship with this id,
 /// creating the relationship and the part name when the reference dangles.
 fn contents_part(
@@ -646,12 +798,9 @@ fn generate_package(document: &Document) -> Result<Package, Error> {
     let mut document_rel: u32 = 0;
 
     if has_pages {
-        add_part(
-            &mut package,
-            PartName::new(PAGES_PART),
-            CT_PAGES,
-            emit::pages_part(document, &style, &page_rel_ids),
-        );
+        let mut root = emit::pages_part(document, &style, &page_rel_ids);
+        ensure_background_marks(&mut root);
+        add_part(&mut package, PartName::new(PAGES_PART), CT_PAGES, root);
         for (index, page) in document.pages.iter().enumerate() {
             add_part(
                 &mut package,
@@ -714,6 +863,7 @@ fn generate_package(document: &Document) -> Result<Package, Error> {
             ensure_relationship(&mut package, &index, REL_MASTER, &file, rel_id.clone());
         }
     }
+    ensure_windows_part(&mut package, &main, &style);
     Ok(package)
 }
 
@@ -764,6 +914,7 @@ mod tests {
                 "/visio/pages/page1.xml",
                 "/visio/masters/masters.xml",
                 "/visio/masters/master1.xml",
+                "/visio/windows.xml",
             ]
         );
         let main = package.part(&PartName::new(MAIN_PART)).expect("main part");
@@ -782,6 +933,7 @@ mod tests {
                 "/visio/document.xml",
                 "/visio/masters/masters.xml",
                 "/visio/masters/master1.xml",
+                "/visio/windows.xml",
             ]
         );
         let main = package.part(&PartName::new(MAIN_PART)).expect("main");
@@ -1179,5 +1331,287 @@ mod tests {
         assert_eq!(declared[0].content_type, CT_DRAWING_MAIN);
         let part = package.part(&main).expect("main part");
         assert_eq!(part.content_type.as_str(), CT_DRAWING_MAIN);
+    }
+
+    // --- task P8-20: the windows part and background-page marks ---------
+
+    /// A `Page` element with the attributes the two rules read.
+    fn page_node(id: &str, back_page: Option<&str>, background: Option<&str>) -> XmlNode {
+        let mut node = XmlNode {
+            name: QName::local("Page"),
+            attributes: Vec::new(),
+            children: Vec::new(),
+            self_closing: true,
+        };
+        node.attributes.push(XmlAttribute {
+            name: QName::local("ID"),
+            value: id.to_owned(),
+        });
+        if let Some(value) = back_page {
+            node.attributes.push(XmlAttribute {
+                name: QName::local("BackPage"),
+                value: value.to_owned(),
+            });
+        }
+        if let Some(value) = background {
+            node.attributes.push(XmlAttribute {
+                name: QName::local("Background"),
+                value: value.to_owned(),
+            });
+        }
+        node
+    }
+
+    /// A pages-list root of these `Page` elements.
+    fn pages_root(pages: Vec<XmlNode>) -> XmlNode {
+        XmlNode {
+            name: QName::local("Pages"),
+            attributes: Vec::new(),
+            children: pages.into_iter().map(XmlChild::Element).collect(),
+            self_closing: false,
+        }
+    }
+
+    /// The `Background` value of the `Page` at `position`, `None` without
+    /// the attribute.
+    fn background_at(root: &XmlNode, position: usize) -> Option<String> {
+        root.children
+            .get(position)
+            .and_then(|child| match child {
+                XmlChild::Element(element) => Some(element),
+                _ => None,
+            })
+            .and_then(|element| {
+                element
+                    .attributes
+                    .iter()
+                    .find(|attribute| attribute.name.local == "Background")
+                    .map(|attribute| attribute.value.clone())
+            })
+    }
+
+    #[test]
+    fn a_generated_package_carries_the_windows_triple() {
+        let package = from_model(&sample()).expect("package");
+        let part = package.part(&PartName::new(WINDOWS_PART)).expect("part");
+        assert_eq!(part.content_type.as_str(), CT_WINDOWS);
+        let PartData::Xml(root) = &part.data else {
+            panic!("the windows part is XML");
+        };
+        assert_eq!(root.name.local, "Windows");
+        assert!(root.children.is_empty(), "an empty root is enough");
+        let main = PartName::new(MAIN_PART);
+        let rel = package
+            .relationships_from(&main)
+            .find(|relationship| relationship.rel_type == REL_WINDOWS)
+            .expect("relationship");
+        assert_eq!(rel.target, "windows.xml");
+        assert_eq!(rel.target_mode, TargetMode::Internal);
+        // Pages and masters take `rId1` and `rId2` first.
+        assert_eq!(rel.id.as_str(), "rId3");
+        assert!(
+            package.content_types.iter().any(|decl| {
+                decl.kind == ContentTypeKind::Override
+                    && decl.name == WINDOWS_PART
+                    && decl.content_type == CT_WINDOWS
+            }),
+            "the override"
+        );
+    }
+
+    #[test]
+    fn a_patched_package_without_a_windows_part_gains_one() {
+        let document = sample();
+        let source = from_model(&document).expect("generated");
+        let mut stripped = source.clone();
+        stripped
+            .parts
+            .retain(|part| part.name.as_str() != WINDOWS_PART);
+        stripped
+            .content_types
+            .retain(|decl| decl.name != WINDOWS_PART);
+        stripped
+            .relationships
+            .retain(|relationship| relationship.rel_type != REL_WINDOWS);
+        let package = package_for(&document, &stripped).expect("package");
+        assert!(package.part(&PartName::new(WINDOWS_PART)).is_some());
+        let rel = package
+            .relationships_from(&PartName::new(MAIN_PART))
+            .find(|relationship| relationship.rel_type == REL_WINDOWS)
+            .expect("relationship");
+        // The stripped source keeps `rId1` and `rId2` occupied.
+        assert_eq!(rel.id.as_str(), "rId3");
+    }
+
+    #[test]
+    fn a_package_with_a_windows_part_keeps_it_byte_for_byte() {
+        let document = sample();
+        let mut source = from_model(&document).expect("generated");
+        let mut root = emit::visio_root(&NameStyle::generated(), "Windows");
+        root.attributes.push(XmlAttribute {
+            name: QName::local("ClientWidth"),
+            value: "42".to_owned(),
+        });
+        if let Some(part) = source
+            .parts
+            .iter_mut()
+            .find(|part| part.name.as_str() == WINDOWS_PART)
+        {
+            part.data = PartData::Xml(root.clone());
+        }
+        let package = package_for(&document, &source).expect("package");
+        let part = package.part(&PartName::new(WINDOWS_PART)).expect("part");
+        assert_eq!(part.data, PartData::Xml(root), "the part is untouched");
+    }
+
+    #[test]
+    fn a_windows_part_under_another_name_takes_the_relationship() {
+        let document = sample();
+        let mut source = from_model(&document).expect("generated");
+        let windows = source
+            .parts
+            .iter()
+            .position(|part| part.name.as_str() == WINDOWS_PART)
+            .expect("generated windows part");
+        source.parts[windows].name = PartName::new("/other/win.xml");
+        source
+            .content_types
+            .retain(|decl| decl.name != WINDOWS_PART);
+        source.content_types.push(ContentTypeDecl {
+            kind: ContentTypeKind::Override,
+            name: "/other/win.xml".to_owned(),
+            content_type: CT_WINDOWS.to_owned(),
+        });
+        source
+            .relationships
+            .retain(|relationship| relationship.rel_type != REL_WINDOWS);
+        let package = package_for(&document, &source).expect("package");
+        let rel = package
+            .relationships_from(&PartName::new(MAIN_PART))
+            .find(|relationship| relationship.rel_type == REL_WINDOWS)
+            .expect("relationship");
+        assert_eq!(rel.target, "/other/win.xml");
+        assert!(
+            package.part(&PartName::new(WINDOWS_PART)).is_none(),
+            "no second windows part"
+        );
+    }
+
+    #[test]
+    fn a_windows_part_without_a_declaration_gets_one() {
+        let document = sample();
+        let mut source = from_model(&document).expect("generated");
+        source
+            .content_types
+            .retain(|decl| decl.name != WINDOWS_PART);
+        let package = package_for(&document, &source).expect("package");
+        let added: Vec<&ContentTypeDecl> = package
+            .content_types
+            .iter()
+            .filter(|decl| decl.name == WINDOWS_PART)
+            .collect();
+        assert_eq!(added.len(), 1);
+        assert_eq!(added[0].content_type, CT_WINDOWS);
+    }
+
+    #[test]
+    fn a_referenced_page_is_marked_a_background_page() {
+        let mut root = pages_root(vec![
+            page_node("0", Some("1"), None),
+            page_node("1", None, None),
+        ]);
+        ensure_background_marks(&mut root);
+        assert_eq!(background_at(&root, 0), None);
+        assert_eq!(background_at(&root, 1).as_deref(), Some("1"));
+    }
+
+    #[test]
+    fn a_false_mark_on_a_referenced_page_becomes_one() {
+        let mut root = pages_root(vec![
+            page_node("0", Some("1"), None),
+            page_node("1", None, Some("0")),
+        ]);
+        ensure_background_marks(&mut root);
+        assert_eq!(background_at(&root, 1).as_deref(), Some("1"));
+    }
+
+    #[test]
+    fn a_true_mark_keeps_its_spelling() {
+        let mut root = pages_root(vec![
+            page_node("0", Some("1"), None),
+            page_node("1", None, Some("true")),
+        ]);
+        ensure_background_marks(&mut root);
+        assert_eq!(background_at(&root, 1).as_deref(), Some("true"));
+    }
+
+    #[test]
+    fn an_unreferenced_page_keeps_its_mark_untouched() {
+        let mut root = pages_root(vec![page_node("0", None, Some("0"))]);
+        ensure_background_marks(&mut root);
+        assert_eq!(background_at(&root, 0).as_deref(), Some("0"));
+    }
+
+    #[test]
+    fn a_back_page_naming_a_missing_page_marks_nothing() {
+        let mut root = pages_root(vec![page_node("0", Some("9"), None)]);
+        ensure_background_marks(&mut root);
+        assert_eq!(background_at(&root, 0), None);
+    }
+
+    #[test]
+    fn a_repeated_id_is_marked_at_its_first_element() {
+        // The reader resolves `BackPage` to the first page with that `ID`;
+        // the writer marks the same one (task P8-20).
+        let mut root = pages_root(vec![
+            page_node("0", Some("7"), None),
+            page_node("7", None, None),
+            page_node("7", None, None),
+        ]);
+        ensure_background_marks(&mut root);
+        assert_eq!(background_at(&root, 1).as_deref(), Some("1"));
+        assert_eq!(background_at(&root, 2), None);
+    }
+
+    #[test]
+    fn an_unparsable_back_page_marks_nothing() {
+        let mut root = pages_root(vec![
+            page_node("0", Some("x"), None),
+            page_node("x", None, Some("0")),
+        ]);
+        // A loose comment and a `Page` without an `ID` are skipped by the
+        // rule, never crashed on.
+        root.children.push(XmlChild::Comment("loose".to_owned()));
+        root.children.push(XmlChild::Element(XmlNode {
+            name: QName::local("Page"),
+            attributes: Vec::new(),
+            children: Vec::new(),
+            self_closing: true,
+        }));
+        ensure_background_marks(&mut root);
+        // Neither the unparsable `BackPage` value nor the unparsable `ID`
+        // takes part in the rule: nothing changes.
+        assert_eq!(background_at(&root, 0), None);
+        assert_eq!(background_at(&root, 1).as_deref(), Some("0"));
+        assert_eq!(background_at(&root, 2), None);
+        assert_eq!(background_at(&root, 3), None);
+    }
+
+    #[test]
+    fn the_background_mark_lands_on_a_generated_page() {
+        let mut document = sample();
+        let background = Page::new(larrygram_model::PageId { index: 1 }, 2);
+        document.pages.push(background);
+        document.pages[0].background = Some(larrygram_model::PageId { index: 1 });
+        let package = from_model(&document).expect("package");
+        let bytes = write_package(&package).expect("bytes");
+        let reparsed = crate::read_package(&bytes, &crate::Limits::DEFAULT).expect("read");
+        let pages = reparsed
+            .part(&PartName::new(PAGES_PART))
+            .expect("pages part");
+        let PartData::Xml(root) = &pages.data else {
+            panic!("the pages part is XML");
+        };
+        assert_eq!(background_at(root, 1).as_deref(), Some("1"));
     }
 }
