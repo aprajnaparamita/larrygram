@@ -42,6 +42,14 @@ serde-saphyr = "1.3"     # MIT; pure-Rust YAML (replaces archived serde_yaml and
 # reads `docProps` and `[Content_Types].xml` of the wide corpus.
 zip = { version = "9", default-features = false }
 
+# R7: the macOS `.icns` rasteriser (`cargo xtask dist mac`). The same
+# resvg 0.45 the desktop app rasterises its window icon with (ADR 0067,
+# task P7-16): outline paths and gradients only, so no text or
+# raster-image features. MIT OR Apache-2.0, already in the tree through
+# `apps/larrygram` and egui_extras; invoked as a library, unlike the
+# system tools (iconutil, hdiutil, codesign) which are only invoked.
+resvg = { version = "0.45.1", default-features = false }
+
 [dev-dependencies]
 # Path dev-dep: prove the extractor and the runtime loader agree on
 # the ui-spec format (P1-03 review M2). xtask is outside the layer
