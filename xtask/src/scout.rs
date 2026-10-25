@@ -1034,7 +1034,9 @@ pub struct Facts {
     /// The file is a copy of a Visio stock template or stencil.
     pub template_copy: bool,
     /// The file was made from a Visio stock template (its masters may
-    /// be copies of Microsoft masters).
+    /// be copies of Microsoft masters). Counted and reported, not
+    /// excluded: the project's precedent (ADR 0005) uses such files in
+    /// tests and never commits them.
     pub template_origin: bool,
 }
 
@@ -1048,8 +1050,6 @@ impl Facts {
             Some("microsoft-company")
         } else if self.template_copy {
             Some("template-copy")
-        } else if self.template_origin {
-            Some("template-origin")
         } else {
             None
         }
@@ -1062,23 +1062,29 @@ pub fn contains_microsoft(value: &str) -> bool {
 }
 
 /// Whether `name` is a Visio stock template or stencil identifier
-/// (`BASICD_M.VSTX` and friends).
+/// (`BASICD_M.VSTX` and friends). The name may be a bare file name or
+/// the full path Visio writes in the `Template` property.
 pub fn is_stock_template_name(name: &str) -> bool {
-    let lower = name.to_ascii_lowercase();
-    let stem = lower
+    let base = name
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(name)
+        .to_ascii_lowercase();
+    let stem = base
         .rsplit_once('.')
         .map(|(stem, _ext)| stem)
-        .unwrap_or(lower.as_str());
+        .unwrap_or(base.as_str());
     const KNOWN: [&str; 3] = ["basicd_m", "basflo_m", "xfunc_m"];
     if KNOWN.contains(&stem) {
         return true;
     }
-    // `<CODE>_M` with a short alphanumeric code: the naming of the
-    // templates and stencils that ship with Visio.
+    // `<CODE>_[MU]` with a short alphanumeric code: the naming of the
+    // templates and stencils that ship with Visio (`_M` metric, `_U`
+    // US units).
     let Some((code, suffix)) = stem.rsplit_once('_') else {
         return false;
     };
-    suffix == "m"
+    matches!(suffix, "m" | "u")
         && (5..=8).contains(&code.len())
         && code.bytes().all(|b| b.is_ascii_alphanumeric())
 }
@@ -2169,9 +2175,32 @@ mod tests {
         assert!(is_stock_template_name("basflo_m.vss"));
         assert!(is_stock_template_name("XFUNC_M"));
         assert!(is_stock_template_name("orgchrt_m.vstx"));
+        // the full path Visio writes in the Template property
+        assert!(is_stock_template_name(
+            "C:\\Program Files\\Microsoft Office\\Office15\\visio content\\1033\\BASICD_M.VSTX"
+        ));
+        // the US-units twin of a stock template
+        assert!(is_stock_template_name("basicd_u.vstx"));
         assert!(!is_stock_template_name("my_drawing.vsdx"));
         assert!(!is_stock_template_name("basicd.vsdx"));
         assert!(!is_stock_template_name("averyveryverylongcode_m.vsdx"));
+    }
+
+    #[test]
+    fn a_drawing_made_from_a_stock_template_is_counted_but_not_excluded() {
+        let bytes = make_zip(&[
+            ("[Content_Types].xml", CONTENT_TYPES_DRAWING),
+            ("visio/document.xml", "<VisioDocument/>"),
+            (
+                "docProps/app.xml",
+                r#"<Properties><Template>
+                    C:\Program Files\Microsoft Office\Office15\visio content\1033\USEQME_M.VSTX
+                   </Template></Properties>"#,
+            ),
+        ]);
+        let facts = classify_bytes(&bytes, FileExt::Vsdx, "my-chart.vsdx");
+        assert!(facts.template_origin);
+        assert_eq!(facts.excluded_reason(), None);
     }
 
     #[test]

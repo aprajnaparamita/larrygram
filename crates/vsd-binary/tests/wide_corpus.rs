@@ -172,11 +172,15 @@ fn contains_microsoft(value: &str) -> bool {
 /// Whether `name` is a Visio stock template or stencil identifier (the
 /// same rule as `cargo xtask scout`).
 fn is_stock_template_name(name: &str) -> bool {
-    let lower = name.to_ascii_lowercase();
-    let stem = lower
+    let base = name
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(name)
+        .to_ascii_lowercase();
+    let stem = base
         .rsplit_once('.')
         .map(|(stem, _ext)| stem)
-        .unwrap_or(lower.as_str());
+        .unwrap_or(base.as_str());
     const KNOWN: [&str; 3] = ["basicd_m", "basflo_m", "xfunc_m"];
     if KNOWN.contains(&stem) {
         return true;
@@ -184,7 +188,7 @@ fn is_stock_template_name(name: &str) -> bool {
     let Some((code, suffix)) = stem.rsplit_once('_') else {
         return false;
     };
-    suffix == "m"
+    matches!(suffix, "m" | "u")
         && (5..=8).contains(&code.len())
         && code.bytes().all(|b| b.is_ascii_alphanumeric())
 }
@@ -211,13 +215,15 @@ fn filter_flags(props: &[SummaryProperty], file_name: &str) -> (bool, bool, bool
     (ms_author, ms_company, template_copy, template_origin)
 }
 
-/// Whether the filter excludes the file, and under which reason.
+/// Whether the filter excludes the file, and under which reason. A
+/// file merely made from a stock template (`template_origin`) is
+/// counted, not excluded: the project's precedent (ADR 0005) uses
+/// such files in tests and never commits them.
 fn excluded_reason(flags: (bool, bool, bool, bool)) -> Option<&'static str> {
     match flags {
         (true, _, _, _) => Some("microsoft-author"),
         (_, true, _, _) => Some("microsoft-company"),
         (_, _, true, _) => Some("template-copy"),
-        (_, _, _, true) => Some("template-origin"),
         _ => None,
     }
 }
@@ -788,10 +794,7 @@ mod tests {
             excluded_reason((false, false, true, false)),
             Some("template-copy")
         );
-        assert_eq!(
-            excluded_reason((false, false, false, true)),
-            Some("template-origin")
-        );
+        assert_eq!(excluded_reason((false, false, false, true)), None);
         assert_eq!(excluded_reason((false, false, false, false)), None);
     }
 
