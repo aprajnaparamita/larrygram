@@ -133,4 +133,23 @@ is read by a widget. The differences they leave standing:
 
 ## Gate results
 
-<!-- Filled at hand-off (the gate queue's result). -->
+```
+gateq submit P7-14 --quick  (first run, RED: one old name in this
+  report's draft and the private `ClassicMetrics` behind public docs;
+  both fixed)
+gateq submit P7-14 --quick  GREEN at e7d106d93d (4m15s)
+
+gateq submit P7-14 --skip wasm,fuzz  (the hand-off gate, after a
+  clean rebase onto `main` at 7d27a56) GREEN at feb41bf614 (10m40s)
+  PASS  codegen, names, parity, fmt, clippy, test, doc, coverage,
+        deny, layers
+  SKIP  wasm, fuzz (the queue's worker policy, AGENTS.md section 7)
+```
+
+Per-crate checks this change triggers, all green: `cargo test` and
+`cargo clippy --all-targets --all-features` on `larrygram-ui`,
+`larrygram-ui-spec` and `larrygram-commands`; `cargo xtask codegen
+--check` and `cargo xtask parity`. No new dependency.
+
+Coverage at the hand-off gate: every crate at or above its threshold
+and its `coverage.toml` ratchet (the ratchet table is the master's).
