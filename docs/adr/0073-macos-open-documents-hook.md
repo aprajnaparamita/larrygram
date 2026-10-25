@@ -38,14 +38,24 @@ compiles it.
 
 ### Method injection, never a delegate change
 
-The module adds the one method `application:openURLs:` to the class of
-whatever `NSApplication` delegate the app already has (winit's),
-through one `class_addMethod` call. This is the same method injection
-winit itself uses for `NSApplication::sendEvent:`, and AppKit calls the
-method like any delegate method (`respondsToSelector:` is answered
-from the class). The delegate object and its class keep their
-identity: nothing takes the delegate slot, so winit's assertion never
-fires.
+The module adds the one method `application:openURLs:` to `NSObject`,
+the root of the application delegate's class hierarchy, through one
+`class_addMethod` call. This is the same method injection winit itself
+uses for `NSApplication::sendEvent:`, and AppKit calls the method on
+the delegate like any delegate method (`respondsToSelector:` is
+answered from the class). No object and no class changes its identity:
+nothing takes the delegate slot, so winit's assertion never fires.
+
+`NSObject` is where the hook has to live because of timing: the launch
+event is delivered as soon as the app finishes launching, before the
+first frame and before the eframe app creator runs (measured: the
+callback fires before the creator). A hook added in the creator is too
+late and the launch event falls through to the system document
+machinery, which shows "The document ... could not be opened. Larrygram
+cannot open files in the 'Visio Drawing' format." winit builds its
+delegate class inside `EventLoop::new`, so `NSObject` is the only class
+of that hierarchy that exists before the event loop starts, where the
+hook must already be in place.
 
 - The callback's implementation is one plain `extern "C"` function
   with the exact signature of `application:openURLs:`
@@ -56,13 +66,12 @@ fires.
   different implementation of the selector is an error, never an
   override. A concurrent install that adds the same hook first is a
   success.
-- `install()` runs in the eframe app creator: after the winit event
-  loop exists (the winit documentation says `NSApplication` may only be
-  touched after `EventLoop::new`), but before the first frame, so the
-  launch event is still queued when the hook is in place. It is called
-  only on the main thread and answers an error, never a panic,
-  anywhere else (AGENTS.md section 6). A failure is one status-line
-  warning; the app still starts.
+- `install()` runs before `eframe::run_native`, on the main thread,
+  and answers an error, never a panic, anywhere else (AGENTS.md
+  section 6). It touches no `NSApplication` API (only the Objective-C
+  runtime), so the winit rule about `sharedApplication` after
+  `EventLoop::new` does not apply. A failure reaches the status line;
+  the app still starts.
 
 ### No unwind across AppKit
 
@@ -85,8 +94,10 @@ queue of paths is the only state it touches.
 
 ### Dispatch
 
-The callback only queues paths. The UI thread drains the queue once
-per frame and dispatches `file.open` per path through the command
+The callback only queues paths and asks egui for a repaint (an idle
+window runs no frame until something wakes it, so a queue without a
+wake waits for the next interaction). The UI thread drains the queue
+once per frame and dispatches `file.open` per path through the command
 registry (ADR 0028), exactly like the File > Open menu item. Every
 error is the same status-line error the Open dialog shows, and no
 input crashes the app.
@@ -104,10 +115,15 @@ crate versions.
   Dock icon open documents at launch and while the app runs.
 - The exception is one file. A future reviewer can delete it and lose
   only this feature.
-- The hook rides on winit's delegate class. If a future winit
-  implements `application:openURLs:` itself, the install reports the
-  conflict as an error instead of overriding it, and this ADR is
-  revisited (then winit's own handling may need to be used).
+- Every object in the process answers `respondsToSelector:` for
+  `application:openURLs:` (the method sits on `NSObject`). Only AppKit
+  sends that selector, and only to the application delegate, so the
+  wider answer is inert; if a future winit or eframe ever asks other
+  objects, the ADR is revisited.
+- A future winit that implements `application:openURLs:` on its
+  delegate still wins: `class_addMethod` does not override, and the
+  install reports the conflict as an error instead. Then winit's own
+  handling may need to be used.
 - The wasm build does not compile the module (it is macOS-only), and
   the command-line paths work on every desktop platform.
 
@@ -120,6 +136,10 @@ crate versions.
 - **Subclassing winit's delegate and `object_setClass`**: same effect
   as method injection with more moving parts (a runtime class, a class
   swap per instance).
+- **Hooking the delegate's class from the eframe app creator**: works
+  for a running app but loses the launch event, which macOS delivers
+  before the creator runs; the system then shows its "could not be
+  opened" dialog.
 - **File paths in `argv`**: LaunchServices does not pass document paths
   in `argv` for `open -a` or a Finder double-click; only a direct
   terminal launch does (which this task also supports, separately).

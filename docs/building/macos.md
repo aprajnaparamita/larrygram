@@ -105,7 +105,10 @@ Do this on the mounted `.dmg`, before copying the app anywhere:
 - [ ] Open `Larrygram.app` from the mounted image (right-click, Open,
       the first time; see "Signing" above).
 - [ ] Open a `.vsdx` drawing by double-clicking it in Finder: the app
-      comes to the front with the drawing on the page.
+      comes to the front with the drawing on the page. (If another app
+      owns the `.vsdx` extension on your Mac, choose **Open With >
+      Larrygram** once and **Always**; a double-click opens the
+      extension's default app, whatever that is.)
 - [ ] Open a `.vsd` drawing by double-clicking it: the drawing opens,
       and the status line may list import warnings (the binary format
       is read-only import).
