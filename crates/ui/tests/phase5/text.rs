@@ -11,7 +11,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use egui_kittest::Harness;
-use larrygram_commands::app::{AppCtx, DocumentSession, Settings};
+use larrygram_commands::app::{AppCtx, DocumentSession};
 use larrygram_commands::{CommandId, Invocation, Source};
 use larrygram_model::{
     Document, PageId, Row, Section, SectionName, Shape, ShapeId, TextContent, TextPart,

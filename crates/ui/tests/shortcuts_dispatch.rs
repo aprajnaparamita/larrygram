@@ -18,9 +18,7 @@ use larrygram_ui_spec::{
 #[allow(clippy::expect_used)] // test helper: a failure here is the bug
 fn committed_shortcuts() -> Shortcuts {
     let sets = Loader::from_embedded().expect("the embedded ui-spec loads");
-    sets.get(LayoutKind::Panel2016)
-        .shortcuts
-        .clone()
+    sets.get(LayoutKind::Panel2016).shortcuts.clone()
 }
 
 #[allow(clippy::expect_used)] // test helper: a failure here is the bug

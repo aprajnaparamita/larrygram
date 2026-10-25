@@ -230,8 +230,11 @@ fn button_content(
             egui::Button::new(icons::icon_themed(ctx, icon, menu::ICON, true)).selected(checked),
         ),
         (DisplayMode::IconText, Some(icon)) => Some(
-            egui::Button::new((icons::icon_themed(ctx, icon, menu::ICON, true), label.to_owned()))
-                .selected(checked),
+            egui::Button::new((
+                icons::icon_themed(ctx, icon, menu::ICON, true),
+                label.to_owned(),
+            ))
+            .selected(checked),
         ),
     }
 }
@@ -358,7 +361,12 @@ fn draw_dropdown(
     let activation = rows::button_activation(item, input, Source::Ui, Args::new());
     let enabled = !matches!(activation, Activation::Disabled { .. });
     let content = egui::Button::new((
-        icons::icon_themed(ui.ctx(), item.icon.as_deref().unwrap_or(&item.id), menu::ICON, true),
+        icons::icon_themed(
+            ui.ctx(),
+            item.icon.as_deref().unwrap_or(&item.id),
+            menu::ICON,
+            true,
+        ),
         icons::dropdown_arrow(10.0),
     ));
     let response = ui.add_enabled_ui(enabled, |ui| {

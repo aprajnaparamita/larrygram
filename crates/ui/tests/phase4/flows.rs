@@ -22,7 +22,7 @@
 use std::cell::Cell;
 use std::path::{Path, PathBuf};
 
-use larrygram_commands::app::{AppCtx, Settings};
+use larrygram_commands::app::AppCtx;
 use larrygram_commands::{CommandId, Invocation, Source, UiRequest};
 use larrygram_ui::dialogs::{FileChoice, FilePicker, OpenRequest, PickState, SaveRequest};
 use larrygram_ui::shell::dispatch_one;
@@ -155,7 +155,7 @@ fn the_window_commands_only_request_their_windows() {
     // section 6). P4-16 removed the shell intercepts; the shell acts
     // on the requests for interactive sources only.
     let registry = larrygram_commands::builtins::registry().expect("the registry builds");
-    let mut app = AppCtx::new(Settings::default());
+    let mut app = AppCtx::new(crate::phase4_settings());
     for (id, request) in [
         ("app.quit", UiRequest::Quit),
         ("app.office.center.options", UiRequest::ShowOptions),

@@ -20,7 +20,6 @@ use crate::{ShellRig, sets};
 fn tab_labels(kind: LayoutKind) -> BTreeSet<String> {
     sets()
         .get(kind)
-        
         .layout
         .tabs
         .iter()

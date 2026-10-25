@@ -578,7 +578,9 @@ fn button_atoms(
 fn menu_row_atoms(ctx: &egui::Context, item: &Item, label: &str) -> Atoms<'static> {
     let mut builder = AtomsBuilder::new().push(spacer(2.0));
     if item.icon.is_some() {
-        builder = builder.push(egui_ui_icon(ctx, item, 16.0)).push(spacer(6.0));
+        builder = builder
+            .push(egui_ui_icon(ctx, item, 16.0))
+            .push(spacer(6.0));
     } else {
         builder = builder.push(spacer(GUTTER - 4.0));
     }

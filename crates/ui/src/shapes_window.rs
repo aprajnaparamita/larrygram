@@ -178,14 +178,11 @@ impl ShapesWindow {
             Header::Classic => {
                 ui.horizontal(|ui| {
                     ui.label("Shapes");
-                    ui.with_layout(
-                        egui::Layout::right_to_left(egui::Align::Center),
-                        |ui| {
-                            ui.add_enabled_ui(false, |ui| ui.small_button("x"))
-                                .inner
-                                .on_disabled_hover_text("Not yet implemented");
-                        },
-                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.add_enabled_ui(false, |ui| ui.small_button("x"))
+                            .inner
+                            .on_disabled_hover_text("Not yet implemented");
+                    });
                 });
                 ui.horizontal(|ui| {
                     ui.label("Search for Shapes:");
@@ -199,9 +196,7 @@ impl ShapesWindow {
                 ui.heading("Shapes");
                 ui.label("STENCILS");
                 ui.label("SEARCH");
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.search).hint_text("Search for shapes"),
-                );
+                ui.add(egui::TextEdit::singleline(&mut self.search).hint_text("Search for shapes"));
             }
         }
         ui.separator();

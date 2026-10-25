@@ -104,7 +104,10 @@ fn all_four_kinds_load_from_embedded_and_match_disk() {
             LayoutKind::Panel2016 => &sets.panel_2016,
             LayoutKind::Panel365 => &sets.panel_365,
         };
-        assert!(std::ptr::eq(sets.get(kind), field), "{kind:?} get borrows the field");
+        assert!(
+            std::ptr::eq(sets.get(kind), field),
+            "{kind:?} get borrows the field"
+        );
         let embedded = field;
         assert_eq!(embedded.v2, from_disk.v2, "{kind:?} v2 matches");
         assert_eq!(embedded.theme, from_disk.theme, "{kind:?} theme matches");
