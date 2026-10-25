@@ -60,8 +60,10 @@ web-sys = { version = "0.3", features = [
 ] }
 
 [dev-dependencies]
-# Headless UI tests (ADR 0030, ADR 0037).
-egui_kittest = "0.37"
+# Headless UI tests (ADR 0030, ADR 0037). The `wgpu` feature renders
+# the Phase 7 golden images through `Harness::render` (ADR 0065, task
+# P7-10); it is a dev-only renderer and never ships.
+egui_kittest = { version = "0.37", features = ["wgpu"] }
 # Counts pinned per layout (ADR 0037, P4-04).
 insta = "1"
 # Property tests (ADR 0037; the settings-slot round trip, P4-16).
