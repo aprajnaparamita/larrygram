@@ -16,7 +16,7 @@
 //! event.
 //!
 //! `unsafe` is denied everywhere except the one macOS delegate module
-//! (ADR 0073): the workspace lint is lowered to `deny` there so the
+//! (ADR 0074): the workspace lint is lowered to `deny` there so the
 //! module can carry its own `#![allow(unsafe_code)]`, and nothing else
 //! in this crate may use `unsafe`.
 
@@ -228,7 +228,7 @@ fn run_with(args: &[String]) -> Result<(), AppError> {
     let layouts = Loader::from_embedded().map_err(|error| AppError::new(error.to_string()))?;
     let cli_layout = options.ui_layout;
     let cli_paths = options.paths;
-    // The macOS open-documents hook (task R8 Goal 2, ADR 0073) goes in
+    // The macOS open-documents hook (task R8 Goal 2, ADR 0074) goes in
     // before the event loop starts: macOS can deliver the launch event
     // before the first frame, and a hook added later loses it to the
     // system document machinery (which shows a "could not be opened"

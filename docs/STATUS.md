@@ -15,7 +15,7 @@ Task board. Only the master agent edits this file, on `main`.
 
 - Gate queue: `tools/gate-queue/gateq` (AGENTS.md section 7). Merge gates are `main --quick --corpus`; the idle full check is `main-full` in `/Volumes/Dara/larrygram/worktrees/main-full`.
 - Merged today: P8-04, P8-02, P8-05, P7-02 (merge gate green at `d156f9c`). P7-08 started; P7-06 and P7-07 resumed.
-- P7-03, P7-06, P7-07 and P8-07 merged (`5e6259f`, `d9c7490`, `5fe8f19`, `cb66c6c`). P7-16, P8-08 and P8-10 merged (the 12 new corpus files fetched into main). P7-09 merged. P8-09, P8-16, P7-10, P8-15, P7-11, P7-12, P8-18, P7-13 and P8-13 merged. P8-11, P8-12, P8-19 and R7 merged. P8-20 merged. In progress: P7-14, P8-17, R8. Ready: R8, P9-01. P7-17 (Opus, the UI review) waits for P7-14; the Phase 7 gate waits for P7-17; the user's manual test waits for both. Ready: R7 (the tooling, early), P9-01 (the Phase 9 plan only). Then P8-14 and P8-20; after the Phase 7 and 8 gates: R6 (history), the user's manual test of the Mac app, R7 (the `.dmg`), then Phase 9.
+- P7-03, P7-06, P7-07 and P8-07 merged (`5e6259f`, `d9c7490`, `5fe8f19`, `cb66c6c`). P7-16, P8-08 and P8-10 merged (the 12 new corpus files fetched into main). P7-09 merged. P8-09, P8-16, P7-10, P8-15, P7-11, P7-12, P8-18, P7-13 and P8-13 merged. P8-11, P8-12, P8-19 and R7 merged. P8-20, P8-17 and R8 merged. In progress: P7-14. Ready: P8-14, P9-01. Ready: R8, P9-01. P7-17 (Opus, the UI review) waits for P7-14; the Phase 7 gate waits for P7-17; the user's manual test waits for both. Ready: R7 (the tooling, early), P9-01 (the Phase 9 plan only). Then P8-14 and P8-20; after the Phase 7 and 8 gates: R6 (history), the user's manual test of the Mac app, R7 (the `.dmg`), then Phase 9.
 - Merged since the restart: P8-06, P7-05, P7-15, P8-03, P7-04, P7-08; P8-07 ready; P7-09 waits for P7-06 and P7-07; P8-03 RED at `51ce31e7`, resubmitted at `fc3fec7b`. Queued (paused for the iTerm2 restart): P7-06, P7-05, P7-03, P7-07, P7-08, P8-03, P7-04, then `main-full` at `13942e0`.
 - Queued, not started: P7-16, P8-08.
 - Master items: the parity matrix's one column per layout (P7-02 open issue); `UiRequest::ShowWelcome` in the shell (P7-09); P8-02/P8-04/P8-05 open issues for P8-03, P8-07, P8-08, P8-10 (in their Result sections); the remote still holds the pre-R4 history until the user force-pushes, and the three backup files wait for that.
@@ -66,16 +66,16 @@ Phase 8: binary `.vsd`, `.vss` and `.vst` import, read-only, in `crates/vsd-bina
 | [P8-11](tasks/P8-11.md) | reviewer | P8-09, P8-10, P8-15 | E | merged (request changes: 2 blocker, 1 major, 5 minor; F2 to P8-17, F6 to P8-19, the rest to P8-14) | 0fd9e35 |
 | [P8-12](tasks/P8-12.md) | coverage-auditor | P8-09, P8-10, P8-15 | E | merged (no blockers; 4 major, 10 minor to P8-14; vsd-binary ratchet 99.9 at the gate) | 3c05f7a |
 | [P8-13](tasks/P8-13.md) | cleanroom-auditor | P8-09, P8-10, P8-15 | E | merged (pass with one required fix: the Microsoft sample golden, to P8-17 and R6; minors fixed by the master) | 8e69a71 |
-| [P8-14](tasks/P8-14.md) | implementer | P8-11..P8-13, P8-17 | F | waiting (fixes, phase report) | — |
+| [P8-14](tasks/P8-14.md) | implementer | P8-11..P8-13, P8-17 | F | ready (the audit fixes and the phase report) | — |
 | [P8-15](tasks/P8-15.md) | implementer | P8-10 | D+ | merged (own line/fill/text rows, line-end offsets, record ids, groups, paint order, drawing scale, master geometry on instances, per-section cell values, guide shapes, per-page goldens, the twin comparison; parity 75.3%; open for P8-17: wedges, text boxes, field text) | aadf7b6 |
 | [P8-16](tasks/P8-16.md) | researcher | P8-10 | D+ | merged (5 238 files fetched, 5 075 swept, 0 panics; 32 gate-corpus and 206 export proposals; template-origin files counted, not excluded; open: 0 groups and 0 connects from binary import, 94 rejected OPC packages, 1 size cap on a version 6 file) | b2338c6 |
-| [P8-17](tasks/P8-17.md) | implementer | P8-15 | D++ | in progress (.vsd fidelity round 2, the twins; plus P8-11 F2 and P8-13 F1) | — |
+| [P8-17](tasks/P8-17.md) | implementer | P8-15 | D++ | merged (duplicated points, per-section NoLine/NoFill/NoShow, open sub-path fills, the twin test on 17 files, P8-11 F2 and P8-13 F1 fixed; open: the twin comparison does not normalise drawing units) | 9bffd89 |
 | [P8-18](tasks/P8-18.md) | researcher | P8-16 | D+ | merged (risk facts per file, 849 of 5 075 flagged; `scout select`; 32 gate proposals and 206 export rows, none flagged) | 8c6b64b |
 | [P8-19](tasks/P8-19.md) | implementer | P8-16 | D+ | merged (placeholder ids, currency and NaN literals, empty page parts; 1 993 wide-corpus packages open and round trip, was 1 899; P8-11 F6 fixed) | 02d2a88 |
 | [P8-20](tasks/P8-20.md) | implementer | P8-19 | D++ | merged (the windows part on write, BackPage targets marked, fixtures rebuilt, completeness test; ADR 0073) | 758e695 |
 | [R6](tasks/R6.md) | master | Phase 7 and 8 gates | boundary | waiting (remove the Microsoft sample goldens from history; nothing may run; the user's force-push follows) | — |
 | [R7](tasks/R7.md) | implementer | R6, the user's manual test | boundary | merged (`cargo xtask dist mac`: the .app and the .dmg; double-click open left to R8; the .dmg goes to testers after R8, R6 and the user's manual test) | 69a5ec3 |
-| [R8](tasks/R8.md) | implementer | R7 | boundary | ready (open documents from Finder and the command line) | — |
+| [R8](tasks/R8.md) | implementer | R7 | boundary | merged (path arguments and the macOS open-documents event; ADR 0074) | 90e301b |
 
 ## Phase 9 task board
 

@@ -1,4 +1,4 @@
-# 0073: The macOS open-documents hook (the one `unsafe` module)
+# 0074: The macOS open-documents hook (the one `unsafe` module)
 
 - Status: accepted
 - Date: 2026-10-25
@@ -88,7 +88,7 @@ queue of paths is the only state it touches.
   forbids mixing `lints.workspace = true` with overrides.
 - The crate root of `apps/larrygram` keeps `#![deny(unsafe_code)]`, so
   every other module is still denied `unsafe`.
-- `macos_open_urls.rs` carries `#![allow(unsafe_code)] // ADR 0073`,
+- `macos_open_urls.rs` carries `#![allow(unsafe_code)] // ADR 0074`,
   and every `unsafe` block inside it carries a `// SAFETY:` comment
   saying why it holds.
 
