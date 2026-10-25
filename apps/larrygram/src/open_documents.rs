@@ -68,6 +68,29 @@ impl OpenQueue {
 /// thread drains each frame (task R8 Goal 2).
 pub(crate) static QUEUED: OpenQueue = OpenQueue::new();
 
+/// The hook that wakes the UI when paths arrive (task R8 Goal 2).
+///
+/// An idle window runs no frame until something requests a repaint, so
+/// a queued path must wake it or it waits for the next interaction.
+/// The app registers `egui::Context::request_repaint`; tests register
+/// a spy. `None` until [`set_wake`] runs.
+static WAKE: Mutex<Option<Box<dyn Fn() + Send + Sync>>> = Mutex::new(None);
+
+/// Registers the wake hook (task R8 Goal 2).
+pub(crate) fn set_wake(hook: Box<dyn Fn() + Send + Sync>) {
+    *WAKE.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(hook);
+}
+
+/// Queues `paths` for the next frame and wakes the UI (task R8 Goal
+/// 2). Never panics (AGENTS.md section 6).
+pub(crate) fn queue_paths(paths: impl IntoIterator<Item = PathBuf>) {
+    QUEUED.queue_paths(paths);
+    let hook = WAKE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(hook) = hook.as_ref() {
+        hook();
+    }
+}
+
 /// Serialises the tests that share [`QUEUED`] (unit tests run in
 /// parallel).
 #[cfg(test)]
@@ -190,6 +213,27 @@ mod tests {
         );
         let session = shell.app.active_document().expect("the next path opens");
         assert_eq!(session.path.as_deref(), Some(good.as_path()));
+    }
+
+    #[test]
+    fn queued_paths_wake_the_ui() {
+        // Task R8 Goal 2: an idle window runs no frame on its own, so
+        // queueing must ask for a repaint.
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let wakes = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&wakes);
+        set_wake(Box::new(move || {
+            counter.fetch_add(1, Ordering::SeqCst);
+        }));
+        let _serialised = QUEUE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let path = fixture("minimal-drawing.vsdx");
+        queue_paths([path.clone()]);
+        assert_eq!(wakes.load(Ordering::SeqCst), 1, "the UI is woken once");
+        assert_eq!(QUEUED.take_paths(), vec![path]);
     }
 
     #[test]
