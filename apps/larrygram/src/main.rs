@@ -10,13 +10,27 @@
 //! Settings persist in eframe's storage slot as `settings.json` (ADR
 //! 0032); a corrupt slot falls back to the defaults with one warning
 //! (ADR 0021). The app never panics on input (AGENTS.md section 6).
+//!
+//! Documents open from outside through the `open_documents` module
+//! (task R8): paths on the command line and the macOS open-documents
+//! event.
+//!
+//! `unsafe` is denied everywhere except the one macOS delegate module
+//! (ADR 0073): the workspace lint is lowered to `deny` there so the
+//! module can carry its own `#![allow(unsafe_code)]`, and nothing else
+//! in this crate may use `unsafe`.
 
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
+
+#[cfg(target_os = "macos")]
+mod macos_open_urls;
+mod open_documents;
 
 use std::fmt;
+use std::path::PathBuf;
 
 use eframe::egui;
-use larrygram_commands::{AppCtx, Settings};
+use larrygram_commands::{AppCtx, Settings, Source};
 use larrygram_ui::settings::TextStore;
 use larrygram_ui::shell::Shell;
 use larrygram_ui_spec::{LayoutKind, Loader};
@@ -56,16 +70,22 @@ const APP_NAME: &str = "larrygram";
 const ICON_PX: u32 = 128;
 
 /// What the command line asked for (ADR 0032: `--ui-layout` wins over
-/// the persisted setting).
+/// the persisted setting; task R8: the positional paths to open).
 #[derive(Debug, Default, PartialEq, Eq)]
 struct Options {
     /// The Panel layout from `--ui-layout`, when given.
     ui_layout: Option<LayoutKind>,
     /// `--help`: print the usage line and exit.
     help: bool,
+    /// The documents to open at startup (task R8 Goal 1).
+    paths: Vec<PathBuf>,
 }
 
-/// Parses the command line (`--ui-layout <layout>`, `--help`).
+/// Parses the command line (`--ui-layout <layout>`, `--help`, and the
+/// positional `<path>...` documents, task R8 Goal 1).
+///
+/// Anything that starts with `-` is an option and an unknown one still
+/// fails as before; every other argument is a document path.
 fn parse_args(args: &[String]) -> Result<Options, AppError> {
     let mut options = Options::default();
     let mut index = 0;
@@ -82,11 +102,12 @@ fn parse_args(args: &[String]) -> Result<Options, AppError> {
                 let value = other.get("--ui-layout=".len()..).unwrap_or_default();
                 options.ui_layout = Some(parse_layout(value)?);
             }
-            other => {
+            other if other.starts_with('-') => {
                 return Err(AppError::new(format!(
                     "unknown option {other:?}; try --help"
                 )));
             }
+            other => options.paths.push(PathBuf::from(other)),
         }
         index += 1;
     }
@@ -114,7 +135,7 @@ fn parse_layout(value: &str) -> Result<LayoutKind, AppError> {
 
 /// The one-line usage, printed by `--help`.
 fn help_text() -> &'static str {
-    "usage: larrygram [--ui-layout panel-modern|panel-classic|panel-2016|panel-365] [--help]"
+    "usage: larrygram [--ui-layout panel-modern|panel-classic|panel-2016|panel-365] [<path>...] [--help]"
 }
 
 /// The app icon source: the single `icon.svg` brand asset (ADR 0067).
@@ -206,13 +227,26 @@ fn run_with(args: &[String]) -> Result<(), AppError> {
         .map_err(|error| AppError::new(error.to_string()))?;
     let layouts = Loader::from_embedded().map_err(|error| AppError::new(error.to_string()))?;
     let cli_layout = options.ui_layout;
+    let cli_paths = options.paths;
     let native_options = native_options();
     eframe::run_native(
         APP_NAME,
         native_options,
         Box::new(move |cc| {
             larrygram_ui::install_image_loaders(&cc.egui_ctx);
-            let shell = build_shell(cc.storage, registry, layouts, cli_layout)?;
+            let mut shell = build_shell(cc.storage, registry, layouts, cli_layout)?;
+            // The macOS open-documents delegate (task R8 Goal 2, ADR
+            // 0073): registered after the winit event loop exists and
+            // before the first frame, so the launch event is still
+            // queued. A failure is one status-line warning; the app
+            // still starts (AGENTS.md section 6).
+            #[cfg(target_os = "macos")]
+            if let Err(error) = macos_open_urls::install() {
+                shell.note_error(error.to_string());
+            }
+            // The command-line paths open at startup through
+            // `file.open` (task R8 Goal 1).
+            open_documents::dispatch_paths(&mut shell, &cli_paths, Source::Cli);
             Ok(Box::new(LarrygramApp::new(shell)))
         }),
     )
@@ -263,6 +297,7 @@ impl LarrygramApp {
 
     /// One UI pass: draw the frame and dispatch its intents.
     fn update_ui(&mut self, ui: &mut egui::Ui) {
+        self.open_queued_paths();
         let intents = match self.shell.show_in(ui) {
             Ok(intents) => intents,
             Err(error) => {
@@ -272,6 +307,19 @@ impl LarrygramApp {
         };
         if let Err(error) = self.shell.dispatch(&intents) {
             self.shell.note_error(error.to_string());
+        }
+    }
+
+    /// Opens the document paths queued since the last frame (task R8
+    /// Goal 2: one `file.open` dispatch per URL, on the UI thread).
+    ///
+    /// The macOS open-documents delegate fills the queue
+    /// (`macos_open_urls`); a path that does not open is the Open
+    /// dialog's status-line error and never a crash.
+    fn open_queued_paths(&mut self) {
+        let paths = open_documents::QUEUED.take_paths();
+        if !paths.is_empty() {
+            open_documents::dispatch_paths(&mut self.shell, &paths, Source::Ui);
         }
     }
 
@@ -321,6 +369,7 @@ fn main() {
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
+    use std::path::Path;
 
     use eframe::Storage as _;
 
@@ -408,6 +457,71 @@ mod tests {
     fn a_bad_command_line_never_starts_the_event_loop() {
         let error = run_with(&strings(&["--oops"])).expect_err("unknown flag");
         assert!(error.to_string().contains("--oops"));
+    }
+
+    #[test]
+    fn the_command_line_takes_document_paths() {
+        // Task R8 Goal 1: `larrygram <path>...`, with the options
+        // mixed in as before.
+        let options = parse_args(&strings(&[
+            "one.vsdx",
+            "--ui-layout",
+            "panel-classic",
+            "/tmp/two.vsd",
+        ]))
+        .expect("args");
+        assert_eq!(
+            options.paths,
+            vec![PathBuf::from("one.vsdx"), PathBuf::from("/tmp/two.vsd")]
+        );
+        assert_eq!(options.ui_layout, Some(LayoutKind::PanelClassic));
+        assert!(!options.help);
+
+        let options = parse_args(&strings(&["/tmp/two.vsd", "--help"])).expect("args");
+        assert_eq!(options.paths, vec![PathBuf::from("/tmp/two.vsd")]);
+        assert!(options.help);
+
+        assert!(parse_args(&[]).expect("args").paths.is_empty());
+    }
+
+    #[test]
+    fn an_unknown_option_still_fails_however_it_is_spelled() {
+        // A path never swallows an option (task R8 Goal 1).
+        for flag in ["--nope", "-x", "-", "--ui-layout=nope"] {
+            let error = parse_args(&strings(&[flag])).expect_err("unknown option");
+            assert!(error.to_string().contains("unknown"), "{flag}: {error}");
+        }
+    }
+
+    /// A committed fixture under `corpus/fixtures/` (task P8-10).
+    fn fixture() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("corpus")
+            .join("fixtures")
+            .join("minimal-drawing.vsdx")
+    }
+
+    #[test]
+    fn queued_paths_open_in_the_next_frame() {
+        // Task R8 Goal 2: the drain runs `file.open` per queued path.
+        // This is the only test that uses the app queue.
+        let path = fixture();
+        let mut app = LarrygramApp::new(
+            build_shell(
+                None,
+                larrygram_commands::builtins::registry().expect("registry"),
+                Loader::from_embedded().expect("layouts"),
+                None,
+            )
+            .expect("shell"),
+        );
+        open_documents::QUEUED.queue_paths([path.clone()]);
+        app.open_queued_paths();
+        let session = app.shell.app.active_document().expect("the document opens");
+        assert_eq!(session.path.as_deref(), Some(path.as_path()));
+        assert!(open_documents::QUEUED.take_paths().is_empty());
     }
 
     #[test]
