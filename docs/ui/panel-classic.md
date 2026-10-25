@@ -19,7 +19,8 @@ From top to bottom:
    - Standard on row 0 and Formatting on row 1;
    - each toolbar starts with a 7 px gripper;
    - toolbars sit end to end; one that does not fit wraps to a new
-     row.
+     row, and one wider than the window breaks between its buttons
+     (never between a split button and its arrow).
 4. **Body**:
    - the docked Shapes window on the left (190 px: title row with a
      close button, a search box, then the stencils);
@@ -57,8 +58,15 @@ The whole chrome (menu bar, toolbar rows and status bar) is one flat
 - **The open top-level title** gets `menu.bar.open.fill` and
   `menu.bar.open.border`, joined to the menu below it.
 - **Submenus** open to the right after a short hover (about 400 ms), or
-  at once with the Right arrow key. They open on the left if there is no
-  room on the right.
+  at once with a click or the Right arrow key. They open on the left if
+  there is no room on the right. Only one submenu chain is open at a
+  time.
+- **Closing submenus.** Hovering another row of the parent closes the
+  open submenu. Once the pointer has moved off every open menu and
+  stayed off for the same 400 ms, every submenu closes; the top-level
+  menu stays open until a click outside or Esc. A pointer that rests
+  outside the menus does not close a submenu the keyboard opened. The
+  same rules apply to context menus and toolbar popups.
 - **Keyboard.** Up and Down move between items, skipping separators and
   hidden items. Disabled items can get focus but cannot be activated.
   Enter or Space activates the item. Right opens a submenu; Left closes
@@ -116,7 +124,8 @@ choices for each mode are remembered separately.
 - **Right-click** on the toolbar area opens the same list.
 - **Floating toolbars** (`dock: floating`: Drawing, Ink, Picture) open
   as small tool windows near the top left of the drawing the first
-  time they are shown. Dragging toolbars between docked and floating is
+  time they are shown, each under the one before. A window holds its
+  buttons in rows of at most six. Dragging toolbars between docked and floating is
   out of scope for Phase 7.
 
 ## Context menus
@@ -157,8 +166,9 @@ choices for each mode are remembered separately.
 ## Shapes window
 
 - The title row reads "Shapes", with a close button.
-- Below it is "Search for Shapes:" with a text box, a dropdown arrow
-  and a green go button.
+- Below it is "Search for Shapes:", and under that a text box, a
+  dropdown arrow and a green go button. The window keeps its 190 px
+  (`shapes_window.width`, at most 30% of a narrow window).
 - Then come the open stencils, each as a title bar that expands or
   collapses.
 - With no stencil open, the window shows a short getting-started note
