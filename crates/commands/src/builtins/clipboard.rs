@@ -39,7 +39,21 @@ pub(crate) const TABLE: CommandTable = &[
     ("edit.copy", "Copy", has_selection, run_copy),
     ("edit.cut", "Cut", has_selection, run_cut),
     ("edit.paste", "Paste", can_paste, run_paste),
+    (
+        "edit.paste.in.place",
+        "Paste in Place",
+        can_paste,
+        run_paste_in_place,
+    ),
     ("edit.duplicate", "Duplicate", has_selection, run_duplicate),
+    // Panel Modern's Paste menu calls the duplicate "Duplicate"
+    // (task P7-20: one action, one handler).
+    (
+        "edit.paste.duplicate",
+        "Duplicate",
+        has_selection,
+        run_duplicate,
+    ),
 ];
 
 /// Enabled when the active document has pages and the clipboard holds a
@@ -89,7 +103,34 @@ pub(super) fn run_cut(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, Com
 /// Optional `x` and `y` (inches) place the fragment at the pointer; both
 /// must be given together.
 pub(super) fn run_paste(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError> {
-    let pointer = pointer_offset(&inv.args)?;
+    paste_run(ctx, inv, false)
+}
+
+/// `edit.paste.in.place`: pastes the clipboard at the recorded
+/// coordinates (task P7-20): no paste offset and no pointer, so the
+/// fragment lands exactly where it was copied.
+///
+/// The `x`/`y` pointer pair has no meaning here and is rejected, not
+/// ignored.
+pub(super) fn run_paste_in_place(
+    ctx: &mut AppCtx,
+    inv: &Invocation,
+) -> Result<Outcome, CommandError> {
+    if inv.args.get("x").is_some() || inv.args.get("y").is_some() {
+        return Err(CommandError::invalid_args(
+            "paste in place takes neither x nor y; use edit.paste for a paste at the pointer",
+        ));
+    }
+    paste_run(ctx, inv, true)
+}
+
+/// The shared body of `edit.paste` and `edit.paste.in.place`.
+fn paste_run(ctx: &mut AppCtx, inv: &Invocation, in_place: bool) -> Result<Outcome, CommandError> {
+    let pointer = if in_place {
+        None
+    } else {
+        pointer_offset(&inv.args)?
+    };
     let Some(content) = ctx.clipboard.content.clone() else {
         return Err(CommandError::failed("the clipboard is empty"));
     };
@@ -104,6 +145,7 @@ pub(super) fn run_paste(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, C
         .ok_or_else(|| CommandError::failed("no active page"))?;
     let placement = match pointer {
         Some((x, y)) => Placement::Pointer(x, y),
+        None if in_place => Placement::Offset(0.0, 0.0),
         None => {
             let steps = f64::from(ctx.clipboard.pastes.saturating_add(1));
             Placement::Offset(PASTE_OFFSET * steps, -PASTE_OFFSET * steps)
@@ -111,16 +153,17 @@ pub(super) fn run_paste(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, C
     };
     let count = content.shapes.len();
     let (edit, roots, warnings) = paste_content(ctx, session_id, page, content, placement)?;
-    if pointer.is_none() {
+    if pointer.is_none() && !in_place {
         ctx.clipboard.pastes = ctx.clipboard.pastes.saturating_add(1);
     }
     select_shapes(ctx, page, &roots);
     super::connector::reroute_quietly(ctx);
-    Ok(edit_outcome(
-        format!("Pasted {count} shapes"),
-        warnings,
-        Box::new(edit),
-    ))
+    let message = if in_place {
+        format!("Pasted {count} shapes in place")
+    } else {
+        format!("Pasted {count} shapes")
+    };
+    Ok(edit_outcome(message, warnings, Box::new(edit)))
 }
 
 /// `edit.duplicate`: copies the selection at the paste offset without
@@ -275,7 +318,7 @@ fn ancestor_selected(
 /// Where a paste puts the fragment: at an absolute pin or as a delta
 /// from the copied position.
 #[derive(Debug, Clone, Copy)]
-enum Placement {
+pub(super) enum Placement {
     /// Move by this many inches.
     Offset(f64, f64),
     /// Put the first root's pin on this page position.
@@ -284,7 +327,7 @@ enum Placement {
 
 /// Inserts `content` on `page` and returns the undo step plus the new
 /// top-level roots.
-fn paste_content(
+pub(super) fn paste_content(
     ctx: &mut AppCtx,
     session: SessionId,
     page: PageId,
@@ -679,5 +722,59 @@ mod tests {
             .map(|_| ())
             .expect_err("id exhaustion");
         assert!(error.to_string().contains("too many shapes"), "{error}");
+    }
+
+    /// Task P7-20: `edit.paste.in.place` pastes at the recorded
+    /// coordinates (no paste offset, no counter bump) and rejects a
+    /// pointer pair.
+    #[test]
+    fn paste_in_place_keeps_the_coordinates() {
+        let (mut ctx, _session, page) = context(true);
+        let shape = {
+            let doc = &mut ctx.active_document_mut().expect("session").document;
+            let shape = doc
+                .insert_shape(page, Shape::new(ShapeId { index: 0 }, 1), None)
+                .expect("shape");
+            for (cell, value) in [("PinX", 2.0), ("PinY", 3.0)] {
+                doc.write_cell(
+                    larrygram_model::SheetRef::Shape(shape),
+                    &CellName::from_static(cell),
+                    &CellWrite::new(number_literal(value), CellValue::Number(value)),
+                )
+                .expect("write");
+            }
+            shape
+        };
+        ctx.selection.shapes = vec![shape];
+        ctx.selection.anchor = Some(shape);
+        ctx.selection.page = Some(page);
+        run_copy(&mut ctx, &crate::Invocation::empty(crate::Source::Test)).expect("copy");
+
+        let outcome = run_paste_in_place(&mut ctx, &crate::Invocation::empty(crate::Source::Test))
+            .expect("in place");
+        assert_eq!(outcome.message.as_deref(), Some("Pasted 1 shapes in place"));
+        let pasted = *ctx.selection.shapes.first().expect("pasted root");
+        let doc = &ctx.active_document().expect("session").document;
+        let (pin_x, _) = read_cell_number(doc, pasted, "PinX").expect("PinX");
+        let (pin_y, _) = read_cell_number(doc, pasted, "PinY").expect("PinY");
+        assert_eq!((pin_x, pin_y), (2.0, 3.0), "no paste offset");
+        assert_eq!(ctx.clipboard.pastes, 0, "the offset counter stays put");
+
+        // The plain paste offsets by (0.1, -0.1) and advances it.
+        run_paste(&mut ctx, &crate::Invocation::empty(crate::Source::Test)).expect("paste");
+        let pasted = *ctx.selection.shapes.first().expect("pasted root");
+        let doc = &ctx.active_document().expect("session").document;
+        let (pin_x, _) = read_cell_number(doc, pasted, "PinX").expect("PinX");
+        let (pin_y, _) = read_cell_number(doc, pasted, "PinY").expect("PinY");
+        assert!((pin_x - 2.1).abs() < 1e-9, "{pin_x}");
+        assert!((pin_y - 2.9).abs() < 1e-9, "{pin_y}");
+        assert_eq!(ctx.clipboard.pastes, 1);
+
+        // A pointer pair is rejected, not ignored.
+        let args = crate::Args::new().with("x", crate::ArgValue::Number(1.0));
+        let error =
+            run_paste_in_place(&mut ctx, &crate::Invocation::new(args, crate::Source::Test))
+                .expect_err("x");
+        assert!(error.to_string().contains("edit.paste"), "{error}");
     }
 }
