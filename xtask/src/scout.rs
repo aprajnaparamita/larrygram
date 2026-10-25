@@ -815,7 +815,7 @@ pub fn run_fetch(
                     };
                     let outcome = run_job(net, job, retry_base_ms, &pins, &pin_file);
                     let finished = done.fetch_add(1, Ordering::SeqCst) + 1;
-                    if finished % 250 == 0 {
+                    if finished.is_multiple_of(250) {
                         eprintln!("scout: {finished}/{total} attempted");
                     }
                     {
