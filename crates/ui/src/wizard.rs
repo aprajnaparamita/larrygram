@@ -222,6 +222,7 @@ where
             .open(&mut window_open)
             .resizable(false)
             .collapsible(false)
+            .id(egui::Id::unique(crate::window_size::ABOUT_WINDOW).with("wizard"))
             .fixed_size(crate::window_size::ABOUT.size(screen.size()))
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
             .show(ui.ctx(), |ui| match about_window(ui) {

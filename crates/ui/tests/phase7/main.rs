@@ -27,8 +27,10 @@ mod layouts;
 mod menus;
 mod modern;
 mod placement;
+mod popups;
 mod review;
 mod surfaces;
+mod windows;
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;

@@ -863,27 +863,57 @@ impl Shell {
     /// the task's "not yours" set) and draws disabled.
     fn show_modern_status(&mut self, ui: &mut Ui) -> Vec<Intent> {
         let mut produced = Vec::new();
-        ui.horizontal(|ui| {
-            ui.label(self.page_count_label("of"));
-            ui.separator();
-            ui.label(self.status_line());
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.add_enabled_ui(false, |ui| ui.button("Switch window"))
-                    .inner
-                    .on_disabled_hover_text("Not yet implemented");
-                if let Some(intent) =
-                    menu_item(ui, &self.registry, &self.app, "view.zoom.fit", None)
-                {
-                    produced.push(intent);
-                }
-                self.zoom_controls(ui, &mut produced);
-                if let Some(intent) =
-                    menu_item(ui, &self.registry, &self.app, "view.full_screen_mode", None)
-                {
-                    produced.push(intent);
-                }
-            });
-        });
+        let bar = ui.available_rect_before_wrap();
+        let height = ui.spacing().interact_size.y;
+        let bar = egui::Rect::from_min_size(bar.min, egui::vec2(bar.width(), height));
+        ui.allocate_rect(bar, egui::Sense::hover());
+        flat_status_buttons(ui);
+        // The buttons on the right first, so the texts on the left
+        // take only the room they leave (task P7-17: at 1024 pt the
+        // page count drew under Full Screen).
+        let mut right = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(bar)
+                .layout(egui::Layout::right_to_left(egui::Align::Center)),
+        );
+        flat_status_buttons(&mut right);
+        right
+            .add_enabled_ui(false, |ui| ui.button("Switch window"))
+            .inner
+            .on_disabled_hover_text("Not yet implemented");
+        if let Some(intent) =
+            menu_item(&mut right, &self.registry, &self.app, "view.zoom.fit", None)
+        {
+            produced.push(intent);
+        }
+        self.zoom_controls(&mut right, &mut produced);
+        if let Some(intent) = menu_item(
+            &mut right,
+            &self.registry,
+            &self.app,
+            "view.full_screen_mode",
+            None,
+        ) {
+            produced.push(intent);
+        }
+        let used = right.min_rect();
+        let gap = ui.spacing().item_spacing.x;
+        let left_rect = egui::Rect::from_min_max(
+            bar.min,
+            egui::pos2((used.min.x - gap).max(bar.min.x), bar.max.y),
+        );
+        let mut left = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(left_rect)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
+        left.set_clip_rect(left_rect.intersect(ui.clip_rect()));
+        let count = self.page_count_label("of");
+        if !count.is_empty() {
+            left.add(egui::Label::new(count).extend());
+            left.separator();
+        }
+        left.add(egui::Label::new(self.status_line()).truncate());
         produced
     }
 
@@ -905,26 +935,32 @@ impl Shell {
                 ui.label(format!("A {:.0}\u{b0}", angle.degrees()));
             }
             ui.separator();
-            ui.label(self.status_line());
+            ui.add(egui::Label::new(self.status_line()).truncate());
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.label(self.page_count_label("/"));
             });
         });
     }
 
-    /// The zoom controls of the Panel Modern status bar: the slider,
-    /// the minus and plus buttons, the percentage and fit-to-window.
+    /// The zoom controls of the Panel Modern status bar, drawn into a
+    /// right-to-left row: the percentage, then − slider + (so they
+    /// read "− slider + 100%" from the left; task P7-17: the
+    /// right-to-left row put Zoom In left of the slider).
     fn zoom_controls(&mut self, ui: &mut Ui, produced: &mut Vec<Intent>) {
+        /// The status bar's zoom slider width, in points.
+        const SLIDER_WIDTH: f32 = 90.0;
         let mut zoom = self
             .app
             .active_document()
             .map(|session| session.view.zoom)
             .unwrap_or(1.0);
-        if let Some(intent) = menu_item(ui, &self.registry, &self.app, "view.zoom.out", None) {
+        ui.label(format!("{:.0}%", zoom * 100.0));
+        if let Some(intent) = glyph_item(ui, &self.registry, &self.app, "view.zoom.in", "+") {
             produced.push(intent);
         }
         // The slider has no label atom; the tooltip doubles as its
         // accessible name (ADR 0031 rule).
+        ui.spacing_mut().slider_width = SLIDER_WIDTH;
         let response = ui
             .add(
                 egui::Slider::new(&mut zoom, MIN_ZOOM..=MAX_ZOOM)
@@ -933,17 +969,18 @@ impl Shell {
             )
             .on_hover_text("Zoom");
         let changed = response.dragged() || response.changed();
-        if let Some(intent) = menu_item(ui, &self.registry, &self.app, "view.zoom.in", None) {
+        if let Some(intent) = glyph_item(ui, &self.registry, &self.app, "view.zoom.out", "\u{2212}")
+        {
             produced.push(intent);
         }
-        ui.label(format!("{:.0}%", zoom * 100.0));
         if changed && let Some(session) = self.app.active_document_mut() {
             session.view.zoom = zoom.clamp(MIN_ZOOM, MAX_ZOOM);
         }
     }
 
     /// "Page n of m" with `join` between the numbers ("of" for Panel
-    /// Modern, "/" for Panel Classic).
+    /// Modern, "/" for Panel Classic); empty with no document open
+    /// (task P7-17: it read "PAGE 0 OF 1").
     fn page_count_label(&self, join: &str) -> String {
         let (current, total) = match self.app.active_document() {
             Some(session) => {
@@ -961,7 +998,7 @@ impl Shell {
                     + 1;
                 (current, total)
             }
-            None => (0, 0),
+            None => return String::new(),
         };
         if join == "of" {
             format!("PAGE {current} {join} {}", total.max(1)).to_uppercase()
@@ -1425,6 +1462,7 @@ impl Shell {
                 .collapsible(false)
                 .resizable(false)
                 .title_bar(false)
+                .id(egui::Id::unique(window_size::WIZARD_WINDOW))
                 .fixed_size(window_size::WIZARD.size(screen))
                 .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
                 .show(ui.ctx(), |ui| {
@@ -1484,6 +1522,7 @@ impl Shell {
             egui::Window::new("About Larrygram")
                 .collapsible(false)
                 .resizable(false)
+                .id(egui::Id::unique(window_size::ABOUT_WINDOW))
                 .fixed_size(window_size::ABOUT.size(screen))
                 .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
                 .open(&mut open)
@@ -1814,6 +1853,35 @@ fn layout_radio_checked(app: &AppCtx, id: &str) -> Option<bool> {
     Some(app.settings.ui_layout == kind)
 }
 
+/// A status-bar button that shows `glyph` for the registry id `id`
+/// (the zoom − and + buttons): the command's label is its accessible
+/// name and tooltip. `Some(intent)` when clicked.
+fn glyph_item(
+    ui: &mut Ui,
+    registry: &Registry,
+    app: &AppCtx,
+    id: &'static str,
+    glyph: &str,
+) -> Option<Intent> {
+    let command = CommandId::parse(id).ok()?;
+    let label = registry
+        .meta(&command)
+        .map(|meta| meta.label.clone())
+        .unwrap_or_else(|| id.to_owned());
+    let enabled = registry.enabled(&command, app);
+    let response = ui
+        .add_enabled_ui(enabled.value, |ui| ui.button(glyph))
+        .inner
+        .accessible_name(label.as_str());
+    let response = match &enabled.reason {
+        Some(reason) => response.on_disabled_hover_text(reason.clone()),
+        None => response.on_hover_text(label.as_str()),
+    };
+    response
+        .clicked()
+        .then(|| Intent::new(command, Invocation::empty(Source::Menu)))
+}
+
 /// One menu or status-bar item for a registry id: `Some(intent)` when
 /// clicked.
 ///
@@ -2124,6 +2192,23 @@ fn with_choice(invocation: &Invocation, choice: FileChoice) -> Invocation {
         }
     }
     invocation
+}
+
+/// Draws the status-bar buttons flat: the bar's own colour behind
+/// them and a light fill on hover only (task P7-17: the default
+/// pale button fill under the bar's white text was unreadable).
+fn flat_status_buttons(ui: &mut Ui) {
+    let visuals = ui.visuals_mut();
+    for widgets in [
+        &mut visuals.widgets.inactive,
+        &mut visuals.widgets.noninteractive,
+    ] {
+        widgets.weak_bg_fill = egui::Color32::TRANSPARENT;
+        widgets.bg_fill = egui::Color32::TRANSPARENT;
+        widgets.bg_stroke = egui::Stroke::NONE;
+    }
+    visuals.widgets.hovered.weak_bg_fill = egui::Color32::from_white_alpha(40);
+    visuals.widgets.active.weak_bg_fill = egui::Color32::from_white_alpha(64);
 }
 
 /// Dispatches one already-built invocation; the seam the CLI and the

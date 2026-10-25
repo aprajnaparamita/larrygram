@@ -28,7 +28,8 @@ use larrygram_ui_spec::v2::{
     ControlSize, Group, Item, ItemKind, LayoutV2, PanelStyle, Tab, Window,
 };
 
-use super::common::Action;
+use super::common::{Action, MAX_DEPTH, Resolve};
+use super::controls;
 use super::place::{self, Placed};
 use super::{ListData, Metrics, PanelModern, redo_labels, show_label_rows, undo_labels};
 use crate::contexts::SelectionContext;
@@ -1439,6 +1440,98 @@ fn a_combo_menu_draws_every_entry_kind() {
         "the submenu opens in {:?}",
         rig.names()
     );
+}
+
+#[test]
+fn a_submenu_closes_when_the_pointer_leaves_the_menus() {
+    // Task P7-17: an egui submenu stayed open after the pointer left
+    // every menu; now it closes after the delay and the menu stays.
+    let mut rig = sink_rig();
+    rig.click(Role::Button, "Combo Items");
+    rig.hover_text("More");
+    assert!(rig.has("Deep One"), "the submenu opens on hover");
+    rig.harness.hover_at(egui::pos2(1900.0, 590.0));
+    // Half a second of single frames at the rig's 1/60 s clock (the
+    // pending close keeps asking for a repaint, so `run` would not
+    // settle while the clock is pinned).
+    for _ in 0..30 {
+        rig.now += 1.0 / 60.0;
+        rig.harness.input_mut().time = Some(rig.now);
+        rig.harness.step();
+    }
+    rig.run();
+    assert!(
+        !rig.has("Deep One"),
+        "the submenu closed after the pointer left"
+    );
+    assert!(rig.has("Menu Button"), "the menu itself stays open");
+}
+
+#[test]
+fn a_menu_control_with_a_stub_command_opens_when_a_child_runs() {
+    let mut opener = item(
+        "stub.opener",
+        ItemKind::Dropdown,
+        "Opener",
+        Some("file.save"),
+    );
+    opener.items = vec![item(
+        "reach.me",
+        ItemKind::Button,
+        "Reach Me",
+        Some("file.save"),
+    )];
+    let mut dead = item(
+        "stub.dead",
+        ItemKind::Dropdown,
+        "Dead End",
+        Some("file.save"),
+    );
+    dead.items = vec![item(
+        "stub.child",
+        ItemKind::Button,
+        "Nothing",
+        Some("file.save"),
+    )];
+    let mut nested = item(
+        "stub.nested",
+        ItemKind::Dropdown,
+        "Nested",
+        Some("file.save"),
+    );
+    let mut sub = item("stub.sub", ItemKind::Submenu, "Sub", None);
+    sub.items = vec![item(
+        "deep.reach",
+        ItemKind::Button,
+        "Deep Reach",
+        Some("file.save"),
+    )];
+    nested.items = vec![
+        item("stub.heading", ItemKind::Heading, "Heading", None),
+        sub,
+    ];
+    let resolve: Resolve<'_> = &stub_out;
+    assert!(controls::menu_reachable(&opener, resolve, 0));
+    assert!(!controls::menu_reachable(&dead, resolve, 0));
+    assert!(controls::menu_reachable(&nested, resolve, 0));
+    assert!(!controls::menu_reachable(&nested, resolve, MAX_DEPTH));
+
+    let tab = tab(
+        "tab.reach",
+        "Reach",
+        vec![group("group.reach", vec![opener])],
+    );
+    let mut rig = Rig::build_on(
+        Surface::Chrome,
+        SelectionContext::EmptyPage,
+        egui::vec2(800.0, 400.0),
+        hand_built(vec![tab], Vec::new()),
+        sink_lists(),
+        AppCtx::new(Settings::default()),
+        Resolving::Test(Rc::new(stub_out)),
+    );
+    rig.click(Role::Button, "Opener");
+    assert!(rig.has("Reach Me"), "the menu opens in {:?}", rig.names());
 }
 
 #[test]

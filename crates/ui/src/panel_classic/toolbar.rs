@@ -45,14 +45,51 @@ pub(crate) fn draw_toolbars(
     by_row.sort_by_key(|(row, _)| *row);
     for (_, row_toolbars) in by_row {
         ui.horizontal_wrapped(|ui| {
-            ui.set_min_height(ClassicMetrics::for_ctx(ui.ctx()).toolbar_row_height);
+            let m = ClassicMetrics::for_ctx(ui.ctx());
+            ui.set_min_height(m.toolbar_row_height);
+            // Toolbars sit end to end; one that does not fit starts a
+            // new row, and one wider than the window breaks between
+            // its items (`docs/ui/panel-classic.md`; task P7-17: egui
+            // wrapped single widgets, so a split's arrow landed on the
+            // next row and the last button ran off the window). Each
+            // item's width is the one it took last frame, or the
+            // estimate on the first frame.
+            let room = ui.available_width();
+            let spacing = ui.spacing().item_spacing.x;
+            let mut x = 0.0_f32;
             for toolbar in row_toolbars {
+                let items: Vec<&Item> = toolbar.items.iter().filter(|item| !item.hidden).collect();
+                let widths: Vec<f32> = items
+                    .iter()
+                    .map(|item| {
+                        state
+                            .toolbar_widths
+                            .get(&item.id)
+                            .copied()
+                            .unwrap_or_else(|| item_width(ui, item, &m) + spacing)
+                    })
+                    .collect();
+                let whole = m.toolbar_gripper_width + spacing + widths.iter().sum::<f32>();
+                if x > 0.0 && x + whole > room {
+                    ui.end_row();
+                    x = 0.0;
+                }
                 draw_gripper(ui, &toolbar.id);
-                for item in &toolbar.items {
-                    if item.hidden {
-                        continue;
+                x += m.toolbar_gripper_width + spacing;
+                for (item, width) in items.into_iter().zip(widths) {
+                    if x > 0.0 && x + width > room {
+                        ui.end_row();
+                        x = 0.0;
                     }
+                    let before = ui.cursor().min;
                     draw_item(ui, item, input, state, intents, &mut secondary, &mut anchor);
+                    let after = ui.cursor().min;
+                    if (after.y - before.y).abs() < 0.5 && after.x > before.x {
+                        state
+                            .toolbar_widths
+                            .insert(item.id.clone(), after.x - before.x);
+                    }
+                    x += width;
                 }
             }
         });
@@ -121,6 +158,50 @@ fn toolbars_for<'a>(
                 && state.toolbar_visible_in(input.layout, input.mode, &toolbar.id)
         })
         .collect()
+}
+
+/// The width one docked toolbar item takes, separator included,
+/// before the item spacing: the sizes `draw_item` gives each kind.
+fn item_width(ui: &Ui, item: &Item, m: &ClassicMetrics) -> f32 {
+    let separator = if item.begin_group {
+        m.toolbar_separator_width + 2.0 * m.toolbar_separator_margin + ui.spacing().item_spacing.x
+    } else {
+        0.0
+    };
+    let body = match item.kind {
+        ItemKind::Combo => item
+            .width
+            .map(|width| width as f32)
+            .filter(|width| width.is_finite() && *width > 0.0)
+            .unwrap_or_else(|| combo_width(&item.id, m)),
+        ItemKind::Split | ItemKind::SplitRecent => {
+            button_width(ui, item, m) + ui.spacing().item_spacing.x + m.toolbar_split_arrow_width
+        }
+        ItemKind::Dropdown | ItemKind::Palette => m.toolbar_button.x + m.toolbar_split_arrow_width,
+        _ => button_width(ui, item, m),
+    };
+    separator + body.min(1000.0)
+}
+
+/// The width of a toolbar button's main part per `display`: the icon
+/// cell, the icon and label, or the label alone (two cells).
+fn button_width(ui: &Ui, item: &Item, m: &ClassicMetrics) -> f32 {
+    let display = item.display.unwrap_or(DisplayMode::Icon);
+    match (display, item.icon.as_deref()) {
+        (DisplayMode::Text, _) | (_, None) => 2.0 * m.toolbar_button.x,
+        (DisplayMode::Icon, Some(_)) => m.toolbar_button.x,
+        (DisplayMode::IconText, Some(_)) => {
+            let label = item.label.clone().unwrap_or_default();
+            let font = egui::TextStyle::Button.resolve(ui.style());
+            let text = ui
+                .painter()
+                .layout_no_wrap(label, font, egui::Color32::WHITE)
+                .rect
+                .width();
+            (m.icon_small + ui.spacing().icon_spacing + text + 2.0 * ui.spacing().button_padding.x)
+                .max(m.toolbar_button.x)
+        }
+    }
 }
 
 /// The 7 px gripper at the start of every toolbar.
@@ -346,9 +427,19 @@ fn draw_split(
         anchor,
     );
     // The arrow part.
+    // The arrow part keeps its 11 px: no padding, a small arrow
+    // (task P7-17: the 16 px arrow with button padding drew 30 px wide).
     let arrow_size = Vec2::new(m.toolbar_split_arrow_width, m.toolbar_button.y);
-    let arrow = egui::Button::new(icons::dropdown_arrow(m.icon_small)).min_size(arrow_size);
-    let response = ui.add_sized(arrow_size, arrow);
+    let response = ui
+        .scope(|ui| {
+            ui.spacing_mut().button_padding = Vec2::ZERO;
+            let arrow = egui::Button::new(icons::dropdown_arrow(
+                (m.toolbar_split_arrow_width - 2.0).max(4.0),
+            ))
+            .min_size(arrow_size);
+            ui.add_sized(arrow_size, arrow)
+        })
+        .inner;
     response.widget_info(|| {
         WidgetInfo::labeled(egui::accesskit::Role::Button, true, format!("{label} menu"))
     });
@@ -382,9 +473,11 @@ fn draw_dropdown(
             m.icon_small,
             enabled,
         ),
-        icons::dropdown_arrow(10.0),
+        icons::dropdown_arrow((m.toolbar_split_arrow_width - 2.0).max(4.0)),
     ));
     let response = ui.add_enabled_ui(enabled, |ui| {
+        ui.spacing_mut().button_padding = Vec2::new(1.0, 0.0);
+        ui.spacing_mut().icon_spacing = 0.0;
         ui.add_sized(
             Vec2::new(
                 m.toolbar_button.x + m.toolbar_split_arrow_width,
