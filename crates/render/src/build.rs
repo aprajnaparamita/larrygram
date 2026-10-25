@@ -548,7 +548,11 @@ fn shape_node(
         own.push(Node::Shape(Box::new(Shape {
             shape_id: Some(id),
             transform,
-            path: if has_fill_path { fill_path } else { stroke_path },
+            path: if has_fill_path {
+                fill_path
+            } else {
+                stroke_path
+            },
             fill: None,
             stroke: None,
             shadow: shadow.take(),
@@ -1085,6 +1089,7 @@ fn rows_to_path(
 /// `MoveTo` row is a point of the loop and the loop closes at the end.
 /// The `no-bgcolor` box's fill sections are open sub-paths and Visio
 /// still fills the whole box (the twins' PDFs).
+#[allow(clippy::too_many_arguments)] // one fill-mapping entry point
 fn section_fill_path(
     rows: &[GeometryRow],
     width: f64,
@@ -1097,15 +1102,7 @@ fn section_fill_path(
 ) {
     let mut probe = Path::new();
     rows_to_path(
-        rows,
-        width,
-        height,
-        tolerance,
-        page_rect,
-        sheet,
-        warnings,
-        &mut probe,
-        false,
+        rows, width, height, tolerance, page_rect, sheet, warnings, &mut probe, false,
     );
     if every_sub_path_closes(&probe) {
         let mut open = false;
@@ -4211,6 +4208,132 @@ mod tests {
                 Segment::Close,
             ],
             "each closed sub-path closes on its own start"
+        );
+    }
+    #[test]
+    fn a_shape_that_paints_nothing_still_carries_its_path() {
+        // The fallback node: a section that fills (no `NoFill`) but the
+        // shape has neither a fill paint nor a stroke. The path still
+        // takes hits.
+        let (mut doc, _page, shape) = document_with_shape();
+        if let Some(entity) = doc.shape_mut(shape) {
+            entity.sheet.cells = vec![number_cell("Width", 1.0), number_cell("Height", 1.0)];
+        }
+        let section = geometry_section(
+            vec![
+                grow("MoveTo", &[("X", 0.0), ("Y", 0.0)]),
+                grow("LineTo", &[("X", 1.0), ("Y", 0.0)]),
+            ],
+            &[("NoLine", true)],
+        );
+        if let Some(entity) = doc.shape_mut(shape) {
+            entity.sheet.sections.push(section);
+        }
+        let nodes = nodes_of(&doc);
+        assert_eq!(nodes.len(), 1);
+        let Node::Shape(node) = &nodes[0] else {
+            panic!("expected a shape node");
+        };
+        assert!(node.fill.is_none() && node.stroke.is_none());
+        assert!(!node.path.is_empty(), "the path is kept for the hits");
+    }
+
+    #[test]
+    fn a_geometry_section_without_rows_fills_nothing() {
+        let (mut doc, _page, shape) = document_with_shape();
+        if let Some(entity) = doc.shape_mut(shape) {
+            entity.sheet.cells = vec![
+                number_cell("Width", 1.0),
+                number_cell("Height", 1.0),
+                number_cell("FillPattern", 1.0),
+            ];
+            entity
+                .sheet
+                .sections
+                .push(geometry_section(Vec::new(), &[]));
+        }
+        assert!(nodes_of(&doc).is_empty(), "an empty section draws nothing");
+    }
+
+    #[test]
+    fn a_closed_and_an_open_sub_path_fill_one_loop() {
+        // A section whose sub-paths do not all close fills one loop of
+        // its rows (P8-17 goal 4).
+        let (mut doc, _page, shape) = document_with_shape();
+        if let Some(entity) = doc.shape_mut(shape) {
+            entity.sheet.cells = vec![
+                number_cell("Width", 1.0),
+                number_cell("Height", 1.0),
+                number_cell("FillPattern", 1.0),
+            ];
+            entity.sheet.sections.push(geometry_section(
+                vec![
+                    grow("MoveTo", &[("X", 0.0), ("Y", 0.0)]),
+                    grow("LineTo", &[("X", 1.0), ("Y", 0.0)]),
+                    grow("LineTo", &[("X", 1.0), ("Y", 1.0)]),
+                    grow("LineTo", &[("X", 0.0), ("Y", 0.0)]),
+                    grow("MoveTo", &[("X", 2.0), ("Y", 0.0)]),
+                    grow("LineTo", &[("X", 3.0), ("Y", 0.0)]),
+                ],
+                &[("NoLine", true)],
+            ));
+        }
+        let nodes = nodes_of(&doc);
+        let Node::Shape(fill_node) = &nodes[0] else {
+            panic!("expected a shape node");
+        };
+        assert_eq!(
+            fill_node.path.segments(),
+            &[
+                Segment::MoveTo(Point::new(0.0, 0.0)),
+                Segment::LineTo(Point::new(1.0, 0.0)),
+                Segment::LineTo(Point::new(1.0, 1.0)),
+                Segment::LineTo(Point::new(0.0, 0.0)),
+                Segment::LineTo(Point::new(2.0, 0.0)),
+                Segment::LineTo(Point::new(3.0, 0.0)),
+                Segment::Close,
+            ],
+            "the open sub-path joins the loop"
+        );
+    }
+
+    #[test]
+    fn a_closed_row_sub_path_keeps_its_own_close() {
+        // An `Ellipse` row draws its own closed sub-path: the fill
+        // closes each sub-path on its own start.
+        let (mut doc, _page, shape) = document_with_shape();
+        if let Some(entity) = doc.shape_mut(shape) {
+            entity.sheet.cells = vec![
+                number_cell("Width", 1.0),
+                number_cell("Height", 1.0),
+                number_cell("FillPattern", 1.0),
+            ];
+            entity.sheet.sections.push(geometry_section(
+                vec![grow(
+                    "Ellipse",
+                    &[
+                        ("X", 1.0),
+                        ("Y", 1.0),
+                        ("A", 2.0),
+                        ("B", 1.0),
+                        ("C", 1.5),
+                        ("D", 1.5),
+                    ],
+                )],
+                &[("NoLine", true)],
+            ));
+        }
+        let nodes = nodes_of(&doc);
+        let Node::Shape(fill_node) = &nodes[0] else {
+            panic!("expected a shape node");
+        };
+        assert!(
+            fill_node
+                .path
+                .segments()
+                .iter()
+                .any(|segment| matches!(segment, Segment::Close)),
+            "the ellipse closes"
         );
     }
 }

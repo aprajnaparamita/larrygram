@@ -85,14 +85,10 @@ const BOOL_CELLS: &[&str] = &["FlipX", "FlipY"];
 /// The geometry row cells the renderer reads, compared as lengths.
 const GEOMETRY_CELLS: &[&str] = &["X", "Y", "A", "B", "C", "D"];
 
-/// Compares one import against its twin: one message per difference,
-/// empty when the two documents agree on everything compared.
-pub fn compare_documents(our: &Document, twin: &Document) -> Vec<String> {
-    compare_documents_counted(our, twin).0
-}
-
-/// The comparison as a report: the messages per difference and the
-/// number of compared cells (P8-17 goal 7: one report per file).
+/// Compares one import against its twin as a report: one message per
+/// difference and the number of compared cells (P8-17 goal 7: one
+/// report per file). The messages are empty when the two documents
+/// agree on everything compared.
 pub fn compare_documents_counted(our: &Document, twin: &Document) -> (Vec<String>, usize) {
     let mut out = Vec::new();
     let mut compared = 0usize;
@@ -184,19 +180,59 @@ fn compare_shapes(
         let sheets = (our, twin);
         let pair = (a_sheet, b_sheet);
         for &name in LENGTH_CELLS {
-            compare_cell(out, compared, &shape_place, name, CellKind::Length, sheets, pair);
+            compare_cell(
+                out,
+                compared,
+                &shape_place,
+                name,
+                CellKind::Length,
+                sheets,
+                pair,
+            );
         }
         for &name in ANGLE_CELLS {
-            compare_cell(out, compared, &shape_place, name, CellKind::Angle, sheets, pair);
+            compare_cell(
+                out,
+                compared,
+                &shape_place,
+                name,
+                CellKind::Angle,
+                sheets,
+                pair,
+            );
         }
         for &name in NUMBER_CELLS {
-            compare_cell(out, compared, &shape_place, name, CellKind::Plain, sheets, pair);
+            compare_cell(
+                out,
+                compared,
+                &shape_place,
+                name,
+                CellKind::Plain,
+                sheets,
+                pair,
+            );
         }
         for &name in COLOR_CELLS {
-            compare_cell(out, compared, &shape_place, name, CellKind::Color, sheets, pair);
+            compare_cell(
+                out,
+                compared,
+                &shape_place,
+                name,
+                CellKind::Color,
+                sheets,
+                pair,
+            );
         }
         for &name in BOOL_CELLS {
-            compare_cell(out, compared, &shape_place, name, CellKind::Flag, sheets, pair);
+            compare_cell(
+                out,
+                compared,
+                &shape_place,
+                name,
+                CellKind::Flag,
+                sheets,
+                pair,
+            );
         }
 
         compare_geometry(out, compared, &shape_place, our, twin, a_sheet, b_sheet);

@@ -1321,16 +1321,13 @@ fn reference(value: Option<u32>) -> Option<u32> {
 /// row keeps its place: a curve is its shape, not its end point.
 fn without_repeated_points(rows: Vec<(u32, Row)>) -> Vec<(u32, Row)> {
     let mut kept: Vec<(u32, Row)> = Vec::with_capacity(rows.len());
-    for index in 0..rows.len() {
-        let Some((id, row)) = rows.get(index) else {
-            continue;
-        };
+    for (index, (id, row)) in rows.iter().enumerate() {
         let repeats = kept
             .last()
             .is_some_and(|(_, previous)| same_draw_point(previous, row));
         let superseded = row.row_type.as_deref() == Some("MoveTo")
             && rows
-                .get(index.saturating_add(1))
+                .get(index + 1)
                 .is_some_and(|(_, next)| next.row_type.as_deref() == Some("MoveTo"));
         if repeats || superseded {
             continue;
@@ -1343,8 +1340,7 @@ fn without_repeated_points(rows: Vec<(u32, Row)>) -> Vec<(u32, Row)> {
 /// Whether both rows draw to the same point (both are `MoveTo` or
 /// `LineTo` rows with equal `X` and `Y`).
 fn same_draw_point(previous: &Row, row: &Row) -> bool {
-    let point_row =
-        |row: &Row| matches!(row.row_type.as_deref(), Some("MoveTo") | Some("LineTo"));
+    let point_row = |row: &Row| matches!(row.row_type.as_deref(), Some("MoveTo") | Some("LineTo"));
     if !point_row(previous) || !point_row(row) {
         return false;
     }
@@ -4110,5 +4106,32 @@ mod tests {
         let kept = without_repeated_points(rows);
         assert_eq!(kept.len(), 2, "the superseded `MoveTo` row is dropped");
         assert_eq!(kept[0].0, 2);
+    }
+    #[test]
+    fn a_curved_row_and_a_row_without_a_point_keep_their_place() {
+        // A curve is its shape, not its end point, and a row with no
+        // point to repeat is never a repeat.
+        let point = |kind: &str, x: f64, y: f64| {
+            let mut row = Row::new();
+            row.row_type = Some(kind.to_owned());
+            row.cells.push(number_cell("X", x, Unit::Inches));
+            row.cells.push(number_cell("Y", y, Unit::Inches));
+            row
+        };
+        let mut arc = Row::new();
+        arc.row_type = Some("ArcTo".to_owned());
+        arc.cells.push(number_cell("X", 1.0, Unit::Inches));
+        let mut bare = Row::new();
+        bare.row_type = Some("LineTo".to_owned());
+        let rows = vec![
+            (1, point("MoveTo", 1.0, 1.0)),
+            (2, arc),
+            (3, point("MoveTo", 1.0, 1.0)),
+            (4, bare),
+            (5, point("LineTo", 1.0, 1.0)),
+        ];
+        let kept = without_repeated_points(rows);
+        assert_eq!(kept.len(), 5, "no row repeats a point the drawing does not");
+        assert!(without_repeated_points(Vec::new()).is_empty());
     }
 }

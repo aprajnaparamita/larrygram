@@ -94,7 +94,7 @@ fn the_twin_lookup_needs_the_directory_with_its_vsdx_folder() {
 
 #[test]
 fn equal_documents_compare_clean() {
-    let mismatches = compare::compare_documents(&document(), &document());
+    let mismatches = compare::compare_documents_counted(&document(), &document()).0;
     assert!(mismatches.is_empty(), "{mismatches:?}");
 }
 
@@ -102,7 +102,7 @@ fn equal_documents_compare_clean() {
 fn a_different_page_size_is_reported() {
     let mut twin = document();
     twin.pages[0].sheet.cells = vec![number("PageWidth", 12.0), number("PageHeight", 8.5)];
-    let mismatches = compare::compare_documents(&document(), &twin);
+    let mismatches = compare::compare_documents_counted(&document(), &twin).0;
     assert_eq!(
         mismatches,
         ["page 1 / PageWidth / 12.0000 / 11.0000".to_owned()]
@@ -114,7 +114,7 @@ fn a_shape_only_one_side_has_is_reported_by_its_id() {
     let mut twin = document();
     twin.shapes.pop();
     twin.pages[0].shapes.pop();
-    let mismatches = compare::compare_documents(&document(), &twin);
+    let mismatches = compare::compare_documents_counted(&document(), &twin).0;
     assert_eq!(
         mismatches,
         ["page 1 / shape 2: only in the .vsd import".to_owned()]
@@ -125,7 +125,7 @@ fn a_shape_only_one_side_has_is_reported_by_its_id() {
 fn a_different_cell_is_reported_with_both_values() {
     let mut twin = document();
     twin.shapes[1].sheet.cells[0] = number("PinX", 3.5);
-    let mismatches = compare::compare_documents(&document(), &twin);
+    let mismatches = compare::compare_documents_counted(&document(), &twin).0;
     assert_eq!(
         mismatches,
         ["page 1 / shape 2 / PinX / 3.5000 / 3.0000".to_owned()]
@@ -138,7 +138,7 @@ fn a_different_text_is_reported() {
     twin.shapes[0].text = Some(TextContent {
         parts: vec![TextPart::Text("uno".to_owned())],
     });
-    let mismatches = compare::compare_documents(&document(), &twin);
+    let mismatches = compare::compare_documents_counted(&document(), &twin).0;
     assert_eq!(
         mismatches,
         ["page 1 / shape 1 / text / \"uno\" / \"one\"".to_owned()]
@@ -151,7 +151,7 @@ fn trailing_whitespace_in_the_text_is_ignored() {
     twin.shapes[0].text = Some(TextContent {
         parts: vec![TextPart::Text("one  \n".to_owned())],
     });
-    let mismatches = compare::compare_documents(&document(), &twin);
+    let mismatches = compare::compare_documents_counted(&document(), &twin).0;
     assert!(mismatches.is_empty(), "{mismatches:?}");
 }
 
@@ -161,7 +161,7 @@ fn a_cleared_sheet_still_compares_through_the_defaults() {
     // the renderer draws, so a cleared sheet differs like any other.
     let mut twin = document();
     twin.shapes[0].sheet.cells.clear();
-    let mismatches = compare::compare_documents(&document(), &twin);
+    let mismatches = compare::compare_documents_counted(&document(), &twin).0;
     assert!(!mismatches.is_empty(), "the defaults differ from the cells");
 }
 
@@ -169,7 +169,7 @@ fn a_cleared_sheet_still_compares_through_the_defaults() {
 fn text_only_one_side_has_is_not_compared() {
     let mut twin = document();
     twin.shapes[0].text = None;
-    let mismatches = compare::compare_documents(&document(), &twin);
+    let mismatches = compare::compare_documents_counted(&document(), &twin).0;
     assert!(mismatches.is_empty(), "{mismatches:?}");
 }
 
@@ -177,6 +177,6 @@ fn text_only_one_side_has_is_not_compared() {
 fn a_length_within_the_tolerance_agrees() {
     let mut twin = document();
     twin.shapes[0].sheet.cells[0] = number("PinX", 1.0 + 0.0005);
-    let mismatches = compare::compare_documents(&document(), &twin);
+    let mismatches = compare::compare_documents_counted(&document(), &twin).0;
     assert!(mismatches.is_empty(), "{mismatches:?}");
 }

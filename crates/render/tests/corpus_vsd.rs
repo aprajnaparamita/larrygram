@@ -52,11 +52,15 @@ use tiny_skia::{Pixmap, PremultipliedColorU8};
 ///   template, a sample company and long-form sample text).
 const NO_GOLDEN: &[&str] = &["tdf76829-datetime-format.vsd"];
 
+/// One file that renders without a golden: name, page count, page
+/// sizes in inches and shape count.
+type NoGoldenNumbers = (&'static str, usize, &'static [(f64, f64)], usize);
+
 /// The structural numbers that pin the import of every file in
 /// [`NO_GOLDEN`] in place of its picture: page count, each page's size
 /// in inches (the model's `PageWidth`/`PageHeight`) and the shape
 /// count. Numbers only; the drawing's content never enters the repo.
-const NO_GOLDEN_NUMBERS: &[(&str, usize, &[(f64, f64)], usize)] = &[(
+const NO_GOLDEN_NUMBERS: &[NoGoldenNumbers] = &[(
     "tdf76829-datetime-format.vsd",
     2,
     &[
