@@ -2171,6 +2171,16 @@ dependencies = [
 [[package]]
 name = "larrygram-control"
 version = "1.0.0-alpha.1"
+dependencies = [
+ "base64 0.22.1",
+ "getrandom 0.3.4",
+ "larrygram-commands",
+ "larrygram-geom",
+ "larrygram-model",
+ "larrygram-render",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "larrygram-geom"
