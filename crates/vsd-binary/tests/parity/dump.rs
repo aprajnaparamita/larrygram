@@ -246,19 +246,26 @@ fn build_shape(builder: ShapeBuilder) -> Shape {
     let mut stroke_width = None;
     let mut shadow = None;
     let mut shadow_color = None;
+    // The generator draws one pass per (fill, stroke) combination: a
+    // filled shape gets a fill pass (`fill: solid, stroke: none`) and a
+    // stroke pass (`fill: none, stroke: solid`). The shape's fill is
+    // what the filling pass states and its stroke what the stroking
+    // pass states, so each side prefers the pass that draws it.
     for style in &builder.styles {
-        if fill.is_none()
-            && let Some(v) = prop(style, "draw:fill")
-        {
-            fill = Some(fill_kind(&v));
-            fill_color = prop(style, "draw:fill-color").and_then(|v| rgb(&v));
+        if let Some(v) = prop(style, "draw:fill") {
+            let kind = fill_kind(&v);
+            if fill.is_none() || (fill == Some(Fill::None) && kind != Fill::None) {
+                fill = Some(kind);
+                fill_color = prop(style, "draw:fill-color").and_then(|v| rgb(&v));
+            }
         }
-        if stroke.is_none()
-            && let Some(v) = prop(style, "draw:stroke")
-        {
-            stroke = Some(stroke_kind(&v));
-            stroke_color = prop(style, "svg:stroke-color").and_then(|v| rgb(&v));
-            stroke_width = prop(style, "svg:stroke-width").and_then(|v| inches(&v));
+        if let Some(v) = prop(style, "draw:stroke") {
+            let kind = stroke_kind(&v);
+            if stroke.is_none() || (stroke == Some(Stroke::None) && kind != Stroke::None) {
+                stroke = Some(kind);
+                stroke_color = prop(style, "svg:stroke-color").and_then(|v| rgb(&v));
+                stroke_width = prop(style, "svg:stroke-width").and_then(|v| inches(&v));
+            }
         }
         if shadow.is_none()
             && let Some(v) = prop(style, "draw:shadow")

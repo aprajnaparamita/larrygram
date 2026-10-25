@@ -624,6 +624,13 @@ impl Mapper<'_> {
                 "TextStyle" => {
                     shape.text_style = Some(parse_attr_uint(&attribute.value, part, "TextStyle")?)
                 }
+                "Type" => {
+                    // A guide (Visio draws guides on screen only; they
+                    // never print or export, so the renderer skips
+                    // them). The attribute is mapped, not preserved:
+                    // the write side regenerates it from the field.
+                    shape.is_guide = attribute.value == "Guide";
+                }
                 "Master" => {
                     if master.is_none() {
                         shape.preserved.attributes.push(attribute.clone());
@@ -1183,6 +1190,44 @@ mod tests {
             xml_part(&package, &PartName::new("/visio/document.xml")),
             Err(Error::InvalidPackage(_))
         ));
+    }
+
+    /// Marks every `Shape` element of an XML tree as a guide.
+    fn mark_guides(node: &mut XmlNode) {
+        if node.name.local == "Shape" {
+            node.attributes.push(XmlAttribute {
+                name: qname("Type"),
+                value: "Guide".to_owned(),
+            });
+        }
+        for child in &mut node.children {
+            if let XmlChild::Element(element) = child {
+                mark_guides(element);
+            }
+        }
+    }
+
+    #[test]
+    fn a_guide_shape_maps_its_type_and_the_write_side_keeps_it() {
+        // P8-15: `Type="Guide"` marks a guide: Visio draws guides on
+        // screen only and never prints or exports them. The fixture is
+        // the hand-built drawing above with its shape marked as one.
+        let mut package = drawing();
+        for part in &mut package.parts {
+            if let PartData::Xml(root) = &mut part.data {
+                mark_guides(root);
+            }
+        }
+        let document = to_model(&package).expect("document");
+        let shape = document.shapes.first().expect("shape");
+        assert!(shape.is_guide);
+
+        // The write side regenerates the attribute from the field, and
+        // the reopened shape is still a guide.
+        let written = crate::write::write_document(&document, &crate::package::Package::new())
+            .expect("writes");
+        let reopened = crate::read_document(&written, &crate::Limits::DEFAULT).expect("rereads");
+        assert!(reopened.shapes.first().expect("shape").is_guide);
     }
 
     #[test]

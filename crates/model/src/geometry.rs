@@ -1303,6 +1303,31 @@ mod tests {
     }
 
     #[test]
+    fn section_flags_resolve_per_section_not_per_name() {
+        // P8-15: the value policy's name-only "own entry" search
+        // answered for the first same-named section, so one section's
+        // `NoLine` suppressed the stroke of every section of a shape
+        // with several `Geometry` sections (the box outline of
+        // `no-bgcolor.vsd` did not draw).
+        let mut doc = Document::new();
+        let id = doc.add_shape(Shape::new(ShapeId { index: 0 }, 1));
+        {
+            let shape = doc.shape_mut(id).expect("exists");
+            let mut first = geometry(vec![row("LineTo", 1, &[("X", 1.0), ("Y", 1.0)])]);
+            first.cells.push(number_cell("NoLine", 1.0));
+            shape.sheet.sections.push(first);
+            let second = geometry(vec![row("LineTo", 1, &[("X", 2.0), ("Y", 2.0)])]);
+            shape.sheet.sections.push(second);
+        }
+        let geometry = doc.shape_geometry(id).expect("reads");
+        assert!(geometry.paths[0].no_line);
+        assert!(
+            !geometry.paths[1].no_line,
+            "each section resolves its own flags"
+        );
+    }
+
+    #[test]
     fn an_instance_without_rows_resolves_the_masters_rows() {
         // A master with a LineTo row; its instance has a Geometry section
         // with no rows (ADR 0019).

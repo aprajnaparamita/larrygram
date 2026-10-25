@@ -493,7 +493,13 @@ impl<'d> CellReader<'d> {
         resolved: crate::lookup::Resolved<'_>,
         default: f64,
     ) -> f64 {
-        let (value, source) = self.preferred(sheet, cell, &resolved);
+        // A repeated-section cell: the caller resolved the row's
+        // identity and applied the snapshot rule already, so the
+        // sheet's own name-only search must not override it (P8-15: it
+        // returned the first same-named section's cell for every one of
+        // them, which kept the `NoLine` of one geometry section on all
+        // of a shape's sections).
+        let (value, source) = (resolved.value.cloned(), resolved.source);
         if source == ValueSource::HardDefault {
             return default;
         }
@@ -531,7 +537,11 @@ impl<'d> CellReader<'d> {
         resolved: crate::lookup::Resolved<'_>,
         default: bool,
     ) -> bool {
-        let (value, source) = self.preferred(sheet, cell, &resolved);
+        // The repeated-section rule of `number_from_or`: the caller's
+        // row identity and its snapshot preference already resolved the
+        // cell, and the name-only search would answer for the first
+        // same-named section (P8-15).
+        let (value, source) = (resolved.value.cloned(), resolved.source);
         if source == ValueSource::HardDefault {
             return default;
         }
@@ -2674,6 +2684,59 @@ mod tests {
                 .expect("reads")
         );
         assert!(reader.warnings().is_empty(), "{:?}", reader.warnings());
+    }
+
+    #[test]
+    fn two_character_rows_keep_their_own_colour_and_text() {
+        // P8-15: the name-only "own entry" search must not answer for a
+        // repeated-section row: two `Character` rows with different
+        // colours and texts keep their own values.
+        let (mut doc, shape) = document_with_shape();
+        let mut section =
+            crate::section::Section::new(crate::name::SectionName::from_static("Character"));
+        for (red, text) in [(3u8, "first"), (7, "second")] {
+            let mut row = crate::section::Row::new();
+            let mut color = Cell::new(CellName::from_static("Color"));
+            color.value = Some(CellValue::Color(Color::new(red, 0, 0)));
+            row.cells.push(color);
+            let mut font = Cell::new(CellName::from_static("Font"));
+            font.value = Some(CellValue::Str(text.to_owned()));
+            row.cells.push(font);
+            section.rows.push(row);
+        }
+        doc.shape_mut(shape)
+            .expect("shape")
+            .sheet
+            .sections
+            .push(section);
+        let mut reader = CellReader::new(&doc);
+        for (index, (red, text)) in [(3u8, "first"), (7, "second")].into_iter().enumerate() {
+            let row = RowTarget::at(index);
+            assert_eq!(
+                reader
+                    .row_color(
+                        SheetRef::Shape(shape),
+                        "Character",
+                        row,
+                        &CellName::from_static("Color")
+                    )
+                    .expect("reads"),
+                Color::new(red, 0, 0),
+                "row {index}"
+            );
+            assert_eq!(
+                reader
+                    .row_text(
+                        SheetRef::Shape(shape),
+                        "Character",
+                        row,
+                        &CellName::from_static("Font")
+                    )
+                    .expect("reads"),
+                text,
+                "row {index}"
+            );
+        }
     }
 
     #[test]

@@ -131,7 +131,7 @@ pub const ALWAYS_NOT_COMPARED: [&str; 7] = [
     "stylesheet rows and master shapes: compared through each shape's resolved cells instead",
     "foreign data (OLE objects, pictures), hyperlinks, events and macro references, annotations, reviewers, smart tags, the document font list and shape-data custom labels (ADR 0070 drops)",
     "curved geometry coordinates: the oracle flattens curves into line chords, so vertex lists do not align (row kinds are compared through `geometry.polyline`)",
-    "group structure (shape nesting): vsd2raw nests rendering groups (master geometry, sub-shape content) inside a shape's layer, so both sides compare top-level shapes with the descendants' content merged",
+    "group structure (shape nesting): vsd2raw states one layer per drawing shape and nests a master's rendering groups inside the layer, while our model nests group sub-shapes like the `.vsdx` reader does; both sides are flattened to one entry per drawing shape",
 ];
 
 /// Compares the oracle's document against ours.
@@ -186,29 +186,69 @@ fn compare_page(report: &mut Report, place: &str, oracle: &Page, ours: &Page) {
         place,
         "shape count",
         Some(oracle.shapes.len() as f64),
-        Some(ours.shapes.len() as f64),
+        Some(drawing_shapes(&ours.shapes).len() as f64),
     );
-    for (index, (a, b)) in oracle.shapes.iter().zip(ours.shapes.iter()).enumerate() {
+    let ours_shapes = drawing_shapes(&ours.shapes);
+    for (index, (a, b)) in oracle.shapes.iter().zip(ours_shapes.iter()).enumerate() {
         let a = flatten(a);
-        let b = flatten(b);
         let shape_place = if a.label.is_empty() {
             format!("{place} / shape {}", index + 1)
         } else {
             format!("{place} / {}", a.label)
         };
-        compare_shape(report, &shape_place, &a, &b);
+        compare_shape(report, &shape_place, &a, b);
+    }
+}
+
+/// Whether a shape draws anything: geometry, text or a text box.
+///
+/// A shape that draws nothing (a group whose content is all in its
+/// sub-shapes) is not an entry of the per-shape list.
+fn draws(shape: &Shape) -> bool {
+    let geometry = shape.geometry.as_ref();
+    let draws_geometry =
+        geometry.is_some_and(|geometry| geometry.subpaths > 0 || !geometry.polyline);
+    draws_geometry || shape.text.is_some() || shape.text_box.is_some()
+}
+
+/// Our shapes flattened to one entry per drawing shape.
+///
+/// Our model nests group sub-shapes the way the `.vsdx` reader keeps
+/// them (P8-15 goal 3), while the oracle's dump states one layer per
+/// drawing shape and no group structure. The comparison therefore
+/// walks our tree in document order and keeps each drawing shape with
+/// its own content: a group with its own geometry or text is an entry,
+/// and so is each of its sub-shapes.
+fn drawing_shapes(shapes: &[Shape]) -> Vec<Shape> {
+    let mut out = Vec::new();
+    for shape in shapes {
+        push_drawing_shapes(shape, &mut out);
+    }
+    out
+}
+
+/// Appends `shape` and its descendants, in document order.
+fn push_drawing_shapes(shape: &Shape, out: &mut Vec<Shape>) {
+    if draws(shape) {
+        let mut own = shape.clone();
+        own.children = Vec::new();
+        out.push(own);
+    }
+    for child in &shape.children {
+        push_drawing_shapes(child, out);
     }
 }
 
 /// One shape with every descendant's content merged in (the "shape"
-/// unit of the comparison).
+/// unit of the oracle's side of the comparison).
 ///
 /// `vsd2raw` nests rendering groups (a master's geometry, a group's
 /// sub-shape content) as anonymous layers inside the shape's layer, so
-/// the dump states one shape per top-level layer. Both sides are
-/// flattened the same way: text concatenates, style facts take the
-/// first stated value, the geometry merges and the first text box
-/// wins.
+/// the dump states one shape per drawing shape. On our side the model
+/// nests group sub-shapes like the `.vsdx` reader does, so its
+/// per-shape list is [`drawing_shapes`]. Text concatenates, style
+/// facts take the first stated value, the geometry merges and the
+/// first text box wins.
 fn flatten(shape: &Shape) -> Shape {
     let mut flat = shape.clone();
     flat.children = Vec::new();
@@ -757,6 +797,7 @@ mod tests {
         let (oracle, mut ours) = agreeing_docs();
         ours.pages[0].shapes.push(NeutralShape {
             label: "id2".to_owned(),
+            text: Some("a shape of its own".to_owned()),
             ..NeutralShape::default()
         });
         let report = compare("fixture", &oracle, &ours);
@@ -780,6 +821,24 @@ mod tests {
         }];
         nested.pages[0].shapes.push(parent);
         let report = compare("fixture", &nested, &ours);
+        assert!(report.mismatches.is_empty(), "{}", report.render());
+    }
+
+    #[test]
+    fn a_group_that_draws_nothing_is_not_an_entry_of_our_list() {
+        // Our model nests group sub-shapes (P8-15 goal 3) while the
+        // dump states one layer per drawing shape; the comparison
+        // flattens our tree to one entry per drawing shape.
+        let (oracle, ours) = agreeing_docs();
+        let mut nested = ours.clone();
+        let shape = nested.pages[0].shapes.remove(0);
+        let group = NeutralShape {
+            label: "the group".to_owned(),
+            children: vec![shape],
+            ..NeutralShape::default()
+        };
+        nested.pages[0].shapes = vec![group];
+        let report = compare("fixture", &oracle, &nested);
         assert!(report.mismatches.is_empty(), "{}", report.render());
     }
 

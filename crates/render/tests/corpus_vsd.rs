@@ -10,9 +10,13 @@
 //! `UnsupportedVersion(5)`, never a panic.
 //!
 //! The goldens under `tests/golden/vsd/` are our own rendering of the
-//! imported corpus drawings (first page of each file), compared with
+//! imported corpus drawings (every page of each file that draws,
+//! named `<name>-p<N>.png`), compared with
 //! the ADR 0027 metric as `tests/golden.rs` implements it (a local
-//! copy: test binaries cannot share code). Regenerate with
+//! copy: test binaries cannot share code). A background page (P8-15:
+//! `tdf76829-datetime-format.vsd`'s `VHintergrund`) has no golden of
+//! its own: it draws composited behind its foreground page, as Visio
+//! draws it. Regenerate with
 //!
 //! ```sh
 //! LARRYGRAM_UPDATE_GOLDEN=1 cargo test -p larrygram-render --test corpus_vsd
@@ -20,9 +24,16 @@
 //!
 //! and review the changed images.
 
-mod common;
-
 use std::path::{Path, PathBuf};
+
+/// The `.vsdx` twin comparison (P8-15 goal 8): the shared comparison
+/// of one import against its twin. It lives beside the corpus tests of
+/// `larrygram-vsd-binary` (`crates/vsd-binary/tests/twins.rs` owns it
+/// and its contract); this suite drives it because the `.vsdx` reader
+/// is a same-layer crate `larrygram-vsd-binary` may not depend on
+/// (ADR 0002).
+#[path = "../../vsd-binary/tests/twins/compare.rs"]
+mod twin_compare;
 
 use larrygram_render::{PngOptions, SvgOptions, render_png, render_svg};
 use larrygram_vsd_binary::{Error, Limits as VsdLimits, import};
@@ -90,9 +101,46 @@ fn imported(name: &str) -> Option<larrygram_vsd_binary::Import> {
     }
 }
 
-/// Every corpus file opens and every page renders through both
-/// backends. Warnings are allowed (ADR 0071); an `Err` or a panic
-/// fails. The version 5 files must fail cleanly.
+/// The scene of every page that draws: every page that is not another
+/// page's background page, in page order, with its background page
+/// composited behind it (a background page like
+/// `tdf76829-datetime-format.vsd`'s `VHintergrund` draws behind its
+/// foreground page and never as a page of its own).
+#[allow(clippy::expect_used)] // test helper: the page scene must build
+fn drawing_scenes(document: &larrygram_model::Document) -> Vec<larrygram_render::Scene> {
+    use larrygram_model::PageId;
+    use larrygram_render::{BuildOptions, build_scene};
+    let backgrounds: std::collections::BTreeSet<u32> = document
+        .pages
+        .iter()
+        .filter_map(|page| page.background.map(|background| background.index))
+        .collect();
+    let options = BuildOptions {
+        background: true,
+        ..BuildOptions::new()
+    };
+    document
+        .pages
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| !backgrounds.contains(&u32::try_from(*index).unwrap_or(u32::MAX)))
+        .map(|(index, _)| {
+            build_scene(
+                document,
+                PageId {
+                    index: u32::try_from(index).unwrap_or(u32::MAX),
+                },
+                &options,
+            )
+            .expect("builds the page scene")
+        })
+        .collect()
+}
+
+/// Every corpus file opens and every page that draws renders through
+/// both backends, its background page composited behind it. Warnings
+/// are allowed (ADR 0071); an `Err` or a panic fails. The version 5
+/// files must fail cleanly.
 #[test]
 fn every_corpus_vsd_opens_and_renders_every_page() {
     let files = corpus_files();
@@ -111,7 +159,7 @@ fn every_corpus_vsd_opens_and_renders_every_page() {
             Err(Error::UnsupportedVersion(5)) => continue,
             Err(other) => panic!("{name}: does not import: {other:?}"),
         };
-        for scene in common::page_scenes(&imported.document, true) {
+        for scene in drawing_scenes(&imported.document) {
             let png = render_png(&scene, &PngOptions::new())
                 .unwrap_or_else(|e| panic!("{name} page {pages}: render_png: {e}"));
             assert!(!png.is_empty(), "{name} page {pages}: empty PNG");
@@ -196,16 +244,23 @@ fn comparable(document: &larrygram_model::Document) -> larrygram_model::Document
 /// A copy of `document` with only the shapes a page or a master
 /// references (their trees included), the arena renumbered in order and
 /// every id rewritten.
+///
+/// The order is document order: the top-level shapes of every page and
+/// master in their list order, each with its sub-shapes depth first.
+/// That is the order the model is written and read back in (the writer
+/// writes the trees, the reader rebuilds the arena in encounter order),
+/// so the round trip compares like with like.
 fn project_referenced_shapes(document: &larrygram_model::Document) -> larrygram_model::Document {
     use larrygram_model::ShapeId;
     let mut document = document.clone();
     let mut reachable = vec![false; document.shapes.len()];
+    let mut order: Vec<u32> = Vec::new();
     let mut stack: Vec<u32> = Vec::new();
     for page in &document.pages {
-        stack.extend(page.shapes.iter().map(|id| id.index));
+        stack.extend(page.shapes.iter().rev().map(|id| id.index));
     }
     for master in &document.masters {
-        stack.extend(master.shapes.iter().map(|id| id.index));
+        stack.extend(master.shapes.iter().rev().map(|id| id.index));
     }
     while let Some(index) = stack.pop() {
         let Some(slot) = reachable.get_mut(index as usize) else {
@@ -215,20 +270,19 @@ fn project_referenced_shapes(document: &larrygram_model::Document) -> larrygram_
             continue;
         }
         *slot = true;
+        order.push(index);
         if let Some(shape) = document.shapes.get(index as usize) {
-            stack.extend(shape.children.iter().map(|id| id.index));
+            stack.extend(shape.children.iter().rev().map(|id| id.index));
         }
     }
     let mut map = vec![u32::MAX; document.shapes.len()];
     let mut kept = Vec::new();
-    for (index, keep) in reachable.iter().copied().enumerate() {
-        if keep {
-            if let Some(slot) = map.get_mut(index) {
-                *slot = u32::try_from(kept.len()).unwrap_or(u32::MAX);
-            }
-            if let Some(shape) = document.shapes.get(index) {
-                kept.push(shape.clone());
-            }
+    for index in order {
+        if let Some(slot) = map.get_mut(index as usize) {
+            *slot = u32::try_from(kept.len()).unwrap_or(u32::MAX);
+        }
+        if let Some(shape) = document.shapes.get(index as usize) {
+            kept.push(shape.clone());
         }
     }
     let remap = |id: u32| -> ShapeId {
@@ -421,8 +475,9 @@ fn text_of(content: Option<&larrygram_model::TextContent>) -> String {
         .collect()
 }
 
-/// The golden images of the imported corpus drawings: the first page
-/// of each importable corpus file, in `tests/golden/vsd/`.
+/// The golden images of the imported corpus drawings: every page of
+/// each importable corpus file, in `tests/golden/vsd/` as
+/// `<name>-p<N>.png` (page numbers from 1).
 #[test]
 fn golden_images_of_the_imported_corpus_drawings() {
     let files = corpus_files();
@@ -439,43 +494,107 @@ fn golden_images_of_the_imported_corpus_drawings() {
         let Some(imported) = imported(&name) else {
             continue;
         };
-        let scenes = common::page_scenes(&imported.document, true);
-        let scene = scenes.first().expect("the drawing has a page");
-        let rendered = render_png(
-            scene,
-            &PngOptions {
-                scale: GOLDEN_SCALE,
-                ..PngOptions::new()
-            },
-        )
-        .unwrap_or_else(|e| panic!("{name}: render_png: {e}"));
         let stem = name.strip_suffix(".vsd").unwrap_or(&name);
-        let path = golden_vsd_dir().join(format!("{stem}.png"));
-        if update {
-            let old = std::fs::read(&path).ok();
-            if old.as_deref() == Some(rendered.as_slice()) {
+        for (index, scene) in drawing_scenes(&imported.document).iter().enumerate() {
+            let rendered = render_png(
+                scene,
+                &PngOptions {
+                    scale: GOLDEN_SCALE,
+                    ..PngOptions::new()
+                },
+            )
+            .unwrap_or_else(|e| panic!("{name} page {}: render_png: {e}", index + 1));
+            let golden_name = format!("{stem}-p{}.png", index + 1);
+            let path = golden_vsd_dir().join(&golden_name);
+            if update {
+                let old = std::fs::read(&path).ok();
+                if old.as_deref() == Some(rendered.as_slice()) {
+                    cases += 1;
+                    continue;
+                }
+                let what = if old.is_some() { "updated" } else { "created" };
+                println!("{what} golden: {}", path.display());
+                std::fs::create_dir_all(golden_vsd_dir()).expect("creates the golden directory");
+                std::fs::write(&path, &rendered).expect("writes the golden");
                 cases += 1;
                 continue;
             }
-            let what = if old.is_some() { "updated" } else { "created" };
-            println!("{what} golden: {}", path.display());
-            std::fs::create_dir_all(golden_vsd_dir()).expect("creates the golden directory");
-            std::fs::write(&path, &rendered).expect("writes the golden");
+            let saved = std::fs::read(&path).unwrap_or_else(|_| {
+                panic!(
+                    "missing golden {golden_name}; regenerate with \
+                     LARRYGRAM_UPDATE_GOLDEN=1 cargo test -p larrygram-render --test corpus_vsd"
+                )
+            });
+            if let Err(diff) = compare_images(&saved, &rendered) {
+                panic!("golden {golden_name}: {diff}");
+            }
             cases += 1;
-            continue;
         }
-        let saved = std::fs::read(&path).unwrap_or_else(|_| {
-            panic!(
-                "missing golden {stem}.png; regenerate with \
-                 LARRYGRAM_UPDATE_GOLDEN=1 cargo test -p larrygram-render --test corpus_vsd"
-            )
-        });
-        if let Err(diff) = compare_images(&saved, &rendered) {
-            panic!("golden {stem}.png: {diff}");
-        }
-        cases += 1;
     }
     assert!(cases > 0, "no golden compared");
+}
+
+/// The `.vsdx` twin comparison (P8-15 goal 8): every corpus `.vsd`
+/// that has a `.vsdx` twin must import to the document the `.vsdx`
+/// reader reads from it (pages, shapes, the cells the renderer reads,
+/// and text, per page). The twins are found through
+/// `LARRYGRAM_VSD_TWINS`, the folder that holds `vsdx/`; the run skips
+/// cleanly when the variable is unset or no twin is there yet, like
+/// the libvisio oracle (ADR 0010).
+#[test]
+fn the_vsd_imports_match_their_vsdx_twins() {
+    let Some(dir) = std::env::var_os("LARRYGRAM_VSD_TWINS").map(PathBuf::from) else {
+        eprintln!(
+            "skipping the twin comparison: LARRYGRAM_VSD_TWINS is unset;              point it at the folder that holds vsdx/"
+        );
+        return;
+    };
+    if !dir.join("vsdx").is_dir() {
+        eprintln!(
+            "skipping the twin comparison: {} has no vsdx/ folder",
+            dir.display()
+        );
+        return;
+    }
+    let files = corpus_files();
+    if require_corpus_or(&files) {
+        return;
+    }
+    let mut compared = 0usize;
+    let mut failures = Vec::new();
+    for file in &files {
+        let name = file
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let stem = name.strip_suffix(".vsd").unwrap_or(&name);
+        let twin_path = dir.join("vsdx").join(format!("{stem}.vsdx"));
+        let Ok(twin_bytes) = std::fs::read(&twin_path) else {
+            continue; // the twin has not arrived yet
+        };
+        let Some(imported) = imported(&name) else {
+            continue; // the version 5 files have no twin
+        };
+        let twin = read_document(&twin_bytes, &Limits::DEFAULT)
+            .unwrap_or_else(|e| panic!("{stem}.vsdx: does not read: {e:?}"));
+        let mismatches = twin_compare::compare_documents(&imported.document, &twin);
+        if !mismatches.is_empty() {
+            failures.push(format!("{name}:\n  {}", mismatches.join("\n  ")));
+        }
+        compared += 1;
+    }
+    if compared == 0 {
+        eprintln!(
+            "skipping the twin comparison: no corpus file has a twin under {} yet",
+            dir.display()
+        );
+        return;
+    }
+    assert!(
+        failures.is_empty(),
+        "the imports differ from their twins:\n\n{}",
+        failures.join("\n\n")
+    );
 }
 
 /// The golden directory of this test: `crates/render/tests/golden/vsd/`.
