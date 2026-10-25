@@ -221,3 +221,41 @@ fn new_on_both_layouts_runs_the_same_command() {
         "file.new is implemented and enabled"
     );
 }
+
+/// A right-click on the page tab draws its menu at the pointer, in
+/// both layouts (task P7-17: the click that opened a shell context
+/// menu also closed it, and the menu sat at the window's corner).
+#[test]
+fn a_right_click_on_the_page_tab_shows_its_menu() {
+    for (kind, entry) in [
+        (LayoutKind::PanelClassic, "Rename Page"),
+        (LayoutKind::PanelModern, "Rename"),
+    ] {
+        let mut rig = rig(kind, (1440.0, 900.0));
+        let pos = rig
+            .harness()
+            .query_all_by_label("Page-1")
+            .next()
+            .expect("the page tab")
+            .rect()
+            .center();
+        crate::review::click_at(&mut rig, pos, egui::PointerButton::Secondary);
+        rig.harness().run_steps(2);
+        assert!(shows(&mut rig, entry), "{kind:?}: the page tab menu draws");
+        let row = rig
+            .harness()
+            .query_all_by_label(entry)
+            .next()
+            .expect("the menu row")
+            .rect();
+        assert!(
+            (row.min - pos).length() < 300.0,
+            "{kind:?}: the menu opens at the pointer ({row:?}, click at {pos:?})"
+        );
+        click_outside(&mut rig);
+        assert!(
+            !shows(&mut rig, entry),
+            "{kind:?}: a click outside closes it"
+        );
+    }
+}
