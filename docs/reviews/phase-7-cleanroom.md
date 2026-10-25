@@ -116,7 +116,7 @@ through the gate queue: the task changes no code).
    17 in `crates/geom/src/curve.rs`, the `VisFromParts`/`VisToParts`
    constant tables of source 18 in `docs/sources.md`), one
    enumeration-sentence quote in `docs/tasks/P1-01.md` that predates
-   Phase 7 (the file's diff is the Ferrogram-to-Larrygram rename only)
+   Phase 7 (the file's diff is the product rename only)
    and the audit reports quoting findings. The 6-word scan over the
    Phase 7 added lines finds one functional fragment in
    `docs/STATUS.md:308` ("open the page tab context menu", the
@@ -127,8 +127,9 @@ through the gate queue: the task changes no code).
    code follows ("Tooltips are written by us, not stored in the
    layout"; `crates/ui/src/tab_bar.rs:53` "the tooltip text is ours,
    never Microsoft's"). The guides in `docs/ui/**` and
-   `docs/phase-7/**` are clean. The word "Ribbon" appears in no
-   Phase 7 file, doc, label or identifier (P7-01 rule).
+   `docs/phase-7/**` are clean. The old Microsoft feature name for the
+   tabbed command bar (the word the P7-01 rule bans) appears in no
+   Phase 7 file, doc, label or identifier.
 
 6. **`cargo deny check` passes; `larrygram-vsd-binary` is the only
    MPL-2.0 crate.** Pass. `advisories ok, bans ok, licenses ok,
