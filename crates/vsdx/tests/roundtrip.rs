@@ -5,14 +5,19 @@
 //! must be semantically equivalent to the source (`diff` empty on every XML
 //! part, same part list, content types and relationships, byte-equal binary
 //! parts) and the second write must be byte-identical to the first (writer
-//! stability). The corpus is fetched, never committed (ADR 0005): the tests
-//! skip with a message when `corpus/vsdx/` is absent, and fail instead when
-//! `LARRYGRAM_REQUIRE_CORPUS=1` is set.
+//! stability). The one difference the criterion allows is the windows part
+//! and its entries, which the writer adds to a source that has none (task
+//! P8-20, ADR 0073). The corpus is fetched, never committed (ADR 0005): the
+//! tests skip with a message when `corpus/vsdx/` is absent, and fail instead
+//! when `LARRYGRAM_REQUIRE_CORPUS=1` is set.
 
 use std::path::{Path, PathBuf};
 
 use larrygram_model::{XmlNode, diff};
-use larrygram_vsdx::{Limits, Package, PartData, read_package, to_model, write_document};
+use larrygram_vsdx::{
+    ContentTypeDecl, ContentTypeKind, Limits, Package, PartData, Relationship, read_package,
+    to_model, write_document,
+};
 
 /// The corpus directory with the real `.vsdx` packages.
 fn corpus_dir() -> PathBuf {
@@ -49,15 +54,6 @@ fn corpus_missing(files: &[PathBuf]) -> bool {
     files.is_empty()
 }
 
-/// The names of the parts of a package, in order.
-fn part_names(package: &Package) -> Vec<&str> {
-    package
-        .parts
-        .iter()
-        .map(|part| part.name.as_str())
-        .collect()
-}
-
 /// The paths of every XML difference between two parts, empty when the parts
 /// are equivalent (ADR 0012).
 fn part_differences(a: &XmlNode, b: &XmlNode) -> Vec<String> {
@@ -76,10 +72,59 @@ fn root_name(node: &XmlNode) -> String {
     }
 }
 
+/// The windows part the writer adds to a package that has none (task
+/// P8-20, ADR 0073).
+const WINDOWS_PART: &str = "/visio/windows.xml";
+
+/// Whether a content-type declaration names the windows part.
+fn is_windows_decl(decl: &ContentTypeDecl) -> bool {
+    decl.kind == ContentTypeKind::Override
+        && decl.name.trim_start_matches('/') == WINDOWS_PART.trim_start_matches('/')
+}
+
+/// Whether a relationship is the main part's windows relationship.
+fn is_windows_relationship(relationship: &Relationship) -> bool {
+    relationship.source.as_str() == "/visio/document.xml"
+        && relationship.rel_type.ends_with("/windows")
+}
+
+/// The part names, without the windows part the writer adds when
+/// `skip_windows` is set.
+fn part_names(package: &Package, skip_windows: bool) -> Vec<&str> {
+    package
+        .parts
+        .iter()
+        .map(|part| part.name.as_str())
+        .filter(|part| !(skip_windows && *part == WINDOWS_PART))
+        .collect()
+}
+
+/// The content-type declarations, without the windows entry the writer adds
+/// when `skip_windows` is set.
+fn content_types(package: &Package, skip_windows: bool) -> Vec<&ContentTypeDecl> {
+    package
+        .content_types
+        .iter()
+        .filter(|decl| !(skip_windows && is_windows_decl(decl)))
+        .collect()
+}
+
+/// The relationships, without the windows entry the writer adds when
+/// `skip_windows` is set.
+fn relationships(package: &Package, skip_windows: bool) -> Vec<&Relationship> {
+    package
+        .relationships
+        .iter()
+        .filter(|relationship| !(skip_windows && is_windows_relationship(relationship)))
+        .collect()
+}
+
 /// Round-trips one package: read, write, re-read, re-write.
 ///
 /// Asserts semantic equivalence of the first write with the source and
 /// byte-identity of the two writes. Prints the difference paths on failure.
+/// The written package adds the windows part and its entries to a source
+/// that has none (task P8-20); the criterion compares everything else.
 #[allow(clippy::panic)] // test helper: the assertions report the failing file
 fn round_trip(name: &str, bytes: &[u8]) {
     let source = read_package(bytes, &Limits::DEFAULT).unwrap_or_else(|error| {
@@ -106,21 +151,30 @@ fn round_trip(name: &str, bytes: &[u8]) {
         "{name}: the second write differs from the first"
     );
 
+    let added_windows = !source
+        .parts
+        .iter()
+        .any(|part| part.name.as_str() == WINDOWS_PART);
     assert_eq!(
-        part_names(&source),
-        part_names(&reparsed),
+        part_names(&source, added_windows),
+        part_names(&reparsed, added_windows),
         "{name}: part lists differ"
     );
     assert_eq!(
-        source.content_types, reparsed.content_types,
+        content_types(&source, added_windows),
+        content_types(&reparsed, added_windows),
         "{name}: content types differ"
     );
     assert_eq!(
-        source.relationships, reparsed.relationships,
+        relationships(&source, added_windows),
+        relationships(&reparsed, added_windows),
         "{name}: relationships differ"
     );
 
-    for (before, after) in source.parts.iter().zip(reparsed.parts.iter()) {
+    for before in &source.parts {
+        let after = reparsed.part(&before.name).unwrap_or_else(|| {
+            panic!("{name}: part {} is missing", before.name.as_str());
+        });
         assert_eq!(before.name, after.name, "{name}: part names differ");
         assert_eq!(
             before.content_type,

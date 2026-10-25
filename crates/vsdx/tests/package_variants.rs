@@ -32,8 +32,8 @@ use std::io::Write as _;
 
 use larrygram_model::{Cell, Document, XmlChild, XmlNode, diff};
 use larrygram_vsdx::{
-    Error, Limits, Package, PartData, from_model, read_package, to_model, write_document,
-    write_package,
+    ContentTypeDecl, ContentTypeKind, Error, Limits, Package, PartData, Relationship, from_model,
+    read_package, to_model, write_document, write_package,
 };
 use zip::CompressionMethod;
 use zip::write::{SimpleFileOptions, ZipWriter};
@@ -162,8 +162,47 @@ fn generated_shape_attributes(document: &Document) -> Vec<(String, String)> {
         .collect()
 }
 
+/// The windows part the writer adds to a package that has none (task
+/// P8-20, ADR 0073).
+const WINDOWS_PART: &str = "/visio/windows.xml";
+
+/// Whether a content-type declaration names the windows part.
+fn is_windows_decl(decl: &ContentTypeDecl) -> bool {
+    decl.kind == ContentTypeKind::Override
+        && decl.name.trim_start_matches('/') == WINDOWS_PART.trim_start_matches('/')
+}
+
+/// Whether a relationship is the main part's windows relationship.
+fn is_windows_relationship(relationship: &Relationship) -> bool {
+    relationship.source.as_str() == "/visio/document.xml"
+        && relationship.rel_type.ends_with("/windows")
+}
+
+/// The content-type declarations, without the windows entry the writer adds
+/// when `skip_windows` is set.
+fn content_types(package: &Package, skip_windows: bool) -> Vec<&ContentTypeDecl> {
+    package
+        .content_types
+        .iter()
+        .filter(|decl| !(skip_windows && is_windows_decl(decl)))
+        .collect()
+}
+
+/// The relationships, without the windows entry the writer adds when
+/// `skip_windows` is set.
+fn relationships(package: &Package, skip_windows: bool) -> Vec<&Relationship> {
+    package
+        .relationships
+        .iter()
+        .filter(|relationship| !(skip_windows && is_windows_relationship(relationship)))
+        .collect()
+}
+
 /// Round-trips one package: read, write, re-read and re-write (the
 /// Phase 2 criterion of `tests/roundtrip.rs`, as an assertion).
+///
+/// The written package adds the windows part and its entries to a source
+/// that has none (task P8-20); the criterion compares everything else.
 fn assert_round_trip(name: &str, bytes: &[u8]) {
     let source = read_package(bytes, &Limits::DEFAULT).expect("source package reads");
     let document = to_model(&source).expect("source maps");
@@ -173,11 +212,16 @@ fn assert_round_trip(name: &str, bytes: &[u8]) {
     let second = write_document(&remodeled, &reparsed).expect("second write");
     assert_eq!(first, second, "{name}: the second write differs");
 
+    let added_windows = !source
+        .parts
+        .iter()
+        .any(|part| part.name.as_str() == WINDOWS_PART);
     let names = |package: &Package| {
         package
             .parts
             .iter()
             .map(|part| part.name.as_str().to_owned())
+            .filter(|part| !(added_windows && part == WINDOWS_PART))
             .collect::<Vec<_>>()
     };
     assert_eq!(
@@ -186,14 +230,19 @@ fn assert_round_trip(name: &str, bytes: &[u8]) {
         "{name}: part lists differ"
     );
     assert_eq!(
-        source.content_types, reparsed.content_types,
+        content_types(&source, added_windows),
+        content_types(&reparsed, added_windows),
         "{name}: content types differ"
     );
     assert_eq!(
-        source.relationships, reparsed.relationships,
+        relationships(&source, added_windows),
+        relationships(&reparsed, added_windows),
         "{name}: relationships differ"
     );
-    for (before, after) in source.parts.iter().zip(reparsed.parts.iter()) {
+    for before in &source.parts {
+        let after = reparsed.part(&before.name).unwrap_or_else(|| {
+            panic!("{name}: part {} is missing", before.name.as_str());
+        });
         assert_eq!(before.name, after.name, "{name}: part names differ");
         assert_eq!(
             before.content_type,
