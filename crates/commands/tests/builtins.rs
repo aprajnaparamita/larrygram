@@ -940,9 +940,11 @@ fn page_navigation_wraps_around() {
         Some(PageId { index: 0 })
     );
 
-    // A document without pages is disabled.
+    // A document without pages is disabled (task P7-20: `file.new`
+    // now opens a blank drawing with one page, so a page-less session
+    // is opened directly here).
     let mut ctx = AppCtx::new(Settings::default());
-    run(&mut ctx, "file.new", Args::new()).expect("new");
+    ctx.open_document(DocumentSession::new(Document::new(), None));
     let error = run(&mut ctx, "page.next", Args::new()).expect_err("no pages");
     assert!(
         matches!(error, CommandError::NotEnabled { .. }),
