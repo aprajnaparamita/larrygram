@@ -163,7 +163,7 @@ impl PanelModern {
     /// `Settings::last_core_tab`).
     ///
     /// The active core tab is the `active_core`-nth visible core tab
-    /// (no [`ContextId`](ui_spec::v2::ContextId) of its own), so the
+    /// (no context id of its own), so the
     /// id is computed against the same visible list the tab strip
     /// draws.
     pub fn active_core_id(
