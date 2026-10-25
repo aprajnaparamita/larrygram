@@ -859,7 +859,6 @@ dependencies = [
  "log",
  "resvg",
  "rfd",
- "serde",
  "serde_json",
  "wasm-bindgen",
  "wasm-bindgen-futures",
