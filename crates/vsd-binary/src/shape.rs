@@ -110,6 +110,7 @@ use larrygram_model::{
 use crate::chunks::{Chunk, FormatVersion, Record};
 use crate::error::Error;
 use crate::limits::Limits;
+use crate::style;
 use crate::warning::{ImportWarning, WarningKind};
 
 // The record ids this module consumes (ADR 0069: each domain module
@@ -167,6 +168,19 @@ const POLYLINE_TO: Record = Record(0xc1);
 const NURBS_TO: Record = Record(0xc3);
 /// A curve-data record: the points a geometry row references by id.
 const SHAPE_DATA: Record = Record(0xd1);
+/// The styles stream record: its rows belong to the stylesheet, not to
+/// the shape whose record group the walk is inside.
+const STYLES_STREAM: Record = Record(0x1a);
+/// A line-properties record. Below a stylesheet it is a style row
+/// ([`crate::style`] maps it); inside a shape record group it is the
+/// shape's own `Line` row (P8-15 goal 1).
+const LINE: Record = Record(0x85);
+/// A fill-and-shadow record: the `FillForegnd`/`FillBkgnd`/`Shadow*`
+/// cells, on a style or on a shape.
+const FILL_AND_SHADOW: Record = Record(0x86);
+/// A text-block record: the margins and alignment, on a style or on a
+/// shape.
+const TEXT_BLOCK: Record = Record(0x87);
 
 // The records ADR 0070 drops with a warning. Every other record kind
 // this module does not consume belongs to another domain module (line,
@@ -605,6 +619,9 @@ struct Open {
     level: u16,
     /// The shape itself.
     shape: Shape,
+    /// The Visio id the shape record named as its parent, when it named
+    /// one (P8-15 goal 3: the group join).
+    parent_ref: Option<i32>,
     /// The `Geometry` sections finished so far.
     sections: Vec<Section>,
     /// The section-level cells of the open section.
@@ -622,6 +639,7 @@ impl Open {
             id,
             level,
             shape,
+            parent_ref: None,
             sections: Vec::new(),
             section_cells: Vec::new(),
             rows: Vec::new(),
@@ -672,6 +690,47 @@ struct Walker<'a> {
     /// The name-index tables seen outside shape record groups: element
     /// id to name id, oldest first.
     name_index: Vec<Vec<(u32, u32)>>,
+    /// The level of the styles stream record while the walk is inside
+    /// the stylesheet, else `None`: its line, fill and text-block rows
+    /// are style rows, mapped by [`crate::style`].
+    styles_level: Option<u16>,
+    /// The group join: arena index of a shape to the Visio id its shape
+    /// record named as its parent (P8-15 goal 3).
+    parents: Vec<(u32, i32)>,
+    /// The shape lists, in stream order: each names its shapes in
+    /// z-order (P8-15: the paint order).
+    orders: Vec<Vec<i32>>,
+    /// The shape list being read, if one is open.
+    current_list: Option<ShapeList>,
+}
+
+/// One shape list being read: the order its trailer declares and the
+/// id table of its shape-id records (P8-15: the paint order).
+struct ShapeList {
+    /// The list's trailer, as [`geometry_order`] reads it: the record
+    /// ids of the list's entries in z-order, when the list has one.
+    order: Option<Vec<u32>>,
+    /// The shape-id records of the list: record id to shape id.
+    ids: Vec<(u32, i32)>,
+}
+
+impl ShapeList {
+    /// The shape ids of the list in z-order: the trailer's order
+    /// mapped through the id table, else the table in stream order.
+    fn z_order(self) -> Vec<i32> {
+        let Some(order) = self.order.filter(|order| !order.is_empty()) else {
+            return self.ids.into_iter().map(|(_, shape)| shape).collect();
+        };
+        order
+            .iter()
+            .filter_map(|element| {
+                self.ids
+                    .iter()
+                    .find(|(record, _)| record == element)
+                    .map(|(_, shape)| *shape)
+            })
+            .collect()
+    }
 }
 
 impl<'a> Walker<'a> {
@@ -684,6 +743,19 @@ impl<'a> Walker<'a> {
             next_index: 0,
             shape_ids: VecDeque::new(),
             name_index: Vec::new(),
+            styles_level: None,
+            parents: Vec::new(),
+            orders: Vec::new(),
+            current_list: None,
+        }
+    }
+
+    /// Ends the open shape list, keeping its z-order.
+    fn flush_order(&mut self) {
+        if let Some(list) = self.current_list.take()
+            && !list.ids.is_empty()
+        {
+            self.orders.push(list.z_order());
         }
     }
 
@@ -697,6 +769,15 @@ impl<'a> Walker<'a> {
         warnings: &mut Vec<ImportWarning>,
     ) -> Result<(), Error> {
         self.close_to(chunk.level);
+        if chunk.record == STYLES_STREAM {
+            self.styles_level = Some(chunk.level);
+            return Ok(());
+        }
+        if let Some(base) = self.styles_level
+            && chunk.level <= base
+        {
+            self.styles_level = None;
+        }
         if matches!(
             chunk.record,
             SHAPE_GROUP | SHAPE_SHAPE | SHAPE_GUIDE | SHAPE_FOREIGN
@@ -704,9 +785,21 @@ impl<'a> Walker<'a> {
             return self.open_shape(chunk, names, masters, warnings);
         }
         match chunk.record {
-            SHAPE_LIST => self.shape_ids.clear(),
+            SHAPE_LIST => {
+                self.flush_order();
+                self.shape_ids.clear();
+                self.current_list = Some(ShapeList {
+                    order: geometry_order(chunk.data, warnings, &self.context()),
+                    ids: Vec::new(),
+                });
+            }
             SHAPE_ID => match Fields::new(chunk.data).u32() {
-                Some(id) => self.shape_ids.push_back(id),
+                Some(id) => {
+                    self.shape_ids.push_back(id);
+                    if let Some(list) = self.current_list.as_mut() {
+                        list.ids.push((chunk.id, i32::try_from(id).unwrap_or(0)));
+                    }
+                }
                 None => warnings.push(bad_value(self.context(), "shape id")),
             },
             NAME_IDX => self.read_name_index(chunk.data, chunk.level),
@@ -734,6 +827,23 @@ impl<'a> Walker<'a> {
                     open.rows.push((chunk.id, row));
                 }
             }
+            LINE | FILL_AND_SHADOW | TEXT_BLOCK => {
+                // A shape's own `Line`, `FillAndShadow` and `TextBlock`
+                // rows (P8-15 goal 1): the styles stream's rows are
+                // `crate::style`'s to map.
+                if self.styles_level.is_none()
+                    && let Some(open) = self.stack.last_mut()
+                    && chunk.level > open.level
+                {
+                    let context = format!("shape {}", open.shape.visio_id);
+                    let sheet = &mut open.shape.sheet;
+                    match chunk.record {
+                        LINE => style::map_line(chunk.data, sheet, &context, warnings),
+                        FILL_AND_SHADOW => style::map_fill(chunk.data, sheet, &context, warnings),
+                        _ => style::map_text_block(chunk.data, sheet, &context, warnings),
+                    }
+                }
+            }
             _ => self.skip_other(chunk.record, warnings),
         }
         Ok(())
@@ -745,6 +855,9 @@ impl<'a> Walker<'a> {
             if let Some(mut open) = self.stack.pop() {
                 open.finish_section();
                 open.shape.sheet.sections.append(&mut open.sections);
+                if let Some(parent) = open.parent_ref {
+                    self.parents.push((open.id.index, parent));
+                }
                 self.finished.insert(open.id.index, open.shape);
             }
         }
@@ -791,7 +904,7 @@ impl<'a> Walker<'a> {
                 }),
             }
         }
-        let master = read_shape_record(chunk.data, &mut shape, &context, warnings);
+        let (master, parent) = read_shape_record(chunk.data, &mut shape, &context, warnings);
         if let Some(master) = master {
             match masters
                 .iter()
@@ -808,19 +921,22 @@ impl<'a> Walker<'a> {
                 }),
             }
         }
-        self.stack.push(Open::new(id, chunk.level, shape));
+        let mut open = Open::new(id, chunk.level, shape);
+        open.parent_ref = parent;
+        self.stack.push(open);
         Ok(())
     }
 
-    /// The Visio id of a new shape and whether it had none: the next
-    /// shape-id record of the most recent shape list, else the shape
-    /// record's own id.
+    /// The Visio id of a new shape and whether it had none: the shape
+    /// record's own id, else the next shape-id record of the most
+    /// recent shape list (the reference names a shape by its record id;
+    /// the list is the group's child order).
     fn take_shape_id(&mut self, chunk: &Chunk<'_>) -> (i32, bool) {
-        if let Some(id) = self.shape_ids.pop_front() {
-            return (i32::try_from(id).unwrap_or(0), false);
-        }
         if chunk.id != u32::MAX {
             return (i32::try_from(chunk.id).unwrap_or(0), false);
+        }
+        if let Some(id) = self.shape_ids.pop_front() {
+            return (i32::try_from(id).unwrap_or(0), false);
         }
         (0, true)
     }
@@ -920,29 +1036,173 @@ impl<'a> Walker<'a> {
     /// document, in stream order.
     fn finish(mut self, document: &mut Document) {
         self.close_to(0);
+        self.flush_order();
         for (_, shape) in self.finished {
             document.add_shape(shape);
+        }
+        regroup(document, &self.parents);
+        reorder(document, &self.orders);
+    }
+}
+
+/// Re-links the shapes whose records name a parent (P8-15 goal 3).
+///
+/// A group's sub-shapes are its siblings in the stream: the record
+/// nesting level alone yields a flat list. The shape record's parent
+/// field names the group by its Visio id, so each reference resolves to
+/// the closest earlier shape with that id (shape ids repeat per page,
+/// and the parent record comes first in the stream). The resolved
+/// parent replaces the level-derived one, the children lists and the
+/// top-level shape lists of the pages and masters follow, and every
+/// shape keeps at most one parent: a reference that would close a cycle
+/// (it can only point backwards) cannot.
+fn regroup(document: &mut Document, parents: &[(u32, i32)]) {
+    let visio_ids: Vec<i32> = document.shapes.iter().map(|shape| shape.visio_id).collect();
+    let mut parent_of: Vec<Option<u32>> = document
+        .shapes
+        .iter()
+        .map(|shape| shape.parent.map(|parent| parent.index))
+        .collect();
+    for &(child, parent_visio) in parents {
+        let child_index = usize::try_from(child).unwrap_or(usize::MAX);
+        if child_index >= visio_ids.len() {
+            continue;
+        }
+        let target = (0..child_index)
+            .rev()
+            .find(|candidate| visio_ids.get(*candidate) == Some(&parent_visio));
+        if let (Some(slot), Some(target)) = (parent_of.get_mut(child_index), target) {
+            *slot = u32::try_from(target).ok();
+        }
+    }
+    for shape in &mut document.shapes {
+        shape.parent = None;
+        shape.children.clear();
+    }
+    for (index, parent) in parent_of.iter().enumerate() {
+        let id = ShapeId {
+            index: u32::try_from(index).unwrap_or(u32::MAX),
+        };
+        if let Some(parent) = parent {
+            if let Some(shape) = document.shapes.get_mut(index) {
+                shape.parent = Some(ShapeId { index: *parent });
+            }
+            if let Some(parent_shape) = document
+                .shapes
+                .get_mut(usize::try_from(*parent).unwrap_or(usize::MAX))
+            {
+                parent_shape.children.push(id);
+            }
+        }
+    }
+    let top_level = |id: &ShapeId| {
+        parent_of
+            .get(usize::try_from(id.index).unwrap_or(usize::MAX))
+            .is_none_or(Option::is_none)
+    };
+    for page in &mut document.pages {
+        page.shapes.retain(top_level);
+    }
+    for master in &mut document.masters {
+        master.shapes.retain(top_level);
+    }
+}
+
+/// Re-orders the shapes of every page, master and group by the shape
+/// lists (P8-15: the paint order).
+///
+/// A shape list names its shapes in z-order (the order the reference
+/// calls the shapes order). The stream order the arena keeps is not
+/// that order: a filled shape can be written before the lines drawn
+/// over it. Each list is matched to the page, master or group whose
+/// shapes it names exactly (the ids are Visio ids and repeat per
+/// page, so the match is by the whole set).
+fn reorder(document: &mut Document, orders: &[Vec<i32>]) {
+    let visio_ids: Vec<i32> = document.shapes.iter().map(|shape| shape.visio_id).collect();
+    let mut used = vec![false; orders.len()];
+    let apply = |shapes: &mut [ShapeId], used: &mut [bool]| {
+        let ids: Vec<i32> = shapes
+            .iter()
+            .map(|id| {
+                visio_ids
+                    .get(usize::try_from(id.index).unwrap_or(usize::MAX))
+                    .copied()
+                    .unwrap_or(i32::MAX)
+            })
+            .collect();
+        let Some(order) = match_order(&ids, orders, used) else {
+            return;
+        };
+        shapes.sort_by_key(|id| {
+            let visio = visio_ids
+                .get(usize::try_from(id.index).unwrap_or(usize::MAX))
+                .copied()
+                .unwrap_or(i32::MAX);
+            order
+                .iter()
+                .position(|wanted| *wanted == visio)
+                .unwrap_or(usize::MAX)
+        });
+    };
+    for page in &mut document.pages {
+        apply(&mut page.shapes, &mut used);
+    }
+    for master in &mut document.masters {
+        apply(&mut master.shapes, &mut used);
+    }
+    for index in 0..document.shapes.len() {
+        if let Some(shape) = document.shapes.get_mut(index) {
+            let mut children = std::mem::take(&mut shape.children);
+            apply(&mut children, &mut used);
+            shape.children = children;
         }
     }
 }
 
-/// Reads the shape record payload: the master and style references.
+/// The unused shape list that names exactly `ids`, marked as used.
+fn match_order(ids: &[i32], orders: &[Vec<i32>], used: &mut [bool]) -> Option<Vec<i32>> {
+    let mut wanted = ids.to_vec();
+    wanted.sort_unstable();
+    for (index, order) in orders.iter().enumerate() {
+        if used.get(index).copied().unwrap_or(true) {
+            continue;
+        }
+        let mut sorted = order.clone();
+        sorted.sort_unstable();
+        if sorted == wanted {
+            if let Some(slot) = used.get_mut(index) {
+                *slot = true;
+            }
+            return Some(order.clone());
+        }
+    }
+    None
+}
+
+/// Reads the shape record payload: the parent, master and style
+/// references.
 ///
 /// The first ten bytes are flags this module does not map, then the
 /// parent id, the master page and shape ids, and the fill, line and
 /// text style ids. A reference of `0xFFFFFFFF` is no reference. The
-/// master id is returned for resolution against the master list; the
-/// style ids stay Visio ids on the shape.
+/// master id is returned for resolution against the master list, and
+/// the parent id for the group join (P8-15 goal 3); the style ids stay
+/// Visio ids on the shape.
 fn read_shape_record(
     data: &[u8],
     shape: &mut Shape,
     context: &str,
     warnings: &mut Vec<ImportWarning>,
-) -> Option<u32> {
+) -> (Option<u32>, Option<i32>) {
     let mut fields = Fields::new(data);
-    if fields.skip(18).is_none() {
+    if fields.skip(10).is_none() {
         warnings.push(bad_value(context.to_owned(), "shape record"));
-        return None;
+        return (None, None);
+    }
+    let parent = fields.u32();
+    if fields.skip(4).is_none() {
+        warnings.push(bad_value(context.to_owned(), "shape record"));
+        return (None, None);
     }
     let master = fields.u32();
     fields.skip(4);
@@ -956,7 +1216,13 @@ fn read_shape_record(
     shape.fill_style = reference(fill);
     shape.line_style = reference(line);
     shape.text_style = reference(text);
-    reference(master)
+    let parent = match parent {
+        // `0` and `0xFFFFFFFF` both mean "no parent": the shape is one
+        // of its page's top-level shapes.
+        Some(0) | Some(u32::MAX) | None => None,
+        Some(value) => i32::try_from(value).ok(),
+    };
+    (reference(master), parent)
 }
 
 /// A style or master reference: `0xFFFFFFFF` means no reference.
@@ -2748,16 +3014,259 @@ mod tests {
             shape_record(u32::MAX, u32::MAX, u32::MAX, u32::MAX, u32::MAX),
         )];
         chunks.push(chunk(0x2b, 2, 0, vec![]));
-        chunks.push(chunk(0x85, 2, 0, vec![])); // a line record: another module's
+        // An empty line record: the shape maps it and reports the
+        // unparseable payload (P8-15: shape-level rows are mapped).
+        chunks.push(chunk(0x85, 2, 0, vec![]));
         let mut document = Document::new();
         let mut warnings = Vec::new();
         collect(&chunks, &mut document, &mut warnings).expect("collect");
         assert_eq!(
             kinds(&warnings),
-            [WarningKind::SkippedRecord {
-                name: "unknown record"
-            }]
+            [
+                WarningKind::SkippedRecord {
+                    name: "unknown record"
+                },
+                WarningKind::BadValue {
+                    what: "line record"
+                }
+            ]
         );
+    }
+
+    /// A line-record payload: width, colour, pattern, rounding and the
+    /// arrow and cap bytes after the rounding format byte.
+    fn line_row(width: f64, colour: [u8; 4], pattern: u8) -> Vec<u8> {
+        let mut data = vec![0u8; 28];
+        data[1..9].copy_from_slice(&width.to_le_bytes());
+        data[10..14].copy_from_slice(&colour);
+        data[14] = pattern;
+        data[16..24].copy_from_slice(&0.25f64.to_le_bytes());
+        data[25] = 2;
+        data[26] = 3;
+        data[27] = 1;
+        data
+    }
+
+    /// A fill-and-shadow-record payload.
+    fn fill_row(foreground: (u8, [u8; 4]), pattern: u8) -> Vec<u8> {
+        let mut data = vec![0u8; 41];
+        data[0] = foreground.0;
+        data[1..5].copy_from_slice(&foreground.1);
+        data[10] = pattern;
+        data[21] = 3;
+        data
+    }
+
+    /// A text-block-record payload: one margin is enough.
+    fn text_block_row(margin: f64) -> Vec<u8> {
+        let mut data = vec![0u8; 51];
+        data[1..9].copy_from_slice(&margin.to_le_bytes());
+        data
+    }
+
+    #[test]
+    fn a_shape_maps_its_own_line_fill_and_text_block_rows() {
+        // P8-15 goal 1: a shape record group carries its own `Line`,
+        // `FillAndShadow` and `TextBlock` rows; dropping them left
+        // every instance at the hard defaults (no line where the file
+        // has one, no fill where there is one).
+        let mut chunks = vec![chunk(
+            0x48,
+            1,
+            4,
+            shape_record(u32::MAX, u32::MAX, u32::MAX, u32::MAX, u32::MAX),
+        )];
+        chunks.push(chunk(0x85, 2, 0, line_row(0.25, [1, 2, 3, 0], 2)));
+        chunks.push(chunk(0x86, 2, 0, fill_row((1, [255, 255, 255, 0]), 1)));
+        chunks.push(chunk(0x87, 2, 0, text_block_row(0.05)));
+        let mut document = Document::new();
+        let mut warnings = Vec::new();
+        collect(&chunks, &mut document, &mut warnings).expect("collect");
+        assert!(warnings.is_empty(), "{warnings:?}");
+        let cells = &document.shapes[0].sheet.cells;
+        assert_eq!(number(cells, "LineWeight"), Some(0.25));
+        assert_eq!(number(cells, "LinePattern"), Some(2.0));
+        assert_eq!(number(cells, "BeginArrow"), Some(2.0));
+        assert_eq!(number(cells, "EndArrow"), Some(3.0));
+        assert_eq!(number(cells, "LineCap"), Some(1.0));
+        assert_eq!(number(cells, "FillForegnd"), Some(1.0));
+        assert_eq!(number(cells, "FillPattern"), Some(1.0));
+        assert_eq!(number(cells, "ShdwPattern"), Some(3.0));
+        assert_eq!(number(cells, "LeftMargin"), Some(0.05));
+    }
+
+    #[test]
+    fn the_line_rows_of_the_styles_stream_are_not_shape_cells() {
+        let mut chunks = vec![chunk(0x1a, 1, 0, vec![])];
+        chunks.push(chunk(0x85, 3, 0, line_row(0.25, [1, 2, 3, 0], 2)));
+        chunks.push(chunk(
+            0x48,
+            1,
+            4,
+            shape_record(u32::MAX, u32::MAX, u32::MAX, u32::MAX, u32::MAX),
+        ));
+        chunks.push(chunk(0x85, 2, 0, line_row(0.5, [1, 2, 3, 0], 2)));
+        let mut document = Document::new();
+        let mut warnings = Vec::new();
+        collect(&chunks, &mut document, &mut warnings).expect("collect");
+        let cells = &document.shapes[0].sheet.cells;
+        assert_eq!(number(cells, "LineWeight"), Some(0.5));
+    }
+
+    #[test]
+    fn the_arrow_bytes_follow_the_rounding_format_byte() {
+        // P8-15: byte 24 is the rounding value's format byte. Reading
+        // the markers there drew an arrowhead on every outline.
+        let mut payload = line_row(0.25, [1, 2, 3, 0], 2);
+        payload[24] = 7;
+        let mut chunks = vec![chunk(
+            0x48,
+            1,
+            4,
+            shape_record(u32::MAX, u32::MAX, u32::MAX, u32::MAX, u32::MAX),
+        )];
+        chunks.push(chunk(0x85, 2, 0, payload));
+        let mut document = Document::new();
+        let mut warnings = Vec::new();
+        collect(&chunks, &mut document, &mut warnings).expect("collect");
+        let cells = &document.shapes[0].sheet.cells;
+        assert_eq!(number(cells, "BeginArrow"), Some(2.0));
+        assert_eq!(number(cells, "EndArrow"), Some(3.0));
+        assert_eq!(number(cells, "LineCap"), Some(1.0));
+    }
+
+    /// A shape record payload naming `parent` as its parent shape.
+    fn shape_record_with_parent(parent: u32) -> Vec<u8> {
+        let mut data = shape_record(u32::MAX, u32::MAX, u32::MAX, u32::MAX, u32::MAX);
+        data[10..14].copy_from_slice(&parent.to_le_bytes());
+        data
+    }
+
+    #[test]
+    fn a_shape_takes_its_visioid_from_the_record_id() {
+        // The shape list names the group's children in z-order; the
+        // shape ids are the record ids (P8-15: the ids the smoke tests
+        // pin).
+        let mut chunks = vec![chunk(0x65, 1, 0, vec![])];
+        chunks.push(chunk(0x83, 2, 0, shape_id(30)));
+        chunks.push(chunk(
+            0x48,
+            1,
+            3,
+            shape_record(u32::MAX, u32::MAX, u32::MAX, u32::MAX, u32::MAX),
+        ));
+        chunks.push(chunk(
+            0x48,
+            1,
+            5,
+            shape_record(u32::MAX, u32::MAX, u32::MAX, u32::MAX, u32::MAX),
+        ));
+        let mut document = Document::new();
+        let mut warnings = Vec::new();
+        collect(&chunks, &mut document, &mut warnings).expect("collect");
+        assert_eq!(
+            document
+                .shapes
+                .iter()
+                .map(|s| s.visio_id)
+                .collect::<Vec<_>>(),
+            [3, 5]
+        );
+    }
+
+    #[test]
+    fn the_parent_field_nests_a_group_sub_shape() {
+        // P8-15 goal 3: a group's sub-shapes are its siblings in the
+        // stream; the parent field names the group.
+        let mut chunks = vec![chunk(0x47, 1, 1, shape_record_with_parent(0))];
+        chunks.push(chunk(0x48, 1, 2, shape_record_with_parent(1)));
+        chunks.push(chunk(0x48, 1, 3, shape_record_with_parent(1)));
+        let mut document = Document::new();
+        let mut warnings = Vec::new();
+        collect(&chunks, &mut document, &mut warnings).expect("collect");
+        let group = &document.shapes[0];
+        assert_eq!(group.visio_id, 1);
+        assert_eq!(group.parent, None);
+        assert_eq!(
+            group.children,
+            vec![ShapeId { index: 1 }, ShapeId { index: 2 }]
+        );
+        assert_eq!(document.shapes[1].parent, Some(ShapeId { index: 0 }));
+        assert_eq!(document.shapes[2].parent, Some(ShapeId { index: 0 }));
+    }
+
+    #[test]
+    fn a_shape_list_orders_the_shapes_it_names() {
+        // P8-15: the paint order comes from the shape list, not from
+        // the stream order (a filled shape written before the lines
+        // drawn over it must stay behind them).
+        let mut document = Document::new();
+        for visio_id in [1, 2, 3] {
+            document.add_shape(Shape::new(ShapeId { index: 0 }, visio_id));
+        }
+        let mut page = larrygram_model::Page::new(larrygram_model::PageId { index: 0 }, 0);
+        page.shapes = vec![
+            ShapeId { index: 0 },
+            ShapeId { index: 1 },
+            ShapeId { index: 2 },
+        ];
+        document.pages.push(page);
+        reorder(&mut document, &[vec![3, 1, 2]]);
+        assert_eq!(
+            document.pages[0].shapes,
+            vec![
+                ShapeId { index: 2 },
+                ShapeId { index: 0 },
+                ShapeId { index: 1 }
+            ]
+        );
+    }
+
+    #[test]
+    fn a_group_children_take_the_order_of_their_list() {
+        let mut document = Document::new();
+        let mut group = Shape::new(ShapeId { index: 0 }, 1);
+        group.children = vec![ShapeId { index: 1 }, ShapeId { index: 2 }];
+        document.add_shape(group);
+        document.add_shape(Shape::new(ShapeId { index: 1 }, 2));
+        document.add_shape(Shape::new(ShapeId { index: 2 }, 3));
+        reorder(&mut document, &[vec![3, 2]]);
+        assert_eq!(
+            document.shapes[0].children,
+            vec![ShapeId { index: 2 }, ShapeId { index: 1 }]
+        );
+    }
+
+    #[test]
+    fn a_list_that_names_other_shapes_does_not_reorder() {
+        let mut document = Document::new();
+        for visio_id in [1, 2] {
+            document.add_shape(Shape::new(ShapeId { index: 0 }, visio_id));
+        }
+        let mut page = larrygram_model::Page::new(larrygram_model::PageId { index: 0 }, 0);
+        page.shapes = vec![ShapeId { index: 0 }, ShapeId { index: 1 }];
+        document.pages.push(page);
+        reorder(&mut document, &[vec![7, 8]]);
+        assert_eq!(
+            document.pages[0].shapes,
+            vec![ShapeId { index: 0 }, ShapeId { index: 1 }]
+        );
+    }
+
+    #[test]
+    fn a_parent_reference_resolves_to_the_closest_earlier_shape() {
+        // Shape ids repeat per page: page 2's shape 1 must not nest
+        // under page 1's shape 1.
+        let mut chunks = vec![chunk(0x48, 1, 1, shape_record_with_parent(0))];
+        chunks.push(chunk(0x48, 1, 2, shape_record_with_parent(1)));
+        chunks.push(chunk(0x48, 1, 1, shape_record_with_parent(0)));
+        chunks.push(chunk(0x48, 1, 2, shape_record_with_parent(1)));
+        let mut document = Document::new();
+        let mut warnings = Vec::new();
+        collect(&chunks, &mut document, &mut warnings).expect("collect");
+        assert_eq!(document.shapes[1].parent, Some(ShapeId { index: 0 }));
+        assert_eq!(document.shapes[3].parent, Some(ShapeId { index: 2 }));
+        assert_eq!(document.shapes[2].parent, None);
     }
 
     #[test]

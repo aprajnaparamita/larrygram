@@ -277,12 +277,28 @@ fn assert_fdo(document: &Document, title: &str, creator: &str) {
 
 /// `no-bgcolor.vsd`: a page that keeps its Visio id after earlier pages
 /// were deleted, and two German-named masters.
+#[allow(clippy::expect_used)] // test helper: the page's group must be there
 fn assert_no_bgcolor(document: &Document) {
     assert_eq!(document.pages.len(), 1);
     let page = &document.pages[0];
     assert_eq!(page.name, "1577");
     assert_eq!(page.visio_id, 4, "pages keep their id when ids are gone");
-    assert_eq!(page.shapes.len(), 7);
+    // One group shape whose record names six sub-shapes as its
+    // children (P8-15 goal 3: the level alone yields seven flat
+    // shapes).
+    assert_eq!(page.shapes.len(), 1);
+    let group = document
+        .shape(page.shapes[0])
+        .expect("the page's group shape");
+    assert_eq!(group.visio_id, 1);
+    assert_eq!(group.children.len(), 6, "the group's sub-shapes");
+    for child in &group.children {
+        assert_eq!(
+            document.shape(*child).and_then(|shape| shape.parent),
+            Some(page.shapes[0]),
+            "each sub-shape nests under the group"
+        );
+    }
     let names: Vec<&str> = document
         .masters
         .iter()
@@ -295,7 +311,14 @@ fn assert_no_bgcolor(document: &Document) {
         .map(|master| master.visio_id)
         .collect();
     assert_eq!(ids, [2, 4]);
-    assert_eq!(document.masters[0].shapes.len(), 7);
+    assert_eq!(document.masters[0].shapes.len(), 1, "the master's group");
+    assert_eq!(
+        document
+            .shape(document.masters[0].shapes[0])
+            .map(|g| g.children.len()),
+        Some(6),
+        "the master's group has the same six sub-shapes"
+    );
     assert!(
         document.masters[1].shapes.is_empty(),
         "the shared subtree resolves once (the P8-03 rule), so the \
