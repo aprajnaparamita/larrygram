@@ -46,7 +46,7 @@ colors:
   pane.title.fill: '#ffffff'
   pane.title.text: '#3955a3'
   pane.border: '#d4d4d4'
-  canvas.background: '#fbfbfb'        # area around the page
+  canvas.background: '#e6e6e6'        # area around the page (P7-17: a visible grey, the page stands out)
   page.background: '#ffffff'
   page.border: '#a9b0b8'
   page.shadow: '#eaeaea'

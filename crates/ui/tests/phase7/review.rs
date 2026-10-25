@@ -192,6 +192,14 @@ fn common_surfaces() -> Vec<(String, bool, Prepare)> {
     vec![
         ("idle".into(), false, Box::new(|_| {})),
         (
+            "no-document".into(),
+            false,
+            Box::new(|rig| {
+                let mut shell = rig.shell.borrow_mut();
+                shell.app.documents.clear();
+            }),
+        ),
+        (
             "options".into(),
             false,
             Box::new(|rig| rig.dispatch("app.office.center.options")),

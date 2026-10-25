@@ -76,6 +76,17 @@ const VIEW_MENU: &[&str] = &[
 /// the wizard and the About window (ADR 0066, task P7-09).
 const HELP_MENU: &[&str] = &["help.welcome", "help.about"];
 
+/// The width of the Shape Data and Size & Position panes, in points.
+const PANES_WIDTH: f32 = 220.0;
+
+/// The largest share of the window width one side panel takes.
+const PANE_SHARE: f32 = 0.3;
+
+/// Below this width the Panel Modern status bar draws its compact set
+/// of buttons (task P7-17: at 1024 pt the full set ran into the page
+/// count).
+const COMPACT_STATUS_WIDTH: f32 = 760.0;
+
 /// The zoom range of the status-bar slider (the Phase 4 range: 10%
 /// to 6400%, P4-05).
 const MIN_ZOOM: f64 = 0.1;
@@ -759,9 +770,15 @@ impl Shell {
             }
             FrameStyle::Fluent => 200.0,
         };
+        // The panels keep their theme widths (task P7-17: they shrank
+        // to their content, 105 pt for the Shape Data pane), but never
+        // take more than a share of a narrow window.
+        let window_width = ui.ctx().content_rect().width();
+        let cap = (window_width * PANE_SHARE).max(120.0);
         egui::Panel::left("shell-shapes")
             .resizable(true)
-            .default_size(shapes_width)
+            .default_size(shapes_width.min(cap))
+            .min_size(shapes_width.min(cap))
             .show(ui, |ui| {
                 theme_pane(ui, "pane.background");
                 let produced = self.shapes.show(ui, &self.app, style.shapes_header());
@@ -782,7 +799,8 @@ impl Shell {
             });
         egui::Panel::right("shell-panes")
             .resizable(true)
-            .default_size(220.0)
+            .default_size(PANES_WIDTH.min(cap))
+            .min_size(PANES_WIDTH.min(cap))
             .show(ui, |ui| {
                 theme_pane(ui, "pane.background");
                 let shape_data = ui.scope(|ui| panes::show_shape_data(ui, &mut self.app));
@@ -877,13 +895,27 @@ impl Shell {
                 .layout(egui::Layout::right_to_left(egui::Align::Center)),
         );
         flat_status_buttons(&mut right);
-        right
-            .add_enabled_ui(false, |ui| ui.button("Switch window"))
-            .inner
-            .on_disabled_hover_text("Not yet implemented");
-        if let Some(intent) =
+        // A narrow bar drops the disabled Switch window placeholder and
+        // shortens Fit to Window, so the page count keeps its room.
+        let compact = bar.width() < COMPACT_STATUS_WIDTH;
+        if !compact {
+            right
+                .add_enabled_ui(false, |ui| ui.button("Switch window"))
+                .inner
+                .on_disabled_hover_text("Not yet implemented");
+        }
+        let fit = if compact {
+            glyph_item(
+                &mut right,
+                &self.registry,
+                &self.app,
+                "view.zoom.fit",
+                "Fit",
+            )
+        } else {
             menu_item(&mut right, &self.registry, &self.app, "view.zoom.fit", None)
-        {
+        };
+        if let Some(intent) = fit {
             produced.push(intent);
         }
         self.zoom_controls(&mut right, &mut produced);

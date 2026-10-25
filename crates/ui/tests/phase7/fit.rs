@@ -290,3 +290,41 @@ fn chrome_keeps_the_controls_outside_the_canvas_band() {
         .collect();
     assert_eq!(kept, ["top", "low"]);
 }
+
+/// The paint output of one frame that draws `text` wrapped at `width`,
+/// breaking anywhere (the way a squeezed button label broke one letter
+/// per line, P7-10).
+fn wrapped_output(text: &str, width: f32) -> egui::FullOutput {
+    let ctx = egui::Context::default();
+    let mut output = ctx.run_ui(Default::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            let mut job = egui::text::LayoutJob::simple(
+                text.to_owned(),
+                egui::FontId::proportional(14.0),
+                egui::Color32::BLACK,
+                width,
+            );
+            job.wrap.break_anywhere = true;
+            // Painted as laid out: a label would re-wrap the job with
+            // the ui's own wrap settings.
+            let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+            ui.painter()
+                .galley(ui.cursor().min, galley, egui::Color32::BLACK);
+        });
+    });
+    // Nothing renders the frame; drop its texture deltas.
+    output.textures_delta.clear();
+    output
+}
+
+#[test]
+fn mid_word_wraps_flags_a_word_split_across_lines() {
+    let split = wrapped_output("Supercalifragilistic", 30.0);
+    assert_eq!(mid_word_wraps(&split), ["Supercalifragilistic"]);
+}
+
+#[test]
+fn mid_word_wraps_accepts_wraps_at_spaces_and_single_lines() {
+    assert!(mid_word_wraps(&wrapped_output("Font Size", 30.0)).is_empty());
+    assert!(mid_word_wraps(&wrapped_output("Font Size", 400.0)).is_empty());
+}

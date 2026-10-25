@@ -97,8 +97,9 @@ pub(crate) fn draw_toolbars(
     // Floating toolbars (`dock: floating`) as small tool windows,
     // clear of the docked rows (P7-12 minor 8: they used to land on
     // top of the rows and eat the clicks).
-    let below_rows = ui.cursor().min.y;
-    let mut floating_index = 0_usize;
+    // Each window opens under the one before it (task P7-17: a 28 px
+    // cascade hid the buttons of every window but the last).
+    let mut next_y = ui.cursor().min.y + 8.0;
     for toolbar in input
         .layout
         .toolbars
@@ -110,30 +111,39 @@ pub(crate) fn draw_toolbars(
         }
         let mut open = true;
         let label = toolbar.label.clone().unwrap_or_else(|| toolbar.id.clone());
-        egui::Window::new(label)
+        let shown = egui::Window::new(label)
             .id(Id::unique(("panel_classic_floating", toolbar.id.clone())))
             // Below the docked rows, near the top left of the
             // drawing, cascaded so the windows do not cover each
             // other (`docs/ui/panel-classic.md`).
-            .default_pos(Pos2::new(
-                300.0,
-                below_rows + 8.0 + 28.0 * floating_index as f32,
-            ))
+            .default_pos(Pos2::new(300.0, next_y))
             .collapsible(false)
             .resizable(false)
             .open(&mut open)
             .show(ui.ctx(), |ui| {
-                for item in &toolbar.items {
-                    if item.hidden {
-                        continue;
+                // A small tool window: the buttons in rows of at most
+                // [`FLOATING_COLUMNS`] (task P7-17: one vertical strip
+                // in a window as wide as the frame).
+                let m = ClassicMetrics::for_ctx(ui.ctx());
+                let spacing = ui.spacing().item_spacing.x;
+                let width = FLOATING_COLUMNS * (m.toolbar_button.x + spacing);
+                ui.set_max_width(width);
+                ui.horizontal_wrapped(|ui| {
+                    ui.set_max_width(width);
+                    for item in &toolbar.items {
+                        if item.hidden {
+                            continue;
+                        }
+                        draw_item(ui, item, input, state, intents, &mut secondary, &mut anchor);
                     }
-                    draw_item(ui, item, input, state, intents, &mut secondary, &mut anchor);
-                }
+                });
             });
+        if let Some(shown) = shown {
+            next_y = shown.response.rect.max.y + 8.0;
+        }
         if !open {
             state.set_toolbar_visible_in(input.mode, &toolbar.id, false);
         }
-        floating_index += 1;
     }
     if secondary {
         state.open_popup = Some(TOOLBAR_LIST.to_owned());
@@ -159,6 +169,9 @@ fn toolbars_for<'a>(
         })
         .collect()
 }
+
+/// The most buttons in one row of a floating toolbar window.
+const FLOATING_COLUMNS: f32 = 6.0;
 
 /// The width one docked toolbar item takes, separator included,
 /// before the item spacing: the sizes `draw_item` gives each kind.
