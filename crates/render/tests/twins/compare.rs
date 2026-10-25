@@ -1,6 +1,21 @@
-// This Source Code Form is subject to the terms of the Mozilla Public
-// License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+// MIT License
+//
+// Copyright (c) 2026 the Larrygram project. Permission is hereby
+// granted, free of charge, to any person obtaining a copy of this
+// software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense,
+// and/or sell copies of the Software, and to permit persons to whom the
+// Software is furnished to do so, subject to the following conditions:
+// The above copyright notice and this permission notice shall be
+// included in all copies or substantial portions of the Software.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+// EXPRESS OR IMPLIED.
+//
+// Our own code, not ported or derived from libvisio: the comparison is
+// format-agnostic and reads only the model (AGENTS.md section 5 keeps
+// the MPL code inside `crates/vsd-binary`, so this file moved out of
+// it, P8-17 goal 7).
 
 //! The comparison of one `.vsd` import against its `.vsdx` twin
 //! (P8-15 goal 8): pages, shapes, the cells the renderer reads, and
@@ -70,10 +85,13 @@ const BOOL_CELLS: &[&str] = &["FlipX", "FlipY"];
 /// The geometry row cells the renderer reads, compared as lengths.
 const GEOMETRY_CELLS: &[&str] = &["X", "Y", "A", "B", "C", "D"];
 
-/// Compares one import against its twin: one message per difference,
-/// empty when the two documents agree on everything compared.
-pub fn compare_documents(our: &Document, twin: &Document) -> Vec<String> {
+/// Compares one import against its twin as a report: one message per
+/// difference and the number of compared cells (P8-17 goal 7: one
+/// report per file). The messages are empty when the two documents
+/// agree on everything compared.
+pub fn compare_documents_counted(our: &Document, twin: &Document) -> (Vec<String>, usize) {
     let mut out = Vec::new();
+    let mut compared = 0usize;
     if our.pages.len() != twin.pages.len() {
         out.push(format!(
             "document / page count / {} / {}",
@@ -90,6 +108,7 @@ pub fn compare_documents(our: &Document, twin: &Document) -> Vec<String> {
         let pair = (page(index), page(index));
         compare_cell(
             &mut out,
+            &mut compared,
             &place,
             "PageWidth",
             CellKind::Length,
@@ -98,15 +117,16 @@ pub fn compare_documents(our: &Document, twin: &Document) -> Vec<String> {
         );
         compare_cell(
             &mut out,
+            &mut compared,
             &place,
             "PageHeight",
             CellKind::Length,
             sheets,
             pair,
         );
-        compare_shapes(&mut out, &place, our, twin, index);
+        compare_shapes(&mut out, &mut compared, &place, our, twin, index);
     }
-    out
+    (out, compared)
 }
 
 /// The sheet reference of one page.
@@ -119,6 +139,7 @@ fn page(index: usize) -> SheetRef {
 /// Compares the shapes of one page, joined by Visio `ID`.
 fn compare_shapes(
     out: &mut Vec<String>,
+    compared: &mut usize,
     place: &str,
     our: &Document,
     twin: &Document,
@@ -159,26 +180,67 @@ fn compare_shapes(
         let sheets = (our, twin);
         let pair = (a_sheet, b_sheet);
         for &name in LENGTH_CELLS {
-            compare_cell(out, &shape_place, name, CellKind::Length, sheets, pair);
+            compare_cell(
+                out,
+                compared,
+                &shape_place,
+                name,
+                CellKind::Length,
+                sheets,
+                pair,
+            );
         }
         for &name in ANGLE_CELLS {
-            compare_cell(out, &shape_place, name, CellKind::Angle, sheets, pair);
+            compare_cell(
+                out,
+                compared,
+                &shape_place,
+                name,
+                CellKind::Angle,
+                sheets,
+                pair,
+            );
         }
         for &name in NUMBER_CELLS {
-            compare_cell(out, &shape_place, name, CellKind::Plain, sheets, pair);
+            compare_cell(
+                out,
+                compared,
+                &shape_place,
+                name,
+                CellKind::Plain,
+                sheets,
+                pair,
+            );
         }
         for &name in COLOR_CELLS {
-            compare_cell(out, &shape_place, name, CellKind::Color, sheets, pair);
+            compare_cell(
+                out,
+                compared,
+                &shape_place,
+                name,
+                CellKind::Color,
+                sheets,
+                pair,
+            );
         }
         for &name in BOOL_CELLS {
-            compare_cell(out, &shape_place, name, CellKind::Flag, sheets, pair);
+            compare_cell(
+                out,
+                compared,
+                &shape_place,
+                name,
+                CellKind::Flag,
+                sheets,
+                pair,
+            );
         }
 
-        compare_geometry(out, &shape_place, our, twin, a_sheet, b_sheet);
-        if let (Some(x), Some(y)) = (text_of(our, a), text_of(twin, b))
-            && x != y
-        {
-            out.push(format!("{shape_place} / text / {y:?} / {x:?}"));
+        compare_geometry(out, compared, &shape_place, our, twin, a_sheet, b_sheet);
+        if let (Some(x), Some(y)) = (text_of(our, a), text_of(twin, b)) {
+            *compared += 1;
+            if x != y {
+                out.push(format!("{shape_place} / text / {y:?} / {x:?}"));
+            }
         }
     }
 }
@@ -227,6 +289,7 @@ enum CellKind {
 /// [`CellReader`] (the value the renderer reads).
 fn compare_cell(
     out: &mut Vec<String>,
+    compared: &mut usize,
     place: &str,
     name: &str,
     kind: CellKind,
@@ -248,6 +311,7 @@ fn compare_cell(
             if !x.is_finite() || !y.is_finite() {
                 return;
             }
+            *compared += 1;
             let delta = match kind {
                 CellKind::Angle => (x - y).to_degrees().abs(),
                 _ => (x - y).abs(),
@@ -260,6 +324,7 @@ fn compare_cell(
             let (Ok(x), Ok(y)) = (left.color(a, &name_ref), right.color(b, &name_ref)) else {
                 return;
             };
+            *compared += 1;
             if x != y {
                 out.push(format!(
                     "{place} / {name} / #{:02x}{:02x}{:02x} / #{:02x}{:02x}{:02x}",
@@ -271,6 +336,7 @@ fn compare_cell(
             let (Ok(x), Ok(y)) = (left.boolean(a, &name_ref), right.boolean(b, &name_ref)) else {
                 return;
             };
+            *compared += 1;
             if x != y {
                 out.push(format!("{place} / {name} / {y} / {x}"));
             }
@@ -282,6 +348,7 @@ fn compare_cell(
 /// row cells the renderer reads.
 fn compare_geometry(
     out: &mut Vec<String>,
+    compared: &mut usize,
     place: &str,
     our: &Document,
     twin: &Document,
@@ -291,6 +358,7 @@ fn compare_geometry(
     use larrygram_model::RowTarget;
     let a_rows = geometry_rows(our, a);
     let b_rows = geometry_rows(twin, b);
+    *compared += 1;
     if a_rows != b_rows {
         out.push(format!("{place} / geometry rows / {} / {}", b_rows, a_rows));
         return;
@@ -307,7 +375,11 @@ fn compare_geometry(
             ) else {
                 continue;
             };
-            if x.is_finite() && y.is_finite() && (x - y).abs() > LENGTH_TOLERANCE {
+            if !x.is_finite() || !y.is_finite() {
+                continue;
+            }
+            *compared += 1;
+            if (x - y).abs() > LENGTH_TOLERANCE {
                 out.push(format!(
                     "{place} / geometry row {ix} {name} / {y:.4} / {x:.4}"
                 ));
