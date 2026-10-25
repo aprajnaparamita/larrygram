@@ -67,6 +67,10 @@ struct SweepRow {
     masters: usize,
     /// Shape count (the whole arena).
     shapes: usize,
+    /// The shapes the page trees reference (P8-21 goal 4): the shapes
+    /// a page lists and their sub-shapes. An orphan record no page
+    /// references does not count.
+    page_shapes: usize,
     /// Group shapes (shapes with children).
     groups: usize,
     /// Connect records across all pages.
@@ -219,6 +223,31 @@ fn round_trip_check(bytes: &[u8]) -> String {
 
 /// Runs `read_document` over one file under `catch_unwind`: every
 /// panic is a bug, and the sweep records it instead of dying.
+/// The number of shapes the page trees reference (P8-21 goal 4): each
+/// page's own shapes and their sub-shapes. A shape record no page
+/// references (an orphan) does not count. The walk is iterative and
+/// bounded by the arena size, so a hostile child chain cannot loop.
+fn page_shape_count(document: &larrygram_model::Document) -> usize {
+    let mut stack: Vec<larrygram_model::ShapeId> = document
+        .pages
+        .iter()
+        .flat_map(|page| page.shapes.iter().copied())
+        .collect();
+    let cap = document.shapes.len().saturating_add(1);
+    let mut count = 0usize;
+    while let Some(id) = stack.pop() {
+        if count >= cap {
+            break;
+        }
+        let Some(shape) = document.shape(id) else {
+            continue;
+        };
+        count += 1;
+        stack.extend(shape.children.iter().copied());
+    }
+    count
+}
+
 fn sweep_one(bytes: &[u8], row: &IndexRow) -> SweepRow {
     let mut out = SweepRow {
         blob_id: row.blob_id.clone(),
@@ -240,6 +269,7 @@ fn sweep_one(bytes: &[u8], row: &IndexRow) -> SweepRow {
             out.pages = document.pages.len();
             out.masters = document.masters.len();
             out.shapes = document.shapes.len();
+            out.page_shapes = page_shape_count(&document);
             out.themes = document.themes.len();
             out.properties = document.properties.len();
             for shape in &document.shapes {
@@ -298,7 +328,7 @@ fn sweep_header() -> String {
     "blob_id,tier,ext,kind,version,outcome,error_kind,error_message,panic,warnings_total,\
      warning_skipped_record,warning_dropped,warning_unresolved_reference,warning_bad_value,\
      warning_unsupported,pages,masters,shapes,groups,connects,one_d,text_chars,drawing_scale,\
-     themes,properties,roundtrip"
+     themes,properties,roundtrip,page_shapes"
         .to_owned()
 }
 
@@ -331,6 +361,7 @@ fn sweep_line(row: &SweepRow) -> String {
         row.themes.to_string(),
         row.properties.to_string(),
         row.roundtrip.clone(),
+        row.page_shapes.to_string(),
     ];
     csv_line(&fields)
 }
@@ -510,6 +541,30 @@ mod tests {
         assert_eq!(
             csv_rows("\"a,b\",c\n"),
             vec![vec!["a,b".to_owned(), "c".to_owned()]]
+        );
+    }
+
+    /// The `page_shapes` count comes from the page trees, not the
+    /// shape list (P8-21 goal 4): an orphan record no page references
+    /// does not count, a sub-shape its page's shape references does.
+    #[test]
+    fn orphan_shape_records_do_not_count_as_page_shapes() {
+        use larrygram_model::{Document, Page, PageId, Shape, ShapeId};
+        let mut document = Document::new();
+        let mut page = Page::new(PageId { index: 0 }, 0);
+        let on_page = document.add_shape(Shape::new(ShapeId { index: 0 }, 1));
+        let child = document.add_shape(Shape::new(ShapeId { index: 0 }, 2));
+        let orphan = document.add_shape(Shape::new(ShapeId { index: 0 }, 3));
+        if let Some(shape) = document.shape_mut(on_page) {
+            shape.children.push(child);
+        }
+        page.shapes.push(on_page);
+        document.pages.push(page);
+        assert_eq!(document.shapes.len(), 3, "the arena holds the orphan too");
+        assert_eq!(
+            page_shape_count(&document),
+            2,
+            "{orphan:?} is never referenced"
         );
     }
 
