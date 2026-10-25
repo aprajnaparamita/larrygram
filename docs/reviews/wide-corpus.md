@@ -246,17 +246,110 @@ here on their unit tests alone. The 672 binary-family embeddings are
 entry compression ratios of 101:1 and 157:1; no package totals 200 MB
 (the largest is 20 MB uncompressed).
 
+## The twin sweep (task P8-21)
+
+Aggregates only (master note "Privacy"): no file is named. Every
+number comes from the local CSVs under `reference/wide-twins/`, written
+by the ignored tests of `crates/render/tests/wide_twins.rs`
+(`LARRYGRAM_WIDE_TWINS` and `LARRYGRAM_WIDE_CORPUS`).
+
+### Method
+
+The sweep imports each of the 77 converted files' original and
+compares that document with the `.vsdx` reader's document for its
+twin, through the shared, format-agnostic comparison of
+`crates/render/tests/twins/compare.rs`. The comparison reads the cells
+the renderer reads (page size, the transform, line, fill and text-block
+cells, the geometry rows and the text) and joins shapes by their Visio
+`ID`. A scaled drawing keeps its lengths in the drawing's units with
+`PageScale`/`DrawingScale` beside them, so the comparison multiplies
+the **twin's** stated lengths (and its formula-derived defaults) by
+`PageScale / DrawingScale` before it compares: the unit artefact is
+gone, and what disagrees after that is a fault in a reader or the
+import. A documented constant default (the margins' "0.1 inch") is a
+physical quantity and does not scale.
+
+The picture page renders every page of the 206 export-set files with
+our renderer at 600 pixels across and rasterises Visio's PDF at the
+same width (the system `pdftoppm`), then scores each pair with the
+ADR 0027 metric as a score: the fraction of pixels whose channels
+differ by more than 2 of 255, over the two rasters' common area.
+
+### Agreement by cell family (77 files)
+
+249 289 cells compared, 239 510 agree (96.1%), 11 045 differ; 5 090
+shapes joined over 120 pages. **22 of the 77 files agree on
+everything** the comparison reads. No reader panicked.
+
+| Family | Mismatches | Files with a mismatch |
+|---|---|---|
+| Text block (`Txt*`, the four margins) | 6 269 | 39 |
+| Geometry (row counts and row cells) | 1 307 | 40 |
+| Shape join (a shape only one side has) | 1 255 | 6 |
+| Fill | 709 | 14 |
+| Transform | 665 | 8 |
+| Line | 539 | 10 |
+| Text | 290 | 17 |
+| Page (count, name, size) | 11 | 5 |
+
+### The ten most common mismatch causes
+
+| Cause | Family | Mismatches | Files | What it is |
+|---|---|---|---|---|
+| Geometry row counts | geometry | 1 279 | 39 | the twin states only the rows that differ from its master (row-level inheritance); the import carries the rows it draws. The comparison should compare the resolved row union |
+| Shape join | join | 1 255 | 6 | shapes only one side has: the two formats order and group pages and records differently, and the comparison joins pages by position |
+| `BottomMargin` | text block | 1 180 | 34 | the text-block margins do not map on import (they read as 0) |
+| `LeftMargin` | text block | 1 171 | 34 | the same margin mapping |
+| `RightMargin` | text block | 1 169 | 34 | the same margin mapping |
+| `TopMargin` | text block | 729 | 9 | the same margin mapping |
+| `TxtLocPinX` | text block | 370 | 15 | the text transform lands on the wrong box (the margins and the `TxtPin*` resolution through the master chain) |
+| `TxtWidth` | text block | 370 | 15 | the same text transform |
+| `LineWeight` | line | 343 | 5 | line weights that do not map (and the hairline question of the renderers) |
+| `TxtHeight` | text block | 322 | 8 | the same text transform |
+
+The next causes are `TxtPinX` (322 in 10 files), `TxtLocPinY` and
+`TxtPinY` (318 each), the fill colours and patterns (`FillForegnd`
+291 in 11, `FillPattern` 216 in 12, `FillBkgnd` 189 in 6), the text
+(290 in 17: fields print their placeholder where Visio prints the
+computed value) and the remaining transform and line cells. Every one
+of these is a mapping or resolution fault in a reader or the import,
+or the known open issue of the comparison's own row handling; none is
+a unit artefact any more.
+
+### Picture scores (399 pages of 206 files)
+
+| Score (differing pixel fraction) | Pages |
+|---|---|
+| 0 (the rasters match at ADR 0027's threshold) | 37 |
+| 0 to 0.5% (within the ADR 0027 tolerance) | 16 |
+| 0.5% to 5% | 126 |
+| 5% to 25% | 183 |
+| 25% to 50% | 26 |
+| 50% to 90% | 9 |
+| 90% and above | 2 |
+
+The median score is 0.064 and the mean 0.110: 53 pages sit inside the
+golden tolerance and 215 differ on less than a quarter of their
+pixels. 17 pages render at a size that differs from the PDF raster and
+2 pages have no matching PDF page (a page-count difference). The
+worst scores concentrate on the known render gaps: text laid out at
+the wrong box, sub-pixel hairlines that draw as nothing, hatch fills
+that draw as a dot grid, and theme colours.
+
 ## The proposal lists
 
 In the task Result sections (not here): 32 Tier A files for the gate
-corpus with full manifest rows, and 206 Tier A files in
-`reference/wide-corpus/export-set.csv` for the export set.
+corpus with full manifest rows, and 205 Tier A files in
+`reference/wide-corpus/export-set.csv` for the export set (206 before
+task P8-21 dropped the empty drawings and refilled their slots).
 Both are chosen for coverage (versions 6 and 11, drawing scales,
 groups, connectors, text-heavy drawings, multi-page drawings, real
 `.vss`/`.vst` files, `.vsdx` files with themes) by
 `cargo xtask scout select` (task P8-18), the port of the local
 `reference/wide-corpus/select.py` helper; only files the sweeps opened
-are eligible, gate-corpus files are capped at 2 MB and one per
+and at least one page of which holds a shape that page references are
+eligible (a stencil or template stays eligible by its masters; task
+P8-21 goal 4), gate-corpus files are capped at 2 MB and one per
 repository, and no risky file is ever eligible (the risk filter above).
 The P8-16 run of the helper picked the same bucket counts (32 and
 206); the risk filter replaced 14 of its gate slots and kept every

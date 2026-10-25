@@ -1871,8 +1871,15 @@ pub struct SweepFacts {
     pub outcome: String,
     /// Page count.
     pub pages: usize,
-    /// Shape count.
+    /// Shape count (the whole arena).
     pub shapes: usize,
+    /// The shapes the page trees reference (P8-21 goal 4): each page's
+    /// own shapes and their sub-shapes. An orphan record no page
+    /// references does not count. A sweep that does not write the
+    /// column leaves it zero and its files are never eligible.
+    pub page_shapes: usize,
+    /// Master count.
+    pub masters: usize,
     /// Group shapes.
     pub groups: usize,
     /// Connect records.
@@ -1911,6 +1918,8 @@ pub fn sweep_rows(text: &str) -> Result<Vec<SweepFacts>> {
             outcome: get("outcome"),
             pages: count("pages"),
             shapes: count("shapes"),
+            page_shapes: count("page_shapes"),
+            masters: count("masters"),
             groups: count("groups"),
             connects: count("connects"),
             one_d: count("one_d"),
@@ -1950,8 +1959,13 @@ pub struct Candidate {
     pub version: String,
     /// Page count.
     pub pages: usize,
-    /// Shape count.
+    /// Shape count (the whole arena).
     pub shapes: usize,
+    /// The shapes the page trees reference (P8-21 goal 4): orphan
+    /// records do not count. The eligibility rule reads this count.
+    pub page_shapes: usize,
+    /// Master count.
+    pub masters: usize,
     /// Group shapes.
     pub groups: usize,
     /// Connect records.
@@ -1997,6 +2011,8 @@ pub fn candidates(index: &[IndexRow], sweeps: &[SweepFacts]) -> Vec<Candidate> {
             version: row.facts.version.clone(),
             pages: sweep.map(|s| s.pages).unwrap_or(0),
             shapes: sweep.map(|s| s.shapes).unwrap_or(0),
+            page_shapes: sweep.map(|s| s.page_shapes).unwrap_or(0),
+            masters: sweep.map(|s| s.masters).unwrap_or(0),
             groups: sweep.map(|s| s.groups).unwrap_or(0),
             connects: sweep.map(|s| s.connects).unwrap_or(0),
             one_d: sweep.map(|s| s.one_d).unwrap_or(0),
@@ -2021,6 +2037,20 @@ fn scaled(scale: &str) -> bool {
     };
     let v = v.abs();
     (v - 1.0).abs() > 0.01 && (v - 1.0 / 25.4).abs() > 0.001
+}
+
+/// Whether a candidate is eligible at all (task P8-21 goal 4): a
+/// drawing needs at least one page that holds a shape that page
+/// references — orphan records do not count, and for `.vsd` the count
+/// comes from the import's page trees, not from its shape list (the
+/// sweeps' `page_shapes` column). A stencil or a template stays
+/// eligible by its masters instead: it draws nothing on a page of its
+/// own.
+fn eligible(candidate: &Candidate) -> bool {
+    if candidate.page_shapes >= 1 {
+        return true;
+    }
+    matches!(candidate.ext.as_str(), "vss" | "vst" | "vssx" | "vstx") && candidate.masters >= 1
 }
 
 /// The state one selection fills into (the P8-16 helper's `taken` and
@@ -2124,7 +2154,7 @@ pub fn select(pool: &[Candidate]) -> Selection {
     const EXPORT_CAP: u64 = 5 * 1024 * 1024;
     let opened: Vec<Candidate> = pool
         .iter()
-        .filter(|c| c.tier == "a" && c.opened)
+        .filter(|c| c.tier == "a" && c.opened && eligible(c))
         .cloned()
         .collect();
     let pool_where = |test: &dyn Fn(&Candidate) -> bool| -> Vec<Candidate> {
@@ -3519,7 +3549,7 @@ mod tests {
 
     // ---- select (task P8-18) --------------------------------------
 
-    /// A hand-built selection candidate.
+    /// A hand-built selection candidate: one that draws something.
     fn cand(blob: char, repo: &str, ext: &str, version: &str) -> Candidate {
         Candidate {
             blob_id: blob.to_string().repeat(40),
@@ -3533,6 +3563,7 @@ mod tests {
             ext: ext.to_owned(),
             kind: "ole-drawing".to_owned(),
             version: version.to_owned(),
+            page_shapes: 1,
             opened: true,
             ..Candidate::default()
         }
@@ -3544,8 +3575,8 @@ mod tests {
             "blob_id,tier,ext,kind,version,outcome,error_kind,panic,warnings_total,\
              warning_skipped_record,warning_dropped,warning_unresolved_reference,\
              warning_bad_value,warning_unsupported,pages,masters,shapes,groups,connects,\
-             one_d,text_chars,drawing_scale\n\
-             {},a,vsd,drawing,11,opened,,0,0,0,0,0,0,0,2,1,10,2,3,4,500,0.5\n",
+             one_d,text_chars,drawing_scale,page_shapes\n\
+             {},a,vsd,drawing,11,opened,,0,0,0,0,0,0,0,2,1,10,2,3,4,500,0.5,3\n",
             "a".repeat(40)
         );
         let rows = sweep_rows(&vsd).unwrap();
@@ -3553,18 +3584,25 @@ mod tests {
         assert_eq!(rows[0].outcome, "opened");
         assert_eq!(rows[0].pages, 2);
         assert_eq!(rows[0].shapes, 10);
+        assert_eq!(rows[0].page_shapes, 3);
+        assert_eq!(rows[0].masters, 1);
         assert_eq!(rows[0].themes, 0);
         assert_eq!(rows[0].drawing_scale, "0.5");
         let vsdx = format!(
             "blob_id,tier,ext,kind,version,outcome,error_kind,panic,warnings_total,\
              warning_skipped_record,warning_dropped,warning_unresolved_reference,\
              warning_bad_value,warning_unsupported,pages,masters,shapes,groups,connects,\
-             one_d,text_chars,drawing_scale,themes,properties\n\
-             {},a,vsdx,drawing,,opened,,0,0,0,0,0,0,0,1,0,5,0,0,1,20,,3,1\n",
+             one_d,text_chars,drawing_scale,themes,properties,page_shapes\n\
+             {},a,vsdx,drawing,,opened,,0,0,0,0,0,0,0,1,0,5,0,0,1,20,,3,1,4\n",
             "b".repeat(40)
         );
         let rows = sweep_rows(&vsdx).unwrap();
         assert_eq!(rows[0].themes, 3);
+        assert_eq!(rows[0].page_shapes, 4);
+        // A sweep that does not write the column leaves it zero (and
+        // its files are never eligible).
+        let old = format!("blob_id,outcome,shapes\n{},opened,5\n", "c".repeat(40));
+        assert_eq!(sweep_rows(&old).unwrap()[0].page_shapes, 0);
         assert!(sweep_rows("x,y\n1,2\n").is_err());
     }
 
@@ -3599,6 +3637,7 @@ mod tests {
             .map(|r| SweepFacts {
                 blob_id: r.state.blob_id.clone(),
                 outcome: "opened".to_owned(),
+                page_shapes: 1,
                 ..SweepFacts::default()
             })
             .collect();
@@ -3615,6 +3654,104 @@ mod tests {
         }
         // the export set keeps the whole gate set
         assert!(selection.export.len() >= selection.gate.len());
+    }
+
+    /// One hand-built index row with its sweep row (P8-21 goal 4).
+    fn indexed(
+        blob: char,
+        ext: &str,
+        version: &str,
+        page_shapes: usize,
+        masters: usize,
+        size: u64,
+    ) -> (IndexRow, SweepFacts) {
+        let row = IndexRow {
+            state: StateRow {
+                blob_id: blob.to_string().repeat(40),
+                tier: "a".to_owned(),
+                license: "mit".to_owned(),
+                repo: format!("owner-{blob}/repo"),
+                commit: "c".to_owned(),
+                path: format!("p/{blob}.{ext}"),
+                ext: ext.to_owned(),
+                sha256: "s".to_owned(),
+                size,
+                status: "kept".to_owned(),
+                note: String::new(),
+            },
+            facts: {
+                let mut facts = facts("ole-drawing");
+                facts.version = version.to_owned();
+                facts
+            },
+        };
+        let sweep = SweepFacts {
+            blob_id: row.state.blob_id.clone(),
+            outcome: "opened".to_owned(),
+            pages: 1,
+            page_shapes,
+            masters,
+            ..SweepFacts::default()
+        };
+        (row, sweep)
+    }
+
+    #[test]
+    fn an_empty_drawing_is_never_eligible() {
+        // The drawing holds masters only: no page holds a shape that
+        // page references, so nothing it draws can be checked.
+        let (row, sweep) = indexed('a', "vsd", "6", 0, 2, 1000);
+        let pool = candidates(&[row], &[sweep]);
+        assert_eq!(pool.len(), 1, "the file itself is a candidate");
+        assert!(!eligible(&pool[0]), "but not an eligible one");
+        let selection = select(&pool);
+        assert!(selection.gate.is_empty());
+        assert!(selection.export.is_empty());
+    }
+
+    #[test]
+    fn an_empty_drawing_frees_its_slot_to_the_same_bucket() {
+        // The smallest version 6 drawing is empty: the bucket must
+        // skip it and fill its slot from its own pool.
+        let (a, sa) = indexed('a', "vsd", "6", 0, 0, 10);
+        let (b, sb) = indexed('b', "vsd", "6", 2, 0, 20);
+        let (c, sc) = indexed('c', "vsd", "6", 4, 0, 30);
+        let pool = candidates(&[a, b, c], &[sa, sb, sc]);
+        let selection = select(&pool);
+        let taken: Vec<String> = selection
+            .gate
+            .iter()
+            .filter(|c| c.reason == "version 6 .vsd")
+            .map(|c| c.blob_id.clone())
+            .collect();
+        assert_eq!(taken, ["b".repeat(40), "c".repeat(40)]);
+    }
+
+    #[test]
+    fn a_stencil_stays_eligible_by_its_masters() {
+        let (row, sweep) = indexed('s', "vss", "6", 0, 3, 1000);
+        let pool = candidates(&[row], &[sweep]);
+        assert!(eligible(&pool[0]), "a stencil draws through its masters");
+        let (row, sweep) = indexed('t', "vstx", "", 0, 0, 1000);
+        let pool = candidates(&[row], &[sweep]);
+        assert!(
+            !eligible(&pool[0]),
+            "a template without masters holds nothing"
+        );
+    }
+
+    #[test]
+    fn the_eligibility_reads_the_page_trees_not_the_shape_list() {
+        // The sweep's `shapes` counts the arena (orphans included);
+        // the rule reads `page_shapes` (P8-21 goal 4).
+        let mut empty = cand('e', "one/r", "vsd", "6");
+        empty.shapes = 7;
+        empty.page_shapes = 0;
+        assert!(!eligible(&empty));
+        let mut drawn = cand('d', "one/r", "vsd", "6");
+        drawn.shapes = 7;
+        drawn.page_shapes = 7;
+        assert!(eligible(&drawn));
     }
 
     #[test]
@@ -3716,7 +3853,7 @@ mod tests {
         )
         .unwrap();
         let sweep = format!(
-            "blob_id,outcome,pages,shapes\n{},opened,1,5\n",
+            "blob_id,outcome,pages,shapes,page_shapes\n{},opened,1,5,1\n",
             "a".repeat(40)
         );
         std::fs::write(out.join(SWEEP_VSD_CSV), sweep).unwrap();
