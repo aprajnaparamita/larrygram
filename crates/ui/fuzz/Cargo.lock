@@ -870,6 +870,7 @@ dependencies = [
 name = "larrygram-ui-fuzz"
 version = "0.0.0"
 dependencies = [
+ "egui",
  "larrygram-commands",
  "larrygram-ui",
  "larrygram-ui-spec",
