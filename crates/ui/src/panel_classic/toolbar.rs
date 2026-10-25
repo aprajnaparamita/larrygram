@@ -466,8 +466,9 @@ fn combo_width(id: &str, m: &ClassicMetrics) -> f32 {
 /// Opens or closes the popup of a toolbar item.
 fn toggle_popup(state: &mut PanelClassic, item: &Item, rect: Rect) {
     if state.open_popup.as_deref() == Some(item.id.as_str()) {
-        state.open_popup = None;
+        state.close_popup();
     } else {
+        state.close_popup();
         state.open_popup = Some(item.id.clone());
         state.popup_rect = rect;
     }
@@ -485,13 +486,13 @@ fn draw_popup(
         return;
     };
     if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-        state.open_popup = None;
+        state.close_popup();
         return;
     }
     let mut clicked: Option<(String, Activation)> = None;
     if open == TOOLBAR_LIST {
         let rows = toolbar_list_rows(input, state);
-        clicked = draw_popup_level(ui, &rows, state.popup_rect.left_bottom(), 0);
+        clicked = draw_popup_levels(ui, &rows, state.popup_rect.left_bottom(), state);
     } else {
         let items = input
             .layout
@@ -507,7 +508,7 @@ fn draw_popup(
             });
         if let Some(item) = items {
             let rows = rows::rows(&item.items, input, state, Source::Ui, false, 0);
-            clicked = draw_popup_level(ui, &rows, state.popup_rect.left_bottom(), 0);
+            clicked = draw_popup_levels(ui, &rows, state.popup_rect.left_bottom(), state);
             // `split_recent`: the pick becomes the main button.
             if let Some((row_id, _)) = &clicked
                 && item.kind == ItemKind::SplitRecent
@@ -515,14 +516,14 @@ fn draw_popup(
                 state.split_recent.insert(item.id.clone(), row_id.clone());
             }
         } else {
-            state.open_popup = None;
+            state.close_popup();
         }
     }
     if let Some((_, activation)) = clicked {
         match activation {
             Activation::Intent(intent) => {
                 intents.push(intent);
-                state.open_popup = None;
+                state.close_popup();
             }
             Activation::ToolbarToggle { toolbar, intent } => {
                 if let Some(intent) = intent {
@@ -530,7 +531,7 @@ fn draw_popup(
                 }
                 let visible = state.toolbar_visible_in(input.layout, input.mode, &toolbar);
                 state.set_toolbar_visible_in(input.mode, &toolbar, !visible);
-                state.open_popup = None;
+                state.close_popup();
             }
             _ => {}
         }
@@ -540,7 +541,7 @@ fn draw_popup(
         && !state.popup_hit_rect().contains(pointer)
         && !state.popup_rect.contains(pointer)
     {
-        state.open_popup = None;
+        state.close_popup();
     }
 }
 
@@ -574,52 +575,80 @@ fn toolbar_list_rows(input: &PanelInput<'_>, state: &PanelClassic) -> Vec<Row> {
         .collect()
 }
 
-/// One popup level and its hovered submenus; returns the id and the
-/// activation of the row the user clicked (submenus open on hover).
-fn draw_popup_level(
+/// The open popup's levels and their chain state; returns the id and
+/// the activation of the row the user clicked.
+///
+/// The chain is state (`PanelClassic::popup_chain`), so a submenu
+/// stays open while the pointer moves into it — the `context_chain`
+/// rule of the context menus (P7-12 major 4; the old stateless hover
+/// closed a child level the moment the pointer left the parent row).
+fn draw_popup_levels(
     ui: &mut Ui,
     rows: &[Row],
     pos: Pos2,
-    depth: u32,
+    state: &mut PanelClassic,
 ) -> Option<(String, Activation)> {
-    if depth >= MAX_DEPTH {
-        return None;
+    let mut levels = vec![rows.to_vec()];
+    for link in state.popup_chain.iter().copied().take(MAX_DEPTH as usize) {
+        let Some(row) = levels
+            .last()
+            .and_then(|level| level.get(link))
+            .filter(|row| row.has_children())
+        else {
+            break;
+        };
+        levels.push(row.children.clone());
     }
-    let width = menu::menu_width(ui, rows);
-    let mut outcome = MenuOutcome::default();
-    egui::Area::new(Id::unique((
-        "panel_classic_popup",
-        depth,
-        pos.x.to_bits(),
-        pos.y.to_bits(),
-    )))
-    .order(egui::Order::Foreground)
-    .fixed_pos(pos)
-    .show(ui.ctx(), |ui| {
-        egui::Frame::popup(ui.style()).show(ui, |ui| {
-            outcome = menu::draw_menu(ui, rows, width, None, false);
-        });
-    });
-    let mut activated = None;
-    if let Some(index) = outcome.hovered
-        && let Some(row) = rows.get(index)
-        && row.has_children()
-        && let Some(rect) = outcome.rects.get(index)
-    {
-        activated = draw_popup_level(
-            ui,
-            &row.children,
-            Pos2::new(rect.right(), rect.top()),
-            depth + 1,
-        );
+    let mut pos = pos;
+    let mut activated: Option<(usize, usize)> = None;
+    let mut open_child: Option<(usize, usize)> = None;
+    let mut hover: Option<(usize, usize)> = None;
+    for (level, level_rows) in levels.iter().enumerate() {
+        let width = menu::menu_width(ui, level_rows);
+        let mut outcome = MenuOutcome::default();
+        egui::Area::new(Id::unique(("panel_classic_popup", level)))
+            .order(egui::Order::Foreground)
+            .fixed_pos(pos)
+            .show(ui.ctx(), |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    outcome = menu::draw_menu(ui, level_rows, width, None, false);
+                });
+            });
+        if let Some(index) = outcome.clicked {
+            if level_rows.get(index).is_some_and(Row::has_children) {
+                open_child = Some((level, index));
+            } else {
+                activated = Some((level, index));
+            }
+        }
+        if let Some(index) = outcome.hovered {
+            hover = Some((level, index));
+        }
+        // The next level draws beside the open submenu row.
+        if let Some(link) = state.popup_chain.get(level).copied()
+            && let Some(rect) = outcome.rects.get(link).copied()
+        {
+            pos = rect.right_top();
+        }
     }
-    if let Some(index) = outcome.clicked
-        && let Some(row) = rows.get(index)
-        && !row.has_children()
-    {
-        activated = Some((row.id.clone(), row.activation.clone()));
+    super::update_chain_hover(
+        ui,
+        &levels,
+        hover,
+        &mut state.popup_chain,
+        &mut state.popup_hover,
+    );
+    if let Some((level, index)) = open_child {
+        state.popup_chain.truncate(level);
+        state.popup_chain.push(index);
+        state.popup_hover = None;
     }
-    activated
+    activated.and_then(|(level, index)| {
+        levels
+            .get(level)
+            .and_then(|level| level.get(index))
+            .map(|row| (row.id.clone(), row.activation.clone()))
+    })
 }
 
 /// The items of a menu tree, searched by placement id.
