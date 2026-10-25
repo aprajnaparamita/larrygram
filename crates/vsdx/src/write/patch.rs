@@ -465,16 +465,21 @@ fn patch_cell(node: &mut XmlNode, cell: &Cell) {
 
 /// Syncs the `U` attribute from the cached value and the cell's unit (see
 /// [`value::unit_spelling`]): the code the value's kind needs to read back
-/// (`BOOL`, `STR`) comes first, then the unit code. A unit code the file used
-/// but the model does not spell stays in `Preserved`, so the attribute is
-/// removed only when the model takes it over.
+/// (`BOOL`, `STR`) comes first, then the unit code. A code the file used
+/// but the model does not spell stays in [`Preserved`](larrygram_model::Preserved)
+/// and is never touched (the reader keeps it exactly when the writer would
+/// spell something else over it, task P8-19): the attribute is removed only
+/// when the model takes the spelling over.
 fn sync_unit(node: &mut XmlNode, cell: &Cell) {
+    if preserved_has(&cell.preserved, "U") {
+        return;
+    }
     let current_code = current(node, "U").map(str::to_owned);
     match value::unit_spelling(cell.value.as_ref(), cell.unit, current_code.as_deref()) {
         value::UnitSpelling::Keep => {}
         value::UnitSpelling::Code(code) => sync_string(node, "U", code, ""),
         value::UnitSpelling::Absent => {
-            if current(node, "U").is_some() && !preserved_has(&cell.preserved, "U") {
+            if current(node, "U").is_some() {
                 remove(node, "U");
             }
         }
@@ -775,7 +780,13 @@ pub(crate) fn patch_shapes(
     sync_children(
         wrapper,
         |element| element.name.local == "Shape",
-        |element| current(element, "ID").and_then(|id| id.trim().parse::<i32>().ok()),
+        // An `ID` the element omits is the model's default id of zero (the
+        // reader maps it that way); one that is no signed id claims nothing
+        // (the reader keeps such a `Shape` verbatim, task P8-19).
+        |element| match current(element, "ID") {
+            None => Some(0),
+            Some(id) => id.trim().parse::<i32>().ok(),
+        },
         &keys,
         preserved,
         |element, index| {
@@ -800,18 +811,34 @@ pub(crate) fn patch_shapes(
 // Connects, pages, masters, styles and properties
 // ---------------------------------------------------------------------------
 
-/// The connect key: the record's own attribute tuple.
+/// The `Connect` element's key: the record's own attribute tuple.
+///
+/// An attribute the element omits is the model's default for it (`0`, or
+/// the empty cell name): Visio writes short `Connect` spellings like
+/// `<Connect FromSheet="4" FromCell="BeginX" ToSheet="5"/>`, and a key
+/// that demanded the omitted attributes would make the writer drop and
+/// rebuild every such element (task P8-19 round-trip fault). An attribute
+/// that is present but does not parse gives no key at all: the element is
+/// unmapped and no model record claims it.
 type ConnectKey = (i32, String, i32, i32, String, i32);
 
 /// The key of a `Connect` element.
 fn connect_key(node: &XmlNode) -> Option<ConnectKey> {
-    let number = |local: &str| current(node, local)?.trim().parse::<i32>().ok();
+    let number = |local: &str| -> Option<i32> {
+        match current(node, local) {
+            None => Some(0),
+            Some(value) => value.trim().parse::<i32>().ok(),
+        }
+    };
+    let text = |local: &str| -> Option<String> {
+        Some(current(node, local).unwrap_or_default().to_owned())
+    };
     Some((
         number("FromSheet")?,
-        current(node, "FromCell")?.to_owned(),
+        text("FromCell")?,
         number("FromPart")?,
         number("ToSheet")?,
-        current(node, "ToCell")?.to_owned(),
+        text("ToCell")?,
         number("ToPart")?,
     ))
 }

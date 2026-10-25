@@ -2,8 +2,12 @@
 
 use std::io::{Cursor, Write};
 
+use flate2::Compression;
+use flate2::write::DeflateEncoder;
 use zip::CompressionMethod;
 use zip::write::{SimpleFileOptions, ZipWriter};
+
+use super::Limits;
 
 use super::read::{invalid, normalize_name, rels_source};
 use super::xml::{escape_attribute, write_qualified_name, write_xml};
@@ -50,13 +54,18 @@ pub fn write_package(package: &Package) -> Result<Vec<u8>, Error> {
     Ok(cursor.into_inner())
 }
 
-/// Writes one zip entry with deflate compression.
+/// Writes one zip entry with deflate compression, unless deflating would
+/// push the entry past the reader's own compression-ratio cap
+/// ([`Limits::max_compression_ratio`], ADR 0017): a written package must
+/// always read back (task P8-19, two corpus files whose huge, highly
+/// compressible parts the writer deflated past the cap and its own reader
+/// then refused).
 fn write_entry(
     writer: &mut ZipWriter<Cursor<Vec<u8>>>,
     name: &str,
     data: &[u8],
 ) -> Result<(), Error> {
-    let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+    let options = SimpleFileOptions::default().compression_method(compression_for(data)?);
     writer
         .start_file(name, options)
         .map_err(|_| invalid("zip writer failed"))?;
@@ -64,6 +73,32 @@ fn write_entry(
         .write_all(data)
         .map_err(|_| invalid("zip writer failed"))?;
     Ok(())
+}
+
+/// The compression method for one entry: `Deflated`, except for an entry
+/// whose deflated form the reader's compression-ratio cap refuses (it is
+/// stored). The deflated size is measured with the zip writer's own codec
+/// and level (flate2 raw deflate, `Compression::default()`), so it is the
+/// written size exactly.
+fn compression_for(data: &[u8]) -> Result<CompressionMethod, Error> {
+    let len = u64::try_from(data.len()).unwrap_or(u64::MAX);
+    let ratio = Limits::DEFAULT.max_compression_ratio;
+    let compressed = u64::try_from(deflated_size(data)?).unwrap_or(u64::MAX);
+    if len > compressed.saturating_mul(ratio) {
+        Ok(CompressionMethod::Stored)
+    } else {
+        Ok(CompressionMethod::Deflated)
+    }
+}
+
+/// The size of `data` under the writer's own deflate.
+fn deflated_size(data: &[u8]) -> Result<usize, Error> {
+    let mut encoder = DeflateEncoder::new(Vec::new(), Compression::default());
+    encoder
+        .write_all(data)
+        .map_err(|_| invalid("zip writer failed"))?;
+    let out = encoder.finish().map_err(|_| invalid("zip writer failed"))?;
+    Ok(out.len())
 }
 
 /// The zip entry name for a part, rejecting package-metadata names.
@@ -182,6 +217,27 @@ mod tests {
         assert!(package.parts.is_empty());
         assert!(package.content_types.is_empty());
         assert!(package.relationships.is_empty());
+    }
+
+    #[test]
+    fn a_highly_compressible_entry_is_stored_for_the_reader_caps() {
+        // A part whose deflated form the reader's compression-ratio cap
+        // would refuse is stored instead (task P8-19): a written package
+        // always reads back, whatever it contains.
+        let repetitive = vec![b'x'; 400_000];
+        assert_eq!(
+            compression_for(&repetitive).expect("method"),
+            CompressionMethod::Stored
+        );
+        let varied = b"<A>0123456789</A>".repeat(64);
+        assert_eq!(
+            compression_for(&varied).expect("method"),
+            CompressionMethod::Deflated
+        );
+        assert_eq!(
+            compression_for(b"").expect("method"),
+            CompressionMethod::Deflated
+        );
     }
 
     #[test]
