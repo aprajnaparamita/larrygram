@@ -1,0 +1,25 @@
+[package]
+name = "larrygram-vsd-binary-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.larrygram-vsd-binary]
+path = ".."
+
+# Prevent this from interfering with workspaces (the cargo-fuzz way).
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "import"
+path = "fuzz_targets/import.rs"
+test = false
+doc = false
+bench = false

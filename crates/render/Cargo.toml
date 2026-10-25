@@ -30,6 +30,10 @@ proptest = "1"
 # (tests/raster.rs, task P4-05). Already in the tree through
 # tiny-skia's `png-format` feature; no new crate in the supply chain.
 png = "0.18"
+# Binary `.vsd` import for the end-to-end corpus tests
+# (tests/corpus_vsd.rs, task P8-10): the corpus drawings import, render
+# and round-trip through the `.vsdx` writer.
+larrygram-vsd-binary = { path = "../vsd-binary" }
 
 [lints]
 workspace = true

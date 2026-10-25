@@ -1,0 +1,14 @@
+# cargo-fuzz output; never committed. The curated seed corpus IS committed
+# (ADR 0017 section 4): the `.vsd` and `.bin` files below are byte-identical
+# copies of `corpus/fixtures/` and hand-written junk (see
+# `corpus/PROVENANCE.md`). Fuzzer-generated corpus entries (sha1 names) and
+# everything else `cargo fuzz` writes stay untracked. One directory per fuzz
+# target (`corpus/import/`, task P8-10).
+!corpus/
+corpus/**
+!corpus/import/
+!corpus/import/*.vsd
+!corpus/import/*.bin
+artifacts
+coverage
+target

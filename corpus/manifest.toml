@@ -148,3 +148,87 @@ source = "libvisio"
 path = "src/test/data/testfile6.vsdx"
 sha256 = "102269177b3ca1d287959c5a857279bc3e84fae628f1cc8e023193719790b5b3"
 size = 41365
+
+[[file]]
+name = "vsd/Visio11PlanWithDimensions.vsd"
+source = "libvisio"
+path = "src/test/data/Visio11PlanWithDimensions.vsd"
+sha256 = "8fbd687000f3b7d3d3d409ff2e1a4a4ab95f5c38f5c6ca734ac3799a2b504a87"
+size = 224768
+
+[[file]]
+name = "vsd/Visio11TextFieldsWithUnits.vsd"
+source = "libvisio"
+path = "src/test/data/Visio11TextFieldsWithUnits.vsd"
+sha256 = "2f1692250ac982228e9d40af5da38705f2834e37af9a3f84e09cf794d0d3aaa1"
+size = 37888
+
+[[file]]
+name = "vsd/Visio11TextFieldsWithAngle.vsd"
+source = "libvisio"
+path = "src/test/data/Visio11TextFieldsWithAngle.vsd"
+sha256 = "05cf1d24a3a02b12fb26385911bc6ffa14a2709a9e7e958edb6042de9fc619c7"
+size = 32256
+
+[[file]]
+name = "vsd/Visio11TextFieldsWithCurrency.vsd"
+source = "libvisio"
+path = "src/test/data/Visio11TextFieldsWithCurrency.vsd"
+sha256 = "ec64d8d15f4f157c3830a30e4fe4e4575cf3a2c384d5b7706d965e9512b6762d"
+size = 36352
+
+[[file]]
+name = "vsd/Visio11FormatLine.vsd"
+source = "libvisio"
+path = "src/test/data/Visio11FormatLine.vsd"
+sha256 = "55ca3aae6fe1ac96150cea0783aeac8059eee2575c0c46760fd9f7828fa683bd"
+size = 73728
+
+[[file]]
+name = "vsd/tdf76829-datetime-format.vsd"
+source = "libvisio"
+path = "src/test/data/tdf76829-datetime-format.vsd"
+sha256 = "eaf9d638674320290402301e9a560ac9b1b2ee5ec2294cb7aac5ad0f511a9c3e"
+size = 165888
+
+[[file]]
+name = "vsd/bitmaps.vsd"
+source = "libvisio"
+path = "src/test/data/bitmaps.vsd"
+sha256 = "3cf4cf41f9639d4229415cb10b797f64acc496463e8df2b7d5ee75b49b512ce3"
+size = 206336
+
+[[file]]
+name = "vsd/bitmaps2.vsd"
+source = "libvisio"
+path = "src/test/data/bitmaps2.vsd"
+sha256 = "9ad0d161043f2ddc65848a08ccd76bea9cc317ab542834f9a46910edafe8cd2d"
+size = 87040
+
+[[file]]
+name = "vsd/Visio6PlanWithDimensions.vsd"
+source = "libvisio"
+path = "src/test/data/Visio6PlanWithDimensions.vsd"
+sha256 = "e2369c41a0d7b25c4e3f7167033684fc436b3662ba78d08c1e3f8fe97a23f640"
+size = 91136
+
+[[file]]
+name = "vsd/Visio6TextFieldsWithUnits.vsd"
+source = "libvisio"
+path = "src/test/data/Visio6TextFieldsWithUnits.vsd"
+sha256 = "0245e65872e1af88e2f2ebfcb4b3f661d68b9b0cf05bd4207625a61db8f4bc88"
+size = 30720
+
+[[file]]
+name = "vsd/Visio5PlanWithDimensions.vsd"
+source = "libvisio"
+path = "src/test/data/Visio5PlanWithDimensions.vsd"
+sha256 = "7ca19851d2aab6b30b1e6a11f1d95f4e05c00d1557e4594d63a9a9cf22126b02"
+size = 73216
+
+[[file]]
+name = "vsd/Visio5TextFieldsWithUnits.vsd"
+source = "libvisio"
+path = "src/test/data/Visio5TextFieldsWithUnits.vsd"
+sha256 = "26eaa8b44299333820a9ab980c37084251eb8a931ba98d89d68262e48288a29e"
+size = 27136
