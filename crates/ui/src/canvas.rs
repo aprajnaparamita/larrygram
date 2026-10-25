@@ -48,8 +48,9 @@ use crate::{Intent, UiError, theme};
 /// Points per inch at zoom 1.0 (ADR 0025: 96 pixels per inch, 1:1).
 pub const POINTS_PER_INCH: f64 = 96.0;
 
-/// The width of the ruler bands, in points.
-pub const RULER_WIDTH: f32 = 18.0;
+/// The width of the ruler bands with no theme applied: the
+/// `ruler.size` default (ADR 0063), in points.
+pub const RULER_WIDTH: f32 = 16.0;
 
 /// The grid spacing and the ruler tick spacing, in inches (our own
 /// choice: the ruler ticks sit on the grid).
@@ -375,7 +376,7 @@ pub fn show_with_overlay(
 ) -> Result<CanvasOutput, UiError> {
     let mut output = CanvasOutput::default();
     let (rect, response) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
-    let viewport = viewport_rect(rect, session.view.show_rulers);
+    let viewport = viewport_rect(rect, session.view.show_rulers, ruler_width(ui));
     output.focus_id = Some(response.id);
 
     // Pan: middle-drag or space-drag.
@@ -481,7 +482,7 @@ pub fn show_text_editor(
     let Some(page) = session.active_page else {
         return Ok(EditorAction::Pending);
     };
-    let viewport = viewport_rect(rect, session.view.show_rulers);
+    let viewport = viewport_rect(rect, session.view.show_rulers, ruler_width(ui));
     let scene = build_scene(&session.document, page, &BuildOptions::new()).map_err(|error| {
         UiError::Io {
             message: error.to_string(),
@@ -503,8 +504,13 @@ pub fn show_text_editor(
 /// the shell feeds a Shapes-window drag to the stencil tool, which needs
 /// the same mapping the canvas events use). `None` when the point is
 /// outside the canvas viewport or a view value is unusable.
-pub fn page_position(rect: Rect, session: &DocumentSession, screen: Pos2) -> Option<Point> {
-    let viewport = viewport_rect(rect, session.view.show_rulers);
+pub fn page_position(
+    rect: Rect,
+    session: &DocumentSession,
+    screen: Pos2,
+    ruler: f32,
+) -> Option<Point> {
+    let viewport = viewport_rect(rect, session.view.show_rulers, ruler);
     if !viewport.contains(screen) {
         return None;
     }
@@ -697,7 +703,8 @@ pub fn show_rulers(
     if !session.view.show_rulers {
         return Ok(());
     }
-    let viewport = viewport_rect(rect, true);
+    let ruler = ruler_width(ui);
+    let viewport = viewport_rect(rect, true, ruler);
     let colors = CanvasColors::active(ui.ctx());
     let painter = ui.painter_at(rect);
     let zoom = safe_zoom(session.view.zoom);
@@ -710,11 +717,7 @@ pub fn show_rulers(
     painter.rect_filled(left, 0.0, colors.ruler_background);
 
     for (x, major) in tick_positions(viewport.min.x, viewport.width(), pan.x, k) {
-        let length = if major {
-            RULER_WIDTH * 0.6
-        } else {
-            RULER_WIDTH * 0.25
-        };
+        let length = if major { ruler * 0.6 } else { ruler * 0.25 };
         painter.line_segment(
             [
                 egui::pos2(x, viewport.min.y),
@@ -725,7 +728,7 @@ pub fn show_rulers(
         if major {
             let inches = (f64::from(x) - f64::from(viewport.min.x)) / k - pan.x;
             painter.text(
-                egui::pos2(x + 2.0, viewport.min.y - RULER_WIDTH),
+                egui::pos2(x + 2.0, viewport.min.y - ruler),
                 Align2::LEFT_TOP,
                 format_number(converted(inches, units)),
                 FontId::proportional(9.0),
@@ -734,11 +737,7 @@ pub fn show_rulers(
         }
     }
     for (y, major) in tick_positions(viewport.min.y, viewport.height(), pan.y, k) {
-        let length = if major {
-            RULER_WIDTH * 0.6
-        } else {
-            RULER_WIDTH * 0.25
-        };
+        let length = if major { ruler * 0.6 } else { ruler * 0.25 };
         painter.line_segment(
             [
                 egui::pos2(viewport.min.x, y),
@@ -959,13 +958,18 @@ fn positive(value: Option<f64>, fallback: f64) -> f64 {
 }
 
 /// The canvas viewport inside the widget rect: inset by the ruler bands
-/// when the rulers show.
-fn viewport_rect(rect: Rect, show_rulers: bool) -> Rect {
+/// when the rulers show (`ruler` is the `ruler.size` theme metric).
+fn viewport_rect(rect: Rect, show_rulers: bool, ruler: f32) -> Rect {
     if show_rulers {
-        Rect::from_min_max(rect.min + egui::vec2(RULER_WIDTH, RULER_WIDTH), rect.max)
+        Rect::from_min_max(rect.min + egui::vec2(ruler, ruler), rect.max)
     } else {
         rect
     }
+}
+
+/// The ruler band width of this frame (`ruler.size`, ADR 0063).
+pub(crate) fn ruler_width(ui: &Ui) -> f32 {
+    crate::panel_classic::metrics::ClassicMetrics::for_ctx(ui.ctx()).ruler_size
 }
 
 /// Points per one page inch at `zoom` (ADR 0025: 96 at zoom 1).
@@ -1428,11 +1432,12 @@ mod tests {
             source: egui::MouseWheelSource::Unknown,
             modifiers: egui::Modifiers::CTRL,
         });
+        let ruler = crate::panel_classic::metrics::ClassicMetrics::default().ruler_size;
         let (before_x, before_y) = {
             let k = points_per_inch(1.0);
             (
-                (f64::from(anchor.x) - f64::from(RULER_WIDTH)) / k - session.view.pan.x,
-                (f64::from(anchor.y) - f64::from(RULER_WIDTH)) / k - session.view.pan.y,
+                (f64::from(anchor.x) - f64::from(ruler)) / k - session.view.pan.x,
+                (f64::from(anchor.y) - f64::from(ruler)) / k - session.view.pan.y,
             )
         };
         frame(&ctx, input, |ui| {
@@ -1441,8 +1446,8 @@ mod tests {
         assert!(session.view.zoom > 1.0, "the wheel zoomed in");
         // The page point under the pointer is still under the pointer.
         let k = points_per_inch(session.view.zoom);
-        let after_x = (f64::from(anchor.x) - f64::from(RULER_WIDTH)) / k - session.view.pan.x;
-        let after_y = (f64::from(anchor.y) - f64::from(RULER_WIDTH)) / k - session.view.pan.y;
+        let after_x = (f64::from(anchor.x) - f64::from(ruler)) / k - session.view.pan.x;
+        let after_y = (f64::from(anchor.y) - f64::from(ruler)) / k - session.view.pan.y;
         assert!((after_x - before_x).abs() < 1.0e-9);
         assert!((after_y - before_y).abs() < 1.0e-9);
     }
@@ -1576,7 +1581,8 @@ mod tests {
         assert_eq!(
             viewport_rect(
                 Rect::from_min_size(Pos2::ZERO, egui::vec2(10.0, 10.0)),
-                false
+                false,
+                RULER_WIDTH
             ),
             Rect::from_min_size(Pos2::ZERO, egui::vec2(10.0, 10.0))
         );

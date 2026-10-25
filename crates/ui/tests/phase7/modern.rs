@@ -603,6 +603,16 @@ fn check_popup(rig: &mut ModernRig, entries: &[Entry], opener: &Named) {
                     "the row {:?} dispatches its command",
                     entry.label
                 );
+                // The dispatch argument (P7-12 major 5): an option
+                // row carries its `value`, as the Panel Classic rows
+                // do.
+                let expected = expect::args_of(&entry.expect);
+                assert_eq!(
+                    intents[0].invocation.args.text("value"),
+                    expected.text("value"),
+                    "the row {:?} dispatches its value argument",
+                    entry.label
+                );
                 assert_eq!(ints_source(&intents[0]), Source::CommandBar);
             }
             Expect::Submenu(children) => {
@@ -709,19 +719,49 @@ fn the_quick_access_toolbar_dispatches_and_opens() {
     let produced = std::mem::take(&mut *intents.borrow_mut());
     assert_eq!(produced.len(), 1, "Save dispatches once");
     assert_eq!(produced[0].command.as_str(), "file.save");
-    // The customise dropdown is a Phase 7 stub (`view.qat.customize`),
-    // so with the real registry it renders disabled and its
-    // display-only menu does not open: the widget tests drive it with
-    // a test resolver (P7-07), the registry path is this one. Recorded
-    // as a finding in the P7-10 Result.
+    // The customise dropdown is display-only (`view.qat.customize` is
+    // a Phase 7 stub): the button opens its menu whatever the command
+    // says (P7-14's ruling on P7-10 finding 2 — opening a menu is not
+    // running a command), the menu lists the current items checked,
+    // and nothing dispatches.
+    std::mem::take(&mut *intents.borrow_mut());
     let root = harness.root();
     let node = root
         .query_all_by_role_and_label(Role::Button, "Customize Quick Access Toolbar")
         .next()
         .expect("the customise button");
     assert!(
-        node.accesskit_node().data().is_disabled(),
-        "the customise button renders disabled (its command is a stub)"
+        !node.accesskit_node().data().is_disabled(),
+        "the customise button opens its menu"
+    );
+    node.click();
+    harness.run();
+    harness.run_steps(2);
+    {
+        let root = harness.root();
+        let names: Vec<String> = root
+            .children_recursive()
+            .map(|node| {
+                let data = node.accesskit_node().data();
+                let label = data.label().unwrap_or_default().to_owned();
+                if label.is_empty() {
+                    data.value().unwrap_or_default().to_owned()
+                } else {
+                    label
+                }
+            })
+            .collect();
+        for entry in &qat {
+            let name = entry.label.clone().unwrap_or_default();
+            assert!(
+                names.contains(&name),
+                "the menu lists {name:?} in {names:?}"
+            );
+        }
+    }
+    assert!(
+        std::mem::take(&mut *intents.borrow_mut()).is_empty(),
+        "opening the display-only menu dispatches nothing"
     );
 }
 

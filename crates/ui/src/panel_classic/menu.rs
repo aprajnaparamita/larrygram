@@ -1,32 +1,16 @@
 //! Menu painting for the Panel Classic widgets (`docs/ui/panel-classic.md`
-//! "Menus"): the 24 px icon gutter, access-key underlines,
+//! "Menus"): the icon gutter, access-key underlines,
 //! right-aligned shortcuts, separators and the submenu arrow.
 //!
-//! Colours come from the egui defaults until task P7-05 merges the
-//! theme tokens; the metrics below are the layout's numbers.
+//! Colours come from the theme by token name (ADR 0063,
+//! [`crate::theme::color_at`]) and the sizes from
+//! [`ClassicMetrics`]; with no theme applied the defaults draw.
 
 use egui::text::LayoutJob;
 use egui::{Color32, FontId, Pos2, Rect, Sense, Stroke, Ui, Vec2, WidgetInfo};
 
+use crate::panel_classic::metrics::ClassicMetrics;
 use crate::panel_classic::rows::{Activation, Row};
-
-/// Height of one menu item, in logical pixels (`docs/ui/panel-classic.md`).
-pub(crate) const ROW_HEIGHT: f32 = 23.0;
-
-/// Width of the icon gutter.
-pub(crate) const GUTTER: f32 = 24.0;
-
-/// Menu icon size.
-pub(crate) const ICON: f32 = 16.0;
-
-/// Width reserved for the submenu arrow.
-pub(crate) const ARROW_WIDTH: f32 = 16.0;
-
-/// Side padding inside a menu.
-const PAD: f32 = 6.0;
-
-/// Height of the separator line block.
-const SEPARATOR: f32 = 5.0;
 
 /// What one drawn menu level reported.
 #[derive(Debug, Default)]
@@ -39,8 +23,14 @@ pub(crate) struct MenuOutcome {
     pub rects: Vec<Rect>,
 }
 
+/// The widget sizes of this frame (the theme, or the defaults).
+fn metrics(ui: &Ui) -> ClassicMetrics {
+    ClassicMetrics::for_ctx(ui.ctx())
+}
+
 /// The width a menu of `rows` needs, in logical pixels.
 pub(crate) fn menu_width(ui: &Ui, rows: &[Row]) -> f32 {
+    let m = metrics(ui);
     let font = text_font(ui);
     let mut label_width = 0.0f32;
     let mut shortcut_width = 0.0f32;
@@ -56,7 +46,14 @@ pub(crate) fn menu_width(ui: &Ui, rows: &[Row]) -> f32 {
             shortcut_width = shortcut_width.max(text.size().x);
         }
     }
-    (GUTTER + PAD + label_width + 2.0 * PAD + shortcut_width + ARROW_WIDTH + PAD).max(120.0)
+    (m.menu_gutter_width
+        + m.menu_padding_x
+        + label_width
+        + m.menu_shortcut_gap
+        + shortcut_width
+        + m.menu_submenu_arrow_width
+        + m.menu_padding_x)
+        .max(120.0)
 }
 
 /// Draws one menu level: separator blocks and one row per [`Row`].
@@ -70,20 +67,23 @@ pub(crate) fn draw_menu(
     highlight: Option<usize>,
     underlines: bool,
 ) -> MenuOutcome {
+    let m = metrics(ui);
     let mut outcome = MenuOutcome::default();
     for (index, row) in rows.iter().enumerate() {
         if row.separator && index > 0 {
-            let (rect, _) = ui.allocate_exact_size(Vec2::new(width, SEPARATOR), Sense::hover());
+            let (rect, _) =
+                ui.allocate_exact_size(Vec2::new(width, m.menu_separator_height), Sense::hover());
             let y = rect.center().y;
+            let color = crate::theme::color_at(ui.ctx(), "menu.separator");
             ui.painter().line_segment(
                 [
-                    Pos2::new(rect.left() + GUTTER, y),
-                    Pos2::new(rect.right() - PAD, y),
+                    Pos2::new(rect.left() + m.menu_gutter_width, y),
+                    Pos2::new(rect.right() - m.menu_padding_x, y),
                 ],
-                Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color),
+                Stroke::new(1.0, color),
             );
         }
-        let response = draw_row(ui, row, width, highlight == Some(index), underlines);
+        let response = draw_row(ui, row, width, highlight == Some(index), underlines, &m);
         outcome.rects.push(response.rect);
         if response.clicked() {
             outcome.clicked = Some(index);
@@ -103,30 +103,40 @@ fn draw_row(
     width: f32,
     highlighted: bool,
     underlines: bool,
+    m: &ClassicMetrics,
 ) -> egui::Response {
     let enabled = !matches!(row.activation, Activation::Disabled { .. });
-    let (rect, mut response) = ui.allocate_exact_size(Vec2::new(width, ROW_HEIGHT), Sense::click());
+    let (rect, mut response) =
+        ui.allocate_exact_size(Vec2::new(width, m.menu_row_height), Sense::click());
+    // The gutter column: the icon shelf at the left of the menu.
+    let gutter = Rect::from_min_size(
+        Pos2::new(rect.left(), rect.top()),
+        Vec2::new(m.menu_gutter_width, m.menu_row_height),
+    );
+    ui.painter()
+        .rect_filled(gutter, 0.0, crate::theme::color_at(ui.ctx(), "menu.gutter"));
     if highlighted || response.hovered() {
-        let visuals = ui.visuals();
-        ui.painter()
-            .rect_filled(rect, 0.0, visuals.selection.bg_fill);
+        ui.painter().rect_filled(
+            rect,
+            0.0,
+            crate::theme::color_at(ui.ctx(), "menu.highlight.fill"),
+        );
         ui.painter().rect_stroke(
             rect,
             0.0,
-            Stroke::new(1.0, visuals.selection.stroke.color),
+            Stroke::new(
+                1.0,
+                crate::theme::color_at(ui.ctx(), "menu.highlight.border"),
+            ),
             egui::StrokeKind::Inside,
         );
     }
 
     // The gutter: an icon, a check mark for a checked item with no
     // icon, or a pressed frame around a checked icon.
-    let gutter = Rect::from_min_size(
-        Pos2::new(rect.left(), rect.top()),
-        Vec2::new(GUTTER, ROW_HEIGHT),
-    );
     match (&row.icon, row.check) {
         (Some(icon), checked) => {
-            let icon_rect = Rect::from_center_size(gutter.center(), Vec2::splat(ICON));
+            let icon_rect = Rect::from_center_size(gutter.center(), Vec2::splat(m.menu_icon));
             if checked == Some(true) {
                 ui.painter().rect_stroke(
                     icon_rect.expand(2.0),
@@ -135,27 +145,31 @@ fn draw_row(
                     egui::StrokeKind::Inside,
                 );
             }
-            paint_icon(ui, icon_rect, icon, enabled);
+            paint_icon(ui, icon_rect, icon, enabled, m.menu_icon);
         }
         (None, Some(true)) => {
-            paint_check(ui, gutter.center(), ui.visuals().strong_text_color());
+            paint_check(
+                ui,
+                gutter.center(),
+                crate::theme::color_at(ui.ctx(), "chrome.text"),
+            );
         }
         (None, _) => {}
     }
 
     // The label, with the access key underlined when the menu bar
     // shows its access keys.
-    let font = text_font(ui);
-    let job = label_job(&row.label, row.access, underlines, &font);
-    let galley = ui.ctx().fonts_mut(|f| f.layout_job(job));
     let text_color = if enabled {
-        ui.visuals().text_color()
+        crate::theme::color_at(ui.ctx(), "chrome.text")
     } else {
-        ui.visuals().widgets.noninteractive.fg_stroke.color
+        crate::theme::color_at(ui.ctx(), "chrome.text_disabled")
     };
+    let font = text_font(ui);
+    let job = label_job(&row.label, row.access, underlines, &font, text_color);
+    let galley = ui.ctx().fonts_mut(|f| f.layout_job(job));
     ui.painter().galley(
         Pos2::new(
-            rect.left() + GUTTER + PAD * 0.5,
+            rect.left() + m.menu_gutter_width + m.menu_padding_x * 0.5,
             rect.center().y - galley.size().y * 0.5,
         ),
         galley,
@@ -169,7 +183,7 @@ fn draw_row(
             .fonts_mut(|f| f.layout_no_wrap(shortcut.clone(), font.clone(), text_color));
         ui.painter().galley(
             Pos2::new(
-                rect.right() - PAD - ARROW_WIDTH - galley.size().x,
+                rect.right() - m.menu_padding_x - m.menu_submenu_arrow_width - galley.size().x,
                 rect.center().y - galley.size().y * 0.5,
             ),
             galley,
@@ -181,7 +195,10 @@ fn draw_row(
         paint_arrow_right(
             ui.painter(),
             Rect::from_center_size(
-                Pos2::new(rect.right() - PAD - ARROW_WIDTH * 0.5, rect.center().y),
+                Pos2::new(
+                    rect.right() - m.menu_padding_x - m.menu_submenu_arrow_width * 0.5,
+                    rect.center().y,
+                ),
                 Vec2::splat(8.0),
             ),
             text_color,
@@ -197,8 +214,8 @@ fn draw_row(
     response
 }
 
-/// The menu-bar title ("File"): 24 px high, with the open and hover
-/// look (`menu.bar.open.fill` in the theme, egui defaults here).
+/// The menu-bar title ("File"): one menu bar high, with the open and
+/// hover look (`menu.bar.open.*` and `button.hover.fill`).
 pub(crate) fn draw_title(
     ui: &mut Ui,
     label: &str,
@@ -206,27 +223,40 @@ pub(crate) fn draw_title(
     open: bool,
     underlines: bool,
 ) -> egui::Response {
+    let m = metrics(ui);
     let font = text_font(ui);
     let galley = ui
         .ctx()
         .fonts_mut(|f| f.layout_no_wrap(label.to_owned(), font.clone(), Color32::WHITE));
-    let size = Vec2::new(galley.size().x + 2.0 * PAD, 24.0);
+    let size = Vec2::new(
+        galley.size().x + 2.0 * m.menu_bar_item_padding_x,
+        m.menu_bar_height,
+    );
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
-    let visuals = ui.visuals();
     if open {
-        ui.painter()
-            .rect_filled(rect, 0.0, visuals.selection.bg_fill);
+        ui.painter().rect_filled(
+            rect,
+            0.0,
+            crate::theme::color_at(ui.ctx(), "menu.bar.open.fill"),
+        );
         ui.painter().rect_stroke(
             rect,
             0.0,
-            Stroke::new(1.0, visuals.selection.stroke.color),
+            Stroke::new(
+                1.0,
+                crate::theme::color_at(ui.ctx(), "menu.bar.open.border"),
+            ),
             egui::StrokeKind::Inside,
         );
     } else if response.hovered() {
-        ui.painter()
-            .rect_filled(rect, 0.0, visuals.widgets.hovered.bg_fill);
+        ui.painter().rect_filled(
+            rect,
+            0.0,
+            crate::theme::color_at(ui.ctx(), "button.hover.fill"),
+        );
     }
-    let job = label_job(label, access, underlines, &font);
+    let text_color = crate::theme::color_at(ui.ctx(), "chrome.text");
+    let job = label_job(label, access, underlines, &font, text_color);
     let galley = ui.ctx().fonts_mut(|f| f.layout_job(job));
     ui.painter().galley(
         Pos2::new(
@@ -234,25 +264,32 @@ pub(crate) fn draw_title(
             rect.center().y - galley.size().y * 0.5,
         ),
         galley,
-        visuals.text_color(),
+        text_color,
     );
     response
         .widget_info(|| WidgetInfo::labeled(egui::accesskit::Role::Button, true, label.to_owned()));
     response
 }
 
-/// A label with the access-key letter underlined (`underlines` on).
+/// A label with the access-key letter underlined (`underlines` on),
+/// painted in `color`.
 ///
 /// The first character equal to the access key (case-insensitive)
 /// gets a 1 px underline; the label is otherwise plain.
-fn label_job(text: &str, access: Option<char>, underlines: bool, font: &FontId) -> LayoutJob {
+fn label_job(
+    text: &str,
+    access: Option<char>,
+    underlines: bool,
+    font: &FontId,
+    color: Color32,
+) -> LayoutJob {
     let plain = egui::TextFormat {
         font_id: font.clone(),
-        color: Color32::WHITE,
+        color,
         ..Default::default()
     };
     let underline = egui::TextFormat {
-        underline: Stroke::new(1.0, Color32::WHITE),
+        underline: Stroke::new(1.0, color),
         ..plain.clone()
     };
     let key = access.map(|access| access.to_ascii_lowercase());
@@ -279,29 +316,24 @@ fn label_job(text: &str, access: Option<char>, underlines: bool, font: &FontId) 
     job
 }
 
-/// The font of the chrome text (egui defaults until P7-05).
+/// The font of the chrome text (the theme's `ui` role through egui).
 fn text_font(ui: &Ui) -> FontId {
     egui::TextStyle::Button.resolve(ui.style())
 }
 
-/// Paints the small icon mark of `key` into `rect` (the placeholder
-/// mark of `crates/ui/src/icons`, ADR 0030).
-fn paint_icon(ui: &mut Ui, rect: Rect, key: &str, enabled: bool) {
-    let cell = Rect::from_min_size(rect.min, Vec2::splat(ICON));
+/// Paints the icon of `key` into `rect` at the row's enabled state
+/// (ADR 0062: a disabled control draws its icon at 40% alpha).
+fn paint_icon(ui: &mut Ui, rect: Rect, key: &str, enabled: bool, icon_size: f32) {
+    let cell = Rect::from_min_size(rect.min, Vec2::splat(icon_size));
     let mut child = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(cell)
             .layout(egui::Layout::left_to_right(egui::Align::Center)),
     );
-    if enabled {
-        if let Some(theme) = crate::theme::current(child.ctx()) {
-            let _ = crate::icons::draw(&mut child, cell, key, ICON, &theme, true);
-        } else {
-            let _ = crate::icons::placeholder(&mut child, key, ICON);
-        }
+    if let Some(theme) = crate::theme::current(child.ctx()) {
+        let _ = crate::icons::draw(&mut child, cell, key, icon_size, &theme, enabled);
     } else {
-        let faded = child.visuals().widgets.noninteractive.fg_stroke.color;
-        child.painter().rect_filled(rect, 0.0, faded);
+        let _ = crate::icons::placeholder(&mut child, key, icon_size);
     }
 }
 

@@ -147,6 +147,10 @@ pub struct Shell {
     focus: ShortcutScope,
     /// The canvas area of the previous frame (focus tracking).
     canvas_rect: Option<egui::Rect>,
+    /// The right-click targets of the last frame and their rects (the
+    /// page-tab strip and the two panes; P7-14's routing and the
+    /// tests' hit points).
+    context_rects: HitRects,
     /// The canvas widget id of the previous frame (keyboard focus).
     canvas_id: Option<egui::Id>,
     /// The session and page of the previous frame (page-switch selection
@@ -222,6 +226,7 @@ impl Shell {
             shortcuts,
             focus: ShortcutScope::Global,
             canvas_rect: None,
+            context_rects: Vec::new(),
             canvas_id: None,
             last_page: None,
             tab_bar_rect: None,
@@ -325,6 +330,9 @@ impl Shell {
     /// failure never crashes the frame (AGENTS.md section 6).
     pub fn note_error(&mut self, error: impl Into<String>) {
         let message = error.into();
+        // The status line shows the error in every layout (P7-12
+        // major 3: the warnings only reached the Phase 4 status bar).
+        self.status = message.clone();
         if self.app.warnings.last() != Some(&message) {
             self.app.record_warning(message);
         }
@@ -381,6 +389,7 @@ impl Shell {
     /// failure goes to the status bar and the frame still renders.
     pub fn show_in(&mut self, ui: &mut Ui) -> Result<Vec<Intent>, UiError> {
         let mut intents = Vec::new();
+        self.context_rects.clear();
         self.clear_selection_on_page_switch();
         self.finish_pick();
         self.sync_active_tool();
@@ -421,6 +430,7 @@ impl Shell {
                 self.show_fluent_frame(ui, &mut intents);
             }
         }
+        self.route_context_click(ui);
         self.draw_context_menus(ui, &mut intents);
         self.show_dialogs(ui, &mut intents);
         self.record_layout_state();
@@ -435,7 +445,9 @@ impl Shell {
     fn sync_layout_widgets(&mut self, ctx: &Context) {
         let kind = self.app.settings.ui_layout;
         let theme = self.layouts.get(kind).theme.clone();
-        if theme::current(ctx).as_ref() != Some(&theme)
+        if theme::current(ctx)
+            .map(|active| active.id != theme.id)
+            .unwrap_or(true)
             && let Err(error) = theme::apply(ctx, &theme)
         {
             self.note_error(error.to_string());
@@ -535,8 +547,12 @@ impl Shell {
     /// the Shapes window, the drawing with its page-tab strip and the
     /// status bar (docs/ui/panel-classic.md, "Window").
     fn show_classic_frame(&mut self, ui: &mut Ui, intents: &mut Vec<Intent>) {
-        // Title bar (23 px): the document name and the app name.
+        // Title bar (`title_bar.height`): the document name and the
+        // app name on the `chrome.title_bar` colour.
         egui::Panel::top("shell-title").show(ui, |ui| {
+            let height =
+                crate::panel_classic::metrics::ClassicMetrics::for_ctx(ui.ctx()).title_bar_height;
+            theme_strip(ui, "chrome.title_bar", "chrome.text", height);
             ui.horizontal(|ui| {
                 ui.label(self.title_text());
                 ui.separator();
@@ -586,8 +602,12 @@ impl Shell {
     fn show_modern_frame(&mut self, ui: &mut Ui, intents: &mut Vec<Intent>) {
         let context = self.selection_context();
         let lists = self.list_data();
-        // Title bar (25 px): QAT left, document title, help right.
+        // Title bar (`title_bar.height`): QAT left, document title,
+        // help right.
         egui::Panel::top("shell-title").show(ui, |ui| {
+            let height =
+                crate::panel_classic::metrics::ClassicMetrics::for_ctx(ui.ctx()).title_bar_height;
+            theme_strip(ui, "chrome.title_bar", "chrome.text", height);
             ui.horizontal(|ui| {
                 let mut produced = Vec::new();
                 let mut errors = Vec::new();
@@ -714,7 +734,7 @@ impl Shell {
                 let produced = self
                     .tab_bar
                     .show_backstage(ui, set, &self.registry, &self.app);
-                let opened = matches!(&produced, Ok(intents) if !intents.is_empty());
+                let opened = leaves_file_view(&produced);
                 self.absorb(produced, intents);
                 if opened {
                     // A backstage command runs: leave the File view
@@ -731,15 +751,19 @@ impl Shell {
     /// The docked side windows: the Shapes window on the left and the
     /// Shape Data and Size & Position panes on the right.
     fn show_dock_panels(&mut self, ui: &mut Ui, intents: &mut Vec<Intent>, style: FrameStyle) {
+        // The Shapes window takes its width from the theme
+        // (`shapes_window.width`); the Phase 4 frame keeps its own.
         let shapes_width = match style {
-            FrameStyle::Classic => 190.0,
-            FrameStyle::Modern => 262.0,
+            FrameStyle::Classic | FrameStyle::Modern => {
+                crate::panel_classic::metrics::ClassicMetrics::for_ctx(ui.ctx()).shapes_window_width
+            }
             FrameStyle::Fluent => 200.0,
         };
         egui::Panel::left("shell-shapes")
             .resizable(true)
             .default_size(shapes_width)
             .show(ui, |ui| {
+                theme_pane(ui, "pane.background");
                 let produced = self.shapes.show(ui, &self.app, style.shapes_header());
                 if let Some(_picks) = self.keep(produced) {
                     // Picking a stencil inserts a shape in Phase 5;
@@ -750,21 +774,29 @@ impl Shell {
                     self.stencil_down = false;
                 }
                 // Right-clicking the window opens its context menu
-                // (task P7-09 Goal 4, `contexts::menu_for`).
-                if ui.input(|input| input.pointer.secondary_clicked()) {
-                    self.open_context_menu(HitTarget::ShapesWindow);
-                }
+                // (task P7-09 Goal 4): the rect is recorded and the
+                // unified right-click router picks the topmost
+                // target under the pointer (P7-14).
+                self.context_rects
+                    .push((HitTarget::ShapesWindow, ui.max_rect()));
             });
         egui::Panel::right("shell-panes")
             .resizable(true)
             .default_size(220.0)
             .show(ui, |ui| {
-                let shape_data = panes::show_shape_data(ui, &mut self.app);
-                if let Some(mut more) = self.keep(shape_data) {
+                theme_pane(ui, "pane.background");
+                let shape_data = ui.scope(|ui| panes::show_shape_data(ui, &mut self.app));
+                let shape_data_rect = shape_data.response.rect;
+                self.context_rects
+                    .push((HitTarget::ShapeDataWindow, shape_data_rect));
+                if let Some(mut more) = self.keep(shape_data.inner) {
                     intents.append(&mut more);
                 }
-                let size_position = panes::show_size_position(ui, &mut self.app);
-                if let Some(mut more) = self.keep(size_position) {
+                let size_position = ui.scope(|ui| panes::show_size_position(ui, &mut self.app));
+                let size_position_rect = size_position.response.rect;
+                self.context_rects
+                    .push((HitTarget::SizePositionWindow, size_position_rect));
+                if let Some(mut more) = self.keep(size_position.inner) {
                     intents.append(&mut more);
                 }
             });
@@ -774,33 +806,54 @@ impl Shell {
     /// the active layout's look (the `status_bar` and `page_tabs`
     /// regions).
     fn show_bottom_panels(&mut self, ui: &mut Ui, intents: &mut Vec<Intent>, style: FrameStyle) {
-        egui::Panel::bottom("shell-status").show(ui, |ui| match style {
-            FrameStyle::Fluent => {
-                let produced = canvas::show_status_bar(ui, &self.app);
-                let _ = self.keep(produced);
+        egui::Panel::bottom("shell-status").show(ui, |ui| {
+            if let FrameStyle::Classic | FrameStyle::Modern = style {
+                let height = crate::panel_classic::metrics::ClassicMetrics::for_ctx(ui.ctx())
+                    .status_bar_height;
+                theme_strip(ui, "status_bar.background", "status_bar.text", height);
             }
-            FrameStyle::Modern => {
-                let mut more = self.show_modern_status(ui);
-                intents.append(&mut more);
+            match style {
+                FrameStyle::Fluent => {
+                    let produced = canvas::show_status_bar(ui, &self.app);
+                    let _ = self.keep(produced);
+                }
+                FrameStyle::Modern => {
+                    let mut more = self.show_modern_status(ui);
+                    intents.append(&mut more);
+                }
+                FrameStyle::Classic => self.show_classic_status(ui),
             }
-            FrameStyle::Classic => self.show_classic_status(ui),
         });
+        let mut strip_targets = HitRects::new();
         egui::Panel::bottom("shell-tabs").show(ui, |ui| {
+            if let FrameStyle::Classic | FrameStyle::Modern = style {
+                let height = crate::panel_classic::metrics::ClassicMetrics::for_ctx(ui.ctx())
+                    .page_tabs_height;
+                theme_strip(ui, "pane.background", "chrome.text", height);
+            }
             if self.app.active.is_some() {
                 let session = self.app.active_document_mut();
                 if let Some(session) = session {
                     let produced = match style {
-                        FrameStyle::Fluent => canvas::show_page_tabs(ui, session),
+                        FrameStyle::Fluent => {
+                            canvas::show_page_tabs(ui, session).map(|more| (more, Vec::new()))
+                        }
                         FrameStyle::Modern => modern_page_tabs(ui, session),
                         FrameStyle::Classic => classic_page_tabs(ui, session),
                     };
                     match produced {
-                        Ok(mut more) => intents.append(&mut more),
+                        Ok((mut more, targets)) => {
+                            intents.append(&mut more);
+                            strip_targets = targets;
+                        }
                         Err(error) => self.note_error(error.to_string()),
                     }
                 }
             }
         });
+        // The strip's targets join the right-click router's table
+        // (`contexts::menu_for`, P7-14).
+        self.context_rects.extend(strip_targets);
     }
 
     /// The Panel Modern status bar: "Page n of m" and the message on
@@ -914,6 +967,27 @@ impl Shell {
             format!("PAGE {current} {join} {}", total.max(1)).to_uppercase()
         } else {
             format!("Page {current}{join}{}", total.max(1))
+        }
+    }
+
+    /// Opens the context menu of the topmost recorded target under
+    /// the pointer (task P7-14's unified right-click routing): the
+    /// Shapes window, the two panes and the page-tab strip record
+    /// their rects while drawing, and the last (topmost) hit wins.
+    /// The canvas does its own hit testing (a shape under the
+    /// pointer, then the page).
+    fn route_context_click(&mut self, ui: &Ui) {
+        let Some(pos) = ui.input(|input| {
+            input
+                .pointer
+                .secondary_clicked()
+                .then(|| input.pointer.interact_pos())
+                .flatten()
+        }) else {
+            return;
+        };
+        if let Some(target) = topmost_target(&self.context_rects, pos) {
+            self.open_context_menu(target);
         }
     }
 
@@ -1072,7 +1146,7 @@ impl Shell {
                 self.open_context_menu(HitTarget::TextEditing);
                 return;
             }
-            match self.shape_under(pos, rect) {
+            match self.shape_under(ui, pos, rect) {
                 Some(shape) => {
                     if self.app.selection.anchor != Some(shape)
                         && let Some(intent) = select_intent(&self.app, shape)
@@ -1097,9 +1171,9 @@ impl Shell {
 
     /// The topmost shape under a screen point in the canvas, through
     /// the pointer tool's cached page scene (task P7-09).
-    fn shape_under(&mut self, screen: egui::Pos2, rect: egui::Rect) -> Option<ShapeId> {
+    fn shape_under(&mut self, ui: &Ui, screen: egui::Pos2, rect: egui::Rect) -> Option<ShapeId> {
         let session = self.app.active_document()?;
-        let page = canvas::page_position(rect, session, screen)?;
+        let page = canvas::page_position(rect, session, screen, canvas::ruler_width(ui))?;
         let zoom = session.view.zoom;
         self.tools
             .state
@@ -1196,10 +1270,9 @@ impl Shell {
         let Some(screen) = pos else {
             return;
         };
-        let page = self
-            .app
-            .active_document()
-            .and_then(|session| canvas::page_position(rect, session, screen));
+        let page = self.app.active_document().and_then(|session| {
+            canvas::page_position(rect, session, screen, canvas::ruler_width(ui))
+        });
         if !self.stencil_down {
             match page {
                 Some(page) if down => {
@@ -1335,9 +1408,9 @@ impl Shell {
     /// the close confirmation (ADR 0028 [`UiRequest`] flow, ADR 0066).
     ///
     /// The Options dialog body returns the [`Intent`]s of the rows the
-    /// user changed (the ADR 0032 amendment) plus the welcome-wizard
-    /// row; the intents join the frame's intents and run through the
-    /// registry like any other control. The wizard applies
+    /// user changed (the ADR 0032 amendment, the welcome-wizard row
+    /// included); the intents join the frame's intents and run through
+    /// the registry like any other control. The wizard applies
     /// [`wizard::Outcome`] per ADR 0066 and the About window opens
     /// the video through egui's open-URL output.
     fn show_dialogs(&mut self, ui: &mut Ui, intents: &mut Vec<Intent>) {
@@ -1393,11 +1466,6 @@ impl Shell {
                     }
                 });
             self.options_open = open;
-            if let Some(show) = changed.show_wizard_next_start {
-                // The welcome row has no command id (task P7-09):
-                // checked means the wizard opens on the next start.
-                self.app.settings.welcome_seen = !show;
-            }
             self.absorb(Ok(changed.intents), intents);
             if let Some(error) = failure {
                 self.note_error(error.to_string());
@@ -1419,6 +1487,11 @@ impl Shell {
             match outcome {
                 about::Outcome::Close => self.about_open = false,
                 about::Outcome::WatchVideo => {
+                    // Unreachable in the tests on purpose: `egui`
+                    // hands the URL to the platform browser and
+                    // kittest cannot observe that (P7-12 minor 1).
+                    // The outcome value itself is pinned in
+                    // `tests/about`.
                     ui.ctx().open_url(egui::OpenUrl::new_tab(about::VIDEO_URL));
                 }
                 about::Outcome::Open => {}
@@ -1769,6 +1842,30 @@ fn menu_item(
     }
 }
 
+/// Paints one window region from the theme (ADR 0063): the `fill`
+/// behind the region, `text` as its text colour and `height` as its
+/// minimum height.
+fn theme_strip(ui: &mut Ui, fill: &str, text: &str, height: f32) {
+    let fill = crate::theme::color_at(ui.ctx(), fill);
+    ui.painter().rect_filled(ui.max_rect(), 0.0, fill);
+    ui.style_mut().visuals.override_text_color = Some(crate::theme::color_at(ui.ctx(), text));
+    ui.set_min_height(height);
+}
+
+/// Paints one docked pane from the theme: `fill` behind the pane and
+/// `pane.border` around it.
+fn theme_pane(ui: &mut Ui, fill: &str) {
+    let fill = crate::theme::color_at(ui.ctx(), fill);
+    let border = crate::theme::color_at(ui.ctx(), "pane.border");
+    ui.painter().rect_filled(ui.max_rect(), 0.0, fill);
+    ui.painter().rect_stroke(
+        ui.max_rect(),
+        0.0,
+        egui::Stroke::new(1.0, border),
+        egui::StrokeKind::Inside,
+    );
+}
+
 /// Which layout family draws the frame (task P7-09).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FrameStyle {
@@ -1817,6 +1914,26 @@ fn select_intent(app: &AppCtx, shape: ShapeId) -> Option<Intent> {
     Some(Intent::new(command, Invocation::new(args, Source::Ui)))
 }
 
+/// Whether a backstage frame leaves the File view (ADR 0031): one of
+/// its controls dispatched.
+fn leaves_file_view(produced: &Result<Vec<Intent>, UiError>) -> bool {
+    matches!(produced, Ok(intents) if !intents.is_empty())
+}
+
+/// The right-click target under `pos`: the last (topmost) recorded
+/// rect that contains it.
+fn topmost_target(rects: &HitRects, pos: egui::Pos2) -> Option<HitTarget> {
+    rects
+        .iter()
+        .rev()
+        .find(|(_, rect)| rect.contains(pos))
+        .map(|(target, _)| *target)
+}
+
+/// The right-click targets one region draws: each target with the
+/// rect a click must land in (P7-14's unified routing).
+type HitRects = Vec<(HitTarget, egui::Rect)>;
+
 /// One dispatch request for a static command id.
 fn intent_for(id: &'static str) -> Result<Intent, UiError> {
     let command = CommandId::parse(id).map_err(|error| UiError::Io {
@@ -1830,7 +1947,10 @@ fn intent_for(id: &'static str) -> Result<Intent, UiError> {
 /// (docs/ui/panel-modern.md, "Window"). Page tabs switch the active
 /// page directly, as the Phase 4 strip does; the insert button runs
 /// `page.add`.
-fn modern_page_tabs(ui: &mut Ui, session: &mut DocumentSession) -> Result<Vec<Intent>, UiError> {
+fn modern_page_tabs(
+    ui: &mut Ui,
+    session: &mut DocumentSession,
+) -> Result<(Vec<Intent>, HitRects), UiError> {
     let pages: Vec<(PageId, String)> = session
         .document
         .pages
@@ -1841,16 +1961,25 @@ fn modern_page_tabs(ui: &mut Ui, session: &mut DocumentSession) -> Result<Vec<In
     let active = session.active_page;
     let mut clicked = None;
     let mut add = false;
+    let mut rects = HitRects::new();
     ui.horizontal_wrapped(|ui| {
         for (id, label) in &pages {
+            let token = if active == Some(*id) {
+                "page_tab.active.text"
+            } else {
+                "page_tab.text"
+            };
+            let text =
+                egui::RichText::new(label.as_str()).color(crate::theme::color_at(ui.ctx(), token));
             let response = ui
-                .selectable_label(active == Some(*id), label)
+                .selectable_label(active == Some(*id), text)
                 .on_hover_text("Show this page");
+            rects.push((HitTarget::PageTab, response.rect));
             if response.clicked() {
                 clicked = Some(*id);
             }
         }
-        ui.menu_button("All", |ui| {
+        let all = ui.menu_button("All", |ui| {
             for (id, label) in &pages {
                 if ui.button(label).clicked() {
                     clicked = Some(*id);
@@ -1858,14 +1987,16 @@ fn modern_page_tabs(ui: &mut Ui, session: &mut DocumentSession) -> Result<Vec<In
                 }
             }
         });
+        rects.push((HitTarget::PageTab, all.response.rect));
         // The insert-page button: a plus. (The spec draws a circled
         // plus; the egui fonts have no such glyph, so the mark is a
         // plain `+` with its accessible name.)
-        add = ui
+        let new_page = ui
             .button("+")
             .accessible_name("New page")
-            .on_hover_text("New page")
-            .clicked();
+            .on_hover_text("New page");
+        rects.push((HitTarget::PageTab, new_page.rect));
+        add = new_page.clicked();
     });
     if let Some(id) = clicked {
         session.active_page = Some(id);
@@ -1874,13 +2005,16 @@ fn modern_page_tabs(ui: &mut Ui, session: &mut DocumentSession) -> Result<Vec<In
     if add {
         intents.push(intent_for("page.add")?);
     }
-    Ok(intents)
+    Ok((intents, rects))
 }
 
 /// The Panel Classic page-tab strip: the first, previous, next and
 /// last page buttons and the page tabs
 /// (docs/ui/panel-classic.md, "Window").
-fn classic_page_tabs(ui: &mut Ui, session: &mut DocumentSession) -> Result<Vec<Intent>, UiError> {
+fn classic_page_tabs(
+    ui: &mut Ui,
+    session: &mut DocumentSession,
+) -> Result<(Vec<Intent>, HitRects), UiError> {
     let pages: Vec<(PageId, String)> = session
         .document
         .pages
@@ -1894,19 +2028,29 @@ fn classic_page_tabs(ui: &mut Ui, session: &mut DocumentSession) -> Result<Vec<I
     let mut previous = false;
     let mut next = false;
     let mut last = false;
+    let mut rects = HitRects::new();
     ui.horizontal_wrapped(|ui| {
-        first = ui.button("|<").on_hover_text("First page").clicked();
-        previous = ui.button("<").on_hover_text("Previous page").clicked();
+        let first_button = ui.button("|<").on_hover_text("First page");
+        rects.push((HitTarget::PageTabNavigation, first_button.rect));
+        first = first_button.clicked();
+        let previous_button = ui.button("<").on_hover_text("Previous page");
+        rects.push((HitTarget::PageTabNavigation, previous_button.rect));
+        previous = previous_button.clicked();
         for (id, label) in &pages {
             let response = ui
                 .selectable_label(active == Some(*id), label)
                 .on_hover_text("Show this page");
+            rects.push((HitTarget::PageTab, response.rect));
             if response.clicked() {
                 clicked = Some(*id);
             }
         }
-        next = ui.button(">").on_hover_text("Next page").clicked();
-        last = ui.button(">|").on_hover_text("Last page").clicked();
+        let next_button = ui.button(">").on_hover_text("Next page");
+        rects.push((HitTarget::PageTabNavigation, next_button.rect));
+        next = next_button.clicked();
+        let last_button = ui.button(">|").on_hover_text("Last page");
+        rects.push((HitTarget::PageTabNavigation, last_button.rect));
+        last = last_button.clicked();
     });
     if let Some(id) = clicked {
         session.active_page = Some(id);
@@ -1924,7 +2068,7 @@ fn classic_page_tabs(ui: &mut Ui, session: &mut DocumentSession) -> Result<Vec<I
     if next {
         intents.push(intent_for("page.next")?);
     }
-    Ok(intents)
+    Ok((intents, rects))
 }
 
 /// What to do with a `NeedsInput` value once the picker answered (or
@@ -3275,6 +3419,10 @@ mod tests {
         app.open_document(DocumentSession::new(Document::new(), None));
         let id = CommandId::parse("file.opens_and_edits").expect("id");
         dispatch_one(&registry, &mut app, &id, Invocation::empty(Source::Test)).expect("run");
+        // The edit's no-op halves run through the undo stack (P7-12
+        // minor 6: `apply` and `revert` were never exercised).
+        NoopEdit.apply(&mut app).expect("apply");
+        NoopEdit.revert(&mut app).expect("revert");
         assert_eq!(app.documents.len(), 2);
         assert!(
             app.documents[0].undo.can_undo(),
@@ -3336,8 +3484,12 @@ mod tests {
 
     /// A shell with one page carrying one rectangle at (3, 3).
     fn shell_with_shape() -> (Shell, larrygram_model::ShapeId) {
-        // Panel Classic carries the `context.shape` menu of the
-        // mapping table (docs/ui/panel-classic.md).
+        shell_with_shape_in(LayoutKind::PanelClassic)
+    }
+
+    /// The same, in a chosen layout (the context menus differ per
+    /// layout: `context.page_tab_navigation` is Panel Modern's).
+    fn shell_with_shape_in(kind: LayoutKind) -> (Shell, larrygram_model::ShapeId) {
         let mut document = Document::new();
         let id = document.add_shape(test_shape(3.0, 3.0, 1));
         let mut page = larrygram_model::Page::new(PageId { index: 0 }, 1);
@@ -3345,7 +3497,8 @@ mod tests {
         page.sheet.cells = vec![test_cell("PageWidth", 8.5), test_cell("PageHeight", 11.0)];
         document.pages.push(page);
         let mut settings = seen_settings();
-        settings.ui_layout = LayoutKind::PanelClassic;
+        settings.ui_layout = kind;
+        settings.default_layout = kind;
         let mut app = AppCtx::new(settings);
         app.open_document(larrygram_commands::DocumentSession::new(document, None));
         let shell = Shell::new(
@@ -3396,7 +3549,8 @@ mod tests {
         // click becomes the shape's pin.
         let page = {
             let session = shell.app.active_document().expect("a document");
-            canvas::page_position(rect, session, pos).expect("a page position")
+            let ruler = crate::panel_classic::metrics::ClassicMetrics::default().ruler_size;
+            canvas::page_position(rect, session, pos, ruler).expect("a page position")
         };
         {
             let session = shell.app.active_document_mut().expect("a document");
@@ -3420,6 +3574,185 @@ mod tests {
             Some(id),
             "a right-click selects what it hits first"
         );
+    }
+
+    /// One shell frame on a persistent egui context (the panel sizes
+    /// settle across frames on one context; `shell_frame` starts a
+    /// fresh one per call).
+    struct FrameCtx {
+        /// The egui context the frames draw on.
+        ctx: Context,
+    }
+
+    impl FrameCtx {
+        /// A fresh context.
+        fn new() -> Self {
+            Self {
+                ctx: Context::default(),
+            }
+        }
+
+        /// Draws one frame.
+        fn run(&self, shell: &mut Shell, events: Vec<egui::Event>, time: f64) {
+            let mut output = self.ctx.run_ui(
+                egui::RawInput {
+                    events,
+                    time: Some(time),
+                    ..Default::default()
+                },
+                |ui| {
+                    let intents = shell.show_in(ui).expect("the frame renders");
+                    let _ = shell.dispatch(&intents).expect("dispatch");
+                },
+            );
+            output.textures_delta.clear();
+        }
+    }
+
+    /// Right-clicks the recorded rect of `target` and returns the
+    /// context menu the shell opened (P7-14's routing).
+    fn right_click_target(shell: &mut Shell, target: crate::contexts::HitTarget) -> Option<String> {
+        let frames = FrameCtx::new();
+        // Draw until the recorded rects settle (the Shapes window
+        // widens while its previews load), then click.
+        let mut previous = HitRects::new();
+        for _ in 0..32 {
+            frames.run(shell, Vec::new(), 0.0);
+            if shell.context_rects == previous {
+                break;
+            }
+            previous.clone_from(&shell.context_rects);
+        }
+        let rect = shell
+            .context_rects
+            .iter()
+            .find(|(hit, _)| *hit == target)
+            .map(|(_, rect)| *rect)
+            .unwrap_or_else(|| panic!("{target:?} routes a rect"));
+        frames.run(shell, secondary_click_event(rect.center()), 1.0);
+        shell.context_menu_id.clone()
+    }
+
+    /// A right-click on a page tab opens `context.page_tab` (P7-14's
+    /// routing of the strip).
+    #[test]
+    fn a_right_click_on_a_page_tab_opens_its_menu() {
+        let (mut shell, _id) = shell_with_shape();
+        let opened = right_click_target(&mut shell, crate::contexts::HitTarget::PageTab);
+        assert_eq!(opened.as_deref(), Some("context.page_tab"));
+    }
+
+    /// The Panel Classic strip tags its navigation buttons
+    /// (`|<`, `<`, `>`, `>|`) as `context.page_tab_navigation`
+    /// (P7-14's routing). The classic data carries no such menu and
+    /// the modern data does (the menu is Panel Modern's): the router
+    /// picks the target either way, and `topmost_target` maps a click
+    /// to it.
+    #[test]
+    fn the_classic_strip_records_its_navigation_buttons() {
+        let (mut shell, _id) = shell_with_shape();
+        let frames = FrameCtx::new();
+        for _ in 0..4 {
+            frames.run(&mut shell, Vec::new(), 0.0);
+        }
+        let nav = shell
+            .context_rects
+            .iter()
+            .filter(|(hit, _)| *hit == crate::contexts::HitTarget::PageTabNavigation)
+            .count();
+        assert!(nav >= 4, "the four navigation buttons record rects ({nav})");
+        let pos = shell
+            .context_rects
+            .iter()
+            .find(|(hit, _)| *hit == crate::contexts::HitTarget::PageTabNavigation)
+            .map(|(_, rect)| rect.center())
+            .expect("a navigation rect");
+        assert_eq!(
+            topmost_target(&shell.context_rects, pos),
+            Some(crate::contexts::HitTarget::PageTabNavigation)
+        );
+        // The data gap: the classic layout has no menu for the
+        // target, the modern one does.
+        let classic = sets().get(LayoutKind::PanelClassic).v2.clone();
+        let modern = sets().get(LayoutKind::PanelModern).v2.clone();
+        assert!(
+            contexts::menu_for(&classic, crate::contexts::HitTarget::PageTabNavigation).is_none()
+        );
+        assert!(
+            contexts::menu_for(&modern, crate::contexts::HitTarget::PageTabNavigation).is_some()
+        );
+    }
+
+    /// A right-click in the Shape Data or Size & Position pane opens
+    /// that window's menu (P7-14's routing of the two panes).
+    #[test]
+    fn a_right_click_in_a_pane_opens_its_window_menu() {
+        let (mut shell, _id) = shell_with_shape();
+        let opened = right_click_target(&mut shell, crate::contexts::HitTarget::ShapeDataWindow);
+        assert_eq!(opened.as_deref(), Some("context.shape_data_window"));
+        let opened = right_click_target(&mut shell, crate::contexts::HitTarget::SizePositionWindow);
+        assert_eq!(opened.as_deref(), Some("context.size_position_window"));
+    }
+
+    /// A failing command's error reaches the status line and the
+    /// frame keeps rendering (the "never crash" contract of AGENTS.md
+    /// section 6; P7-12 major 3: no test provoked a shell error).
+    /// A backstage command leaves the File view (ADR 0031). The rule
+    /// is `leaves_file_view`: every committed backstage command is a
+    /// stub today, so the click path itself is pinned in the widget
+    /// sweep (`surfaces::the_fluent_backstage_...`) and the decision
+    /// here (P7-12 major 7).
+    #[test]
+    fn a_backstage_command_leaves_the_file_view() {
+        let produced: Result<Vec<Intent>, UiError> = Ok(vec![Intent::new(
+            CommandId::parse("file.new").expect("id"),
+            Invocation::empty(Source::Ui),
+        )]);
+        assert!(leaves_file_view(&produced));
+        assert!(!leaves_file_view(&Ok(Vec::new())), "no dispatch, no leave");
+        let failed: Result<Vec<Intent>, UiError> = Err(UiError::NotImplemented);
+        assert!(!leaves_file_view(&failed), "an error is not a dispatch");
+    }
+
+    #[test]
+    fn a_failing_command_shows_its_error_and_the_frame_survives() {
+        let (mut shell, _id) = shell_with_shape();
+        let before = shell.app.warnings.len();
+        for _ in 0..2 {
+            let command = CommandId::parse("help.welcome.next_start").expect("id");
+            let args = larrygram_commands::Args::new().with(
+                "show",
+                larrygram_commands::ArgValue::Text("maybe".to_owned()),
+            );
+            let intent = Intent::new(command, Invocation::new(args, Source::Ui));
+            let results = shell.dispatch(&[intent]).expect("the dispatch returns");
+            let Err(error) = results[0].as_ref() else {
+                panic!("the command's bad argument fails");
+            };
+            let message = error.to_string();
+            assert!(
+                message.contains("maybe"),
+                "the error names the value: {message}"
+            );
+            assert_eq!(
+                shell.app.warnings.last().map(String::as_str),
+                Some(message.as_str()),
+                "the error is the warning the status bar draws"
+            );
+            assert_eq!(
+                shell.status_line(),
+                message,
+                "the status line shows the error in every layout"
+            );
+        }
+        assert_eq!(
+            shell.app.warnings.len(),
+            before + 1,
+            "the same error warns once (ADR 0021)"
+        );
+        // The frame keeps rendering with the warning recorded.
+        shell_frame(&mut shell, Vec::new(), 2.0);
+        shell_frame(&mut shell, Vec::new(), 3.0);
     }
 
     #[test]
