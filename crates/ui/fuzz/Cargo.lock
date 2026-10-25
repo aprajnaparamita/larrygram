@@ -796,6 +796,7 @@ dependencies = [
  "larrygram-render",
  "larrygram-shapesheet",
  "larrygram-ui-spec",
+ "larrygram-vsd-binary",
  "larrygram-vsdx",
  "serde",
  "serde_json",
@@ -884,6 +885,14 @@ dependencies = [
  "serde-saphyr",
  "serde_json",
  "thiserror",
+]
+
+[[package]]
+name = "larrygram-vsd-binary"
+version = "1.0.0-alpha.1"
+dependencies = [
+ "larrygram-geom",
+ "larrygram-model",
 ]
 
 [[package]]
