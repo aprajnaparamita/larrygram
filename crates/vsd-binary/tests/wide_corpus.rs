@@ -8,9 +8,11 @@
 //! fetched into `reference/wide-corpus/` (never committed, ADR 0005):
 //!
 //! - [`wide_corpus_classify_ole`] writes `ole-facts.csv`: for every
-//!   `.vsd`, `.vss` and `.vst` file, the real kind, the version byte
-//!   and the Microsoft-content filter (AGENTS.md section 4), read
-//!   through this crate's public API.
+//!   `.vsd`, `.vss` and `.vst` file, the real kind, the version byte,
+//!   the Microsoft-content filter (AGENTS.md section 4) and the risk
+//!   facts of task P8-18 (a VBA project, embedded OLE objects,
+//!   hyperlinks to executables or UNC paths), read through this
+//!   crate's public API.
 //! - [`wide_corpus_import_sweep`] runs [`import`] over every
 //!   non-excluded file in `index.csv` and records, per file, whether it
 //!   opened, its error kind, its warning counts by kind and whether it
@@ -28,8 +30,8 @@ use std::sync::Mutex;
 
 use larrygram_vsd_binary::model::{Cell, DocumentKind};
 use larrygram_vsd_binary::{
-    Error, FormatVersion, ImportWarning, Limits, SummaryProperty, SummaryValue, WarningKind,
-    import, read_streams, read_summary_properties, version,
+    Chunk, Error, FormatVersion, ImportWarning, Limits, Record, SummaryProperty, SummaryValue,
+    WarningKind, import, read_chunks, read_streams, read_summary_properties, version,
 };
 
 /// The environment variable that points at the wide corpus.
@@ -56,6 +58,13 @@ struct OleFacts {
     template_copy: bool,
     /// The file was made from a Visio stock template.
     template_origin: bool,
+    /// The container holds a VBA project (task P8-18 goal 1).
+    vba: bool,
+    /// The file embeds an OLE object (task P8-18 goal 1).
+    ole_object: bool,
+    /// A hyperlink points at an executable or a UNC path (task
+    /// P8-18 goal 1).
+    hyperlink_target: bool,
 }
 
 /// What one sweep recorded for one file.
@@ -238,12 +247,17 @@ fn ole_line(facts: &OleFacts) -> String {
         flag(facts.ms_company),
         flag(facts.template_copy),
         flag(facts.template_origin),
+        flag(facts.vba),
+        flag(facts.ole_object),
+        flag(facts.hyperlink_target),
     ])
 }
 
 /// The header of `ole-facts.csv` (the same one `cargo xtask scout` writes).
 fn ole_header() -> String {
-    "blob_id,kind,version,ms_author,ms_company,template_copy,template_origin".to_owned()
+    "blob_id,kind,version,ms_author,ms_company,template_copy,template_origin,\
+     vba,ole_object,hyperlink_target"
+        .to_owned()
 }
 
 fn flag(value: bool) -> String {
@@ -254,9 +268,130 @@ fn flag(value: bool) -> String {
     }
 }
 
+/// The chunk records the risk scan reads (task P8-18 goal 1): the OLE
+/// object list, the OLE data, the foreign data type and the hyperlink
+/// records. The ids follow the format's table (the libvisio
+/// reference's `VSDDocumentStructure.h`, AGENTS.md section 5).
+const OLE_LIST: Record = Record(0x0d);
+/// The OLE data record: the bytes of one embedded OLE object.
+const OLE_DATA: Record = Record(0x1f);
+/// The foreign data type record: what a foreign shape carries.
+const FOREIGN_DATA_TYPE: Record = Record(0x98);
+/// The hyperlink list record.
+const HYPER_LNK_LIST: Record = Record(0x73);
+/// One hyperlink record.
+const HYPERLINK: Record = Record(0xc4);
+
+/// The offset of the foreign type in a foreign-data-type payload: one
+/// skip byte and three (tag byte + double) pairs (the libvisio
+/// reference's `VSDParser::readForeignDataType`).
+const FOREIGN_TYPE_OFFSET: usize = 36;
+/// The offset of the map mode in the same payload. Map mode 8 marks a
+/// metafile whatever the type says.
+const FOREIGN_MAP_MODE_OFFSET: usize = 38;
+
+/// The target suffixes that make a hyperlink risky (task P8-18 goal
+/// 1): files Windows executes. `.com` is left out on purpose: every
+/// web address ends in it.
+const EXECUTABLE_SUFFIXES: [&str; 11] = [
+    ".exe", ".bat", ".cmd", ".scr", ".msi", ".js", ".jse", ".vbs", ".vbe", ".wsf", ".ps1",
+];
+
+/// Whether the container's stream names mark a VBA project (task
+/// P8-18 goal 1). The public container API exposes stream names, not
+/// storage names, so the rule matches the streams a VBA project
+/// writes: `PROJECT`, `PROJECTwm`, `dir`, `_VBA_PROJECT`, `VBA` and
+/// the `__SRP_*` state streams. Conservative: a false positive costs
+/// one file.
+fn vba_stream(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    matches!(
+        lower.as_str(),
+        "project" | "projectwm" | "dir" | "_vba_project" | "vba"
+    ) || lower.starts_with("__srp_")
+}
+
+/// Whether a stream name marks an embedded OLE object (the fallback of
+/// task P8-18 goal 1: the container's names, since the public API
+/// exposes no storage names).
+fn ole_stream(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower.starts_with("ole")
+        || matches!(
+            lower.as_str(),
+            "compobj" | "ole10native" | "controldata" | "compobj10"
+        )
+}
+
+/// Whether the payload of a hyperlink record names an executable or a
+/// UNC path (task P8-18 goal 1). The readers drop hyperlinks from the
+/// model (ADR 0070), so the scan looks at the raw payload bytes, as
+/// ASCII and as UTF-16LE in both alignments.
+fn suspicious_target(data: &[u8]) -> bool {
+    let lower: Vec<u8> = data.iter().map(|b| b.to_ascii_lowercase()).collect();
+    for suffix in EXECUTABLE_SUFFIXES {
+        if lower.windows(suffix.len()).any(|w| w == suffix.as_bytes()) {
+            return true;
+        }
+    }
+    if lower.windows(2).any(|w| w == b"\\\\") {
+        return true;
+    }
+    for offset in [0usize, 1] {
+        let Some(body) = data.get(offset..) else {
+            continue;
+        };
+        let units: Vec<u16> = body
+            .chunks_exact(2)
+            .map(|c| c.try_into().map(u16::from_le_bytes).unwrap_or(0))
+            .collect();
+        let text = String::from_utf16_lossy(&units).to_ascii_lowercase();
+        if EXECUTABLE_SUFFIXES.iter().any(|s| text.contains(s)) || text.contains("\\\\") {
+            return true;
+        }
+    }
+    false
+}
+
+/// What the chunk records say about embedded OLE objects and risky
+/// hyperlinks (task P8-18 goal 1): an OLE object is one whose foreign
+/// data type is an OLE object and not a bitmap or a metafile (the
+/// libvisio reference maps type 1 to bitmap, types 0 and 4 to
+/// metafile, type 2 to OLE), or one with OLE records at all.
+fn risk_chunks(chunks: &[Chunk<'_>]) -> (bool, bool) {
+    let mut ole_object = false;
+    let mut hyperlink_target = false;
+    for chunk in chunks {
+        match chunk.record {
+            OLE_LIST | OLE_DATA => ole_object = true,
+            FOREIGN_DATA_TYPE => {
+                let read_u16 = |offset: usize| -> u16 {
+                    chunk
+                        .data
+                        .get(offset..offset + 2)
+                        .and_then(|b| b.try_into().ok())
+                        .map(u16::from_le_bytes)
+                        .unwrap_or(0)
+                };
+                let foreign_type = read_u16(FOREIGN_TYPE_OFFSET);
+                let map_mode = read_u16(FOREIGN_MAP_MODE_OFFSET);
+                let bitmap_or_metafile = map_mode == 0x8 || matches!(foreign_type, 0 | 1 | 4);
+                if !bitmap_or_metafile {
+                    ole_object = true;
+                }
+            }
+            HYPER_LNK_LIST | HYPERLINK if suspicious_target(chunk.data) => {
+                hyperlink_target = true;
+            }
+            _ => {}
+        }
+    }
+    (ole_object, hyperlink_target)
+}
+
 /// Classifies one OLE file: the container, the version byte, the
-/// filter, and (only when the filter does not exclude the file) the
-/// document kind from [`import`].
+/// filter, the risk facts and (only when the filter does not exclude
+/// the file) the document kind from [`import`].
 ///
 /// An excluded file is never imported: the properties are the filter,
 /// and nothing more reads the file.
@@ -274,7 +409,8 @@ fn classify_ole(bytes: &[u8], blob_id: &str, file_name: &str) -> OleFacts {
         facts.kind = "ole-no-visio".to_owned();
         return facts;
     };
-    facts.version = match version(visio) {
+    let file_version = version(visio);
+    facts.version = match file_version {
         Ok(FormatVersion::V6) => "6".to_owned(),
         Ok(FormatVersion::V11) => "11".to_owned(),
         Err(Error::UnsupportedVersion(byte)) => byte.to_string(),
@@ -300,6 +436,20 @@ fn classify_ole(bytes: &[u8], blob_id: &str, file_name: &str) -> OleFacts {
     facts.kind = "ole-unknown".to_owned();
     if excluded_reason(flags).is_some() {
         return facts;
+    }
+    // The risk facts (task P8-18 goal 1): macros through the
+    // container's stream names, embedded OLE objects and risky
+    // hyperlinks through the chunk records. An excluded file is never
+    // read this far.
+    facts.vba = streams.streams.iter().any(|s| vba_stream(&s.name));
+    facts.ole_object = streams.streams.iter().any(|s| ole_stream(&s.name));
+    if let Ok(fmt) = file_version {
+        let mut blocks: Vec<Vec<u8>> = Vec::new();
+        if let Ok((chunks, _warnings)) = read_chunks(visio, fmt, &Limits::DEFAULT, &mut blocks) {
+            let (ole_object, hyperlink_target) = risk_chunks(&chunks);
+            facts.ole_object = facts.ole_object || ole_object;
+            facts.hyperlink_target = hyperlink_target;
+        }
     }
     match std::panic::catch_unwind(|| import(bytes, &Limits::DEFAULT)) {
         Ok(Ok(imported)) => {
@@ -805,12 +955,107 @@ mod tests {
         assert_eq!(facts.kind, "ole-drawing");
         assert_eq!(facts.version, "11");
         assert!(!facts.ms_author);
+        assert!(!facts.vba);
+        assert!(!facts.ole_object);
+        assert!(!facts.hyperlink_target);
     }
 
     #[test]
     fn classifies_garbage_as_invalid() {
         let facts = classify_ole(b"not a compound file", "blob", "x.vsd");
         assert_eq!(facts.kind, "ole-invalid");
+    }
+
+    /// A hand-built chunk: the unit tests build their own inputs (task
+    /// P8-18, master note "Unit tests").
+    fn chunk(record: Record, data: &[u8]) -> Chunk<'_> {
+        Chunk {
+            record,
+            level: 0,
+            list: 0,
+            id: 0,
+            data,
+        }
+    }
+
+    /// The UTF-16LE bytes of a string.
+    fn to_utf16(text: &str) -> Vec<u8> {
+        text.encode_utf16()
+            .flat_map(|unit| unit.to_le_bytes())
+            .collect()
+    }
+
+    #[test]
+    fn names_the_vba_and_ole_markers() {
+        assert!(vba_stream("PROJECT"));
+        assert!(vba_stream("PROJECTwm"));
+        assert!(vba_stream("_vba_project"));
+        assert!(vba_stream("VBA"));
+        assert!(vba_stream("dir"));
+        assert!(vba_stream("__SRP_3"));
+        assert!(!vba_stream("VisioDocument"));
+        assert!(!vba_stream("PROJECTS"));
+        assert!(ole_stream("Ole10Native"));
+        assert!(ole_stream("OLE"));
+        assert!(ole_stream("CompObj"));
+        assert!(!ole_stream("VisioInformation"));
+    }
+
+    #[test]
+    fn reads_the_risk_facts_from_the_chunks() {
+        // A foreign data type whose type is an OLE object (2) is one.
+        let mut data = vec![0u8; 53];
+        data[36..38].copy_from_slice(&2u16.to_le_bytes());
+        assert_eq!(
+            risk_chunks(&[chunk(FOREIGN_DATA_TYPE, &data)]),
+            (true, false)
+        );
+        // A bitmap (type 1) is not an OLE object.
+        data[36..38].copy_from_slice(&1u16.to_le_bytes());
+        assert_eq!(
+            risk_chunks(&[chunk(FOREIGN_DATA_TYPE, &data)]),
+            (false, false)
+        );
+        // Map mode 8 marks a metafile whatever the type says.
+        data[36..38].copy_from_slice(&7u16.to_le_bytes());
+        data[38..40].copy_from_slice(&8u16.to_le_bytes());
+        assert_eq!(
+            risk_chunks(&[chunk(FOREIGN_DATA_TYPE, &data)]),
+            (false, false)
+        );
+        // An unknown type is not a bitmap or a metafile: conservative.
+        data[36..38].copy_from_slice(&7u16.to_le_bytes());
+        data[38..40].copy_from_slice(&0u16.to_le_bytes());
+        assert_eq!(
+            risk_chunks(&[chunk(FOREIGN_DATA_TYPE, &data)]),
+            (true, false)
+        );
+        // OLE records are the fallback marker.
+        assert_eq!(risk_chunks(&[chunk(OLE_DATA, &[])]), (true, false));
+        assert_eq!(risk_chunks(&[chunk(OLE_LIST, &[])]), (true, false));
+        // A hyperlink record names a risky target.
+        assert_eq!(
+            risk_chunks(&[chunk(HYPERLINK, b"open \\\\server\\share\\x.vsd")]),
+            (false, true)
+        );
+        assert_eq!(
+            risk_chunks(&[chunk(HYPER_LNK_LIST, b"https://example.com/x")]),
+            (false, false)
+        );
+    }
+
+    #[test]
+    fn names_risky_hyperlink_targets() {
+        assert!(suspicious_target(b"run calc.exe now"));
+        assert!(suspicious_target(&to_utf16("run calc.exe now")));
+        assert!(suspicious_target(&to_utf16("open \\\\server\\share")));
+        assert!(suspicious_target(b"x\\\\server\\share"));
+        assert!(suspicious_target(b"setup.MSI"));
+        assert!(!suspicious_target(b"evil.com payload"));
+        assert!(!suspicious_target(b"https://example.com/page"));
+        assert!(!suspicious_target(&to_utf16("https://example.com/page")));
+        assert!(!suspicious_target(b""));
+        assert!(!suspicious_target(b""));
     }
 
     #[test]

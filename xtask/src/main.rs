@@ -13,8 +13,9 @@
 //! - `coverage [--update-ratchet]`: coverage only; optionally record the ratchet.
 //! - `layers`: check crate layering rules.
 //! - `corpus [--verify-only] [--offline <dir>]`: fetch and verify the test corpus.
-//! - `scout fetch <csv> [--out <dir>]` / `scout classify [--out <dir>]`: the
-//!   wide corpus (task P8-16).
+//! - `scout fetch <csv> [--out <dir>]` / `scout classify [--out <dir>]
+//!   [--clamav <log>]` / `scout select [--out <dir>]`: the wide corpus
+//!   (tasks P8-16 and P8-18).
 //! - `extract [--reference <path>] [--out <path>] [--allow-unimplemented] [--check]`:
 //!   regenerate every Phase 1 output from `reference/`, or verify the
 //!   committed files with `--check`. See ADR 0009.
@@ -58,7 +59,9 @@ tasks:
   corpus [--verify-only] [--offline d] fetch and verify the test corpus (ADR 0005)
                                        --offline copies from a local dir instead of the network
   scout fetch <csv> [--out d]          fetch and pin the wide corpus of a BigQuery export
-  scout classify [--out d]             write the wide-corpus index and exclusions
+  scout classify [--out d] [--clamav log]
+                                       write the wide-corpus index, exclusions and risk
+  scout select [--out d]               write export-set.csv and print gate proposals
   extract [--reference <path>] [--out <path>] [--allow-unimplemented] [--check]
                                        regenerate Phase 1 outputs from reference/
                                        --check regenerates into a scratch dir and
