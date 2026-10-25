@@ -195,6 +195,28 @@ fn golden_the_file_view() {
     });
 }
 
+/// Panel Classic with the floating toolbars shown at their shipped
+/// default positions (P7-12 minor 8): the tool windows sit below the
+/// docked rows, clear of their clicks. The render is the pin — the
+/// windows' contents carry no accesskit names in the kittest tree.
+#[test]
+fn golden_panel_classic_with_floating_toolbars() {
+    shell_golden(
+        LayoutKind::PanelClassic,
+        "panel-classic-floating-toolbars",
+        |rig| {
+            for toolbar in ["Drawing", "Ink", "Picture"] {
+                rig.click_named("View");
+                rig.run();
+                rig.click_named("Toolbars");
+                rig.run();
+                rig.click_named(toolbar);
+                rig.run();
+            }
+        },
+    );
+}
+
 /// The welcome wizard's first page (ADR 0065, the amendment).
 #[test]
 fn golden_the_wizard_welcome_page() {

@@ -57,7 +57,11 @@ pub(crate) fn draw_toolbars(
             }
         });
     }
-    // Floating toolbars (`dock: floating`) as small tool windows.
+    // Floating toolbars (`dock: floating`) as small tool windows,
+    // clear of the docked rows (P7-12 minor 8: they used to land on
+    // top of the rows and eat the clicks).
+    let below_rows = ui.cursor().min.y;
+    let mut floating_index = 0_usize;
     for toolbar in input
         .layout
         .toolbars
@@ -71,9 +75,13 @@ pub(crate) fn draw_toolbars(
         let label = toolbar.label.clone().unwrap_or_else(|| toolbar.id.clone());
         egui::Window::new(label)
             .id(Id::unique(("panel_classic_floating", toolbar.id.clone())))
-            // Near the top left of the drawing, clear of the menu bar
-            // and the docked rows (`docs/ui/panel-classic.md`).
-            .default_pos(Pos2::new(300.0, 120.0))
+            // Below the docked rows, near the top left of the
+            // drawing, cascaded so the windows do not cover each
+            // other (`docs/ui/panel-classic.md`).
+            .default_pos(Pos2::new(
+                300.0,
+                below_rows + 8.0 + 28.0 * floating_index as f32,
+            ))
             .collapsible(false)
             .resizable(false)
             .open(&mut open)
@@ -88,6 +96,7 @@ pub(crate) fn draw_toolbars(
         if !open {
             state.set_toolbar_visible_in(input.mode, &toolbar.id, false);
         }
+        floating_index += 1;
     }
     if secondary {
         state.open_popup = Some(TOOLBAR_LIST.to_owned());
