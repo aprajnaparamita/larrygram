@@ -385,6 +385,8 @@ fn the_wide_twin_sweep_compares_every_converted_file() {
     let mut totals = [0usize; 5]; // compared, agreed, joined, mismatches, files
     let mut panics = 0usize;
     let mut families = [0usize; 8];
+    // The causes: `(cause, family)` to `(mismatches, files)`.
+    let mut causes: BTreeMap<(String, String), [usize; 2]> = BTreeMap::new();
     for path in &converted {
         let name = path
             .file_stem()
@@ -414,6 +416,7 @@ fn the_wide_twin_sweep_compares_every_converted_file() {
         match (our, twin) {
             (Ok(document), Ok(twin_document)) => {
                 let result = compare_documents(&document, &twin_document);
+                let mut seen: BTreeMap<(String, String), ()> = BTreeMap::new();
                 for mismatch in &result.mismatches {
                     let slot = Family::ALL
                         .iter()
@@ -421,6 +424,15 @@ fn the_wide_twin_sweep_compares_every_converted_file() {
                         .unwrap_or(0);
                     counts[slot] += 1;
                     families[slot] += 1;
+                    let key = (
+                        mismatch.cause.clone(),
+                        Family::ALL[slot].as_str().to_owned(),
+                    );
+                    causes.entry(key.clone()).or_default()[0] += 1;
+                    seen.insert(key, ());
+                }
+                for key in seen.keys() {
+                    causes.entry(key.clone()).or_default()[1] += 1;
                 }
                 totals[0] += result.compared;
                 totals[1] += result.agreed;
@@ -472,6 +484,21 @@ fn the_wide_twin_sweep_compares_every_converted_file() {
     }
     let out = twins.join("twin-sweep.csv");
     std::fs::write(&out, text).unwrap_or_else(|e| panic!("{}: {e}", out.display()));
+    let mut cause_rows: Vec<(&(String, String), &[usize; 2])> = causes.iter().collect();
+    cause_rows.sort_by(|a, b| b.1[0].cmp(&a.1[0]).then_with(|| a.0.cmp(b.0)));
+    let mut cause_text = String::from("cause,family,mismatches,files\n");
+    for ((cause, family), counts) in &cause_rows {
+        cause_text.push_str(&format!(
+            "{},{},{},{}\n",
+            csv_field(cause),
+            family,
+            counts[0],
+            counts[1]
+        ));
+    }
+    let cause_out = twins.join("twin-sweep-causes.csv");
+    std::fs::write(&cause_out, cause_text)
+        .unwrap_or_else(|e| panic!("{}: {e}", cause_out.display()));
     println!(
         "wide twin sweep: {} files, {} cells compared, {} agree, {} differ, \
          {} joined shapes, {} panics",
@@ -480,7 +507,14 @@ fn the_wide_twin_sweep_compares_every_converted_file() {
     for (family, count) in Family::ALL.iter().map(|f| f.as_str()).zip(families) {
         println!("  mismatch_{family}: {count}");
     }
-    println!("wrote {}", out.display());
+    println!("most common causes:");
+    for ((cause, family), counts) in cause_rows.iter().take(10) {
+        println!(
+            "  {cause} ({family}): {} mismatches in {} files",
+            counts[0], counts[1]
+        );
+    }
+    println!("wrote {} and {}", out.display(), cause_out.display());
     assert!(totals[4] > 0, "no file compared");
 }
 

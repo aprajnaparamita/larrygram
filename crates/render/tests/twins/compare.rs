@@ -168,14 +168,19 @@ impl Family {
     }
 }
 
-/// One difference between an import and its twin: the report line and
-/// the family of the value it names.
+/// One difference between an import and its twin: the report line, the
+/// family of the value it names and the short cause it groups by (the
+/// cell name, or what else differs).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Mismatch {
     /// The report line (`place / cell / twin / import`).
     pub message: String,
     /// The family of the compared value.
     pub family: Family,
+    /// The cause the sweep groups by: the cell's name (`PinX`,
+    /// `geometry X`), `page count`, `page name`, `shape join`,
+    /// `geometry rows` or `text`.
+    pub cause: String,
 }
 
 /// What one comparison found (P8-21 goal 2): the mismatches and the
@@ -243,17 +248,27 @@ struct Comparer<'a> {
 }
 
 impl Comparer<'_> {
+    /// Records one difference.
+    fn record(&mut self, message: String, family: Family, cause: impl Into<String>) {
+        self.mismatches.push(Mismatch {
+            message,
+            family,
+            cause: cause.into(),
+        });
+    }
+
     /// Runs the comparison and returns what it found.
     fn run(mut self) -> Comparison {
         if self.our.pages.len() != self.twin.pages.len() {
-            self.mismatches.push(Mismatch {
-                message: format!(
+            self.record(
+                format!(
                     "document / page count / {} / {}",
                     self.our.pages.len(),
                     self.twin.pages.len()
                 ),
-                family: Family::Page,
-            });
+                Family::Page,
+                "page count",
+            );
         }
         for index in 0..self.our.pages.len().min(self.twin.pages.len()) {
             let place = format!("page {}", index + 1);
@@ -261,10 +276,11 @@ impl Comparer<'_> {
                 continue;
             };
             if a.name != b.name {
-                self.mismatches.push(Mismatch {
-                    message: format!("{place} / name / {:?} / {:?}", b.name, a.name),
-                    family: Family::Page,
-                });
+                self.record(
+                    format!("{place} / name / {:?} / {:?}", b.name, a.name),
+                    Family::Page,
+                    "page name",
+                );
             }
             let pair = (page(index), page(index));
             let factor = page_factor(self.twin, index);
@@ -308,18 +324,20 @@ impl Comparer<'_> {
         collect_ids(self.twin, &b_page.shapes, &mut twin_ids);
         for id in &ids {
             if !twin_ids.contains(id) {
-                self.mismatches.push(Mismatch {
-                    message: format!("{place} / shape {id}: only in the .vsd import"),
-                    family: Family::Join,
-                });
+                self.record(
+                    format!("{place} / shape {id}: only in the .vsd import"),
+                    Family::Join,
+                    "shape join",
+                );
             }
         }
         for id in &twin_ids {
             if !ids.contains(id) {
-                self.mismatches.push(Mismatch {
-                    message: format!("{place} / shape {id}: only in the .vsdx twin"),
-                    family: Family::Join,
-                });
+                self.record(
+                    format!("{place} / shape {id}: only in the .vsdx twin"),
+                    Family::Join,
+                    "shape join",
+                );
             }
         }
         for id in &ids {
@@ -361,10 +379,11 @@ impl Comparer<'_> {
                 if x == y {
                     self.agreed += 1;
                 } else {
-                    self.mismatches.push(Mismatch {
-                        message: format!("{shape_place} / text / {y:?} / {x:?}"),
-                        family: Family::Text,
-                    });
+                    self.record(
+                        format!("{shape_place} / text / {y:?} / {x:?}"),
+                        Family::Text,
+                        "text",
+                    );
                 }
             }
         }
@@ -414,10 +433,11 @@ impl Comparer<'_> {
                 if delta <= tolerance {
                     self.agreed += 1;
                 } else {
-                    self.mismatches.push(Mismatch {
-                        message: format!("{place} / {name} / {y:.4} / {x:.4}"),
+                    self.record(
+                        format!("{place} / {name} / {y:.4} / {x:.4}"),
                         family,
-                    });
+                        name.to_owned(),
+                    );
                 }
             }
             CellKind::Color => {
@@ -428,13 +448,14 @@ impl Comparer<'_> {
                 if x == y {
                     self.agreed += 1;
                 } else {
-                    self.mismatches.push(Mismatch {
-                        message: format!(
+                    self.record(
+                        format!(
                             "{place} / {name} / #{:02x}{:02x}{:02x} / #{:02x}{:02x}{:02x}",
                             y.r, y.g, y.b, x.r, x.g, x.b
                         ),
                         family,
-                    });
+                        name.to_owned(),
+                    );
                 }
             }
             CellKind::Flag => {
@@ -446,10 +467,11 @@ impl Comparer<'_> {
                 if x == y {
                     self.agreed += 1;
                 } else {
-                    self.mismatches.push(Mismatch {
-                        message: format!("{place} / {name} / {y} / {x}"),
+                    self.record(
+                        format!("{place} / {name} / {y} / {x}"),
                         family,
-                    });
+                        name.to_owned(),
+                    );
                 }
             }
         }
@@ -467,10 +489,11 @@ impl Comparer<'_> {
         let b_rows = geometry_rows(self.twin, b);
         self.compared += 1;
         if a_rows != b_rows {
-            self.mismatches.push(Mismatch {
-                message: format!("{place} / geometry rows / {b_rows} / {a_rows}"),
-                family: Family::Geometry,
-            });
+            self.record(
+                format!("{place} / geometry rows / {b_rows} / {a_rows}"),
+                Family::Geometry,
+                "geometry rows",
+            );
             return;
         }
         self.agreed += 1;
@@ -503,10 +526,11 @@ impl Comparer<'_> {
                 if (x - y).abs() <= LENGTH_TOLERANCE {
                     self.agreed += 1;
                 } else {
-                    self.mismatches.push(Mismatch {
-                        message: format!("{place} / geometry row {ix} {name} / {y:.4} / {x:.4}"),
-                        family: Family::Geometry,
-                    });
+                    self.record(
+                        format!("{place} / geometry row {ix} {name} / {y:.4} / {x:.4}"),
+                        Family::Geometry,
+                        format!("geometry {name}"),
+                    );
                 }
             }
         }
@@ -1026,8 +1050,33 @@ mod tests {
             [Mismatch {
                 message: "page 1 / shape 1 / text / \"two\" / \"one\"".to_owned(),
                 family: Family::Text,
+                cause: "text".to_owned(),
             }]
         );
+    }
+
+    #[test]
+    fn the_mismatches_name_their_cause() {
+        let mut twin = document();
+        let Some(id) = twin.pages[0].shapes.first().copied() else {
+            panic!("the twin has a shape");
+        };
+        let Some(shape) = twin.shape_mut(id) else {
+            panic!("the twin has the shape");
+        };
+        for cell in &mut shape.sheet.cells {
+            if cell.name.as_str() == "PinX" {
+                cell.value = Some(CellValue::Number(9.0));
+            }
+        }
+        twin.pages[0].sheet.cells = vec![number("PageWidth", 12.0), number("PageHeight", 8.5)];
+        let result = compare_documents(&document(), &twin);
+        let causes: Vec<&str> = result
+            .mismatches
+            .iter()
+            .map(|mismatch| mismatch.cause.as_str())
+            .collect();
+        assert_eq!(causes, ["PageWidth", "PinX"]);
     }
 
     #[test]
