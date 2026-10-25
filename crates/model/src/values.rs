@@ -493,7 +493,13 @@ impl<'d> CellReader<'d> {
         resolved: crate::lookup::Resolved<'_>,
         default: f64,
     ) -> f64 {
-        let (value, source) = self.preferred(sheet, cell, &resolved);
+        // A repeated-section cell: the caller resolved the row's
+        // identity and applied the snapshot rule already, so the
+        // sheet's own name-only search must not override it (P8-15: it
+        // returned the first same-named section's cell for every one of
+        // them, which kept the `NoLine` of one geometry section on all
+        // of a shape's sections).
+        let (value, source) = (resolved.value.cloned(), resolved.source);
         if source == ValueSource::HardDefault {
             return default;
         }
@@ -531,7 +537,11 @@ impl<'d> CellReader<'d> {
         resolved: crate::lookup::Resolved<'_>,
         default: bool,
     ) -> bool {
-        let (value, source) = self.preferred(sheet, cell, &resolved);
+        // The repeated-section rule of `number_from_or`: the caller's
+        // row identity and its snapshot preference already resolved the
+        // cell, and the name-only search would answer for the first
+        // same-named section (P8-15).
+        let (value, source) = (resolved.value.cloned(), resolved.source);
         if source == ValueSource::HardDefault {
             return default;
         }
