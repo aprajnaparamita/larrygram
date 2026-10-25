@@ -1,4 +1,4 @@
-# The wide corpus (P8-16)
+# The wide corpus (P8-16, P8-18)
 
 Aggregates only (task P8-16, master note "Privacy"): this report names
 no file. Every number comes from the local CSVs under
@@ -175,27 +175,110 @@ Counts only (no file names):
   multi-page.
 - **Themes:** 1 430 of the opened OPC files carry theme parts.
 
+## The risk filter (task P8-18)
+
+GitHub does not virus-scan repository contents, and some repositories
+hold malformed Office files on purpose: fuzzing corpora, CVE proofs of
+concept, scanner test sets. The risk is downstream: the reference
+export run opens files in Visio 2013, which no longer gets security
+fixes, and the gate-corpus proposals become files every gate reads. A
+file that could attack Visio must never reach either list, so the
+selection below never takes a file with a risk reason. The flag is
+conservative: a false positive costs one file, a false negative may
+cost the Windows box.
+
+Every file's facts sit in `index.csv` beside its identity: `vba`,
+`embedded_object`, `external_target`, `zip_uncompressed`,
+`zip_max_ratio`, `antivirus` and `risk` (empty, or the reasons
+`;`-separated). The OLE facts come from `ole-facts.csv` (its `vba`,
+`ole_object` and `hyperlink_target` columns, written by the sweep
+through `larrygram-vsd-binary`'s public API); the OPC facts come from
+the package bytes in `cargo xtask scout classify`. No file content
+goes anywhere near the repository: only these derived facts do.
+
+| Reason | What it detects |
+|---|---|
+| `macros` | OLE: a VBA project, matched on the container's stream names (`PROJECT`, `PROJECTwm`, `dir`, `_VBA_PROJECT`, `VBA`, `__SRP_*`). The public container API exposes stream names, not storage names, so a `_VBA_PROJECT_CUR` storage is seen through its streams. OPC: a part or relationship naming `vbaProject`. |
+| `embedded-object` | OLE: foreign data whose type is an OLE object and not a bitmap or a metafile (the foreign-data-type record of a chunk), or any OLE object list or OLE data record; the fallback scans the container's stream names for OLE embedding markers. OPC: parts under `visio/embeddings/` and OLE object relationships. |
+| `external-target` | OPC: relationships with `TargetMode="External"`. OLE: hyperlink records whose payload names an executable (`.exe`, `.bat`, `.cmd`, `.scr`, `.msi`, script suffixes) or a UNC path, scanned as ASCII and as UTF-16LE in both alignments. `.com` is left out: every web address ends in it. |
+| `container-anomaly` | A zip whose entries total over 200 MB uncompressed, or with an entry compression ratio over 100:1; a compound file the classifier marked `ole-invalid`, `ole-unreadable` or `ole-panic`; a zip the classifier marked `zip-invalid`. |
+| `provenance` | The repository name or the upstream path carries one of the words below. |
+| `antivirus` | A `clamscan --infected` log flags the file: `cargo xtask scout classify --clamav <log>`. The scan itself is not part of this task. |
+
+The provenance words are `cve`, `exploit`, `poc`, `payload`,
+`malware`, `virus`, `fuzz`, `crash`, `afl`, `oss-fuzz`, `clusterfuzz`,
+`testcase` and `corpus`, matched case-insensitively as whole words or
+as whole path segments. A word matches as the rule word itself, as its
+plural, or (for rule words of four characters or more) as a word that
+starts with it; the hyphenated `oss-fuzz` also matches its two parts
+in sequence.
+
+**Counts** (5 075 non-excluded files; 849 carry at least one reason;
+the counts below are the files per reason, so a file can appear twice):
+
+| Reason | Files | Tier A | Tier B |
+|---|---|---|---|
+| `macros` | 1 | 1 | 0 |
+| `embedded-object` | 699 | 421 | 278 |
+| `external-target` | 0 | 0 | 0 |
+| `container-anomaly` | 145 | 74 | 71 |
+| `provenance` | 8 | 4 | 4 |
+| `antivirus` | 0 | 0 | 0 |
+
+| Reason | Kind | Files |
+|---|---|---|
+| `macros` | `ooxml-drawing` | 1 |
+| `embedded-object` | `ole-drawing` | 672 |
+| `embedded-object` | `ooxml-drawing` | 27 |
+| `container-anomaly` | `ole-invalid` | 100 |
+| `container-anomaly` | `ole-unreadable` | 41 |
+| `container-anomaly` | `zip-invalid` | 2 |
+| `container-anomaly` | `ooxml-drawing` | 2 |
+| `provenance` | `ole-unreadable` | 3 |
+| `provenance` | `ooxml-drawing` | 3 |
+| `provenance` | `ole-drawing` | 1 |
+| `provenance` | `ole-invalid` | 1 |
+
+No binary file in the corpus carries a VBA project and no OPC
+relationship in it is external, so `macros` and `external-target` rest
+here on their unit tests alone. The 672 binary-family embeddings are
+600 version 11 and 67 version 6 files. The two zip anomalies are
+entry compression ratios of 101:1 and 157:1; no package totals 200 MB
+(the largest is 20 MB uncompressed).
+
 ## The proposal lists
 
-In the P8-16 Result section (not here): about 30 Tier A files for the
-gate corpus with full manifest rows, and about 200 Tier A files in
+In the task Result sections (not here): 32 Tier A files for the gate
+corpus with full manifest rows, and 206 Tier A files in
 `reference/wide-corpus/export-set.csv` for a reference export run.
-Both were chosen for coverage (versions 6 and 11, drawing scales,
+Both are chosen for coverage (versions 6 and 11, drawing scales,
 groups, connectors, text-heavy drawings, multi-page drawings, real
-`.vss`/`.vst` files, `.vsdx` files with themes) by the local
-`reference/wide-corpus/select.py`, which records the same rules as
-this section; only opened files were eligible, and gate-corpus files
-are capped at 2 MB.
+`.vss`/`.vst` files, `.vsdx` files with themes) by
+`cargo xtask scout select` (task P8-18), the port of the local
+`reference/wide-corpus/select.py` helper; only files the sweeps opened
+are eligible, gate-corpus files are capped at 2 MB and one per
+repository, and no risky file is ever eligible (the risk filter above).
+The P8-16 run of the helper picked the same bucket counts (32 and
+206); the risk filter replaced 14 of its gate slots and kept every
+bucket filled from its own pool.
 
 ## Reproducing
 
+`LARRYGRAM_WIDE_CORPUS` must name the corpus directory in full: the
+sweep tests run with their crate directory as the working directory.
+
 ```sh
 cargo xtask scout fetch reference/bq-github-visio-2026-10-25.csv
-LARRYGRAM_WIDE_CORPUS=reference/wide-corpus \
+LARRYGRAM_WIDE_CORPUS=$PWD/reference/wide-corpus \
   cargo test -p larrygram-vsd-binary --test wide_corpus -- --ignored wide_corpus_classify_ole
 cargo xtask scout classify
-LARRYGRAM_WIDE_CORPUS=reference/wide-corpus \
+LARRYGRAM_WIDE_CORPUS=$PWD/reference/wide-corpus \
   cargo test -p larrygram-vsd-binary --test wide_corpus -- --ignored wide_corpus_import_sweep
-LARRYGRAM_WIDE_CORPUS=reference/wide-corpus \
+LARRYGRAM_WIDE_CORPUS=$PWD/reference/wide-corpus \
   cargo test -p larrygram-vsdx --test wide_corpus -- --ignored wide_corpus_read_sweep
+cargo xtask scout select
 ```
+
+`cargo xtask scout classify --clamav <log>` merges a `clamscan
+--infected` log before the index is written; the scan is run outside
+this pipeline.
