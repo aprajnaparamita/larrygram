@@ -1407,6 +1407,29 @@ mod tests {
     }
 
     #[test]
+    fn a_scale_pair_that_overflows_keeps_the_size_pair() {
+        // The size pair scales by 1 when the pair's quotient is not
+        // finite or not positive.
+        let values = [
+            (65, 11.0),
+            (65, 8.5),
+            (65, 0.0),
+            (65, 0.0),
+            (65, f64::MAX),
+            (65, 0.5),
+        ];
+        let mut chunks = vec![
+            chunk(0x15, 2, u32::MAX, page_record(u32::MAX)),
+            chunk(0x92, 3, 0, page_props(&values)),
+        ];
+        chunks.extend(page_name());
+        let (document, _) = run(&chunks);
+        let cells = &document.pages[0].sheet.cells;
+        assert_eq!(cells[0].value, Some(CellValue::Number(11.0)));
+        assert_eq!(cells[1].value, Some(CellValue::Number(8.5)));
+    }
+
+    #[test]
     fn the_cell_type_table_maps_every_tag_the_format_uses() {
         for tag in [
             32, 33, 36, 37, 40, 42, 47, 48, 49, 50, 51, 52, 53, 54, 63, 64, 65, 66, 67, 68, 69, 70,
