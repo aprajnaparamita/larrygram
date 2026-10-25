@@ -851,15 +851,13 @@ impl<'a> Walker<'a> {
 
     /// Closes every open shape at a level of `level` or deeper.
     fn close_to(&mut self, level: u16) {
-        while self.stack.last().is_some_and(|open| open.level >= level) {
-            if let Some(mut open) = self.stack.pop() {
-                open.finish_section();
-                open.shape.sheet.sections.append(&mut open.sections);
-                if let Some(parent) = open.parent_ref {
-                    self.parents.push((open.id.index, parent));
-                }
-                self.finished.insert(open.id.index, open.shape);
+        while let Some(mut open) = self.stack.pop_if(|open| open.level >= level) {
+            open.finish_section();
+            open.shape.sheet.sections.append(&mut open.sections);
+            if let Some(parent) = open.parent_ref {
+                self.parents.push((open.id.index, parent));
             }
+            self.finished.insert(open.id.index, open.shape);
         }
     }
 
@@ -1064,11 +1062,11 @@ fn regroup(document: &mut Document, parents: &[(u32, i32)]) {
         .map(|shape| shape.parent.map(|parent| parent.index))
         .collect();
     for &(child, parent_visio) in parents {
-        let child_index = usize::try_from(child).unwrap_or(usize::MAX);
-        if child_index >= visio_ids.len() {
-            continue;
-        }
-        let target = (0..child_index)
+        let child_index = child as usize;
+        // The walk stays inside the arena whatever the reference
+        // carries: an entry past the end simply resolves to nothing.
+        let upper = child_index.min(visio_ids.len());
+        let target = (0..upper)
             .rev()
             .find(|candidate| visio_ids.get(*candidate) == Some(&parent_visio));
         if let (Some(slot), Some(target)) = (parent_of.get_mut(child_index), target) {
@@ -3140,6 +3138,33 @@ mod tests {
         let mut data = shape_record(u32::MAX, u32::MAX, u32::MAX, u32::MAX, u32::MAX);
         data[10..14].copy_from_slice(&parent.to_le_bytes());
         data
+    }
+
+    #[test]
+    fn a_parent_reference_to_no_shape_keeps_the_level_nesting() {
+        let mut chunks = vec![chunk(0x48, 1, 1, shape_record_with_parent(0))];
+        chunks.push(chunk(0x48, 2, 2, shape_record_with_parent(99)));
+        let mut document = Document::new();
+        let mut warnings = Vec::new();
+        collect(&chunks, &mut document, &mut warnings).expect("collect");
+        assert_eq!(document.shapes[1].parent, Some(ShapeId { index: 0 }));
+    }
+
+    #[test]
+    fn a_shape_record_cut_after_the_parent_id_still_maps() {
+        let mut data = shape_record_with_parent(0);
+        data.truncate(12);
+        let chunks = vec![chunk(0x48, 1, 1, data)];
+        let mut document = Document::new();
+        let mut warnings = Vec::new();
+        collect(&chunks, &mut document, &mut warnings).expect("collect");
+        assert_eq!(document.shapes.len(), 1);
+        assert_eq!(
+            kinds(&warnings),
+            [WarningKind::BadValue {
+                what: "shape record"
+            }]
+        );
     }
 
     #[test]

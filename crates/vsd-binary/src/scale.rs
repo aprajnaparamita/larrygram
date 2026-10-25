@@ -367,6 +367,38 @@ mod tests {
     }
 
     #[test]
+    fn a_scale_pair_that_overflows_scales_by_one() {
+        let mut document = document();
+        document.pages[0].sheet = page_sheet(f64::MAX, f64::MIN_POSITIVE);
+        scale_document(&mut document);
+        assert_eq!(value(&document, ShapeId { index: 0 }, "PinX"), Some(24.0));
+    }
+
+    #[test]
+    fn a_scale_cell_that_is_not_a_number_scales_by_one() {
+        let mut document = document();
+        let mut sheet = page_sheet(0.25, 12.0);
+        let mut text = Cell::new(CellName::from_static("PageScale"));
+        text.value = Some(CellValue::Str("quarter".to_owned()));
+        sheet.cells[0] = text;
+        document.pages[0].sheet = sheet;
+        scale_document(&mut document);
+        // The unreadable `PageScale` reads as 1, so the pair still
+        // scales by `1 / DrawingScale`.
+        let k = 1.0 / 12.0;
+        assert!((value(&document, ShapeId { index: 0 }, "PinX").unwrap() - 24.0 * k).abs() < 1e-12);
+        assert_eq!(
+            value(&document, ShapeId { index: 0 }, "LinePattern"),
+            Some(1.0),
+            "the test helper reads a number only"
+        );
+        let mut text = Cell::new(CellName::from_static("LineWeight"));
+        text.value = Some(CellValue::Str("thin".to_owned()));
+        document.shapes[0].sheet.cells[2] = text;
+        assert_eq!(value(&document, ShapeId { index: 0 }, "LineWeight"), None);
+    }
+
+    #[test]
     fn a_stale_shape_reference_never_panics() {
         let mut document = document();
         document.pages[0].shapes.push(ShapeId { index: 99 });
