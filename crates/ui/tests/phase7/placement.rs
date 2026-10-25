@@ -178,3 +178,97 @@ fn every_group_control_draws_one_widget_in_order() {
     }
     assert!(controls >= 100, "the sweep covered {controls} controls");
 }
+
+/// Every drawn control's rectangle fits its label (P7-12 major 10:
+/// the placement item used to pass while the command-bar labels
+/// wrapped one letter per line).
+///
+/// The contract: no label word is ever split across lines. The drawn
+/// rectangle (`measure_widths` + `place`, exactly what the widgets
+/// render) must fit the longest word of the label beside the frame
+/// and the atoms the control draws around it (the icon and the \u{25be}
+/// allowances). A long label may still wrap at its spaces (the Visio
+/// two-line label); the constants are the widget anatomy, not the
+/// measurement rules under test.
+#[test]
+fn every_drawn_control_fits_its_label() {
+    let sets = sets();
+    let theme = sets.get(LayoutKind::PanelModern).theme.clone();
+    let ctx = egui::Context::default();
+    larrygram_ui::theme::apply(&ctx, &theme).expect("the theme applies");
+    let metrics = Metrics::from_theme(&theme);
+    let layout = &sets.get(LayoutKind::PanelModern).v2;
+    let tabs: Vec<&Tab> = layout
+        .tabs
+        .iter()
+        .chain(layout.contextual_tabs.iter())
+        .collect();
+    // The scratch harness draws nothing; drop the texture deltas on
+    // purpose (epaint would otherwise panic on drop, as in
+    // `test_util::with_ui`).
+    let mut output = ctx.run_ui(Default::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            for tab in &tabs {
+                for group in &tab.groups {
+                    let items = place::visible_controls(group);
+                    if items.is_empty() {
+                        continue;
+                    }
+                    let widths = larrygram_ui::panel_modern::measure_widths(ui, &items, &metrics);
+                    let placed = place::place(group, &widths, &metrics);
+                    for (item, p) in items.iter().zip(&placed) {
+                        let label = item.label.clone().unwrap_or_default();
+                        // A small control draws its icon only; the
+                        // label's fit is not its contract.
+                        if item.size == Some(larrygram_ui_spec::v2::ControlSize::Small) {
+                            continue;
+                        }
+                        let longest_word = label
+                            .split_whitespace()
+                            .map(|word| galley_width(ui, word))
+                            .fold(0.0_f32, f32::max);
+                        // The room beside the label inside the
+                        // widget: the frame and atom spacing, the
+                        // icon of a medium control, the \u{25be} of a
+                        // menu control (arrow + spacing) and a combo's
+                        // padding and arrow.
+                        let beside = match item.kind {
+                            larrygram_ui_spec::v2::ItemKind::Combo => 30.0,
+                            larrygram_ui_spec::v2::ItemKind::Check => 25.0,
+                            _ => {
+                                let arrow = matches!(
+                                    item.kind,
+                                    larrygram_ui_spec::v2::ItemKind::Split
+                                        | larrygram_ui_spec::v2::ItemKind::SplitRecent
+                                        | larrygram_ui_spec::v2::ItemKind::Dropdown
+                                        | larrygram_ui_spec::v2::ItemKind::Gallery
+                                        | larrygram_ui_spec::v2::ItemKind::Palette
+                                );
+                                36.0 + if arrow { 22.0 } else { 0.0 }
+                            }
+                        };
+                        assert!(
+                            p.rect.width() >= longest_word + beside,
+                            "{:?} ({:?}): rect {:.1} px must fit its label {:?}                              (longest word {:.1} px + {beside:.0} px beside it)",
+                            item.id,
+                            item.kind,
+                            p.rect.width(),
+                            label,
+                            longest_word,
+                        );
+                    }
+                }
+            }
+        });
+    });
+    output.textures_delta.clear();
+}
+
+/// The width of `text` unwrapped in the theme's button font.
+fn galley_width(ui: &egui::Ui, text: &str) -> f32 {
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    ui.painter()
+        .layout_no_wrap(text.to_owned(), font, egui::Color32::WHITE)
+        .size()
+        .x
+}
