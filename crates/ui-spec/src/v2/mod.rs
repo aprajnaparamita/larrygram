@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 use crate::{CommandId, FluentId};
 
 pub use adapter::from_v1;
-pub use load::load_layout;
+pub use load::{base_theme, load_layout};
 
 /// Which of the four layouts a file or setting names.
 ///

@@ -41,14 +41,28 @@ fn workspace_root() -> PathBuf {
 /// `visuals`, `canvas.rs` `CanvasColors::from_theme` and the widgets'
 /// `theme::color_at` reads (P7-14's wiring).
 const COLOR_TOKENS: &[&str] = &[
-    // theme.rs `visuals`
+    // theme.rs `visuals`, `raise_controls` and `accent_controls`
     "chrome.background",
     "chrome.text",
+    "chrome.text_muted",
     "chrome.text_disabled",
+    "button.fill",
+    "button.raised.fill",
     "button.hover.fill",
     "button.hover.border",
+    "button.active.fill",
     "button.pressed.fill",
     "button.pressed.border",
+    "control.border",
+    "focus",
+    "shadow",
+    "menu.background",
+    "menu.border",
+    "field.background",
+    "accent.hover",
+    "accent.pressed",
+    "icon.orange",
+    "icon.red",
     // canvas.rs `CanvasColors::from_theme`
     "canvas.background",
     "page.background",
@@ -95,17 +109,16 @@ const COLOR_TOKENS: &[&str] = &[
     "file_view.nav.selected",
 ];
 
-/// The colour fallback chains of `theme.rs` `visuals` (`color_or`):
-/// any one member serves the read, the first is the warned name.
-const COLOR_CHAINS: &[&[&str]] = &[
-    &["menu.background", "tooltip.background", "chrome.background"],
-    &["menu.border", "tooltip.border", "chrome.border"],
-    &["field.background", "page.background"],
-];
+/// Colour fallback chains: any one member serves the read. (Since
+/// task P7-18 every colour comes from the base theme, so `theme.rs`
+/// reads each token directly and there are none.)
+const COLOR_CHAINS: &[&[&str]] = &[];
 
-/// The font roles `theme.rs` `text_styles` reads: `ui` directly, and
-/// the heading chain (`title`, then `pane_title`, then `ui`).
-const FONT_REQUIRED: &[&str] = &["ui"];
+/// The font roles `theme.rs` `text_styles` reads (`ui`, `caption` for
+/// the small style) and the type-scale roles the widgets ask
+/// `theme::font_at` for (docs/ui/design.md "Type"); and the heading
+/// chain (`title`, then `pane_title`, then `ui`).
+const FONT_REQUIRED: &[&str] = &["ui", "caption", "strong", "lead", "title", "display"];
 const FONT_CHAINS: &[&[&str]] = &[&["title", "pane_title", "ui"]];
 
 /// The metric tokens `panel_modern/metrics.rs` (`Metrics::from_theme`)
@@ -113,6 +126,13 @@ const FONT_CHAINS: &[&[&str]] = &[&["title", "pane_title", "ui"]];
 /// the shell runs both against every theme, and `canvas.rs` reads
 /// `ruler.size`.
 const METRIC_TOKENS: &[&str] = &[
+    // theme.rs `visuals` and the widgets' `theme::metric_at` reads
+    // (task P7-18)
+    "radius.control",
+    "radius.popup",
+    "focus.width",
+    "tab.underline",
+    "file_view.nav.indicator",
     // panel_classic/metrics.rs `ClassicMetrics::from_theme`
     "title_bar.height",
     "menu_bar.height",
@@ -352,6 +372,27 @@ fn token_literals(text: &str) -> Vec<String> {
         }
     }
     out
+}
+
+/// Both layouts share one palette and one type scale (task P7-18,
+/// docs/ui/design.md): their themes derive from `themes/base.yaml`, and
+/// a layout file may set neither a colour nor a font (the loader
+/// refuses one).
+#[test]
+fn both_layouts_share_one_palette_and_one_type_scale() {
+    let themes = themes();
+    let (_, modern) = &themes[0];
+    let (_, classic) = &themes[1];
+    assert_eq!(modern.colors, classic.colors);
+    assert_eq!(modern.fonts, classic.fonts);
+    let base = larrygram_ui_spec::v2::base_theme().expect("the base theme decodes");
+    assert_eq!(modern.colors, base.colors);
+    for file in ["panel-modern.yaml", "panel-classic.yaml"] {
+        let text = std::fs::read_to_string(workspace_root().join("ui-spec/themes").join(file))
+            .expect("the layout theme file");
+        assert!(!text.contains("\ncolors:"), "{file} sets colours");
+        assert!(!text.contains("\nfonts:"), "{file} sets fonts");
+    }
 }
 
 /// Every token of a committed theme is read by some widget (the P7-14

@@ -30,7 +30,7 @@ use crate::error::LoadError;
 use crate::lookup::all_controls;
 use crate::v2::load::{
     Shared, check_icon_files, command_ids, cross_check_contexts, cross_check_layout, decode_layout,
-    decode_v2, embedded_shared,
+    decode_v2, derive_theme, embedded_shared,
 };
 use crate::v2::{Contexts, IconMap, LayoutV2, Theme};
 use crate::{
@@ -55,6 +55,10 @@ const COMMANDS_FILE: &str = "commands.yaml";
 
 /// The keyboard shortcuts, shared by both layouts.
 const SHORTCUTS_FILE: &str = "shortcuts.yaml";
+
+/// The base theme both layout themes derive from: every colour and
+/// font (ADR 0063, task P7-18).
+const THEME_BASE_FILE: &str = "themes/base.yaml";
 
 /// The Panel Modern theme, shared by the two adapted layouts (ADR
 /// 0063).
@@ -338,6 +342,13 @@ impl Loader {
         decode_v2(&text, &path)
     }
 
+    /// Reads one layout theme and derives it from `base`.
+    fn read_layout_theme(&self, base: &Theme, name: &str) -> Result<Theme, LoadError> {
+        let (text, path) = self.read_v2_text(name)?;
+        let layout: Theme = decode_v2(&text, &path)?;
+        derive_theme(base, layout, &path)
+    }
+
     /// Reads the layout format v2 documents from disk: the two
     /// curated layouts, the two themes, `icons.yaml` and
     /// `contexts.yaml`, schema-validated and cross-checked (ADR 0061,
@@ -350,8 +361,9 @@ impl Loader {
         let panel_modern = decode_layout(&text, &modern_path, &self.v2_validator)?;
         let (text, classic_path) = self.read_v2_text(&name_classic)?;
         let panel_classic = decode_layout(&text, &classic_path, &self.v2_validator)?;
-        let theme_modern: Theme = self.read_v2_document(THEME_MODERN_FILE)?;
-        let theme_classic: Theme = self.read_v2_document(THEME_CLASSIC_FILE)?;
+        let base: Theme = self.read_v2_document(THEME_BASE_FILE)?;
+        let theme_modern = self.read_layout_theme(&base, THEME_MODERN_FILE)?;
+        let theme_classic = self.read_layout_theme(&base, THEME_CLASSIC_FILE)?;
         let icons: IconMap = self.read_v2_document(ICONS_FILE)?;
         let contexts: Contexts = self.read_v2_document(CONTEXTS_FILE)?;
         let known = command_ids(commands);

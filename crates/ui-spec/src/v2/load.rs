@@ -422,15 +422,69 @@ pub(crate) fn embedded_shared() -> Result<Shared, LoadError> {
     let p = |name: &str| PathBuf::from("ui-spec").join(name);
     let icons: IconMap = decode_v2(embedded::ICONS_YAML, &p("icons.yaml"))?;
     let contexts: Contexts = decode_v2(embedded::CONTEXTS_YAML, &p("contexts.yaml"))?;
-    let tm = embedded::THEME_PANEL_MODERN_YAML;
-    let tc = embedded::THEME_PANEL_CLASSIC_YAML;
-    let theme_modern: Theme = decode_v2(tm, &p("themes/panel-modern.yaml"))?;
-    let theme_classic: Theme = decode_v2(tc, &p("themes/panel-classic.yaml"))?;
+    let base: Theme = decode_v2(embedded::THEME_BASE_YAML, &p("themes/base.yaml"))?;
+    let path = p("themes/panel-modern.yaml");
+    let layout: Theme = decode_v2(embedded::THEME_PANEL_MODERN_YAML, &path)?;
+    let theme_modern = derive_theme(&base, layout, &path)?;
+    let path = p("themes/panel-classic.yaml");
+    let layout: Theme = decode_v2(embedded::THEME_PANEL_CLASSIC_YAML, &path)?;
+    let theme_classic = derive_theme(&base, layout, &path)?;
     Ok(Shared {
         icons,
         contexts,
         theme_modern,
         theme_classic,
+    })
+}
+
+/// The embedded base theme (`ui-spec/themes/base.yaml`): every colour
+/// and font both layout themes share (ADR 0063, task P7-18). The UI
+/// falls back to its values when a theme lacks a token.
+pub fn base_theme() -> Result<Theme, LoadError> {
+    decode_v2(
+        embedded::THEME_BASE_YAML,
+        &PathBuf::from("ui-spec/themes/base.yaml"),
+    )
+}
+
+/// Derives a layout's theme from the shared base (ADR 0063 as amended
+/// by task P7-18).
+///
+/// The result has the layout's id, name and contextual tab sets, the
+/// base's fonts and colours, and the base's metrics with the layout's
+/// metrics over them. Both layouts share one palette and one type
+/// scale, so a layout file at `path` that sets a colour or a font is a
+/// [`LoadError::Parse`].
+pub(crate) fn derive_theme(base: &Theme, layout: Theme, path: &Path) -> Result<Theme, LoadError> {
+    let refused = |what: &str, names: Vec<&String>| LoadError::Parse {
+        path: path.to_path_buf(),
+        message: format!(
+            "a layout theme may not set {what} ({}): they come from themes/base.yaml",
+            names
+                .iter()
+                .map(|name| name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    };
+    if !layout.colors.is_empty() {
+        return Err(refused("colours", layout.colors.keys().collect()));
+    }
+    if !layout.fonts.is_empty() {
+        return Err(refused("fonts", layout.fonts.keys().collect()));
+    }
+    let mut metrics = base.metrics.clone();
+    metrics.extend(layout.metrics);
+    let mut contextual_tab_sets = base.contextual_tab_sets.clone();
+    contextual_tab_sets.extend(layout.contextual_tab_sets);
+    Ok(Theme {
+        schema_version: layout.schema_version,
+        id: layout.id,
+        name: layout.name,
+        fonts: base.fonts.clone(),
+        colors: base.colors.clone(),
+        metrics,
+        contextual_tab_sets,
     })
 }
 
@@ -571,6 +625,75 @@ mod tests {
         }
         let shallow = shallow.to_string();
         assert!(decode_v2::<serde_json::Value>(&shallow, Path::new("shallow.json")).is_ok());
+    }
+
+    /// A theme document from YAML text (test input).
+    fn theme_yaml(text: &str) -> Theme {
+        decode_v2(text, Path::new("themes/test.yaml")).expect("a theme")
+    }
+
+    #[test]
+    fn a_layout_theme_takes_the_base_colours_fonts_and_metrics() {
+        let base = theme_yaml(
+            "schema_version: 1\nid: base\nname: Base\n\
+             fonts: {ui: {family: Selawik, size_px: 12}}\n\
+             colors: {accent: '#112233'}\n\
+             metrics: {status_bar.height: 22, ruler.size: 16}\n\
+             contextual_tab_sets: {shared: green}\n",
+        );
+        let layout = theme_yaml(
+            "schema_version: 1\nid: panel-x\nname: Panel X\n\
+             metrics: {status_bar.height: 20}\n\
+             contextual_tab_sets: {picture_tools: orange}\n",
+        );
+        let theme = derive_theme(&base, layout, Path::new("themes/panel-x.yaml")).expect("derives");
+        assert_eq!(theme.id, "panel-x");
+        assert_eq!(theme.name, "Panel X");
+        assert_eq!(theme.colors, base.colors);
+        assert_eq!(theme.fonts, base.fonts);
+        // The layout's metric wins; the base fills the rest.
+        assert_eq!(
+            theme.metrics.get("status_bar.height"),
+            Some(&crate::v2::Metric::Px(20.0))
+        );
+        assert_eq!(
+            theme.metrics.get("ruler.size"),
+            Some(&crate::v2::Metric::Px(16.0))
+        );
+        assert_eq!(theme.contextual_tab_sets.len(), 2);
+    }
+
+    #[test]
+    fn the_base_theme_decodes_with_the_palette() {
+        let base = base_theme().expect("the embedded base theme decodes");
+        assert_eq!(base.id, "base");
+        assert_eq!(
+            base.colors.get("accent").map(String::as_str),
+            Some("#1f5bc4")
+        );
+        assert!(base.fonts.contains_key("ui"));
+    }
+
+    #[test]
+    fn a_layout_theme_may_not_set_a_colour_or_a_font() {
+        let base = theme_yaml("schema_version: 1\nid: base\nname: Base\n");
+        let path = Path::new("themes/panel-x.yaml");
+        let colours = theme_yaml(
+            "schema_version: 1\nid: x\nname: X\ncolors: {accent: '#ff0000', tab.text: '#000000'}\n",
+        );
+        let err = derive_theme(&base, colours, path).expect_err("a colour is refused");
+        match err {
+            LoadError::Parse { path: at, message } => {
+                assert_eq!(at, path);
+                assert!(message.contains("colours (accent, tab.text)"), "{message}");
+            }
+            other => panic!("unexpected error {other:?}"),
+        }
+        let fonts = theme_yaml(
+            "schema_version: 1\nid: x\nname: X\nfonts: {ui: {family: Selawik, size_px: 13}}\n",
+        );
+        let err = derive_theme(&base, fonts, path).expect_err("a font is refused");
+        assert!(err.to_string().contains("fonts (ui)"), "{err}");
     }
 
     #[test]

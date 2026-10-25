@@ -26,6 +26,7 @@ mod golden;
 mod layouts;
 mod menus;
 mod modern;
+mod palette;
 mod placement;
 mod popups;
 mod review;

@@ -1,0 +1,159 @@
+# Larrygram base theme: the one design language both Panel layouts
+# share (docs/ui/design.md, ADR 0063 as amended by task P7-18).
+# Every colour and font lives here; a layout theme file
+# (panel-modern.yaml, panel-classic.yaml) holds only the metrics its
+# structure needs and may not set a colour or a font.
+# Colours are sRGB hex (#rrggbb, or #rrggbbaa with alpha); sizes are
+# logical pixels at 100% scaling.
+schema_version: 1
+id: base
+name: Larrygram
+fonts:
+  # The type scale (design.md "Type").
+  ui: {family: Selawik, size_px: 12}                 # body: labels, menus, buttons, tabs
+  caption: {family: Selawik, size_px: 11}            # group captions, tab-set names
+  strong: {family: Selawik Semibold, size_px: 12}    # dialog section headings, the selected File view entry
+  lead: {family: Selawik, size_px: 14}               # wizard and About body text (grows with the window)
+  title: {family: Selawik Semibold, size_px: 15}     # dialog, wizard and File view page titles
+  display: {family: Selawik Light, size_px: 22}      # wizard headings, File view page titles
+colors:
+  # The palette (design.md "Palette"). The widget tokens below each
+  # take one of these values.
+  #   surface #f5f5f5, surface.raised #ffffff, border #d6d6d6,
+  #   border.strong #8a8a8a, text #1f1f1f, text.muted #5f5f5f,
+  #   text.disabled #a3a3a3, accent #1f5bc4, hover #ebebeb,
+  #   pressed #dedede, selected #e3ebf8, selected.border #5b82cc.
+  # Accent
+  accent: '#1f5bc4'                   # File button, selected tab, focus ring, links, default button
+  accent.hover: '#1a4ea8'             # an accent-filled button under the pointer
+  accent.pressed: '#164290'           # an accent-filled button held down
+  accent.text: '#ffffff'              # text on the accent
+  focus: '#1f5bc4'                    # the keyboard focus ring
+  # Chrome (surface)
+  chrome.background: '#f5f5f5'        # tab strip, command bar, menu bar, toolbar rows
+  chrome.title_bar: '#f5f5f5'
+  chrome.text: '#1f1f1f'
+  chrome.text_muted: '#5f5f5f'        # hints, shortcut keys, tab-set names
+  chrome.text_disabled: '#a3a3a3'     # disabled labels and icons
+  chrome.separator: '#d6d6d6'         # between toolbar groups
+  chrome.border: '#d6d6d6'            # the command bar's bottom edge, dividers
+  control.border: '#8a8a8a'           # the edge of a field, check box or standard button
+  shadow: '#0000001f'                 # popup and dialog shadows
+  # Buttons and list rows
+  button.fill: '#00000000'            # a button at rest: flat on its surface
+  button.raised.fill: '#ffffff'       # a standard button (dialogs, the wizard, File view tiles)
+  button.hover.fill: '#ebebeb'
+  button.hover.border: '#ebebeb'
+  button.active.fill: '#dedede'       # held down
+  button.pressed.fill: '#e3ebf8'      # selected: a latched tool or an on toggle
+  button.pressed.border: '#5b82cc'
+  # Menus (surface.raised)
+  menu.background: '#ffffff'
+  menu.gutter: '#ffffff'              # the icon column of a Panel Classic menu
+  menu.border: '#d6d6d6'
+  menu.separator: '#d6d6d6'
+  menu.highlight.fill: '#ebebeb'      # the hovered item
+  menu.highlight.border: '#ebebeb'
+  menu.bar.open.fill: '#e3ebf8'       # the open menu-bar title
+  menu.bar.open.border: '#5b82cc'
+  # The command bar (Panel Modern)
+  tab.text: '#1f1f1f'
+  tab.selected.text: '#1f5bc4'        # with the accent underline
+  group.separator: '#d6d6d6'
+  group.caption.text: '#5f5f5f'
+  contextual.green.band: '#2f7d32'    # the band above a contextual tab set
+  contextual.green.fill: '#eaf4ea'
+  contextual.green.text: '#1e6b22'
+  contextual.orange.band: '#d86a00'
+  contextual.orange.fill: '#fdf1e6'
+  contextual.orange.text: '#a64a00'
+  # Panes (surface.raised)
+  pane.background: '#ffffff'
+  pane.title.fill: '#ffffff'
+  pane.title.text: '#1f1f1f'
+  pane.border: '#d6d6d6'
+  # The drawing area
+  canvas.background: '#e4e4e4'        # the off-page area
+  page.background: '#ffffff'
+  page.border: '#b8b8b8'
+  page.shadow: '#d0d0d0'
+  ruler.background: '#f5f5f5'
+  ruler.ticks: '#5f5f5f'
+  # Status bar and page tabs (surface)
+  status_bar.background: '#f5f5f5'
+  status_bar.text: '#1f1f1f'
+  page_tab.text: '#1f1f1f'
+  page_tab.active.text: '#1f5bc4'
+  # The File view
+  file_view.background: '#ffffff'
+  file_view.nav.background: '#f5f5f5'
+  file_view.nav.text: '#1f1f1f'
+  file_view.nav.selected: '#e3ebf8'   # with an accent bar at its left
+  # Fields (tooltips draw with the menu tokens: egui gives them the window frame)
+  field.background: '#ffffff'
+  # Icon tints (ui-spec/icons.yaml): our own palette, each 3:1 or more
+  # on the chrome and on the selected tint.
+  icon.neutral: '#424242'
+  icon.blue: '#1f5bc4'                # the accent
+  icon.green: '#2f7d32'
+  icon.orange: '#b85600'
+  icon.red: '#c4314b'
+  icon.yellow: '#946c00'
+  icon.purple: '#6b4fbb'
+metrics:
+  # Shape and line (design.md "Spacing, radii and borders")
+  radius.control: 4                   # buttons, fields, tabs, list rows, menu highlights
+  radius.popup: 6                     # menus, tooltips, dialogs, the wizard
+  focus.width: 2
+  tab.underline: 2                    # the selected tab's accent underline
+  file_view.nav.indicator: 3          # the accent bar of the selected File view entry
+  # Shared surfaces
+  title_bar.height: 25
+  shapes_window.width: 262
+  ruler.size: 16
+  page_tabs.height: 40
+  status_bar.height: 22
+  icon.small: 16
+  # The command bar (Panel Modern). The shell runs both metric readers
+  # against every theme, so the base carries both vocabularies.
+  qat.button: {width: 22, height: 22}
+  tab_strip.height: 25
+  tab.padding_x: 12
+  file_button.width: 59
+  command_bar.height: 92
+  command_bar.padding_top: 2
+  group.padding_x: 4
+  group.caption.height: 17
+  group.separator.width: 1
+  launcher: {width: 16, height: 17}   # bottom-right corner of the group caption row
+  button.large: {min_width: 42, height: 69, icon: 32}
+  button.medium: {height: 23, icon: 16}   # icon and label side by side
+  button.small: {width: 22, height: 23, icon: 16}  # icon only
+  split.arrow.width: 12
+  stack.rows: 3
+  stack.row.height: 23
+  rows.row.height: 23                 # two flowing rows (Font, Paragraph groups)
+  rows.gap: 8
+  combo.height: 23
+  check.size: 13
+  file_view.nav.width: 123
+  file_view.nav.row.height: 38
+  # Menus and toolbars (Panel Classic; the menu widget draws every
+  # menu of both layouts)
+  menu_bar.height: 24
+  menu_bar.item.padding_x: 7
+  toolbar.row.height: 26
+  toolbar.button: {width: 23, height: 22}
+  toolbar.split_arrow.width: 11
+  toolbar.separator: {width: 1, margin: 3}
+  toolbar.gripper.width: 7            # drag handle at the left end of a docked toolbar
+  combo.font.width: 144
+  combo.font_size.width: 86
+  combo.zoom.width: 65
+  menu.row.height: 23
+  menu.separator.height: 3
+  menu.gutter.width: 24
+  menu.icon: 16
+  menu.padding_x: 8
+  menu.shortcut.gap: 24
+  menu.submenu_arrow.width: 12
