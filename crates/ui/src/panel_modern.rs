@@ -440,12 +440,12 @@ impl PanelModern {
         }
 
         // The tabs, left to right, with the contextual sets grouped.
-        let mut x = file_rect.max.x;
+        let slots = tab_slots(ui, tabs, &m, file_rect.max.x);
         let active = self.active_index(tabs);
         for (index, tab) in tabs.iter().enumerate() {
             let caption = tab.label.clone().unwrap_or_default();
             let shown = caption.to_uppercase();
-            let tab_width = text_width(ui, &shown) + 2.0 * m.tab_padding_x;
+            let (x, tab_width) = slots.get(index).copied().unwrap_or((file_rect.max.x, 0.0));
             let rect = Rect::from_min_size(
                 egui::pos2(x, strip.min.y),
                 Vec2::new(tab_width, strip.height()),
@@ -486,7 +486,6 @@ impl PanelModern {
                     self.overlay_open = true;
                 }
             }
-            x += tab_width;
         }
 
         // The tab-set captions, one per visible contextual set.
@@ -534,11 +533,13 @@ impl PanelModern {
     fn paint_tab_set_captions(&self, ui: &Ui, tabs: &[&Tab], strip: Rect, start_x: f32) {
         let m = &self.metrics;
         let painter = ui.painter();
-        let mut set_x = start_x;
-        for tab in tabs.iter().filter(|tab| tab.shown_in.is_some()) {
-            let caption = tab.label.clone().unwrap_or_default();
-            let shown = caption.to_uppercase();
-            let tab_width = text_width(ui, &shown) + 2.0 * m.tab_padding_x;
+        let slots = tab_slots(ui, tabs, m, start_x);
+        for (index, tab) in tabs
+            .iter()
+            .enumerate()
+            .filter(|(_, tab)| tab.shown_in.is_some())
+        {
+            let (set_x, tab_width) = slots.get(index).copied().unwrap_or((start_x, 0.0));
             let set_name = tab.tab_set.clone().unwrap_or_default();
             let (band_token, _, text_token) = contextual_tokens(
                 set_family(ui.ctx(), &set_name)
@@ -561,7 +562,6 @@ impl PanelModern {
                 egui::FontId::proportional(9.0),
                 crate::theme::color_at(ui.ctx(), text_token),
             );
-            set_x += tab_width;
         }
     }
 
@@ -824,6 +824,22 @@ impl PanelModern {
         }
         Ok(())
     }
+}
+
+/// Where each tab draws in the strip: `(x, width)` in tab order,
+/// starting at `start_x`. The tab buttons and the contextual set
+/// captions read the same table, so a caption block sits exactly
+/// above its tab (P7-14).
+fn tab_slots(ui: &Ui, tabs: &[&Tab], m: &Metrics, start_x: f32) -> Vec<(f32, f32)> {
+    let mut out = Vec::with_capacity(tabs.len());
+    let mut x = start_x;
+    for tab in tabs {
+        let shown = tab.label.clone().unwrap_or_default().to_uppercase();
+        let width = text_width(ui, &shown) + 2.0 * m.tab_padding_x;
+        out.push((x, width));
+        x += width;
+    }
+    out
 }
 
 /// The tabs a context shows: the core tabs, then the contextual tabs

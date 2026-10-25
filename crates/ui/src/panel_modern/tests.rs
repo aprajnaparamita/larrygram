@@ -1600,3 +1600,31 @@ fn the_file_view_pages_draw_with_live_data() {
     rig.click(Role::Button, "Save As");
     assert!(rig.has("Save As"), "the Save As page draws");
 }
+
+/// The tab buttons and the contextual set captions read the same slot
+/// table, so a caption block sits exactly above its tab: the slots run
+/// left to right and a contextual tab comes after the core tabs
+/// (P7-14: the caption used to restart at the File button).
+#[test]
+fn a_contextual_tab_slot_sits_after_the_core_tabs() {
+    let layout = committed();
+    let tabs: Vec<&larrygram_ui_spec::v2::Tab> = layout
+        .tabs
+        .iter()
+        .chain(layout.contextual_tabs.iter())
+        .collect();
+    let m = Metrics::default();
+    let slots = crate::test_util::with_ui(|ui| super::tab_slots(ui, &tabs, &m, 59.0));
+    assert_eq!(slots.len(), tabs.len());
+    for pair in slots.windows(2) {
+        let (x, width) = pair[0];
+        let (next_x, _) = pair[1];
+        assert_eq!(next_x, x + width, "each tab starts where the last ends");
+    }
+    let first_contextual = tabs
+        .iter()
+        .position(|tab| tab.shown_in.is_some())
+        .expect("the layout has a contextual tab");
+    let (x, _) = slots[first_contextual];
+    assert!(x > 59.0, "the contextual tab is right of the File button");
+}
