@@ -40,6 +40,11 @@ pub const LAYOUT_PANEL_MODERN_YAML: &str =
 pub const LAYOUT_PANEL_CLASSIC_YAML: &str =
     include_str!("../../../ui-spec/layouts/panel-classic.yaml");
 
+/// The committed `ui-spec/themes/base.yaml` as embedded text: the
+/// colours and fonts both layout themes derive from (ADR 0063, task
+/// P7-18).
+pub const THEME_BASE_YAML: &str = include_str!("../../../ui-spec/themes/base.yaml");
+
 /// The committed `ui-spec/themes/panel-modern.yaml` as embedded text
 /// (ADR 0063).
 pub const THEME_PANEL_MODERN_YAML: &str = include_str!("../../../ui-spec/themes/panel-modern.yaml");
@@ -181,6 +186,7 @@ mod tests {
             LAYOUT_PANEL_CLASSIC_YAML,
             read("layouts/panel-classic.yaml")
         );
+        assert_eq!(THEME_BASE_YAML, read("themes/base.yaml"));
         assert_eq!(THEME_PANEL_MODERN_YAML, read("themes/panel-modern.yaml"));
         assert_eq!(THEME_PANEL_CLASSIC_YAML, read("themes/panel-classic.yaml"));
         assert_eq!(ICONS_YAML, read("icons.yaml"));
@@ -197,6 +203,7 @@ mod tests {
         assert!(SHORTCUTS_YAML.contains("sequence"));
         assert!(LAYOUT_PANEL_MODERN_YAML.contains("kind: panel-modern"));
         assert!(LAYOUT_PANEL_CLASSIC_YAML.contains("kind: panel-classic"));
+        assert!(THEME_BASE_YAML.contains("id: base"));
         assert!(THEME_PANEL_MODERN_YAML.contains("id: panel-modern"));
         assert!(THEME_PANEL_CLASSIC_YAML.contains("id: panel-classic"));
         assert!(ICONS_YAML.contains("fallback: placeholder"));

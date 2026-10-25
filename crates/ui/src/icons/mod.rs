@@ -44,12 +44,6 @@ const MAX_CACHE_ENTRIES: usize = 1_024;
 /// per point cannot grow the allocation without bound.
 const MAX_ICON_PIXELS: u32 = 512;
 
-/// Alpha for a disabled icon: 40% of 255, rounded (ADR 0062).
-const DISABLED_ALPHA: u8 = 102;
-
-/// The neutral tint when a theme has no `icon.neutral` token.
-const DEFAULT_TINT: Color32 = Color32::from_rgb(68, 68, 68);
-
 /// Draws the placeholder icon for a control id at `size` points.
 ///
 /// The icon is a simple mark of our own (ADR 0030): a filled rounded
@@ -225,7 +219,8 @@ mod tests {
 /// The atom rasterises the SVG named by `ui-spec/icons.yaml` at `size`
 /// points with the `theme` tint, caches the texture and falls back to
 /// [`icon`] for an unknown key or a rasterisation error. `enabled:
-/// false` draws the icon at 40% alpha.
+/// false` tints the icon `chrome.text_disabled`, the colour of a
+/// disabled label (task P7-18; it was a 40% alpha).
 ///
 /// The key is resolved here, so an unknown key never reaches the
 /// cache. The atom needs the `Ui` to load its texture, which is why the
@@ -262,17 +257,11 @@ pub fn icon_atom(
         );
         return Ok(icon(key, size));
     };
-    let tint = tint_for(theme, entry.tint);
+    let tint = state_tint(theme, entry.tint, enabled);
     let icon = entry.icon;
     let key = key.to_owned();
     Ok(Atom::paint(Vec2::splat(size), move |ui, args| {
-        paint_or_fallback(
-            ui,
-            args.rect,
-            &key,
-            texture_for(ui, icon, tint, size),
-            enabled,
-        );
+        paint_or_fallback(ui, args.rect, &key, texture_for(ui, icon, tint, size));
     }))
 }
 
@@ -310,26 +299,14 @@ pub fn draw(
         paint_mark(ui, rect, key);
         return Ok(());
     };
-    let tint = tint_for(theme, entry.tint);
-    paint_or_fallback(
-        ui,
-        rect,
-        key,
-        texture_for(ui, entry.icon, tint, size),
-        enabled,
-    );
+    let tint = state_tint(theme, entry.tint, enabled);
+    paint_or_fallback(ui, rect, key, texture_for(ui, entry.icon, tint, size));
     Ok(())
 }
 
-fn paint_or_fallback(
-    ui: &Ui,
-    rect: Rect,
-    key: &str,
-    texture: Result<TextureHandle, UiError>,
-    enabled: bool,
-) {
+fn paint_or_fallback(ui: &Ui, rect: Rect, key: &str, texture: Result<TextureHandle, UiError>) {
     match texture {
-        Ok(texture) => paint_texture(ui, rect, &texture, enabled),
+        Ok(texture) => paint_texture(ui, rect, &texture),
         Err(error) => {
             warn_once(
                 key,
@@ -460,20 +437,32 @@ fn rasterize(bytes: &[u8], tint: Color32, pixels: u32) -> Result<ColorImage, UiE
     ))
 }
 
-fn paint_texture(ui: &Ui, rect: Rect, texture: &TextureHandle, enabled: bool) {
+fn paint_texture(ui: &Ui, rect: Rect, texture: &TextureHandle) {
     let uv = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
-    let alpha = if enabled { 255 } else { DISABLED_ALPHA };
-    ui.painter()
-        .image(texture.id(), rect, uv, Color32::from_white_alpha(alpha));
+    // The texture carries its tint; white draws it as rasterised.
+    ui.painter().image(texture.id(), rect, uv, Color32::WHITE);
 }
 
+/// The tint of an icon: its map tint when `enabled`, else the disabled
+/// text colour (`chrome.text_disabled`), so a disabled icon matches a
+/// disabled label (docs/ui/design.md).
+fn state_tint(theme: &Theme, token: Option<&str>, enabled: bool) -> Color32 {
+    if enabled {
+        tint_for(theme, token)
+    } else {
+        crate::theme::color(theme, "chrome.text_disabled")
+    }
+}
+
+/// The colour of tint `token` (`icon.neutral` when `None`); a token the
+/// theme lacks or cannot parse draws `icon.neutral`.
 fn tint_for(theme: &Theme, token: Option<&str>) -> Color32 {
     let token = token.unwrap_or("icon.neutral");
     theme
         .colors
         .get(token)
         .and_then(|value| parse_hex_color(value))
-        .unwrap_or(DEFAULT_TINT)
+        .unwrap_or_else(|| crate::theme::color(theme, "icon.neutral"))
 }
 
 fn parse_hex_color(value: &str) -> Option<Color32> {
@@ -673,7 +662,11 @@ mod icon_set_tests {
             tint_for(&theme(), None),
             Color32::from_rgb(0x44, 0x44, 0x44)
         );
-        assert_eq!(tint_for(&theme(), Some("icon.missing")), DEFAULT_TINT);
+        assert_eq!(
+            tint_for(&theme(), Some("icon.missing")),
+            Color32::from_rgb(0x44, 0x44, 0x44),
+            "an unknown tint draws icon.neutral"
+        );
         assert_eq!(
             parse_hex_color("#2b6cc4"),
             Some(Color32::from_rgb(0x2b, 0x6c, 0xc4))
@@ -701,9 +694,19 @@ mod icon_set_tests {
     }
 
     #[test]
-    fn a_disabled_icon_is_painted_at_40_percent_alpha() {
-        assert_eq!(Color32::from_white_alpha(255), Color32::WHITE);
-        assert_eq!(DISABLED_ALPHA, 102);
+    fn a_disabled_icon_takes_the_disabled_text_colour() {
+        let mut theme = theme();
+        theme
+            .colors
+            .insert("chrome.text_disabled".to_owned(), "#a3a3a3".to_owned());
+        assert_eq!(
+            state_tint(&theme, Some("icon.blue"), false),
+            Color32::from_rgb(0xa3, 0xa3, 0xa3)
+        );
+        assert_eq!(
+            state_tint(&theme, Some("icon.blue"), true),
+            Color32::from_rgb(0x2b, 0x6c, 0xc4)
+        );
     }
 
     #[test]
@@ -717,7 +720,6 @@ mod icon_set_tests {
                 Err(UiError::Render {
                     message: "test failure".to_owned(),
                 }),
-                true,
             );
         });
     }
@@ -725,7 +727,7 @@ mod icon_set_tests {
     #[test]
     fn a_missing_embedded_svg_is_an_error() {
         with_ui(|ui| {
-            let result = texture_for(ui, "no-such-icon", DEFAULT_TINT, 16.0);
+            let result = texture_for(ui, "no-such-icon", Color32::from_rgb(68, 68, 68), 16.0);
             assert!(matches!(result, Err(UiError::Render { .. })));
         });
     }

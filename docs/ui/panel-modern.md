@@ -14,12 +14,13 @@ From top to bottom:
    - in the centre, the document title in `chrome.text`;
    - on the right, a help button and the window buttons.
 2. **Tab strip** (25 px):
-   - a 59 px File button in `accent` with white text;
+   - a 59 px File button in `accent` with `accent.text`, the window's
+     one accent-filled control;
    - then the tabs Home, Insert, Design, Data, Process, Review and
      View;
-   - tab captions are drawn in upper case;
-   - the selected tab has a 1 px `chrome.border` outline that opens
-     into the command bar below, with its caption in `tab.selected.text`.
+   - tab captions are drawn in title case;
+   - the selected tab has its caption in `tab.selected.text` and a
+     `tab.underline` (2 px) accent underline.
 3. **Panel Modern** (92 px):
    - groups run left to right, separated by 1 px `group.separator`
      lines;
@@ -144,8 +145,7 @@ Controls in detail:
   open the group's dialog (Font, Paragraph, Shape
   Format, Page Setup, Layout and Routing, Show, Visual Aids, Adjust).
   Their tooltip names the dialog.
-- **Disabled controls** draw text in `chrome.text_disabled` and icons
-  at 40% alpha.
+- **Disabled controls** draw text and icons in `chrome.text_disabled`.
 - **Hover** uses `button.hover.fill`. A pressed or latched control (the
   active Pointer Tool) uses `button.pressed.fill`.
 - **Tooltips** show the label, then the shortcut in brackets, then one

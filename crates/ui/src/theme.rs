@@ -181,11 +181,13 @@ fn text_styles(theme: &Theme) -> BTreeMap<TextStyle, FontId> {
     let heading_size = heading.map_or(size * 1.5, |spec| font_size(spec.size_px));
     let heading_family = heading.map_or_else(|| family.clone(), |spec| font_family(&spec.family));
 
-    let mut styles = BTreeMap::new();
-    styles.insert(
-        TextStyle::Small,
-        FontId::new((size - 2.0).max(1.0), family.clone()),
+    let small = theme.fonts.get("caption").map_or_else(
+        || FontId::new((size - 2.0).max(1.0), family.clone()),
+        |spec| FontId::new(font_size(spec.size_px), font_family(&spec.family)),
     );
+
+    let mut styles = BTreeMap::new();
+    styles.insert(TextStyle::Small, small);
     styles.insert(TextStyle::Body, FontId::new(size, family.clone()));
     styles.insert(TextStyle::Button, FontId::new(size, family.clone()));
     styles.insert(TextStyle::Monospace, FontId::monospace(size));
@@ -212,74 +214,180 @@ fn font_size(size_px: f64) -> f32 {
     }
 }
 
-/// The egui visuals for the theme tokens mapped in `docs/ui/themes.md`.
+/// The egui visuals for the theme tokens mapped in `docs/ui/themes.md`
+/// (the design language of `docs/ui/design.md`).
+///
+/// Buttons are flat at rest: they take a fill only under the pointer
+/// (`button.hover.*`), while held down (`button.active.fill`) or when
+/// selected (`button.pressed.*`, the selected tint). The surfaces that
+/// need standard framed buttons (dialogs, the wizard) wrap their
+/// controls in [`raise_controls`].
 fn visuals(theme: &Theme) -> Visuals {
+    let token = |name: &str| color(theme, name);
+    let radius = |name: &str| corner_radius(metric_or(theme, name, 0.0));
+    let text = token("chrome.text");
+    let control = radius("radius.control");
+
     let mut visuals = Visuals::light();
-    visuals.panel_fill = color_or(
-        theme,
-        &["chrome.background"],
-        fallback_color("chrome.background"),
-    );
-    visuals.override_text_color = Some(color_or(
-        theme,
-        &["chrome.text"],
-        fallback_color("chrome.text"),
-    ));
-    visuals.weak_text_color = Some(color_or(
-        theme,
-        &["chrome.text_disabled"],
-        fallback_color("chrome.text_disabled"),
-    ));
+    visuals.panel_fill = token("chrome.background");
+    visuals.faint_bg_color = token("chrome.background");
+    visuals.code_bg_color = token("chrome.background");
+    visuals.extreme_bg_color = token("field.background");
+    visuals.override_text_color = Some(text);
+    visuals.weak_text_color = Some(token("chrome.text_muted"));
+    visuals.hyperlink_color = token("accent");
+    visuals.warn_fg_color = token("icon.orange");
+    visuals.error_fg_color = token("icon.red");
+    visuals.text_cursor.stroke = Stroke::new(2.0, token("accent"));
+    visuals.selection.bg_fill = token("button.pressed.fill");
+    visuals.selection.stroke = Stroke::new(1.0, token("accent"));
 
-    visuals.widgets.hovered.weak_bg_fill = color_or(
-        theme,
-        &["button.hover.fill"],
-        fallback_color("button.hover.fill"),
-    );
-    visuals.widgets.hovered.bg_stroke = Stroke::new(
-        1.0,
-        color_or(
-            theme,
-            &["button.hover.border"],
-            fallback_color("button.hover.border"),
-        ),
-    );
-    let pressed = color_or(
-        theme,
-        &["button.pressed.fill"],
-        fallback_color("button.pressed.fill"),
-    );
-    visuals.widgets.active.weak_bg_fill = pressed;
-    visuals.widgets.active.bg_fill = pressed;
-    visuals.widgets.active.bg_stroke = Stroke::new(
-        1.0,
-        color_or(
-            theme,
-            &["button.pressed.border"],
-            fallback_color("button.pressed.border"),
-        ),
-    );
-    visuals.selection.bg_fill = pressed;
+    visuals.window_fill = token("menu.background");
+    visuals.window_stroke = Stroke::new(1.0, token("menu.border"));
+    visuals.window_corner_radius = radius("radius.popup");
+    visuals.menu_corner_radius = radius("radius.popup");
+    visuals.window_shadow.color = token("shadow");
+    visuals.popup_shadow.color = token("shadow");
 
-    visuals.window_fill = color_or(
-        theme,
-        &["menu.background", "tooltip.background", "chrome.background"],
-        fallback_color("menu.background"),
-    );
-    visuals.window_stroke = Stroke::new(
-        1.0,
-        color_or(
-            theme,
-            &["menu.border", "tooltip.border", "chrome.border"],
-            fallback_color("menu.border"),
-        ),
-    );
-    visuals.extreme_bg_color = color_or(
-        theme,
-        &["field.background", "page.background"],
-        Color32::WHITE,
-    );
+    let widgets = &mut visuals.widgets;
+    let fg = Stroke::new(1.0, text);
+    widgets.noninteractive.bg_fill = token("chrome.background");
+    widgets.noninteractive.weak_bg_fill = token("chrome.background");
+    widgets.noninteractive.bg_stroke = Stroke::new(1.0, token("chrome.border"));
+    widgets.noninteractive.fg_stroke = fg;
+
+    widgets.inactive.weak_bg_fill = token("button.fill");
+    // The box of a check box or radio button at rest: a neutral grey,
+    // so it shows on any surface; `raise_controls` gives it the field
+    // fill and a `control.border` edge instead.
+    widgets.inactive.bg_fill = token("button.active.fill");
+    widgets.inactive.bg_stroke = Stroke::NONE;
+    widgets.inactive.fg_stroke = fg;
+
+    widgets.hovered.weak_bg_fill = token("button.hover.fill");
+    widgets.hovered.bg_fill = token("button.hover.fill");
+    widgets.hovered.bg_stroke = Stroke::new(1.0, token("button.hover.border"));
+    widgets.hovered.fg_stroke = fg;
+
+    widgets.active.weak_bg_fill = token("button.active.fill");
+    widgets.active.bg_fill = token("button.active.fill");
+    widgets.active.bg_stroke =
+        Stroke::new(metric_or(theme, "focus.width", 2.0) as f32, token("focus"));
+    widgets.active.fg_stroke = fg;
+
+    widgets.open.weak_bg_fill = token("button.active.fill");
+    widgets.open.bg_fill = token("menu.background");
+    // An open combo or menu button shows the selected edge.
+    widgets.open.bg_stroke = Stroke::new(1.0, token("button.pressed.border"));
+    widgets.open.fg_stroke = fg;
+
+    for state in [
+        &mut widgets.noninteractive,
+        &mut widgets.inactive,
+        &mut widgets.hovered,
+        &mut widgets.active,
+        &mut widgets.open,
+    ] {
+        state.corner_radius = control;
+        state.expansion = 0.0;
+    }
     visuals
+}
+
+/// Gives the controls drawn inside `ui` the standard frame of
+/// `docs/ui/design.md`: a raised fill (`button.raised.fill`) and a
+/// visible edge (`control.border`) at rest, for dialogs, the wizard and
+/// the File view tiles. Check boxes and radio buttons get the same
+/// edge. The rest of the app keeps flat buttons.
+pub fn raise_controls(ui: &mut egui::Ui) {
+    let edge = Stroke::new(1.0, color_at(ui.ctx(), "control.border"));
+    let raised = color_at(ui.ctx(), "button.raised.fill");
+    let field = color_at(ui.ctx(), "field.background");
+    let widgets = &mut ui.visuals_mut().widgets;
+    widgets.inactive.weak_bg_fill = raised;
+    widgets.inactive.bg_fill = field;
+    widgets.inactive.bg_stroke = edge;
+    widgets.hovered.bg_stroke = edge;
+}
+
+/// Gives the buttons drawn inside `ui` the accent fill of a default
+/// button (the File button, the wizard's Next and Start): `accent` at
+/// rest, `accent.hover` under the pointer, `accent.pressed` held down,
+/// with `accent.text` labels.
+pub fn accent_controls(ui: &mut egui::Ui) {
+    let ctx = ui.ctx().clone();
+    let label = color_at(&ctx, "accent.text");
+    let visuals = ui.visuals_mut();
+    visuals.override_text_color = Some(label);
+    for (state, token) in [
+        (&mut visuals.widgets.inactive, "accent"),
+        (&mut visuals.widgets.hovered, "accent.hover"),
+        (&mut visuals.widgets.active, "accent.pressed"),
+        (&mut visuals.widgets.open, "accent.pressed"),
+    ] {
+        let fill = color_at(&ctx, token);
+        state.weak_bg_fill = fill;
+        state.bg_fill = fill;
+        state.bg_stroke = Stroke::new(1.0, fill);
+        state.fg_stroke = Stroke::new(1.0, label);
+    }
+}
+
+/// The font of the theme's type-scale `role` on `ctx` (`ui`,
+/// `caption`, `strong`, `title`, `display`; `docs/ui/design.md`
+/// "Type"), or the body font when the theme lacks the role.
+pub fn font_at(ctx: &Context, role: &str) -> FontId {
+    let style = ctx.global_style();
+    style
+        .text_styles
+        .get(&TextStyle::Name(role.into()))
+        .or_else(|| style.text_styles.get(&TextStyle::Body))
+        .cloned()
+        .unwrap_or_else(|| FontId::proportional(FALLBACK_FONT_SIZE))
+}
+
+/// [`font_at`] for `role`, its size multiplied by `scale` (the wizard
+/// and the About window grow their text with the window).
+pub fn scaled_font(ctx: &Context, role: &str, scale: f32) -> FontId {
+    let font = font_at(ctx, role);
+    let scale = if scale.is_finite() {
+        scale.clamp(0.1, 10.0)
+    } else {
+        1.0
+    };
+    FontId::new(font.size * scale, font.family)
+}
+
+/// The scalar metric `token` on `ctx` in logical pixels, or `fallback`
+/// when no theme is applied or the theme lacks the token.
+pub fn metric_at(ctx: &Context, token: &str, fallback: f32) -> f32 {
+    match current(ctx) {
+        Some(theme) => metric_or(&theme, token, f64::from(fallback)) as f32,
+        None => fallback,
+    }
+}
+
+/// The scalar metric `token`, or `fallback` (with one warning) when the
+/// theme lacks it.
+fn metric_or(theme: &Theme, token: &str, fallback: f64) -> f64 {
+    match theme.metrics.get(token) {
+        Some(Metric::Px(px)) if px.is_finite() => *px,
+        _ => {
+            warn_once(theme, token);
+            fallback
+        }
+    }
+}
+
+/// An egui corner radius from a logical-pixel metric, clamped to the
+/// `u8` egui stores.
+fn corner_radius(px: f64) -> egui::CornerRadius {
+    let px = if px.is_finite() {
+        px.clamp(0.0, 255.0)
+    } else {
+        0.0
+    };
+    egui::CornerRadius::same(px.round() as u8)
 }
 
 /// The colour for `token` on `ctx`, with an egui-default fallback.
@@ -293,23 +401,6 @@ pub fn color_at(ctx: &Context, token: &str) -> Color32 {
         Some(theme) => color(&theme, token),
         None => fallback_color(token),
     }
-}
-
-/// The first present token in `tokens`, else `fallback` with one warning.
-fn color_or(theme: &Theme, tokens: &[&str], fallback: Color32) -> Color32 {
-    for token in tokens {
-        if let Some(color) = theme
-            .colors
-            .get(*token)
-            .and_then(|value| parse_color(value))
-        {
-            return color;
-        }
-    }
-    if let Some(token) = tokens.first() {
-        warn_once(theme, token);
-    }
-    fallback
 }
 
 /// Parses `#rrggbb`, `#rrggbbaa` or the short `#rgb`/`#rgba` spellings.
@@ -348,59 +439,27 @@ fn parse_color(value: &str) -> Option<Color32> {
     }
 }
 
-/// The egui-light fallback for a known token, or mid grey for an unknown
-/// one.
+/// The fallback for `token`: its value in the embedded base theme
+/// (`ui-spec/themes/base.yaml`, the one palette), or mid grey for a
+/// name the base does not define.
 fn fallback_color(token: &str) -> Color32 {
-    match token {
-        "chrome.background" => Color32::from_gray(248),
-        "chrome.text" => Color32::from_gray(80),
-        "chrome.text_disabled" => Color32::from_gray(140),
-        "chrome.border" => Color32::from_gray(190),
-        "button.hover.fill" => Color32::from_gray(230),
-        "button.hover.border" => Color32::TRANSPARENT,
-        "button.pressed.fill" => Color32::from_gray(210),
-        "button.pressed.border" => Color32::from_gray(190),
-        "menu.background" | "tooltip.background" => Color32::from_gray(248),
-        "menu.border" | "tooltip.border" => Color32::from_gray(190),
-        "field.background" | "page.background" | "file_view.background" => Color32::WHITE,
-        "canvas.background" => Color32::from_rgb(204, 204, 204),
-        "page.border" => Color32::from_rgb(169, 176, 184),
-        "page.shadow" => Color32::from_rgb(234, 234, 234),
-        "ruler.background" => Color32::from_rgb(232, 232, 232),
-        "ruler.ticks" => Color32::from_rgb(120, 120, 120),
-        "chrome.title_bar" => Color32::WHITE,
-        "chrome.separator" => Color32::from_gray(190),
-        "menu.gutter" => Color32::from_gray(233),
-        "menu.separator" => Color32::from_gray(154),
-        "menu.highlight.fill" => Color32::from_rgb(255, 231, 162),
-        "menu.highlight.border" => Color32::from_rgb(255, 189, 105),
-        "menu.bar.open.fill" => Color32::from_rgb(181, 209, 245),
-        "menu.bar.open.border" => Color32::from_rgb(101, 147, 207),
-        "pane.background" => Color32::from_gray(238),
-        "pane.title.fill" => Color32::from_rgb(184, 207, 233),
-        "pane.title.text" => Color32::from_gray(64),
-        "pane.border" => Color32::from_rgb(118, 153, 199),
-        "accent" => Color32::from_rgb(0x39, 0x55, 0xa3),
-        "accent.text" => Color32::WHITE,
-        "group.separator" => Color32::from_gray(225),
-        "group.caption.text" => Color32::from_gray(102),
-        "tab.text" => Color32::from_gray(68),
-        "tab.selected.text" => Color32::from_rgb(0x39, 0x55, 0xa3),
-        "contextual.green.band" => Color32::from_rgb(0x49, 0xa3, 0x49),
-        "contextual.green.fill" => Color32::from_rgb(0xe6, 0xf3, 0xe6),
-        "contextual.green.text" => Color32::from_rgb(0x06, 0x70, 0x06),
-        "contextual.orange.band" => Color32::from_rgb(0xff, 0x9d, 0x00),
-        "contextual.orange.fill" => Color32::from_rgb(0xff, 0xf8, 0xed),
-        "contextual.orange.text" => Color32::from_rgb(0xc4, 0x53, 0x00),
-        "status_bar.background" => Color32::from_rgb(0x39, 0x55, 0xa3),
-        "status_bar.text" => Color32::WHITE,
-        "page_tab.text" => Color32::from_gray(68),
-        "page_tab.active.text" => Color32::from_rgb(0x39, 0x55, 0xa3),
-        "file_view.nav.background" => Color32::from_rgb(0x39, 0x55, 0xa3),
-        "file_view.nav.text" => Color32::WHITE,
-        "file_view.nav.selected" => Color32::from_rgb(0x4d, 0x6a, 0xb8),
-        _ => Color32::GRAY,
-    }
+    base_colors().get(token).copied().unwrap_or(Color32::GRAY)
+}
+
+/// The colours of the embedded base theme, parsed once. A base that
+/// fails to decode leaves the map empty (every fallback is then grey).
+fn base_colors() -> &'static BTreeMap<String, Color32> {
+    static COLORS: OnceLock<BTreeMap<String, Color32>> = OnceLock::new();
+    COLORS.get_or_init(|| {
+        larrygram_ui_spec::v2::base_theme()
+            .map(|base| {
+                base.colors
+                    .iter()
+                    .filter_map(|(name, value)| Some((name.clone(), parse_color(value)?)))
+                    .collect()
+            })
+            .unwrap_or_default()
+    })
 }
 
 /// The tokens that already warned, so a missing token warns once.
@@ -434,6 +493,9 @@ mod tests {
             ("chrome.background", background),
             ("chrome.text", "#112233"),
             ("chrome.text_disabled", "#445566"),
+            ("chrome.text_muted", "#445566"),
+            ("button.active.fill", "#ccddee"),
+            ("focus", "#ddeeff"),
             ("chrome.border", "#778899"),
             ("button.hover.fill", "#aabbcc"),
             ("button.hover.border", "#bbccdd"),
@@ -630,9 +692,10 @@ mod tests {
             color(&bare, "canvas.background"),
             fallback_color("canvas.background")
         );
+        // The fallback is the base theme's value (task P7-18).
         assert_eq!(
             color(&bare, "canvas.background"),
-            Color32::from_rgb(204, 204, 204)
+            Color32::from_rgb(0xe4, 0xe4, 0xe4)
         );
     }
 

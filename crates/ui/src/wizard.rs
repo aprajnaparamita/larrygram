@@ -111,6 +111,8 @@ pub fn show_with_about<F>(
 where
     F: FnMut(&mut Ui) -> Result<about::Outcome, UiError>,
 {
+    // The wizard's buttons are standard framed controls.
+    crate::theme::raise_controls(ui);
     let outcome = match state.page {
         Page::Welcome => welcome_page(ui, state, about_window)?,
         Page::ChooseLayout => choose_layout_page(ui, state),
@@ -127,24 +129,36 @@ const ART_SHARE: f32 = 0.55;
 /// Width over height of the brand art (`viewBox="0 0 1600 1000"`).
 const ART_ASPECT: f32 = 1.6;
 
-/// The body text size at a text scale of 1, in points.
-const BODY_SIZE: f32 = 14.0;
-
-/// The heading text size at a text scale of 1, in points.
-const HEADING_SIZE: f32 = 22.0;
-
 /// The height of a layout choice's name button.
 const CHOICE_BUTTON_HEIGHT: f32 = 32.0;
 
 /// The gap between a layout choice's picture and its name button.
 const CHOICE_GAP: f32 = 8.0;
 
-/// One footer button, sized with the window's text scale.
-fn footer_button(ui: &mut Ui, label: &str, scale: f32) -> egui::Response {
-    ui.add(
-        egui::Button::new(egui::RichText::new(label).size(BODY_SIZE * scale))
-            .min_size(egui::vec2(80.0 * scale, 0.0)),
-    )
+/// One footer button, sized with the window's text scale: a standard
+/// framed button, or the accent-filled default button when `default`
+/// (Next, Start; docs/ui/design.md).
+fn footer_button(ui: &mut Ui, label: &str, scale: f32, default: bool) -> egui::Response {
+    ui.scope(|ui| {
+        if default {
+            crate::theme::accent_controls(ui);
+        }
+        ui.add(
+            egui::Button::new(egui::RichText::new(label).font(lead(ui, scale)))
+                .min_size(egui::vec2(80.0 * scale, 0.0)),
+        )
+    })
+    .inner
+}
+
+/// The wizard's body font (the theme's `lead` role) at `scale`.
+fn lead(ui: &Ui, scale: f32) -> egui::FontId {
+    crate::theme::scaled_font(ui.ctx(), "lead", scale)
+}
+
+/// The wizard's heading font (the theme's `display` role) at `scale`.
+fn heading(ui: &Ui, scale: f32) -> egui::FontId {
+    crate::theme::scaled_font(ui.ctx(), "display", scale)
 }
 
 /// The whole drawing rect of one wizard frame: everything the caller's
@@ -198,16 +212,14 @@ where
     let text = egui::Rect::from_min_max(egui::pos2(art_box.max.x + GAP, body.min.y), body.max);
     let mut column = region(ui, text, egui::Layout::top_down(egui::Align::Min));
     column.add_space(GAP);
-    column.label(
-        egui::RichText::new(TITLE)
-            .size(HEADING_SIZE * scale)
-            .strong(),
-    );
+    let title_font = heading(&column, scale);
+    column.label(egui::RichText::new(TITLE).font(title_font));
     column.add_space(GAP * 0.75);
-    column.label(egui::RichText::new(DESCRIPTION).size(BODY_SIZE * scale));
+    let body_font = lead(&column, scale);
+    column.label(egui::RichText::new(DESCRIPTION).font(body_font.clone()));
     column.add_space(GAP);
     if column
-        .button(egui::RichText::new("Why Larrygram?").size(BODY_SIZE * scale))
+        .button(egui::RichText::new("Why Larrygram?").font(body_font))
         .clicked()
     {
         open_about = true;
@@ -243,11 +255,11 @@ where
     }
 
     let mut buttons = region(ui, footer, egui::Layout::right_to_left(egui::Align::Center));
-    if footer_button(&mut buttons, "Next", scale).clicked() {
+    if footer_button(&mut buttons, "Next", scale, true).clicked() {
         state.page = Page::ChooseLayout;
         state.about_open = false;
     }
-    if footer_button(&mut buttons, "Cancel", scale).clicked() {
+    if footer_button(&mut buttons, "Cancel", scale, false).clicked() {
         state.about_open = false;
         outcome = Some(Outcome::Cancel);
     }
@@ -271,11 +283,8 @@ fn choose_layout_page(ui: &mut Ui, state: &mut State) -> Option<Outcome> {
 
     let mut heading = region(ui, body, egui::Layout::top_down(egui::Align::Min));
     heading.add_space(GAP * 0.5);
-    heading.label(
-        egui::RichText::new(LAYOUT_HEADING)
-            .size(HEADING_SIZE * scale)
-            .strong(),
-    );
+    let heading_font = self::heading(&heading, scale);
+    heading.label(egui::RichText::new(LAYOUT_HEADING).font(heading_font));
     let top = heading.min_rect().max.y + GAP;
     let choices = egui::Rect::from_min_max(egui::pos2(body.min.x, top), body.max);
     let column_width = ((choices.width() - GAP) * 0.5).max(0.0);
@@ -322,12 +331,12 @@ fn choose_layout_page(ui: &mut Ui, state: &mut State) -> Option<Outcome> {
     state.default_layout = layout;
 
     let mut buttons = region(ui, footer, egui::Layout::right_to_left(egui::Align::Center));
-    if footer_button(&mut buttons, "Start", scale).clicked() {
+    if footer_button(&mut buttons, "Start", scale, true).clicked() {
         outcome = Some(Outcome::Start {
             default_layout: state.default_layout,
         });
     }
-    if footer_button(&mut buttons, "Back", scale).clicked() {
+    if footer_button(&mut buttons, "Back", scale, false).clicked() {
         state.page = Page::Welcome;
     }
 
