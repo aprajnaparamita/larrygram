@@ -13,6 +13,8 @@
 //! - `coverage [--update-ratchet]`: coverage only; optionally record the ratchet.
 //! - `layers`: check crate layering rules.
 //! - `corpus [--verify-only] [--offline <dir>]`: fetch and verify the test corpus.
+//! - `scout fetch <csv> [--out <dir>]` / `scout classify [--out <dir>]`: the
+//!   wide corpus (task P8-16).
 //! - `extract [--reference <path>] [--out <path>] [--allow-unimplemented] [--check]`:
 //!   regenerate every Phase 1 output from `reference/`, or verify the
 //!   committed files with `--check`. See ADR 0009.
@@ -32,6 +34,7 @@ mod gate;
 mod layers;
 mod oracle;
 mod parity;
+mod scout;
 mod util;
 
 use std::process::ExitCode;
@@ -54,6 +57,8 @@ tasks:
   layers                               check crate layering rules
   corpus [--verify-only] [--offline d] fetch and verify the test corpus (ADR 0005)
                                        --offline copies from a local dir instead of the network
+  scout fetch <csv> [--out d]          fetch and pin the wide corpus of a BigQuery export
+  scout classify [--out d]             write the wide-corpus index and exclusions
   extract [--reference <path>] [--out <path>] [--allow-unimplemented] [--check]
                                        regenerate Phase 1 outputs from reference/
                                        --check regenerates into a scratch dir and
@@ -85,6 +90,8 @@ enum Task {
     Layers,
     /// `cargo xtask corpus`.
     Corpus(corpus::Options),
+    /// `cargo xtask scout`.
+    Scout(scout::Options),
     /// `cargo xtask extract`.
     Extract(extract::ExtractArgs),
     /// `cargo xtask oracle` with its raw arguments.
@@ -121,6 +128,7 @@ fn parse_task(args: &[String]) -> Result<Task, String> {
             }
         }
         "corpus" => Ok(Task::Corpus(corpus::parse_args(rest)?)),
+        "scout" => Ok(Task::Scout(scout::parse_args(rest)?)),
         "extract" => Ok(Task::Extract(extract::parse_args(rest)?)),
         "oracle" => {
             oracle::parse_args(rest)?;
@@ -155,6 +163,7 @@ fn run_task(task: Task) -> Result<(), String> {
         Task::Coverage { update_ratchet } => coverage::run(update_ratchet),
         Task::Layers => layers::run(),
         Task::Corpus(opts) => corpus::run_opts(&opts),
+        Task::Scout(opts) => scout::run(&opts),
         Task::Extract(parsed) => extract_dispatch(&parsed),
         Task::Oracle(args) => oracle::run(&args),
         Task::Help => {
