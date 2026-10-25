@@ -3447,7 +3447,10 @@ mod tests {
         });
         assert!(intent_for("not an id").is_err());
         let app = AppCtx::new(seen_settings());
-        assert_eq!(select_intent(&app, larrygram_model::ShapeId { index: 0 }), None);
+        assert_eq!(
+            select_intent(&app, larrygram_model::ShapeId { index: 0 }),
+            None
+        );
         for style in [FrameStyle::Classic, FrameStyle::Modern, FrameStyle::Fluent] {
             let _ = style.shapes_header();
         }
