@@ -12,15 +12,19 @@
 //! `LARRYGRAM_VSD_TWINS` is unset or the directory is not there yet,
 //! exactly like the libvisio oracle (ADR 0010).
 //!
-//! The `.vsdx` reader lives in `larrygram-vsdx`, a same-layer crate
-//! this one may not depend on (ADR 0002; `cargo xtask layers` counts
-//! dev-dependencies), so the corpus run is driven from the
+//! The comparison itself is format-agnostic and lives with the
+//! `larrygram-render` tests
+//! (`crates/render/tests/twins/compare.rs`, MIT: our own code, no
+//! libvisio derivation; P8-17 goal 7 keeps MPL code inside this
+//! crate). The `.vsdx` reader lives in `larrygram-vsdx`, a same-layer
+//! crate this one may not depend on (ADR 0002; `cargo xtask layers`
+//! counts dev-dependencies), so the corpus run is driven from the
 //! `larrygram-render` suite where both readers are dependencies
 //! (`crates/render/tests/corpus_vsd.rs`, `the_vsd_imports_match_their_
-//! vsdx_twins`). This test owns the comparison and its contract; the
+//! vsdx_twins`). This test owns the comparison's contract; the
 //! hand-built documents below exercise it without any file.
 
-#[path = "twins/compare.rs"]
+#[path = "../../render/tests/twins/compare.rs"]
 mod compare;
 
 use std::path::{Path, PathBuf};
