@@ -12,10 +12,22 @@ fonts:
 colors:
   accent: '#3955a3'                   # File button, status bar, selected tab text, pane titles
   accent.text: '#ffffff'              # text on the accent colour
-  chrome.background: '#ffffff'        # title bar, tab strip, command-bar body
+  chrome.background: '#ffffff'        # tab strip, command-bar body
+  chrome.title_bar: '#ffffff'
   chrome.text: '#444444'
   chrome.text_disabled: '#989898'
+  chrome.separator: '#d4d4d4'
   chrome.border: '#d4d4d4'            # selected tab outline, command-bar bottom edge
+  # Menus (the Panel Classic menu widget draws every menu, including
+  # the context menus of this layout).
+  menu.background: '#ffffff'
+  menu.gutter: '#f3f3f3'
+  menu.border: '#bebebe'
+  menu.separator: '#d4d4d4'
+  menu.highlight.fill: '#d5e1f2'      # hovered item
+  menu.highlight.border: '#c2d5f2'
+  menu.bar.open.fill: '#c2cff2'       # the open top-level menu title
+  menu.bar.open.border: '#a3bde3'
   group.separator: '#e1e1e1'
   group.caption.text: '#666666'
   tab.selected.text: '#3955a3'
@@ -31,7 +43,9 @@ colors:
   contextual.orange.fill: '#fff8ed'
   contextual.orange.text: '#c45300'
   pane.background: '#ffffff'
+  pane.title.fill: '#ffffff'
   pane.title.text: '#3955a3'
+  pane.border: '#d4d4d4'
   canvas.background: '#fbfbfb'        # area around the page
   page.background: '#ffffff'
   page.border: '#a9b0b8'
@@ -47,6 +61,7 @@ colors:
   file_view.nav.selected: '#4d6ab8'
   file_view.background: '#ffffff'
   tooltip.background: '#ffffff'
+  field.background: '#ffffff'
   tooltip.border: '#bebebe'           # provisional
   # Icon tints (ui-spec/icons.yaml): our own palette, not sampled.
   icon.neutral: '#444444'
@@ -88,3 +103,24 @@ metrics:
   status_bar.height: 22
   file_view.nav.width: 123
   file_view.nav.row.height: 38
+  # The Panel Classic metrics (`ClassicMetrics` reads them against
+  # every theme: the menus of this layout draw with the same numbers
+  # the Panel Classic chrome uses).
+  menu_bar.height: 24
+  menu_bar.item.padding_x: 7
+  toolbar.row.height: 26
+  toolbar.button: {width: 23, height: 22}
+  toolbar.split_arrow.width: 11
+  toolbar.separator: {width: 1, margin: 3}
+  toolbar.gripper.width: 7
+  combo.font.width: 144
+  combo.font_size.width: 86
+  combo.zoom.width: 65
+  menu.row.height: 23
+  menu.separator.height: 3
+  menu.gutter.width: 24
+  menu.icon: 16
+  menu.padding_x: 8
+  menu.shortcut.gap: 24
+  menu.submenu_arrow.width: 12
+  icon.small: 16

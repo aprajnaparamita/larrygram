@@ -14,20 +14,9 @@ use larrygram_ui_spec::v2::{DisplayMode, Dock, Item, ItemKind};
 use crate::Intent;
 use crate::icons;
 use crate::panel_classic::menu::{self, MenuOutcome};
+use crate::panel_classic::metrics::ClassicMetrics;
 use crate::panel_classic::rows::{self, Activation, Row};
 use crate::panel_classic::{MAX_DEPTH, PanelClassic, PanelInput};
-
-/// Height of one toolbar row (`docs/ui/panel-classic.md`).
-pub(crate) const ROW: f32 = 26.0;
-
-/// Height of a toolbar button.
-const BUTTON_HEIGHT: f32 = 22.0;
-
-/// Width of a toolbar gripper.
-const GRIPPER: f32 = 7.0;
-
-/// Width of a split button's arrow part.
-const SPLIT_ARROW: f32 = 11.0;
 
 /// The id of the right-click toolbar list popup.
 const TOOLBAR_LIST: &str = "panel_classic.toolbar_list";
@@ -55,7 +44,7 @@ pub(crate) fn draw_toolbars(
     by_row.sort_by_key(|(row, _)| *row);
     for (_, row_toolbars) in by_row {
         ui.horizontal_wrapped(|ui| {
-            ui.set_min_height(ROW);
+            ui.set_min_height(ClassicMetrics::for_ctx(ui.ctx()).toolbar_row_height);
             for toolbar in row_toolbars {
                 draw_gripper(ui, &toolbar.id);
                 for item in &toolbar.items {
@@ -126,9 +115,13 @@ fn toolbars_for<'a>(
 
 /// The 7 px gripper at the start of every toolbar.
 fn draw_gripper(ui: &mut Ui, id: &str) {
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(GRIPPER, BUTTON_HEIGHT), Sense::hover());
+    let m = ClassicMetrics::for_ctx(ui.ctx());
+    let (rect, _) = ui.allocate_exact_size(
+        Vec2::new(m.toolbar_gripper_width, m.toolbar_button.y),
+        Sense::hover(),
+    );
     let painter = ui.painter();
-    let color = ui.visuals().widgets.noninteractive.bg_stroke.color;
+    let color = crate::theme::color_at(ui.ctx(), "chrome.separator");
     for offset in [0.0, 3.0] {
         painter.line_segment(
             [
@@ -152,14 +145,22 @@ fn draw_item(
     anchor: &mut Rect,
 ) {
     if item.begin_group {
-        let (rect, _) = ui.allocate_exact_size(Vec2::new(7.0, BUTTON_HEIGHT), Sense::hover());
+        let m = ClassicMetrics::for_ctx(ui.ctx());
+        let margin = m.toolbar_separator_margin;
+        let (rect, _) = ui.allocate_exact_size(
+            Vec2::new(m.toolbar_separator_width + 2.0 * margin, m.toolbar_button.y),
+            Sense::hover(),
+        );
         let y = rect.center().y;
         ui.painter().line_segment(
             [
                 Pos2::new(rect.center().x, y - 8.0),
                 Pos2::new(rect.center().x, y + 8.0),
             ],
-            egui::Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color),
+            egui::Stroke::new(
+                m.toolbar_separator_width,
+                crate::theme::color_at(ui.ctx(), "chrome.separator"),
+            ),
         );
     }
     match item.kind {
@@ -189,17 +190,19 @@ fn draw_button(
     let enabled = !matches!(activation, Activation::Disabled { .. });
     let label = item.label.clone().unwrap_or_default();
     let checked = rows::item_check(item, input, state, false).unwrap_or(false);
+    let m = ClassicMetrics::for_ctx(ui.ctx());
     let response = match button_content(ui.ctx(), item, &label, checked, enabled) {
         Some(button) => {
-            ui.add_enabled_ui(enabled, |ui| {
-                ui.add_sized(Vec2::new(23.0, BUTTON_HEIGHT), button)
-            })
-            .inner
+            ui.add_enabled_ui(enabled, |ui| ui.add_sized(m.toolbar_button, button))
+                .inner
         }
         None => {
             let button = egui::Button::new(label.clone()).selected(checked);
             ui.add_enabled_ui(enabled, |ui| {
-                ui.add_sized(Vec2::new(48.0, BUTTON_HEIGHT), button)
+                ui.add_sized(
+                    Vec2::new(2.0 * m.toolbar_button.x, m.toolbar_button.y),
+                    button,
+                )
             })
             .inner
         }
@@ -224,15 +227,16 @@ fn button_content(
     checked: bool,
     enabled: bool,
 ) -> Option<egui::Button<'static>> {
+    let icon_size = ClassicMetrics::for_ctx(ctx).icon_small;
     let display = item.display.unwrap_or(DisplayMode::Icon);
     match (display, item.icon.as_deref()) {
         (DisplayMode::Text, _) | (_, None) => None,
         (DisplayMode::Icon, Some(icon)) => Some(
-            egui::Button::new(icons::icon_themed(ctx, icon, menu::ICON, enabled)).selected(checked),
+            egui::Button::new(icons::icon_themed(ctx, icon, icon_size, enabled)).selected(checked),
         ),
         (DisplayMode::IconText, Some(icon)) => Some(
             egui::Button::new((
-                icons::icon_themed(ctx, icon, menu::ICON, enabled),
+                icons::icon_themed(ctx, icon, icon_size, enabled),
                 label.to_owned(),
             ))
             .selected(checked),
@@ -306,17 +310,16 @@ fn draw_split(
     let enabled = !matches!(main_activation, Activation::Disabled { .. });
     let main_label = main_item.label.clone().unwrap_or_else(|| label.clone());
     let main_checked = rows::item_check(&main_item, input, state, false).unwrap_or(false);
+    let m = ClassicMetrics::for_ctx(ui.ctx());
     let response = match button_content(ui.ctx(), &main_item, &main_label, main_checked, enabled) {
         Some(button) => {
-            ui.add_enabled_ui(enabled, |ui| {
-                ui.add_sized(Vec2::new(23.0, BUTTON_HEIGHT), button)
-            })
-            .inner
+            ui.add_enabled_ui(enabled, |ui| ui.add_sized(m.toolbar_button, button))
+                .inner
         }
         None => {
             ui.add_enabled_ui(enabled, |ui| {
                 ui.add_sized(
-                    Vec2::new(48.0, BUTTON_HEIGHT),
+                    Vec2::new(2.0 * m.toolbar_button.x, m.toolbar_button.y),
                     egui::Button::new(main_label.clone()),
                 )
             })
@@ -333,9 +336,9 @@ fn draw_split(
         anchor,
     );
     // The arrow part.
-    let arrow = egui::Button::new(icons::dropdown_arrow(menu::ICON))
-        .min_size(Vec2::new(SPLIT_ARROW, BUTTON_HEIGHT));
-    let response = ui.add_sized(Vec2::new(SPLIT_ARROW, BUTTON_HEIGHT), arrow);
+    let arrow_size = Vec2::new(m.toolbar_split_arrow_width, m.toolbar_button.y);
+    let arrow = egui::Button::new(icons::dropdown_arrow(m.icon_small)).min_size(arrow_size);
+    let response = ui.add_sized(arrow_size, arrow);
     response.widget_info(|| {
         WidgetInfo::labeled(egui::accesskit::Role::Button, true, format!("{label} menu"))
     });
@@ -361,17 +364,24 @@ fn draw_dropdown(
     let label = item.label.clone().unwrap_or_default();
     let activation = rows::button_activation(item, input, Source::Ui, Args::new());
     let enabled = !matches!(activation, Activation::Disabled { .. });
+    let m = ClassicMetrics::for_ctx(ui.ctx());
     let content = egui::Button::new((
         icons::icon_themed(
             ui.ctx(),
             item.icon.as_deref().unwrap_or(&item.id),
-            menu::ICON,
+            m.icon_small,
             enabled,
         ),
         icons::dropdown_arrow(10.0),
     ));
     let response = ui.add_enabled_ui(enabled, |ui| {
-        ui.add_sized(Vec2::new(34.0, BUTTON_HEIGHT), content)
+        ui.add_sized(
+            Vec2::new(
+                m.toolbar_button.x + m.toolbar_split_arrow_width,
+                m.toolbar_button.y,
+            ),
+            content,
+        )
     });
     let mut response = response.inner;
     response
@@ -404,11 +414,15 @@ fn draw_combo(
         rows::combo_activation(item, input, Source::Ui, String::new()),
         Activation::Disabled { .. }
     );
-    let width = item.width.unwrap_or(86.0) as f32;
+    let m = ClassicMetrics::for_ctx(ui.ctx());
+    let width = item
+        .width
+        .map(|width| width as f32)
+        .unwrap_or_else(|| combo_width(&item.id, &m));
     let response = ui
         .add_enabled_ui(enabled, |ui| {
             ui.add_sized(
-                Vec2::new(width, BUTTON_HEIGHT),
+                Vec2::new(width, m.toolbar_button.y),
                 egui::TextEdit::singleline(&mut buffer).hint_text(label.clone()),
             )
         })
@@ -434,6 +448,17 @@ fn draw_combo(
             .cloned()
             .unwrap_or_default();
         state.combo_text.insert(item.id.clone(), applied);
+    }
+}
+
+/// The themed width of one toolbar combo (`combo.font.width`,
+/// `combo.font_size.width` and `combo.zoom.width`): the item id's last
+/// segment names the combo.
+fn combo_width(id: &str, m: &ClassicMetrics) -> f32 {
+    match id.rsplit('.').next() {
+        Some("font") => m.combo_font_width,
+        Some("zoom") => m.combo_zoom_width,
+        _ => m.combo_font_size_width,
     }
 }
 

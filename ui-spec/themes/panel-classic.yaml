@@ -9,7 +9,7 @@ fonts:
   status: {family: Selawik, size_px: 12}
 colors:
   # Window chrome
-  chrome.background: '#bfdbff'        # menu bar, toolbar rows, status bar
+  chrome.background: '#bfdbff'        # menu bar, toolbar rows
   chrome.title_bar: '#ffffff'
   chrome.text: '#000000'
   chrome.text_disabled: '#8d8d8d'
@@ -32,6 +32,7 @@ colors:
   # Panes and drawing area
   pane.background: '#eeeef4'          # Shapes window body, page-tab strip
   pane.title.fill: '#b8cfe9'
+  pane.title.text: '#000000'
   pane.border: '#7699c7'
   canvas.background: '#9b9ab3'        # area around the page
   page.background: '#ffffff'
@@ -39,10 +40,33 @@ colors:
   page.shadow: '#eaeaea'              # the drop shadow beside and below the page
   ruler.background: '#ffffff'
   ruler.ticks: '#000000'
-  scroll.track: '#cdcdcd'
   tooltip.background: '#ffffe1'
   tooltip.border: '#000000'           # provisional
   field.background: '#ffffff'         # combo boxes and search boxes
+  # The Panel Modern vocabulary (`Metrics` and the modern chrome
+  # tokens read against every theme, as the classic vocabulary is).
+  # The values are the Panel Modern palette; a Panel Classic session
+  # never draws those surfaces, so the look stays Panel Classic.
+  accent: '#6593cf'
+  accent.text: '#ffffff'
+  group.separator: '#9ac6ff'
+  group.caption.text: '#000000'
+  tab.text: '#000000'
+  tab.selected.text: '#6593cf'
+  contextual.green.band: '#49a349'
+  contextual.green.fill: '#e6f3e6'
+  contextual.green.text: '#067006'
+  contextual.orange.band: '#ff9d00'
+  contextual.orange.fill: '#fff8ed'
+  contextual.orange.text: '#c45300'
+  status_bar.background: '#bfdbff'
+  status_bar.text: '#000000'
+  page_tab.text: '#000000'
+  page_tab.active.text: '#6593cf'
+  file_view.background: '#ffffff'
+  file_view.nav.background: '#6593cf'
+  file_view.nav.text: '#ffffff'
+  file_view.nav.selected: '#7ba7dc'
   # Icon tints (ui-spec/icons.yaml): our own palette.
   icon.neutral: '#1f3864'
   icon.blue: '#2b6cc4'
@@ -75,7 +99,6 @@ metrics:
   page_tabs.height: 18
   status_bar.height: 20
   icon.small: 16
-  icon.large: 32
   # The Panel Modern metrics `Metrics::from_theme` reads (the shell
   # runs it against every theme). The values are the widget defaults
   # (`crates/ui/src/panel_modern/metrics.rs`), so a Panel Classic

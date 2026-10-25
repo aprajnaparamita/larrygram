@@ -1,19 +1,28 @@
-//! Every theme token the widgets read exists in both committed themes
-//! (ADR 0065 "Data tests", task P7-10).
+//! The theme-token contract of ADR 0063, both directions (ADR 0065
+//! "Data tests"; tasks P7-10 and P7-14).
 //!
-//! The readers are `crates/ui/src/theme.rs` (the egui mapping in
-//! `docs/ui/themes.md`), `crates/ui/src/canvas.rs` (the drawing-area
-//! colours) and `crates/ui/src/panel_modern/metrics.rs`
-//! (`Metrics::from_theme`, which the shell runs against every theme).
-//! A missing token does not crash the app — the readers fall back with
-//! one warning — but the fallback silently changes the look or the
-//! geometry, so the data must carry every token.
+//! Forward: every theme token the widgets read exists in **both**
+//! committed themes. The widgets draw the same surfaces under either
+//! theme (the Panel Classic menu widget draws every context menu, the
+//! shell runs both metric readers against the active theme), so the
+//! vocabulary is shared even where a theme's own look never draws a
+//! surface. A missing token does not crash the app — the readers fall
+//! back with one warning — but the fallback silently changes the look
+//! or the geometry, so the data must carry every token.
+//!
+//! Reverse (P7-14's master ruling): every token of a committed theme
+//! is read by some widget — `every_theme_token_is_read_by_a_widget`
+//! scans `crates/ui/src` for the token's name and fails when no widget
+//! mentions it, so dead data cannot accumulate in the YAML files.
 //!
 //! The lists below name every token the widgets read, with the read
-//! site in a comment. `every_read_token_is_listed` scans the three
-//! reader files for token-shaped string literals and fails when one is
-//! not listed here (and not one of the documented non-tokens), so the
-//! lists cannot drift from the code.
+//! site in a comment. `every_read_token_is_listed` scans the reader
+//! seams (`theme.rs`, `canvas.rs` and the two metric readers) for
+//! token-shaped string literals and fails when one is not listed here
+//! (and not one of the documented non-tokens), so the lists cannot
+//! drift from those seams. The widget files read their tokens through
+//! `theme::color_at` with the name from these same lists; the reverse
+//! test covers them.
 
 // The never-crash lints apply to non-test code only (AGENTS.md
 // section 6); these helpers are test code and use `expect` freely.
@@ -29,8 +38,8 @@ fn workspace_root() -> PathBuf {
 }
 
 /// The colour tokens read directly (no fallback chain): `theme.rs`
-/// `visuals` (the single-token `color_or` calls) and `canvas.rs`
-/// `CanvasColors::from_theme`.
+/// `visuals`, `canvas.rs` `CanvasColors::from_theme` and the widgets'
+/// `theme::color_at` reads (P7-14's wiring).
 const COLOR_TOKENS: &[&str] = &[
     // theme.rs `visuals`
     "chrome.background",
@@ -47,6 +56,43 @@ const COLOR_TOKENS: &[&str] = &[
     "page.shadow",
     "ruler.background",
     "ruler.ticks",
+    // shell.rs (title bar, status bar, page tabs, dock panes)
+    "chrome.title_bar",
+    "chrome.separator",
+    "chrome.border",
+    "pane.background",
+    "pane.border",
+    "pane.title.fill",
+    "pane.title.text",
+    "status_bar.background",
+    "status_bar.text",
+    "page_tab.text",
+    "page_tab.active.text",
+    // panel_classic/menu.rs and toolbar.rs
+    "menu.separator",
+    "menu.gutter",
+    "menu.highlight.fill",
+    "menu.highlight.border",
+    "menu.bar.open.fill",
+    "menu.bar.open.border",
+    // panel_modern.rs (tabs, groups, contextual tab sets)
+    "accent",
+    "accent.text",
+    "tab.text",
+    "tab.selected.text",
+    "group.separator",
+    "group.caption.text",
+    "contextual.green.band",
+    "contextual.green.fill",
+    "contextual.green.text",
+    "contextual.orange.band",
+    "contextual.orange.fill",
+    "contextual.orange.text",
+    // file_view.rs
+    "file_view.background",
+    "file_view.nav.background",
+    "file_view.nav.text",
+    "file_view.nav.selected",
 ];
 
 /// The colour fallback chains of `theme.rs` `visuals` (`color_or`):
@@ -62,9 +108,36 @@ const COLOR_CHAINS: &[&[&str]] = &[
 const FONT_REQUIRED: &[&str] = &["ui"];
 const FONT_CHAINS: &[&[&str]] = &[&["title", "pane_title", "ui"]];
 
-/// The metric tokens `panel_modern/metrics.rs` `Metrics::from_theme`
-/// reads (the shell runs it against every theme).
+/// The metric tokens `panel_modern/metrics.rs` (`Metrics::from_theme`)
+/// and `panel_classic/metrics.rs` (`ClassicMetrics::from_theme`) read;
+/// the shell runs both against every theme, and `canvas.rs` reads
+/// `ruler.size`.
 const METRIC_TOKENS: &[&str] = &[
+    // panel_classic/metrics.rs `ClassicMetrics::from_theme`
+    "title_bar.height",
+    "menu_bar.height",
+    "menu_bar.item.padding_x",
+    "toolbar.row.height",
+    "toolbar.button",
+    "toolbar.split_arrow.width",
+    "toolbar.separator",
+    "toolbar.gripper.width",
+    "combo.font.width",
+    "combo.font_size.width",
+    "combo.zoom.width",
+    "menu.row.height",
+    "menu.separator.height",
+    "menu.gutter.width",
+    "menu.icon",
+    "menu.padding_x",
+    "menu.shortcut.gap",
+    "menu.submenu_arrow.width",
+    "shapes_window.width",
+    "ruler.size",
+    "page_tabs.height",
+    "status_bar.height",
+    "icon.small",
+    // panel_modern/metrics.rs `Metrics::from_theme`
     "tab_strip.height",
     "tab.padding_x",
     "file_button.width",
@@ -92,6 +165,10 @@ const METRIC_TOKENS: &[&str] = &[
 /// The named fields the `Metric::Fields` tokens must carry
 /// (`Metrics::from_theme`).
 const METRIC_FIELDS: &[(&str, &str)] = &[
+    ("toolbar.button", "width"),
+    ("toolbar.button", "height"),
+    ("toolbar.separator", "width"),
+    ("toolbar.separator", "margin"),
     ("launcher", "width"),
     ("launcher", "height"),
     ("button.large", "min_width"),
@@ -125,11 +202,15 @@ const NOT_TOKENS: &[&str] = &[
     "view.zoom.out",
 ];
 
-/// The reader source files the scan covers.
+/// The reader seams the drift scan covers: the egui mapping, the
+/// canvas colours and the two metric readers. (The widgets read
+/// through `theme::color_at`; their names are the lists above, and
+/// `every_theme_token_is_read_by_a_widget` covers them.)
 const READER_SOURCES: &[&str] = &[
     "crates/ui/src/theme.rs",
     "crates/ui/src/canvas.rs",
     "crates/ui/src/panel_modern/metrics.rs",
+    "crates/ui/src/panel_classic/metrics.rs",
 ];
 
 /// The two committed themes, loaded from disk through the loader.
@@ -270,5 +351,90 @@ fn token_literals(text: &str) -> Vec<String> {
             out.push(literal.to_owned());
         }
     }
+    out
+}
+
+/// Every token of a committed theme is read by some widget (the P7-14
+/// master ruling: "a test that fails when a theme token is read by no
+/// widget").
+///
+/// The scan looks for the token's name as a quoted literal anywhere in
+/// `crates/ui/src` outside the test modules, so a token no widget
+/// draws fails here and must be deleted from the YAML (or wired where
+/// it is drawn). Font roles are exempt: `theme.rs` `text_styles` maps
+/// every role the theme carries onto an egui text style.
+#[test]
+fn every_theme_token_is_read_by_a_widget() {
+    let sources = widget_sources(&workspace_root());
+    for (name, theme) in themes() {
+        for token in theme.colors.keys() {
+            assert!(
+                sources.contains(&format!("\"{token}\"")),
+                "no widget reads the colour token {token:?} of theme {name}: \
+                 wire it where it is drawn or delete it"
+            );
+        }
+        for token in theme.metrics.keys() {
+            assert!(
+                sources.contains(&format!("\"{token}\"")),
+                "no widget reads the metric token {token:?} of theme {name}: \
+                 wire it where it is drawn or delete it"
+            );
+        }
+    }
+}
+
+/// The concatenated non-test sources of `crates/ui/src`.
+fn widget_sources(root: &Path) -> String {
+    let mut out = String::new();
+    collect_sources(&root.join("crates/ui/src"), &mut out);
+    out
+}
+
+/// Appends every `.rs` file under `dir` (test modules stripped).
+fn collect_sources(dir: &Path, out: &mut String) {
+    let entries = std::fs::read_dir(dir).unwrap_or_else(|e| panic!("read {dir:?}: {e}"));
+    for entry in entries {
+        let path = entry.expect("a directory entry").path();
+        if path.is_dir() {
+            collect_sources(&path, out);
+        } else if path.extension().is_some_and(|ext| ext == "rs") {
+            let text =
+                std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {path:?}: {e}"));
+            out.push_str(&strip_test_modules(&text));
+        }
+    }
+}
+
+/// The source with every `#[cfg(test)]` item removed (brace-matched,
+/// so a mid-file test module does not hide the code after it).
+fn strip_test_modules(text: &str) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(start) = rest.find("#[cfg(test)]") {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + "#[cfg(test)]".len()..];
+        let Some(brace) = after.find('{') else {
+            return out;
+        };
+        let mut depth = 0_usize;
+        let mut end = None;
+        for (index, character) in after[brace..].char_indices() {
+            match character {
+                '{' => depth += 1,
+                '}' => depth = depth.saturating_sub(1),
+                _ => {}
+            }
+            if depth == 0 {
+                end = Some(brace + index + character.len_utf8());
+                break;
+            }
+        }
+        match end {
+            Some(end) => rest = &after[end..],
+            None => return out,
+        }
+    }
+    out.push_str(rest);
     out
 }
