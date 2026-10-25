@@ -100,7 +100,8 @@ impl Command for Builtin {
 /// takes `path`, `out`, `format`, `scale` and `strict`, `file.inspect`
 /// takes `path`, `page` and `json`, `view.zoom.fit` takes `width` and
 /// `height` (points), `view.units` takes `units` (a `DisplayUnits`
-/// name, P4-15), and `file.close` takes an optional `confirm` flag
+/// name, P4-15), `help.welcome.next_start` takes `show` (`"on"` or
+/// `"off"`, P7-14), and `file.close` takes an optional `confirm` flag
 /// (the answer to its `ConfirmClose` request).
 const BUILTINS: &[(&str, &str, EnabledFn, RunFn)] = &[
     (
@@ -175,6 +176,12 @@ const BUILTINS: &[(&str, &str, EnabledFn, RunFn)] = &[
     ),
     ("help.about", "About Larrygram", always, view::run_about),
     ("help.welcome", "Welcome", always, view::run_welcome),
+    (
+        "help.welcome.next_start",
+        "Welcome wizard on next start",
+        always,
+        view::run_welcome_next_start,
+    ),
 ];
 
 /// Builds the registry with every implemented command registered over

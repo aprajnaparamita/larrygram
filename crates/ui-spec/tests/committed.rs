@@ -86,8 +86,10 @@ const PIN_365: LayoutCounts = LayoutCounts {
 // amendment). P7-02 adds the 151 Phase 7 ids the Panel Classic and
 // Panel Modern layouts use, merges the duplicates into the existing
 // rows and drops the two rows that only held a moved Fluent id
-// (`tools.objects.ungroup` and `help.about.visio`).
-const COMMANDS: usize = 1127;
+// (`tools.objects.ungroup` and `help.about.visio`). P7-14 adds
+// `help.welcome.next_start` (the Options dialog's welcome row, the
+// `OUR_COMMANDS` list of `xtask/src/extract/commands.rs`).
+const COMMANDS: usize = 1128;
 const SHORTCUTS: usize = 90;
 
 #[test]

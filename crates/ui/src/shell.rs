@@ -1405,9 +1405,9 @@ impl Shell {
     /// the close confirmation (ADR 0028 [`UiRequest`] flow, ADR 0066).
     ///
     /// The Options dialog body returns the [`Intent`]s of the rows the
-    /// user changed (the ADR 0032 amendment) plus the welcome-wizard
-    /// row; the intents join the frame's intents and run through the
-    /// registry like any other control. The wizard applies
+    /// user changed (the ADR 0032 amendment, the welcome-wizard row
+    /// included); the intents join the frame's intents and run through
+    /// the registry like any other control. The wizard applies
     /// [`wizard::Outcome`] per ADR 0066 and the About window opens
     /// the video through egui's open-URL output.
     fn show_dialogs(&mut self, ui: &mut Ui, intents: &mut Vec<Intent>) {
@@ -1463,11 +1463,6 @@ impl Shell {
                     }
                 });
             self.options_open = open;
-            if let Some(show) = changed.show_wizard_next_start {
-                // The welcome row has no command id (task P7-09):
-                // checked means the wizard opens on the next start.
-                self.app.settings.welcome_seen = !show;
-            }
             self.absorb(Ok(changed.intents), intents);
             if let Some(error) = failure {
                 self.note_error(error.to_string());
