@@ -97,6 +97,10 @@ struct SweepRow {
     masters: usize,
     /// Shape count (the whole arena).
     shapes: usize,
+    /// The shapes the page trees reference (P8-21 goal 4): the shapes
+    /// a page lists and their sub-shapes. An orphan record no page
+    /// references does not count.
+    page_shapes: usize,
     /// Group shapes (shapes with children).
     groups: usize,
     /// Connect records across all pages.
@@ -504,6 +508,32 @@ fn warning_slot(kind: &str) -> usize {
     }
 }
 
+/// The number of shapes the page trees reference (P8-21 goal 4): each
+/// page's own shapes and their sub-shapes. A shape record no page
+/// references (an orphan) does not count — the import's shape list
+/// holds those too. The walk is iterative and bounded by the arena
+/// size, so a hostile child chain cannot loop.
+fn page_shape_count(document: &larrygram_vsd_binary::model::Document) -> usize {
+    let mut stack: Vec<larrygram_vsd_binary::model::ShapeId> = document
+        .pages
+        .iter()
+        .flat_map(|page| page.shapes.iter().copied())
+        .collect();
+    let cap = document.shapes.len().saturating_add(1);
+    let mut count = 0usize;
+    while let Some(id) = stack.pop() {
+        if count >= cap {
+            break;
+        }
+        let Some(shape) = document.shape(id) else {
+            continue;
+        };
+        count += 1;
+        stack.extend(shape.children.iter().copied());
+    }
+    count
+}
+
 /// Runs `import` over one file under `catch_unwind`: every panic is a
 /// bug, and the sweep records it instead of dying.
 fn sweep_one(bytes: &[u8], row: &IndexRow, version_hint: &str) -> (SweepRow, Vec<String>) {
@@ -529,6 +559,7 @@ fn sweep_one(bytes: &[u8], row: &IndexRow, version_hint: &str) -> (SweepRow, Vec
             out.pages = document.pages.len();
             out.masters = document.masters.len();
             out.shapes = document.shapes.len();
+            out.page_shapes = page_shape_count(document);
             for shape in &document.shapes {
                 if !shape.children.is_empty() {
                     out.groups += 1;
@@ -595,7 +626,8 @@ fn cell(cells: &[Cell], name: &str) -> Option<f64> {
 fn sweep_header() -> String {
     "blob_id,tier,ext,kind,version,outcome,error_kind,panic,warnings_total,\
      warning_skipped_record,warning_dropped,warning_unresolved_reference,warning_bad_value,\
-     warning_unsupported,pages,masters,shapes,groups,connects,one_d,text_chars,drawing_scale"
+     warning_unsupported,pages,masters,shapes,groups,connects,one_d,text_chars,drawing_scale,\
+     page_shapes"
         .to_owned()
 }
 
@@ -627,6 +659,7 @@ fn sweep_line(row: &SweepRow) -> String {
         fields.push(count.to_string());
     }
     fields.push(row.drawing_scale.clone());
+    fields.push(row.page_shapes.to_string());
     csv_line(&fields)
 }
 
@@ -946,6 +979,35 @@ mod tests {
         );
         assert_eq!(excluded_reason((false, false, false, true)), None);
         assert_eq!(excluded_reason((false, false, false, false)), None);
+    }
+
+    /// The `page_shapes` count comes from the import's page trees, not
+    /// its shape list (P8-21 goal 4): an orphan record no page
+    /// references does not count, a sub-shape its page's shape
+    /// references does.
+    #[test]
+    fn orphan_shape_records_do_not_count_as_page_shapes() {
+        use larrygram_model::{Document, Page, PageId, Shape, ShapeId};
+        let mut document = Document::new();
+        let mut page = Page::new(PageId { index: 0 }, 0);
+        let on_page = document.add_shape(Shape::new(ShapeId { index: 0 }, 1));
+        let child = document.add_shape(Shape::new(ShapeId { index: 0 }, 2));
+        let orphan = document.add_shape(Shape::new(ShapeId { index: 0 }, 3));
+        if let Some(shape) = document.shape_mut(on_page) {
+            shape.children.push(child);
+        }
+        page.shapes.push(on_page);
+        document.pages.push(page);
+        assert_eq!(
+            document.shapes.len(),
+            3,
+            "the shape list holds the orphan too"
+        );
+        assert_eq!(
+            page_shape_count(&document),
+            2,
+            "orphan {orphan:?} is never referenced"
+        );
     }
 
     #[test]
