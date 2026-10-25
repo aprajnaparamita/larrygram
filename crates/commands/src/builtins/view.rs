@@ -849,6 +849,38 @@ mod tests {
         }
     }
 
+    /// The fit rectangle mixes its arguments with the measured
+    /// viewport in every combination (task P7-20).
+    #[test]
+    fn the_fit_rectangle_mixes_arguments_and_the_viewport() {
+        let mut ctx = one_page_ctx();
+        ctx.active_document_mut().expect("session").view.viewport = Some((612.0, 792.0));
+        // Only the height is given: the measured width fills in.
+        let args = crate::Args::new().with("height", crate::ArgValue::Number(792.0));
+        let outcome =
+            run_zoom_fit(&mut ctx, &Invocation::new(args, crate::Source::Test)).expect("height");
+        assert_eq!(outcome.message.as_deref(), Some("Zoom 100%"));
+        // Only the width is given: the measured height fills in.
+        let args = crate::Args::new().with("width", crate::ArgValue::Number(612.0));
+        run_zoom_fit(&mut ctx, &Invocation::new(args, crate::Source::Test)).expect("width");
+        // An integer rectangle counts.
+        let args = crate::Args::new()
+            .with("width", crate::ArgValue::Integer(612))
+            .with("height", crate::ArgValue::Integer(792));
+        run_zoom_fit(&mut ctx, &Invocation::new(args, crate::Source::Test)).expect("integers");
+
+        // Without a measured viewport each half asks in turn.
+        let mut ctx = one_page_ctx();
+        let args = crate::Args::new().with("height", crate::ArgValue::Number(792.0));
+        let error = run_zoom_fit(&mut ctx, &Invocation::new(args, crate::Source::Test))
+            .expect_err("width missing");
+        assert!(matches!(error, CommandError::NeedsInput(_)), "{error:?}");
+        let args = crate::Args::new().with("width", crate::ArgValue::Number(612.0));
+        let error = run_zoom_fit(&mut ctx, &Invocation::new(args, crate::Source::Test))
+            .expect_err("height missing");
+        assert!(matches!(error, CommandError::NeedsInput(_)), "{error:?}");
+    }
+
     /// A `percent` argument for [`run_zoom_value`].
     fn percent_invocation(value: f64) -> Invocation {
         let args = crate::Args::new().with("percent", crate::ArgValue::Number(value));
