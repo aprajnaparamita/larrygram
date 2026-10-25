@@ -662,13 +662,18 @@ fn background_name(ctx: &AppCtx) -> String {
                 .collect()
         })
         .unwrap_or_default();
+    // The candidates number one more than the taken names, so the loop
+    // always finds one; the seeded value is the last candidate, the
+    // documented fallback.
+    let mut name = format!("Background-{}", taken.len().saturating_add(1));
     for number in 1..=taken.len().saturating_add(1) {
         let candidate = format!("Background-{number}");
         if !taken.contains(&candidate) {
-            return candidate;
+            name = candidate;
+            break;
         }
     }
-    "Background-1".to_owned()
+    name
 }
 
 /// `tools.backgrounds`: assigns the background page named by the
@@ -1188,6 +1193,16 @@ mod tests {
         let error = run_go_to_page(&mut ctx, &Invocation::empty(crate::Source::Test))
             .expect_err("no target");
         assert!(matches!(error, CommandError::NeedsInput(_)), "{error:?}");
+        // A whole number as a real number counts; a fraction does not.
+        let outcome = run_go_to_page(&mut ctx, &invocation(&[("page", ArgValue::Number(1.0))]))
+            .expect("by number");
+        assert_eq!(outcome.message.as_deref(), Some("On Page-1"));
+        let error = run_go_to_page(&mut ctx, &invocation(&[("page", ArgValue::Number(1.5))]))
+            .expect_err("fraction");
+        assert!(
+            matches!(error, CommandError::InvalidArgs { .. }),
+            "{error:?}"
+        );
         let error = run_go_to_page(
             &mut ctx,
             &invocation(&[("name", ArgValue::Text("Nope".to_owned()))]),
@@ -1486,6 +1501,25 @@ mod tests {
             matches!(error, CommandError::InvalidArgs { .. }),
             "{error:?}"
         );
+        let error = parse_page_setup(&invocation(&[(
+            "orientation",
+            ArgValue::Text("sideways".to_owned()),
+        )]))
+        .expect_err("bad orientation");
+        assert!(error.to_string().contains("sideways"), "{error}");
+        let error = parse_page_setup(&invocation(&[("orientation", ArgValue::Flag(true))]))
+            .expect_err("orientation type");
+        assert!(
+            matches!(error, CommandError::InvalidArgs { .. }),
+            "{error:?}"
+        );
+        // An integer size counts.
+        let setup = parse_page_setup(&invocation(&[
+            ("width", ArgValue::Integer(5)),
+            ("height", ArgValue::Integer(7)),
+        ]))
+        .expect("integers");
+        assert_eq!(setup.size, Some((5.0, 7.0)));
         // The unit-only setup applies without an edit.
         let mut ctx = one_shape_ctx();
         let outcome = run_page_setup(
@@ -1495,5 +1529,25 @@ mod tests {
         .expect("units");
         assert_eq!(outcome.message.as_deref(), Some("Page setup: Meters"));
         assert!(outcome.edit.is_none(), "a setting carries no undo");
+    }
+
+    /// The fragment walk skips a repeated id and a stale one (task
+    /// P7-20): never a panic, one copy per shape.
+    #[test]
+    fn page_fragment_skips_stale_and_repeated_ids() {
+        use larrygram_model::{Shape, ShapeId};
+        let mut document = Document::new();
+        let page = document.add_page("Page-1").expect("page");
+        let shape = document
+            .insert_shape(page, Shape::new(ShapeId { index: 0 }, 1), None)
+            .expect("shape");
+        {
+            let entity = document.pages.first_mut().expect("page");
+            entity.shapes.push(shape);
+            entity.shapes.push(ShapeId { index: 999 });
+        }
+        let entity = document.pages.first().expect("page");
+        let fragment = page_fragment(&document, entity).expect("fragment");
+        assert_eq!(fragment.shapes.len(), 1, "one copy of the one shape");
     }
 }
