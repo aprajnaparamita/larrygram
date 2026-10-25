@@ -2080,6 +2080,41 @@ mod tests {
         }
     }
 
+    /// Task P8-09: a `.vsd` picked in the open dialog opens through
+    /// the shell's pick flow into the model the editor shows.
+    #[test]
+    fn a_picked_vsd_opens_through_the_open_flow() {
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("corpus")
+            .join("fixtures")
+            .join("minimal-drawing.vsd");
+        let mut shell = full_shell();
+        shell.set_picker(Box::new(FakePicker {
+            choice: Some(FileChoice::Path(fixture)),
+            ..FakePicker::default()
+        }));
+        let results = shell
+            .dispatch(&[intent("file.open", Source::Ui)])
+            .expect("dispatch");
+        let outcome = results[0].as_ref().expect("opened");
+        assert!(
+            outcome
+                .message
+                .as_deref()
+                .is_some_and(|message| message.starts_with("Opened ")),
+            "{:?}",
+            outcome.message
+        );
+        let session = shell.app.active_document().expect("session");
+        assert_eq!(session.document.pages.len(), 1, "pages in the open model");
+        assert!(
+            !outcome.warnings.is_empty(),
+            "the import warnings surface as a list"
+        );
+    }
+
     /// Task P8-09: the open dialog lists the binary formats beside the
     /// XML ones.
     #[test]
