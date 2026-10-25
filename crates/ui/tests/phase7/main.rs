@@ -276,6 +276,19 @@ impl ShellRig {
         node.click();
     }
 
+    /// Clicks the `nth` widget with `role` and `name` (a popup row
+    /// shares its name with the tab beside it).
+    #[allow(clippy::expect_used)] // test helper: a failure here is the bug
+    pub fn click_nth(&mut self, role: Role, name: &str, nth: usize) {
+        self.run();
+        let root = self.harness.root();
+        let node = root
+            .query_all_by_role_and_label(role, name)
+            .nth(nth)
+            .unwrap_or_else(|| panic!("no {role:?} named {name:?} (#{nth})"));
+        node.click();
+    }
+
     /// Clicks the first widget named `name`, whatever its role.
     #[allow(clippy::expect_used)] // test helper: a failure here is the bug
     pub fn click_named(&mut self, name: &str) {
