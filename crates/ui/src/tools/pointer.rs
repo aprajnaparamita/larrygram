@@ -211,14 +211,20 @@ fn down(
 
     let handle_frame = {
         let scene = state.state.scene(ctx)?;
-        if !ctx.selection.is_empty() && !modifiers.shift && !modifiers.ctrl {
-            selection_frame(ctx, scene)?
-        } else {
+        if ctx.selection.is_empty() {
             None
+        } else {
+            selection_frame(ctx, scene)?
         }
     };
+    // A resize or rotate handle wins with any modifier (task P7-19: a
+    // Shift or Ctrl press on a handle outside the shape started a
+    // marquee); the move interior is a plain press only, so Shift and
+    // Ctrl still toggle and add shapes.
+    let plain = !modifiers.shift && !modifiers.ctrl;
     if let Some((bounds, angle)) = handle_frame
         && let Some(kind) = handle_at(pos, bounds, angle, zoom)?
+        && (plain || kind != HandleKind::Move)
     {
         state.state.mode = Mode::Drag {
             kind,
