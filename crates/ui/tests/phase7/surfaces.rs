@@ -235,3 +235,37 @@ fn the_file_button_opens_the_file_view() {
     assert!(names.contains_key("Info"), "the File view opens: {names:?}");
     assert!(names.contains_key("Open"), "the File view opens: {names:?}");
 }
+
+/// The page-tabs "All" menu lists every page and its rows switch the
+/// active page (P7-12 major 6: the menu body was drawn but never
+/// opened in a test).
+#[test]
+fn the_all_pages_menu_switches_the_active_page() {
+    let mut rig = ShellRig::with_app(app(LayoutKind::PanelModern, true));
+    rig.click_named("All");
+    rig.run();
+    {
+        let names = rig.names();
+        // The page tab and the menu row share a name: the menu draws
+        // a second "Second" beside the tab.
+        assert_eq!(
+            names.get("Second").copied().unwrap_or_default(),
+            2,
+            "the menu draws one row per page beside the tab: {names:?}"
+        );
+    }
+    // The menu rows draw after the tabs, so the second "Second" is
+    // the menu's entry; it switches the page.
+    rig.click_nth(egui::accesskit::Role::Button, "Second", 1);
+    rig.run();
+    assert_eq!(
+        rig.shell
+            .borrow()
+            .app
+            .active_document()
+            .expect("a document")
+            .active_page,
+        Some(PageId { index: 1 }),
+        "the menu's row switches the page"
+    );
+}
