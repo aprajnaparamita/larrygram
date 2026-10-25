@@ -453,18 +453,23 @@ fn page_nodes(ctx: &mut Ctx<'_>, page: PageId, depth: usize) -> Vec<Node> {
     let shapes = entity.shapes.clone();
     let mut nodes = Vec::new();
     for id in shapes {
-        if let Some(node) = shape_node(ctx, page, id, Transform::identity(), depth, &mut Vec::new())
-        {
-            nodes.push(node);
-        }
+        nodes.extend(shape_node(
+            ctx,
+            page,
+            id,
+            Transform::identity(),
+            depth,
+            &mut Vec::new(),
+        ));
     }
     nodes
 }
 
-/// One shape as a scene node: a group for a shape with sub-shapes, a shape
-/// node otherwise, and `None` when the shape draws nothing (an invisible
-/// layer, a guide, an empty geometry without text, a repeat in a cyclic
-/// children list).
+/// The scene nodes of one shape: the fill and the stroke of its geometry
+/// (one node each, P8-17 goal 2), a group for a shape with sub-shapes,
+/// and nothing when the shape draws nothing (an invisible layer, a
+/// guide, an empty geometry without text, a repeat in a cyclic children
+/// list).
 fn shape_node(
     ctx: &mut Ctx<'_>,
     page: PageId,
@@ -472,68 +477,100 @@ fn shape_node(
     parent: Transform,
     depth: usize,
     visited: &mut Vec<ShapeId>,
-) -> Option<Node> {
+) -> Vec<Node> {
     if depth == 0 || visited.contains(&id) {
-        return None;
+        return Vec::new();
     }
     visited.push(id);
     if hidden_by_layer(ctx, page, id) {
-        return None;
+        return Vec::new();
     }
     // A guide draws on screen only: Visio never prints or exports one,
     // so it has no scene node (P8-15: `Visio6PlanWithDimensions.vsd`'s
     // six dimension guides drew as lines across the page).
     if ctx.doc.shape(id).is_some_and(|shape| shape.is_guide) {
-        return None;
+        return Vec::new();
     }
-    let (children, has_children) = {
-        let entity = ctx.doc.shape(id)?;
-        (entity.children.clone(), !entity.children.is_empty())
+    let Some(entity) = ctx.doc.shape(id) else {
+        return Vec::new();
     };
+    let children = entity.children.clone();
+    let has_children = !children.is_empty();
     let local = ctx.shape_transform(SheetRef::Shape(id));
     let absolute = local.then(parent);
-    let (path, fill, stroke, shadow, text) = shape_content(ctx, page, id, absolute);
+    let (fill_path, stroke_path, fill, stroke, mut shadow, mut text) =
+        shape_content(ctx, page, id, absolute);
 
-    let mut node = None;
-    if !path.is_empty() || text.is_some() {
-        // Relative to the enclosing group node (ADR 0020): the group's
-        // own shape sits inside the group, which already carries `local`.
-        let transform = if has_children {
-            Transform::identity()
-        } else {
-            local
-        };
-        node = Some(Node::Shape(Box::new(Shape {
+    // Relative to the enclosing group node (ADR 0020): the group's
+    // own shape sits inside the group, which already carries `local`.
+    let transform = if has_children {
+        Transform::identity()
+    } else {
+        local
+    };
+    let mut own: Vec<Node> = Vec::new();
+    let has_fill_path = !fill_path.is_empty();
+    let has_stroke_path = !stroke_path.is_empty();
+    if fill.is_some() && has_fill_path {
+        own.push(Node::Shape(Box::new(Shape {
             shape_id: Some(id),
             transform,
-            path,
+            path: fill_path.clone(),
             fill,
-            stroke,
-            shadow,
+            stroke: None,
+            shadow: shadow.take(),
             clip: None,
-            text,
+            text: text.take(),
+        })));
+    }
+    if (has_stroke_path && (stroke.is_some() || own.is_empty()))
+        || (text.is_some() && own.is_empty())
+    {
+        let mut node = Shape {
+            shape_id: Some(id),
+            transform,
+            path: stroke_path.clone(),
+            fill: None,
+            stroke,
+            shadow: None,
+            clip: None,
+            text: text.take(),
+        };
+        // The shadow belongs to the shape's first node.
+        if own.is_empty() {
+            node.shadow = shadow.take();
+        }
+        own.push(Node::Shape(Box::new(node)));
+    }
+    if own.is_empty() && (has_fill_path || has_stroke_path) {
+        // The shape paints nothing but carries a path: one node so the
+        // path still takes hits.
+        own.push(Node::Shape(Box::new(Shape {
+            shape_id: Some(id),
+            transform,
+            path: if has_fill_path { fill_path } else { stroke_path },
+            fill: None,
+            stroke: None,
+            shadow: shadow.take(),
+            clip: None,
+            text: text.take(),
         })));
     }
     if !has_children {
-        return node;
+        return own;
     }
-    let mut kids = Vec::new();
-    if let Some(node) = node {
-        kids.push(node);
-    }
+    let mut kids = own;
     for child in children {
-        if let Some(node) = shape_node(ctx, page, child, absolute, depth - 1, visited) {
-            kids.push(node);
-        }
+        kids.extend(shape_node(ctx, page, child, absolute, depth - 1, visited));
     }
     if kids.is_empty() {
-        return None;
+        return Vec::new();
     }
-    Some(Node::Group(Group {
+    vec![Node::Group(Group {
         transform: local,
         clip: None,
         children: kids,
-    }))
+    })]
 }
 
 /// Whether the shape is dropped for being on invisible layers only.
@@ -572,13 +609,21 @@ fn hidden_by_layer(ctx: &mut Ctx<'_>, page: PageId, id: ShapeId) -> bool {
     })
 }
 
-/// The path, paint, stroke, shadow and text of one shape.
+/// The fill and stroke paths, their paints, the shadow and the text of
+/// one shape.
+///
+/// The fill and the stroke carry one path each: a `Geometry` section
+/// fills and strokes on its own (`NoFill`, `NoLine` and `NoShow` are
+/// per section, P8-17 goal 2), and a section fills its fill loop, not
+/// its stroke sub-paths (goal 4).
+#[allow(clippy::type_complexity)] // one shape-content entry point
 fn shape_content(
     ctx: &mut Ctx<'_>,
     page: PageId,
     id: ShapeId,
     transform: Transform,
 ) -> (
+    Path,
     Path,
     Option<Paint>,
     Option<Stroke>,
@@ -606,25 +651,41 @@ fn shape_content(
     let mut warnings = geometry.warnings;
     let page_rect = page_rect_in_local(ctx, page, transform);
 
-    let mut path = Path::new();
+    let mut fill_path = Path::new();
+    let mut stroke_path = Path::new();
     let mut draw_fill = false;
     let mut draw_line = false;
     for section in &geometry.paths {
         if section.no_show {
             continue;
         }
-        draw_fill |= !section.no_fill;
-        draw_line |= !section.no_line;
-        rows_to_path(
-            &section.rows,
-            width,
-            height,
-            ctx.tolerance,
-            page_rect,
-            sheet,
-            &mut warnings,
-            &mut path,
-        );
+        if !section.no_fill {
+            draw_fill = true;
+            section_fill_path(
+                &section.rows,
+                width,
+                height,
+                ctx.tolerance,
+                page_rect,
+                sheet,
+                &mut warnings,
+                &mut fill_path,
+            );
+        }
+        if !section.no_line {
+            draw_line = true;
+            rows_to_path(
+                &section.rows,
+                width,
+                height,
+                ctx.tolerance,
+                page_rect,
+                sheet,
+                &mut warnings,
+                &mut stroke_path,
+                false,
+            );
+        }
     }
     ctx.warnings.append(&mut warnings);
 
@@ -640,7 +701,7 @@ fn shape_content(
     };
     let shadow = build_shadow(ctx, sheet, line_width);
     let text = build_text(ctx, id, width, height);
-    (path, fill, stroke, shadow, text)
+    (fill_path, stroke_path, fill, stroke, shadow, text)
 }
 
 /// The page size used when a page has no positive `PageWidth` or
@@ -700,6 +761,11 @@ struct PendingSpline {
 /// `page_rect` is the page rectangle in shape-local coordinates (for
 /// `InfiniteLine`); `warnings` collects the ADR 0021 warnings of rows the
 /// builder cannot draw faithfully.
+///
+/// `fill_mode` builds the fill loop instead of the stroke: a `MoveTo`
+/// row is a point of the loop (it draws a segment to its point like a
+/// `LineTo`) and only the first row starts the path (P8-17 goal 4: the
+/// fill of an open sub-path, as Visio fills it).
 #[allow(clippy::too_many_arguments)] // one row-mapping entry point
 fn rows_to_path(
     rows: &[GeometryRow],
@@ -710,6 +776,7 @@ fn rows_to_path(
     sheet: SheetRef,
     warnings: &mut Vec<CellWarning>,
     path: &mut Path,
+    fill_mode: bool,
 ) {
     let mut current: Option<Point> = None;
     let mut open = false;
@@ -761,9 +828,13 @@ fn rows_to_path(
         match row {
             GeometryRow::MoveTo { x, y } => {
                 let to = Point::new(*x, *y);
-                path.push(Segment::MoveTo(to));
-                current = Some(to);
-                open = true;
+                if fill_mode && current.is_some() {
+                    line_to(path, &mut current, &mut open, to);
+                } else {
+                    path.push(Segment::MoveTo(to));
+                    current = Some(to);
+                    open = true;
+                }
             }
             GeometryRow::LineTo { x, y } => {
                 line_to(path, &mut current, &mut open, Point::new(*x, *y));
@@ -917,9 +988,13 @@ fn rows_to_path(
             }
             GeometryRow::RelMoveTo { x, y } => {
                 let to = Point::new(*x * width, *y * height);
-                path.push(Segment::MoveTo(to));
-                current = Some(to);
-                open = true;
+                if fill_mode && current.is_some() {
+                    line_to(path, &mut current, &mut open, to);
+                } else {
+                    path.push(Segment::MoveTo(to));
+                    current = Some(to);
+                    open = true;
+                }
             }
             GeometryRow::RelLineTo { x, y } => {
                 line_to(
@@ -1000,6 +1075,122 @@ fn rows_to_path(
     if let Some(pending) = spline.take() {
         flush_spline(path, tolerance, pending, &mut current, &mut open);
     }
+}
+
+/// The fill of one `Geometry` section onto `path` (P8-17 goal 4).
+///
+/// A section whose sub-paths all close on their own start fills each of
+/// them (two closed loops stay two loops). Any other section fills the
+/// way Visio fills it: one loop of the section's rows in order, where a
+/// `MoveTo` row is a point of the loop and the loop closes at the end.
+/// The `no-bgcolor` box's fill sections are open sub-paths and Visio
+/// still fills the whole box (the twins' PDFs).
+fn section_fill_path(
+    rows: &[GeometryRow],
+    width: f64,
+    height: f64,
+    tolerance: f64,
+    page_rect: Option<[Point; 4]>,
+    sheet: SheetRef,
+    warnings: &mut Vec<CellWarning>,
+    path: &mut Path,
+) {
+    let mut probe = Path::new();
+    rows_to_path(
+        rows,
+        width,
+        height,
+        tolerance,
+        page_rect,
+        sheet,
+        warnings,
+        &mut probe,
+        false,
+    );
+    if every_sub_path_closes(&probe) {
+        let mut open = false;
+        for segment in probe.segments() {
+            if matches!(segment, Segment::MoveTo(_)) {
+                if open {
+                    path.push(Segment::Close);
+                }
+                open = true;
+            }
+            path.push(*segment);
+        }
+        if open {
+            path.push(Segment::Close);
+        }
+        return;
+    }
+    let mut loop_path = Path::new();
+    rows_to_path(
+        rows,
+        width,
+        height,
+        tolerance,
+        page_rect,
+        sheet,
+        warnings,
+        &mut loop_path,
+        true,
+    );
+    if loop_path.is_empty() {
+        return;
+    }
+    loop_path.push(Segment::Close);
+    for segment in loop_path.segments() {
+        path.push(*segment);
+    }
+}
+
+/// Whether every sub-path of `path` returns to its own start, so that
+/// closing each of them is the whole fill.
+fn every_sub_path_closes(path: &Path) -> bool {
+    let mut start: Option<Point> = None;
+    let mut last: Option<Point> = None;
+    let mut any = false;
+    for segment in path.segments() {
+        match segment {
+            Segment::MoveTo(p) => {
+                if let (Some(start), Some(last)) = (start, last)
+                    && !same_point(start, last)
+                {
+                    return false;
+                }
+                start = Some(*p);
+                last = Some(*p);
+                any = true;
+            }
+            Segment::LineTo(p) | Segment::QuadTo { to: p, .. } | Segment::CubicTo { to: p, .. } => {
+                last = Some(*p);
+            }
+            Segment::Close => {
+                if let (Some(start), Some(last)) = (start, last)
+                    && !same_point(start, last)
+                {
+                    return false;
+                }
+                start = None;
+                last = None;
+            }
+            // `Segment` is non-exhaustive outside `larrygram-geom`.
+            _ => {}
+        }
+    }
+    if let (Some(start), Some(last)) = (start, last)
+        && !same_point(start, last)
+    {
+        return false;
+    }
+    any
+}
+
+/// Whether two points are the same for the fill rule (a micron of an
+/// inch apart counts as the same; the row lists carry the duplicates
+/// the drawing does not have).
+fn same_point(a: Point, b: Point) -> bool {
+    (a.x - b.x).abs() < 1e-6 && (a.y - b.y).abs() < 1e-6
 }
 
 /// One builder warning for a formula-encoded value that does not parse
@@ -1943,6 +2134,13 @@ mod tests {
     fn number_cell(name: &str, value: f64) -> Cell {
         let mut cell = Cell::new(CellName::new(name));
         cell.value = Some(Value::Number(value));
+        cell
+    }
+
+    /// A cell with a cached boolean.
+    fn bool_cell(name: &str, value: bool) -> Cell {
+        let mut cell = Cell::new(CellName::new(name));
+        cell.value = Some(Value::Bool(value));
         cell
     }
 
@@ -3405,9 +3603,10 @@ mod tests {
         // draws nothing and substitutes the empty geometry.
         let (doc, page, _shape) = document_with_shape();
         let mut ctx = Ctx::new(&doc, styles(), 0.01);
-        let (path, fill, stroke, shadow, text) =
+        let (fill_path, stroke_path, fill, stroke, shadow, text) =
             shape_content(&mut ctx, page, ShapeId { index: 9 }, Transform::identity());
-        assert!(path.is_empty());
+        assert!(fill_path.is_empty());
+        assert!(stroke_path.is_empty());
         assert!(fill.is_none());
         assert!(stroke.is_none());
         assert!(shadow.is_none());
@@ -3765,7 +3964,7 @@ mod tests {
             ],
         );
         let mut ctx = Ctx::new(&doc, styles, 0.01);
-        let (_path, _fill, stroke, _shadow, _text) =
+        let (_fill_path, _stroke_path, _fill, stroke, _shadow, _text) =
             shape_content(&mut ctx, PageId { index: 0 }, shape, Transform::identity());
         let stroke = stroke.expect("a stroke");
         assert!(stroke.end.is_none(), "{:?}", stroke.end);
@@ -3826,5 +4025,192 @@ mod tests {
             }
             other => panic!("expected a shape, got {other:?}"),
         }
+    }
+
+    // --- per-section geometry (P8-17 goals 2 and 4) ------------------
+
+    /// One `Geometry` section of `rows` with `flags` (`NoFill`,
+    /// `NoLine`, `NoShow`) on its section cells.
+    fn geometry_section(rows: Vec<Row>, flags: &[(&str, bool)]) -> Section {
+        let mut section = Section::new(SectionName::new("Geometry"));
+        section.rows = rows;
+        for (name, value) in flags {
+            section.cells.push(bool_cell(name, *value));
+        }
+        section
+    }
+
+    /// The scene nodes of the document's page.
+    fn nodes_of(doc: &Document) -> Vec<Node> {
+        build(doc).nodes
+    }
+
+    #[test]
+    fn a_geometry_section_fills_and_strokes_on_its_own() {
+        // P8-17 goal 2: `NoFill`, `NoLine` and `NoShow` are per
+        // section, so one section fills and another strokes (the same
+        // cells in a `.vsdx` render the same: the model is the one both
+        // readers build).
+        let (mut doc, _page, shape) = document_with_shape();
+        if let Some(entity) = doc.shape_mut(shape) {
+            entity.sheet.cells = vec![
+                number_cell("Width", 1.0),
+                number_cell("Height", 1.0),
+                number_cell("FillPattern", 1.0),
+                number_cell("LinePattern", 1.0),
+            ];
+        }
+        let stroke_only = geometry_section(
+            vec![
+                grow("MoveTo", &[("X", 0.0), ("Y", 0.0)]),
+                grow("LineTo", &[("X", 1.0), ("Y", 0.0)]),
+            ],
+            &[("NoFill", true)],
+        );
+        let fill_only = geometry_section(
+            vec![
+                grow("MoveTo", &[("X", 0.0), ("Y", 0.5)]),
+                grow("LineTo", &[("X", 1.0), ("Y", 0.5)]),
+                grow("LineTo", &[("X", 1.0), ("Y", 1.0)]),
+            ],
+            &[("NoLine", true)],
+        );
+        let hidden = geometry_section(
+            vec![
+                grow("MoveTo", &[("X", 0.0), ("Y", 0.9)]),
+                grow("LineTo", &[("X", 1.0), ("Y", 0.9)]),
+            ],
+            &[("NoShow", true)],
+        );
+        if let Some(entity) = doc.shape_mut(shape) {
+            entity.sheet.sections.push(stroke_only);
+            entity.sheet.sections.push(fill_only);
+            entity.sheet.sections.push(hidden);
+        }
+        let nodes = nodes_of(&doc);
+        assert_eq!(nodes.len(), 2, "one fill node and one stroke node");
+        let (Node::Shape(fill_node), Node::Shape(stroke_node)) = (&nodes[0], &nodes[1]) else {
+            panic!("expected two shape nodes");
+        };
+        assert!(fill_node.fill.is_some() && fill_node.stroke.is_none());
+        assert!(stroke_node.fill.is_none() && stroke_node.stroke.is_some());
+        assert_eq!(
+            fill_node.path.segments(),
+            &[
+                Segment::MoveTo(Point::new(0.0, 0.5)),
+                Segment::LineTo(Point::new(1.0, 0.5)),
+                Segment::LineTo(Point::new(1.0, 1.0)),
+                Segment::Close,
+            ],
+            "the fill path carries the fill-only section and its loop"
+        );
+        assert_eq!(
+            stroke_node.path.segments(),
+            &[
+                Segment::MoveTo(Point::new(0.0, 0.0)),
+                Segment::LineTo(Point::new(1.0, 0.0)),
+            ],
+            "the stroke path carries the stroke-only section; the \
+             `NoShow` section draws nothing"
+        );
+    }
+
+    #[test]
+    fn an_open_sub_path_fills_the_whole_row_loop() {
+        // P8-17 goal 4: the `no-bgcolor` box's fill sections are open
+        // sub-paths and Visio fills the whole box (the twins' PDFs):
+        // the fill is one loop of the section's rows, where a `MoveTo`
+        // is a point of the loop.
+        let (mut doc, _page, shape) = document_with_shape();
+        if let Some(entity) = doc.shape_mut(shape) {
+            entity.sheet.cells = vec![
+                number_cell("Width", 1.0),
+                number_cell("Height", 1.0),
+                number_cell("FillPattern", 1.0),
+            ];
+        }
+        let section = geometry_section(
+            vec![
+                grow("MoveTo", &[("X", 1.0), ("Y", 0.0)]),
+                grow("MoveTo", &[("X", 1.0), ("Y", 0.5)]),
+                grow("LineTo", &[("X", 0.0), ("Y", 0.5)]),
+                grow("MoveTo", &[("X", 0.0), ("Y", 0.0)]),
+                grow("LineTo", &[("X", 1.0), ("Y", 0.0)]),
+            ],
+            &[("NoLine", true)],
+        );
+        if let Some(entity) = doc.shape_mut(shape) {
+            entity.sheet.sections.push(section);
+        }
+        let nodes = nodes_of(&doc);
+        let Node::Shape(fill_node) = &nodes[0] else {
+            panic!("expected a shape node");
+        };
+        assert_eq!(
+            fill_node.path.segments(),
+            &[
+                Segment::MoveTo(Point::new(1.0, 0.0)),
+                Segment::LineTo(Point::new(1.0, 0.5)),
+                Segment::LineTo(Point::new(0.0, 0.5)),
+                Segment::LineTo(Point::new(0.0, 0.0)),
+                Segment::LineTo(Point::new(1.0, 0.0)),
+                Segment::Close,
+            ],
+            "the box fills as its rows loop, not as three open sub-paths"
+        );
+    }
+
+    #[test]
+    fn two_closed_sub_paths_stay_two_fill_loops() {
+        // A ring of two closed loops fills each loop (the fill of an
+        // open section does not swallow it).
+        let (mut doc, _page, shape) = document_with_shape();
+        if let Some(entity) = doc.shape_mut(shape) {
+            entity.sheet.cells = vec![
+                number_cell("Width", 1.0),
+                number_cell("Height", 1.0),
+                number_cell("FillPattern", 1.0),
+            ];
+        }
+        let section = geometry_section(
+            vec![
+                grow("MoveTo", &[("X", 0.0), ("Y", 0.0)]),
+                grow("LineTo", &[("X", 1.0), ("Y", 0.0)]),
+                grow("LineTo", &[("X", 1.0), ("Y", 1.0)]),
+                grow("LineTo", &[("X", 0.0), ("Y", 1.0)]),
+                grow("LineTo", &[("X", 0.0), ("Y", 0.0)]),
+                grow("MoveTo", &[("X", 0.2), ("Y", 0.2)]),
+                grow("LineTo", &[("X", 0.8), ("Y", 0.2)]),
+                grow("LineTo", &[("X", 0.8), ("Y", 0.8)]),
+                grow("LineTo", &[("X", 0.2), ("Y", 0.8)]),
+                grow("LineTo", &[("X", 0.2), ("Y", 0.2)]),
+            ],
+            &[("NoLine", true)],
+        );
+        if let Some(entity) = doc.shape_mut(shape) {
+            entity.sheet.sections.push(section);
+        }
+        let nodes = nodes_of(&doc);
+        let Node::Shape(fill_node) = &nodes[0] else {
+            panic!("expected a shape node");
+        };
+        assert_eq!(
+            fill_node.path.segments(),
+            &[
+                Segment::MoveTo(Point::new(0.0, 0.0)),
+                Segment::LineTo(Point::new(1.0, 0.0)),
+                Segment::LineTo(Point::new(1.0, 1.0)),
+                Segment::LineTo(Point::new(0.0, 1.0)),
+                Segment::LineTo(Point::new(0.0, 0.0)),
+                Segment::Close,
+                Segment::MoveTo(Point::new(0.2, 0.2)),
+                Segment::LineTo(Point::new(0.8, 0.2)),
+                Segment::LineTo(Point::new(0.8, 0.8)),
+                Segment::LineTo(Point::new(0.2, 0.8)),
+                Segment::LineTo(Point::new(0.2, 0.2)),
+                Segment::Close,
+            ],
+            "each closed sub-path closes on its own start"
+        );
     }
 }
