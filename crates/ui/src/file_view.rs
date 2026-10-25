@@ -134,15 +134,13 @@ impl FileView {
             );
             let selected = entry.id == self.page && entry.kind == FileViewEntryKind::Page;
             if selected {
-                ui.painter().rect_filled(
-                    rect,
-                    0.0,
-                    crate::theme::color_at(ui.ctx(), "file_view.nav.selected"),
-                );
+                paint_selected_entry(ui, rect);
             }
             let response = ui
                 .push_id(entry.id.as_str(), |ui| {
+                    let role = if selected { "strong" } else { "ui" };
                     let text = egui::RichText::new(entry.label.as_str())
+                        .font(crate::theme::font_at(ui.ctx(), role))
                         .color(crate::theme::color_at(ui.ctx(), "file_view.nav.text"));
                     ui.put(rect, Button::new(text).frame(false))
                 })
@@ -180,6 +178,9 @@ impl FileView {
         ui.scope_builder(
             UiBuilder::new().max_rect(page.shrink(PAGE_MARGIN)),
             |ui| -> Result<(), UiError> {
+                // The page's buttons and tiles are standard framed
+                // controls (docs/ui/design.md).
+                crate::theme::raise_controls(ui);
                 self.show_page(ui, &page_id, app, lists, resolve, &mut out);
                 Ok(())
             },
@@ -375,13 +376,30 @@ const TILE_SIZE: Vec2 = Vec2::new(160.0, 96.0);
 /// The gap between two New tiles.
 const TILE_GAP: f32 = 12.0;
 
-/// The size of a page heading, in points.
-const HEADING_SIZE: f32 = 24.0;
+/// The space under a page heading (the spacing scale's 12 px step).
+const HEADING_GAP: f32 = 12.0;
 
-/// A page heading: the page name, large, with room under it.
+/// A page heading: the page name in the theme's `display` font, with
+/// room under it.
 fn page_heading(ui: &mut Ui, text: &str) {
-    ui.label(egui::RichText::new(text).size(HEADING_SIZE));
-    ui.add_space(HEADING_SIZE * 0.5);
+    ui.label(egui::RichText::new(text).font(crate::theme::font_at(ui.ctx(), "display")));
+    ui.add_space(HEADING_GAP);
+}
+
+/// Paints the selected navigation entry: the selected tint across the
+/// row and an accent bar `file_view.nav.indicator` wide at its left
+/// (docs/ui/design.md).
+fn paint_selected_entry(ui: &Ui, rect: Rect) {
+    let ctx = ui.ctx();
+    ui.painter().rect_filled(
+        rect,
+        0.0,
+        crate::theme::color_at(ctx, "file_view.nav.selected"),
+    );
+    let width = crate::theme::metric_at(ctx, "file_view.nav.indicator", 3.0);
+    let bar = Rect::from_min_size(rect.min, Vec2::new(width, rect.height()));
+    ui.painter()
+        .rect_filled(bar, 0.0, crate::theme::color_at(ctx, "accent"));
 }
 
 /// One New tile: a fixed-size button that runs `item`'s command.
