@@ -75,25 +75,26 @@ fn write_entry(
 ) -> Result<(), Error> {
     writer
         .start_file(name, options(CompressionMethod::Deflated))
-        .map_err(zip_fail)?;
+        .map_err(|_| invalid("zip writer failed"))?;
     let start = written_position(writer);
-    writer.write_all(data).map_err(zip_fail)?;
-    writer.flush().map_err(zip_fail)?;
+    writer
+        .write_all(data)
+        .map_err(|_| invalid("zip writer failed"))?;
+    writer.flush().map_err(|_| invalid("zip writer failed"))?;
     let deflated = written_position(writer).saturating_sub(start);
     let len = u64::try_from(data.len()).unwrap_or(u64::MAX);
     if len > deflated.saturating_mul(Limits::DEFAULT.max_compression_ratio) {
-        writer.abort_file().map_err(zip_fail)?;
+        writer
+            .abort_file()
+            .map_err(|_| invalid("zip writer failed"))?;
         writer
             .start_file(name, options(CompressionMethod::Stored))
-            .map_err(zip_fail)?;
-        writer.write_all(data).map_err(zip_fail)?;
+            .map_err(|_| invalid("zip writer failed"))?;
+        writer
+            .write_all(data)
+            .map_err(|_| invalid("zip writer failed"))?;
     }
     Ok(())
-}
-
-/// The fixed, content-free error for any failure of the zip writer.
-fn zip_fail<E>(_: E) -> Error {
-    invalid("zip writer failed")
 }
 
 /// The options for one zip entry with this compression method.

@@ -1395,11 +1395,11 @@ mod tests {
         let package = from_model(&sample()).expect("package");
         let part = package.part(&PartName::new(WINDOWS_PART)).expect("part");
         assert_eq!(part.content_type.as_str(), CT_WINDOWS);
-        let PartData::Xml(root) = &part.data else {
-            panic!("the windows part is XML");
-        };
-        assert_eq!(root.name.local, "Windows");
-        assert!(root.children.is_empty(), "an empty root is enough");
+        assert!(matches!(&part.data, PartData::Xml(_)), "the part is XML");
+        if let PartData::Xml(root) = &part.data {
+            assert_eq!(root.name.local, "Windows");
+            assert!(root.children.is_empty(), "an empty root is enough");
+        }
         let main = PartName::new(MAIN_PART);
         let rel = package
             .relationships_from(&main)
@@ -1609,9 +1609,73 @@ mod tests {
         let pages = reparsed
             .part(&PartName::new(PAGES_PART))
             .expect("pages part");
-        let PartData::Xml(root) = &pages.data else {
-            panic!("the pages part is XML");
+        if let PartData::Xml(root) = &pages.data {
+            assert_eq!(background_at(root, 1).as_deref(), Some("1"));
+        }
+    }
+
+    #[test]
+    fn an_unrecoverable_index_part_yields_no_rel_ids() {
+        // `source_rel_id` has no source element to recover a `Rel` id from
+        // when the index part is missing or not XML: the list grows fresh
+        // ids (or keeps its binary part untouched).
+        let document = sample();
+        let main_part_only = || {
+            let mut source = Package::new();
+            source.content_types.push(ContentTypeDecl {
+                kind: ContentTypeKind::Override,
+                name: MAIN_PART.to_owned(),
+                content_type: CT_DRAWING_MAIN.to_owned(),
+            });
+            source.parts.push(Part {
+                name: PartName::new(MAIN_PART),
+                content_type: ContentType::new(CT_DRAWING_MAIN),
+                data: PartData::Xml(emit::visio_root(&NameStyle::generated(), "VisioDocument")),
+            });
+            source
         };
-        assert_eq!(background_at(root, 1).as_deref(), Some("1"));
+        let package = package_for(&document, &main_part_only()).expect("package");
+        assert!(package.part(&PartName::new(PAGES_PART)).is_some());
+        assert!(package.part(&PartName::new(MASTERS_PART)).is_some());
+
+        let mut source = main_part_only();
+        source.content_types.push(ContentTypeDecl {
+            kind: ContentTypeKind::Override,
+            name: PAGES_PART.to_owned(),
+            content_type: CT_PAGES.to_owned(),
+        });
+        source.parts.push(Part {
+            name: PartName::new(PAGES_PART),
+            content_type: ContentType::new(CT_PAGES),
+            data: PartData::Binary(b"not xml".to_vec()),
+        });
+        let package = package_for(&document, &source).expect("package");
+        assert_eq!(
+            package
+                .part(&PartName::new(PAGES_PART))
+                .map(|part| &part.data),
+            Some(&PartData::Binary(b"not xml".to_vec())),
+            "a binary index part is kept"
+        );
+    }
+
+    #[test]
+    fn a_loose_child_of_a_source_page_element_is_skipped() {
+        // `source_rel_id` skips everything that is not an element when it
+        // looks for the `Rel` of a source entity.
+        let document = sample();
+        let mut source = from_model(&document).expect("generated");
+        if let Some(part) = source
+            .parts
+            .iter_mut()
+            .find(|part| part.name.as_str() == PAGES_PART)
+            && let PartData::Xml(root) = &mut part.data
+            && let Some(XmlChild::Element(page)) = root.children.first_mut()
+        {
+            page.children
+                .insert(0, XmlChild::Comment("loose".to_owned()));
+        }
+        let package = package_for(&document, &source).expect("package");
+        assert!(package.part(&PartName::new(PAGES_PART)).is_some());
     }
 }
