@@ -15,7 +15,7 @@ Task board. Only the master agent edits this file, on `main`.
 
 - Gate queue: `tools/gate-queue/gateq` (AGENTS.md section 7). Merge gates are `main --quick --corpus`; the idle full check is `main-full` in `/Volumes/Dara/larrygram/worktrees/main-full`.
 - Merged today: P8-04, P8-02, P8-05, P7-02 (merge gate green at `d156f9c`). P7-08 started; P7-06 and P7-07 resumed.
-- P7-03, P7-06, P7-07 and P8-07 merged (`5e6259f`, `d9c7490`, `5fe8f19`, `cb66c6c`). P7-16, P8-08 and P8-10 merged (the 12 new corpus files fetched into main). P7-09 merged. P8-09 and P8-16 merged. In progress: P7-10, P8-15. The Phase 8 audits wait for P8-15; P8-16's curated corpus rows go into the manifest after it.
+- P7-03, P7-06, P7-07 and P8-07 merged (`5e6259f`, `d9c7490`, `5fe8f19`, `cb66c6c`). P7-16, P8-08 and P8-10 merged (the 12 new corpus files fetched into main). P7-09 merged. P8-09 and P8-16 merged. In progress: P7-10, P8-15. Ready: P8-18, P8-19. The Phase 8 audits wait for P8-15; P8-16's curated corpus rows go into the manifest after it.
 - Merged since the restart: P8-06, P7-05, P7-15, P8-03, P7-04, P7-08; P8-07 ready; P7-09 waits for P7-06 and P7-07; P8-03 RED at `51ce31e7`, resubmitted at `fc3fec7b`. Queued (paused for the iTerm2 restart): P7-06, P7-05, P7-03, P7-07, P7-08, P8-03, P7-04, then `main-full` at `13942e0`.
 - Queued, not started: P7-16, P8-08.
 - Master items: the parity matrix's one column per layout (P7-02 open issue); `UiRequest::ShowWelcome` in the shell (P7-09); P8-02/P8-04/P8-05 open issues for P8-03, P8-07, P8-08, P8-10 (in their Result sections); the remote still holds the pre-R4 history until the user force-pushes, and the three backup files wait for that.
@@ -68,6 +68,8 @@ Phase 8: binary `.vsd`, `.vss` and `.vst` import, read-only, in `crates/vsd-bina
 | [P8-14](tasks/P8-14.md) | implementer | P8-11..P8-13 | F | waiting (fixes, phase report) | — |
 | [P8-15](tasks/P8-15.md) | implementer | P8-10 | D+ | in progress (.vsd import fidelity: styles, 1-D lines, groups, drawing scale, text, every page; the .vsdx twins when they arrive) | — |
 | [P8-16](tasks/P8-16.md) | researcher | P8-10 | D+ | merged (5 238 files fetched, 5 075 swept, 0 panics; 32 gate-corpus and 206 export proposals; template-origin files counted, not excluded; open: 0 groups and 0 connects from binary import, 94 rejected OPC packages, 1 size cap on a version 6 file) | b2338c6 |
+| [P8-18](tasks/P8-18.md) | researcher | P8-16 | D+ | ready (the wide corpus's risk filter: macros, embedded objects, external targets, container anomalies, provenance; selection ported to `scout select`) | — |
+| [P8-19](tasks/P8-19.md) | implementer | P8-16 | D+ | ready (the 102 .vsdx packages the reader rejects: group by cause, fix the valid ones) | — |
 
 ## Phase 6 task board
 
