@@ -45,7 +45,7 @@ use crate::shortcuts::{self, ShortcutMap};
 use crate::tab_bar::TabBar;
 use crate::text_edit::{EditorAction, TextEditor};
 use crate::tools::{Tool, ToolMachine, stencil};
-use crate::{Intent, UiError, about, theme, wizard};
+use crate::{Intent, UiError, about, theme, window_size, wizard};
 
 /// The File menu items (registry ids, in order).
 const FILE_MENU: &[&str] = &[
@@ -1414,6 +1414,10 @@ impl Shell {
     /// [`wizard::Outcome`] per ADR 0066 and the About window opens
     /// the video through egui's open-URL output.
     fn show_dialogs(&mut self, ui: &mut Ui, intents: &mut Vec<Intent>) {
+        // The modal windows size from the app window, in points, so
+        // they follow a resize and look the same at every display
+        // scale (task P7-17, `window_size`).
+        let screen = ui.ctx().content_rect().size();
         if self.wizard.is_some() {
             let mut outcome: Option<wizard::Outcome> = None;
             let mut failure: Option<UiError> = None;
@@ -1421,6 +1425,7 @@ impl Shell {
                 .collapsible(false)
                 .resizable(false)
                 .title_bar(false)
+                .fixed_size(window_size::WIZARD.size(screen))
                 .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
                 .show(ui.ctx(), |ui| {
                     if let Some(state) = &mut self.wizard {
@@ -1458,6 +1463,7 @@ impl Shell {
             egui::Window::new("Options")
                 .collapsible(false)
                 .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
                 .open(&mut open)
                 .show(ui.ctx(), |ui| {
                     match settings::show_options(ui, &self.app.settings) {
@@ -1478,6 +1484,8 @@ impl Shell {
             egui::Window::new("About Larrygram")
                 .collapsible(false)
                 .resizable(false)
+                .fixed_size(window_size::ABOUT.size(screen))
+                .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
                 .open(&mut open)
                 .show(ui.ctx(), |ui| match about::show(ui) {
                     Ok(value) => outcome = value,
@@ -1505,6 +1513,7 @@ impl Shell {
             egui::Window::new("Unsaved changes")
                 .collapsible(false)
                 .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
                 .show(ui.ctx(), |ui| {
                     ui.label(format!("Unsaved changes in {name}."));
                     ui.horizontal(|ui| {

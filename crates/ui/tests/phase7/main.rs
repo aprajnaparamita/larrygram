@@ -21,6 +21,7 @@
 
 mod expect;
 mod first_run;
+mod fit;
 mod golden;
 mod layouts;
 mod menus;

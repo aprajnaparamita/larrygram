@@ -612,10 +612,11 @@ fn draw_popup_levels(
     let mut activated: Option<(usize, usize)> = None;
     let mut open_child: Option<(usize, usize)> = None;
     let mut hover: Option<(usize, usize)> = None;
+    let mut rects = Vec::with_capacity(levels.len());
     for (level, level_rows) in levels.iter().enumerate() {
         let width = menu::menu_width(ui, level_rows);
         let mut outcome = MenuOutcome::default();
-        egui::Area::new(Id::unique(("panel_classic_popup", level)))
+        let area = egui::Area::new(Id::unique(("panel_classic_popup", level)))
             .order(egui::Order::Foreground)
             .fixed_pos(pos)
             .show(ui.ctx(), |ui| {
@@ -623,6 +624,7 @@ fn draw_popup_levels(
                     outcome = menu::draw_menu(ui, level_rows, width, None, false);
                 });
             });
+        rects.push(area.response.rect);
         if let Some(index) = outcome.clicked {
             if level_rows.get(index).is_some_and(Row::has_children) {
                 open_child = Some((level, index));
@@ -643,9 +645,11 @@ fn draw_popup_levels(
     super::update_chain_hover(
         ui,
         &levels,
+        &rects,
         hover,
         &mut state.popup_chain,
         &mut state.popup_hover,
+        &mut state.popup_left,
     );
     if let Some((level, index)) = open_child {
         state.popup_chain.truncate(level);
