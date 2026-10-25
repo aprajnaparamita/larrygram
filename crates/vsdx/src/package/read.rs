@@ -40,6 +40,10 @@ const RELATIONSHIPS_CONTENT_TYPE: &str = "application/vnd.openxmlformats-package
 /// the written package declares what the reader inferred. The strict rule
 /// above applies whenever the part exists.
 ///
+/// An XML part whose text is empty or whitespace (a page contents part can be
+/// zero bytes, task P8-19) holds no document: it is kept as its raw bytes and
+/// the mapping degrades to no content, like a missing part.
+///
 /// Malformed input returns an [`Error`], never a panic.
 pub fn read_package(bytes: &[u8], limits: &Limits) -> Result<Package, Error> {
     let mut archive =
@@ -167,6 +171,18 @@ pub fn read_package(bytes: &[u8], limits: &Limits) -> Result<Package, Error> {
                 let text = std::str::from_utf8(&data)
                     .map_err(|_| invalid("XML part is not UTF-8"))
                     .map_err(|e| with_part_name(e, &name))?;
+                if text.trim().is_empty() {
+                    // A part with no document at all (a page contents part
+                    // can be zero bytes, task P8-19 cause 4): its raw bytes
+                    // are kept and the mapping degrades to no content, like
+                    // a missing part.
+                    package.parts.push(Part {
+                        name: PartName::new(name),
+                        content_type: ContentType::new(content_type),
+                        data: PartData::Binary(data),
+                    });
+                    continue;
+                }
                 let root = parse_xml(text, limits).map_err(|e| with_part_name(e, &name))?;
                 package.parts.push(Part {
                     name: PartName::new(name),

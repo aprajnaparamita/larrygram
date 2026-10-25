@@ -4,7 +4,9 @@
 //! file of `index.csv` (the index `cargo xtask scout classify` wrote
 //! into `reference/wide-corpus/`, found through
 //! `LARRYGRAM_WIDE_CORPUS`) and records, per file, whether it opened,
-//! its error kind and whether it panicked (a panic is a bug). The
+//! its error kind and message (task P8-19 goal 1), how its save and
+//! re-open went (task P8-19 goal 3, the `roundtrip` column) and whether
+//! it panicked (a panic is a bug). The
 //! `.vsdx` reader has no warning stream yet, so its warning count is
 //! always zero; the sweep still records the column.
 //!
@@ -18,8 +20,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use larrygram_model::{Cell, DocumentKind};
-use larrygram_vsdx::{Error, Limits, read_document};
+use larrygram_model::{Cell, DocumentKind, diff};
+use larrygram_vsdx::{
+    Error, Limits, Package, PartData, read_document, read_package, to_model, write_document,
+};
 
 /// The environment variable that points at the wide corpus.
 const ENV: &str = "LARRYGRAM_WIDE_CORPUS";
@@ -51,6 +55,10 @@ struct SweepRow {
     outcome: String,
     /// The [`Error`] variant name, when the file did not open.
     error_kind: String,
+    /// The [`Error`] message, when the file did not open (task P8-19
+    /// goal 1: the failures can be grouped by cause). The messages never
+    /// carry file content (see [`Error`]), so they are safe to record.
+    error_message: String,
     /// 1 when the read panicked (a bug).
     panic: String,
     /// Page count.
@@ -73,6 +81,9 @@ struct SweepRow {
     themes: usize,
     /// Document properties.
     properties: usize,
+    /// How the file's save and re-open went (task P8-19 goal 3): `ok`,
+    /// or the check that failed. Empty when the file did not open.
+    roundtrip: String,
 }
 
 /// The wide corpus directory named by the environment, or `None`.
@@ -142,6 +153,70 @@ fn error_kind(error: &Error) -> &'static str {
     }
 }
 
+/// Saves and re-opens one file (task P8-19 goal 3): read, write, re-read
+/// and re-write, with the first write semantically equivalent to the
+/// source and the second write byte-identical (the Phase 2 criterion of
+/// `tests/roundtrip.rs`). Returns `"ok"` or the check that failed.
+fn round_trip_check(bytes: &[u8]) -> String {
+    let fail = |what: &str| what.to_owned();
+    let Ok(source) = read_package(bytes, &Limits::DEFAULT) else {
+        return fail("source-read");
+    };
+    let Ok(document) = to_model(&source) else {
+        return fail("map");
+    };
+    let Ok(first) = write_document(&document, &source) else {
+        return fail("write");
+    };
+    let Ok(reparsed) = read_package(&first, &Limits::DEFAULT) else {
+        return fail("re-read");
+    };
+    let Ok(remodeled) = to_model(&reparsed) else {
+        return fail("re-map");
+    };
+    let Ok(second) = write_document(&remodeled, &reparsed) else {
+        return fail("second-write");
+    };
+    if first != second {
+        return fail("unstable");
+    }
+    let names = |package: &Package| {
+        package
+            .parts
+            .iter()
+            .map(|part| part.name.as_str().to_owned())
+            .collect::<Vec<_>>()
+    };
+    if names(&source) != names(&reparsed) {
+        return fail("part-list");
+    }
+    if source.content_types != reparsed.content_types {
+        return fail("content-types");
+    }
+    if source.relationships != reparsed.relationships {
+        return fail("relationships");
+    }
+    for (before, after) in source.parts.iter().zip(reparsed.parts.iter()) {
+        if before.name != after.name || before.content_type != after.content_type {
+            return fail("part-meta");
+        }
+        match (&before.data, &after.data) {
+            (PartData::Xml(a), PartData::Xml(b)) => {
+                if !diff(a, b).unwrap_or_default().is_empty() {
+                    return fail("xml-diff");
+                }
+            }
+            (PartData::Binary(a), PartData::Binary(b)) => {
+                if a != b {
+                    return fail("binary");
+                }
+            }
+            _ => return fail("part-kind"),
+        }
+    }
+    "ok".to_owned()
+}
+
 /// Runs `read_document` over one file under `catch_unwind`: every
 /// panic is a bug, and the sweep records it instead of dying.
 fn sweep_one(bytes: &[u8], row: &IndexRow) -> SweepRow {
@@ -154,6 +229,7 @@ fn sweep_one(bytes: &[u8], row: &IndexRow) -> SweepRow {
     match std::panic::catch_unwind(|| read_document(bytes, &Limits::DEFAULT)) {
         Ok(Ok(document)) => {
             out.outcome = "opened".to_owned();
+            out.roundtrip = round_trip_check(bytes);
             out.kind = match document.kind {
                 DocumentKind::Drawing => "drawing",
                 DocumentKind::Stencil => "stencil",
@@ -193,6 +269,7 @@ fn sweep_one(bytes: &[u8], row: &IndexRow) -> SweepRow {
         Ok(Err(error)) => {
             out.outcome = "error".to_owned();
             out.error_kind = error_kind(&error).to_owned();
+            out.error_message = error.to_string();
         }
         Err(_) => {
             out.outcome = "panic".to_owned();
@@ -218,10 +295,10 @@ fn cell(cells: &[Cell], name: &str) -> Option<f64> {
 /// `sweep-vsd.csv`, plus `themes` and `properties`; the warning
 /// columns stay zero until the reader has a warning stream).
 fn sweep_header() -> String {
-    "blob_id,tier,ext,kind,version,outcome,error_kind,panic,warnings_total,\
+    "blob_id,tier,ext,kind,version,outcome,error_kind,error_message,panic,warnings_total,\
      warning_skipped_record,warning_dropped,warning_unresolved_reference,warning_bad_value,\
      warning_unsupported,pages,masters,shapes,groups,connects,one_d,text_chars,drawing_scale,\
-     themes,properties"
+     themes,properties,roundtrip"
         .to_owned()
 }
 
@@ -235,6 +312,7 @@ fn sweep_line(row: &SweepRow) -> String {
         String::new(),
         row.outcome.clone(),
         row.error_kind.clone(),
+        row.error_message.clone(),
         row.panic.clone(),
         "0".to_owned(),
         "0".to_owned(),
@@ -252,6 +330,7 @@ fn sweep_line(row: &SweepRow) -> String {
         row.drawing_scale.clone(),
         row.themes.to_string(),
         row.properties.to_string(),
+        row.roundtrip.clone(),
     ];
     csv_line(&fields)
 }
@@ -447,9 +526,10 @@ mod tests {
         assert_eq!(sweep.outcome, "opened");
         assert_eq!(sweep.kind, "drawing");
         assert_eq!(sweep.panic, "");
+        assert_eq!(sweep.roundtrip, "ok");
         assert!(sweep.pages >= 1);
         let line = sweep_line(&sweep);
-        assert!(line.starts_with("blob,a,vsdx,drawing,,opened,,"), "{line}");
+        assert!(line.starts_with("blob,a,vsdx,drawing,,opened,,,"), "{line}");
     }
 
     #[test]
@@ -463,6 +543,14 @@ mod tests {
         let sweep = sweep_one(b"garbage", &row);
         assert_eq!(sweep.outcome, "error");
         assert_eq!(sweep.error_kind, "InvalidPackage");
+        assert_eq!(
+            sweep.error_message,
+            "invalid package: zip container is malformed"
+        );
+        assert_eq!(
+            sweep.roundtrip, "",
+            "a file that does not open is not saved"
+        );
         let sweep = sweep_one(b"garbage", &row);
         assert_eq!(
             sweep.error_kind,

@@ -31,15 +31,18 @@
 //!
 //! One rule covers both number paths (task P6-18 F9): **a numeric
 //! literal must be finite**. `1e999999`, `inf` and `nan` parse to the
-//! IEEE infinity or NaN and are rejected like a literal that does not
-//! parse (`Error::InvalidPackage` naming the part and the cell, never
-//! the value): the writer refuses to write a non-finite number
-//! (`mutate::checked_number`), the evaluator maps one to `#NUM!`, so a
-//! file holding one is malformed for us either way (P6-11's hardening,
-//! the two `value_malformed` tests it pins changed deliberately).
+//! IEEE infinity or NaN and the model has no number for them: the
+//! writer refuses to write a non-finite number (`mutate::checked_number`)
+//! and the evaluator maps one to `#NUM!`. Visio itself writes such a
+//! literal (`V='NaN'`, task P8-19 cause 3), so it is not an error: the
+//! value reads as `None` and the caller keeps `V` and `U` verbatim,
+//! exactly like an error cell keeps the value it was written with. A
+//! numeric literal that does not parse at all is still
+//! `Error::InvalidPackage` naming the part and the cell (never the
+//! value).
 //! | `BOOL` | `Bool`, from `0`/`1` (also `true`/`FALSE`); anything else is `Error::InvalidPackage` |
 //! | `COLOR` | `Color` for a `#RGB`/`#RRGGBB` literal, `Str` otherwise (a themed or indexed color is kept as written) |
-//! | `STR`, `DATE`, `GUID`, `PNT` | `Str` |
+//! | `STR`, `DATE`, `GUID`, `PNT`, `CY` | `Str` (a currency literal carries its currency code, `V='0.0000USD'`, [MS-VSDX] 2.2.11.2.2.2.4: value plus currency, kept as written) |
 //! | `LIST` | `List`, kept as its raw `;`-separated text |
 //!
 //! `LIST` is **our own spelling** (task P6-08, P2-14): [MS-VSDX] has no
@@ -83,11 +86,13 @@ pub(crate) enum Kind {
 }
 
 /// The `U` codes that declare a numeric value ([MS-VSDX] 2.2.5.3.3.1: every
-/// code whose default value is a number).
+/// code whose default value is a number). `CY` is not one of them: its
+/// literal carries the currency code (`V='0.0000USD'`) and is kept as
+/// written (the module docs).
 const NUMBER_CODES: &[&str] = &[
-    "AC", "AD", "C", "C_D", "CM", "CY", "DA", "DE", "DEG", "DP", "DT", "ED", "EH", "EM", "ES",
-    "EW", "F_I", "FT", "HA", "IN", "IN_F", "KM", "M", "MI", "MI_F", "MM", "NM", "P", "P_PT", "PER",
-    "PT", "RAD", "YD", "DL",
+    "AC", "AD", "C", "C_D", "CM", "DA", "DE", "DEG", "DP", "DT", "ED", "EH", "EM", "ES", "EW",
+    "F_I", "FT", "HA", "IN", "IN_F", "KM", "M", "MI", "MI_F", "MM", "NM", "P", "P_PT", "PER", "PT",
+    "RAD", "YD", "DL",
 ];
 
 /// The kind of value the `U` code `unit_code` declares.
@@ -97,7 +102,7 @@ pub(crate) fn kind(unit_code: Option<&str>) -> Kind {
         Some("BOOL") => Kind::Bool,
         Some("COLOR") => Kind::Color,
         Some("LIST") => Kind::List,
-        Some("STR") | Some("DATE") | Some("GUID") | Some("PNT") => Kind::Str,
+        Some("STR") | Some("DATE") | Some("GUID") | Some("PNT") | Some("CY") => Kind::Str,
         Some(code) if NUMBER_CODES.contains(&code) => Kind::Number,
         Some(_) => Kind::Unknown,
     }
@@ -136,14 +141,17 @@ pub(crate) fn unit(unit_code: Option<&str>) -> Option<Unit> {
 /// declared kind of `U`.
 ///
 /// A numeric or boolean literal that does not parse is
-/// [`Error::InvalidPackage`] naming the part and the cell; anything else
-/// degrades to a value of another kind (never a panic).
+/// [`Error::InvalidPackage`] naming the part and the cell. A numeric
+/// literal that is not finite has no model representation (task P8-19
+/// cause 3) and reads as `Ok(None)`: the caller keeps `V` and `U`
+/// verbatim. Anything else degrades to a value of another kind (never a
+/// panic).
 pub(crate) fn value(
     v: &str,
     unit_code: Option<&str>,
     part: &str,
     cell: &str,
-) -> Result<CellValue, Error> {
+) -> Result<Option<CellValue>, Error> {
     // The `Themed` marker: the value comes from the theme whatever the
     // declared kind (ADR 0021 amendment). It is kept as the string and
     // resolved later by `larrygram_model::CellReader`. Our own `LIST`
@@ -151,42 +159,37 @@ pub(crate) fn value(
     // the writer only emits the code for a model-built list (P6-08), so
     // `V='Themed' U='LIST'` is a one-entry list, not a theme marker.
     if v.trim() == THEMED && kind(unit_code) != Kind::List {
-        return Ok(CellValue::Str(THEMED.to_owned()));
+        return Ok(Some(CellValue::Str(THEMED.to_owned())));
     }
-    match kind(unit_code) {
+    Ok(match kind(unit_code) {
         Kind::Number => match v.trim().parse::<f64>() {
-            Ok(number) => finite_number(number, part, cell),
-            Err(_) => Err(bad_value(part, cell, "numeric value does not parse")),
+            Ok(number) => finite_number(number),
+            Err(_) => return Err(bad_value(part, cell, "numeric value does not parse")),
         },
         Kind::Bool => match v.trim() {
-            "0" | "false" | "FALSE" => Ok(CellValue::Bool(false)),
-            "1" | "true" | "TRUE" => Ok(CellValue::Bool(true)),
-            _ => Err(bad_value(part, cell, "boolean value is neither 0 nor 1")),
+            "0" | "false" | "FALSE" => Some(CellValue::Bool(false)),
+            "1" | "true" | "TRUE" => Some(CellValue::Bool(true)),
+            _ => return Err(bad_value(part, cell, "boolean value is neither 0 nor 1")),
         },
-        Kind::Color => Ok(match parse_color(v) {
+        Kind::Color => Some(match parse_color(v) {
             Some(color) => CellValue::Color(color),
             None => CellValue::Str(v.to_owned()),
         }),
-        Kind::Str => Ok(CellValue::Str(v.to_owned())),
-        Kind::List => Ok(CellValue::List(v.to_owned())),
+        Kind::Str => Some(CellValue::Str(v.to_owned())),
+        Kind::List => Some(CellValue::List(v.to_owned())),
         Kind::Unknown => match shape(v) {
-            Shaped::Number(number) => finite_number(number, part, cell),
-            Shaped::Color(color) => Ok(CellValue::Color(color)),
-            Shaped::Str(text) => Ok(CellValue::Str(text)),
+            Shaped::Number(number) => finite_number(number),
+            Shaped::Color(color) => Some(CellValue::Color(color)),
+            Shaped::Str(text) => Some(CellValue::Str(text)),
         },
-    }
+    })
 }
 
-/// A finite number literal, or the [`Error::InvalidPackage`] of one
-/// that is not (task P6-18 F9: `1e999999`, `inf` and `nan` parse to the
-/// IEEE infinity or NaN and are rejected like a literal that does not
-/// parse).
-fn finite_number(number: f64, part: &str, cell: &str) -> Result<CellValue, Error> {
-    if number.is_finite() {
-        Ok(CellValue::Number(number))
-    } else {
-        Err(bad_value(part, cell, "numeric value is not finite"))
-    }
+/// The model number of a finite literal, or `None` for one that is not
+/// (task P6-18 F9, task P8-19 cause 3: `1e999999`, `inf` and `nan` parse
+/// to the IEEE infinity or NaN and the model holds no such number).
+fn finite_number(number: f64) -> Option<CellValue> {
+    number.is_finite().then_some(CellValue::Number(number))
 }
 
 // What a value of unknown declared kind looks like, and the shape rules
@@ -225,6 +228,8 @@ mod tests {
         assert_eq!(kind(Some("DATE")), Kind::Str);
         assert_eq!(kind(Some("GUID")), Kind::Str);
         assert_eq!(kind(Some("PNT")), Kind::Str);
+        // A currency literal carries its currency code (task P8-19).
+        assert_eq!(kind(Some("CY")), Kind::Str);
         assert_eq!(kind(Some("XYZ")), Kind::Unknown);
         assert_eq!(kind(None), Kind::Unknown);
     }
@@ -257,18 +262,18 @@ mod tests {
         // V is already canonical: no factor is applied.
         assert_eq!(
             value("11.69291338582677", Some("MM"), "p", "PageWidth"),
-            Ok(CellValue::Number(11.69291338582677))
+            Ok(Some(CellValue::Number(11.69291338582677)))
         );
         // The file's own spelling of a right angle in radians; kept as
         // written, whatever `U` says.
         let right_angle = "1.5707963267949".parse::<f64>().expect("float");
         assert_eq!(
             value("1.5707963267949", Some("DEG"), "p", "Angle"),
-            Ok(CellValue::Number(right_angle))
+            Ok(Some(CellValue::Number(right_angle)))
         );
         assert_eq!(
             value("-6.103171559912468E-6", Some("DA"), "p", "C"),
-            Ok(CellValue::Number(-6.103171559912468E-6))
+            Ok(Some(CellValue::Number(-6.103171559912468E-6)))
         );
     }
 
@@ -284,18 +289,44 @@ mod tests {
     }
 
     #[test]
+    fn a_non_finite_literal_reads_as_no_value() {
+        // Visio writes `V='NaN'` (task P8-19 cause 3): the model holds no
+        // non-finite number, so the value slot stays empty and the caller
+        // keeps the literal verbatim. A literal that does not parse at
+        // all is still an error.
+        assert_eq!(value("NaN", Some("DL"), "p", "c"), Ok(None));
+        assert_eq!(value("inf", None, "p", "c"), Ok(None));
+        assert_eq!(value("-1e999999", Some("IN"), "p", "c"), Ok(None));
+    }
+
+    #[test]
+    fn a_currency_literal_is_kept_as_written() {
+        // `V` carries value and currency code together ([MS-VSDX]
+        // 2.2.11.2.2.2.4); the model has no currency kind, so the literal
+        // is kept as written (task P8-19 cause 2).
+        assert_eq!(
+            value("0.0000USD", Some("CY"), "p", "Value"),
+            Ok(Some(CellValue::Str("0.0000USD".to_owned())))
+        );
+        assert_eq!(
+            value("5", Some("CY"), "p", "Value"),
+            Ok(Some(CellValue::Str("5".to_owned())))
+        );
+    }
+
+    #[test]
     fn booleans_parse_zero_and_one() {
         assert_eq!(
             value("0", Some("BOOL"), "p", "c"),
-            Ok(CellValue::Bool(false))
+            Ok(Some(CellValue::Bool(false)))
         );
         assert_eq!(
             value("1", Some("BOOL"), "p", "c"),
-            Ok(CellValue::Bool(true))
+            Ok(Some(CellValue::Bool(true)))
         );
         assert_eq!(
             value("TRUE", Some("BOOL"), "p", "c"),
-            Ok(CellValue::Bool(true))
+            Ok(Some(CellValue::Bool(true)))
         );
     }
 
@@ -311,15 +342,15 @@ mod tests {
     fn colors_parse_hex_literals() {
         assert_eq!(
             value("#ffffff", Some("COLOR"), "p", "c"),
-            Ok(CellValue::Color(Color::new(255, 255, 255)))
+            Ok(Some(CellValue::Color(Color::new(255, 255, 255))))
         );
         assert_eq!(
             value("#7F7f7F", None, "p", "c"),
-            Ok(CellValue::Color(Color::new(127, 127, 127)))
+            Ok(Some(CellValue::Color(Color::new(127, 127, 127))))
         );
         assert_eq!(
             value("#abc", None, "p", "c"),
-            Ok(CellValue::Color(Color::new(170, 187, 204)))
+            Ok(Some(CellValue::Color(Color::new(170, 187, 204))))
         );
     }
 
@@ -327,7 +358,7 @@ mod tests {
     fn a_non_literal_color_degrades_to_a_string() {
         assert_eq!(
             value("Themed", Some("COLOR"), "p", "c"),
-            Ok(CellValue::Str("Themed".to_owned()))
+            Ok(Some(CellValue::Str("Themed".to_owned())))
         );
     }
 
@@ -335,33 +366,39 @@ mod tests {
     fn declared_strings_stay_strings() {
         assert_eq!(
             value("Calibri", Some("STR"), "p", "c"),
-            Ok(CellValue::Str("Calibri".to_owned()))
+            Ok(Some(CellValue::Str("Calibri".to_owned())))
         );
         assert_eq!(
             value("2015-07-06T11:05:49", Some("DATE"), "p", "c"),
-            Ok(CellValue::Str("2015-07-06T11:05:49".to_owned()))
+            Ok(Some(CellValue::Str("2015-07-06T11:05:49".to_owned())))
         );
         assert_eq!(
             value("42", Some("GUID"), "p", "c"),
-            Ok(CellValue::Str("42".to_owned()))
+            Ok(Some(CellValue::Str("42".to_owned())))
         );
     }
 
     #[test]
     fn unknown_codes_classify_by_shape() {
-        assert_eq!(value("2.5", None, "p", "c"), Ok(CellValue::Number(2.5)));
+        assert_eq!(
+            value("2.5", None, "p", "c"),
+            Ok(Some(CellValue::Number(2.5)))
+        );
         assert_eq!(
             value("#4d4d4d", Some("XYZ"), "p", "c"),
-            Ok(CellValue::Color(Color::new(77, 77, 77)))
+            Ok(Some(CellValue::Color(Color::new(77, 77, 77))))
         );
         assert_eq!(
             value("Themed", None, "p", "c"),
-            Ok(CellValue::Str("Themed".to_owned()))
+            Ok(Some(CellValue::Str("Themed".to_owned())))
         );
-        assert_eq!(value("", None, "p", "c"), Ok(CellValue::Str(String::new())));
+        assert_eq!(
+            value("", None, "p", "c"),
+            Ok(Some(CellValue::Str(String::new())))
+        );
         assert_eq!(
             value(";Not Started;Done", Some("XYZ"), "p", "c"),
-            Ok(CellValue::Str(";Not Started;Done".to_owned()))
+            Ok(Some(CellValue::Str(";Not Started;Done".to_owned())))
         );
     }
 
@@ -372,21 +409,21 @@ mod tests {
         assert_eq!(kind(Some("LIST")), Kind::List);
         assert_eq!(
             value("1;0", Some("LIST"), "p", "LayerMember"),
-            Ok(CellValue::List("1;0".to_owned()))
+            Ok(Some(CellValue::List("1;0".to_owned())))
         );
         assert_eq!(
             value("x", Some("LIST"), "p", "c"),
-            Ok(CellValue::List("x".to_owned()))
+            Ok(Some(CellValue::List("x".to_owned())))
         );
         assert_eq!(
             value("", Some("LIST"), "p", "c"),
-            Ok(CellValue::List(String::new()))
+            Ok(Some(CellValue::List(String::new())))
         );
         // A one-entry list of `Themed` stays a list: the theme-marker
         // rule covers the codes a file writes, not our own one.
         assert_eq!(
             value("Themed", Some("LIST"), "p", "c"),
-            Ok(CellValue::List("Themed".to_owned()))
+            Ok(Some(CellValue::List("Themed".to_owned())))
         );
     }
 
@@ -397,7 +434,7 @@ mod tests {
         // kept as written (the module docs).
         assert_eq!(
             value("1;0", None, "p", "c"),
-            Ok(CellValue::Str("1;0".to_owned()))
+            Ok(Some(CellValue::Str("1;0".to_owned())))
         );
     }
 
@@ -406,19 +443,19 @@ mod tests {
         // ADR 0021 amendment: `Themed` is a marker, not a bad number.
         assert_eq!(
             value("Themed", Some("MM"), "p", "c"),
-            Ok(CellValue::Str("Themed".to_owned()))
+            Ok(Some(CellValue::Str("Themed".to_owned())))
         );
         assert_eq!(
             value("Themed", Some("PER"), "p", "c"),
-            Ok(CellValue::Str("Themed".to_owned()))
+            Ok(Some(CellValue::Str("Themed".to_owned())))
         );
         assert_eq!(
             value("Themed", Some("BOOL"), "p", "c"),
-            Ok(CellValue::Str("Themed".to_owned()))
+            Ok(Some(CellValue::Str("Themed".to_owned())))
         );
         assert_eq!(
             value("themed", None, "p", "c"),
-            Ok(CellValue::Str("themed".to_owned()))
+            Ok(Some(CellValue::Str("themed".to_owned())))
         );
     }
 }

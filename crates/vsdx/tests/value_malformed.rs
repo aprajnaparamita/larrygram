@@ -5,11 +5,13 @@
 //! literal that does not parse is [`Error::InvalidPackage`] naming the
 //! part and the cell (never the value), every other bad or extreme
 //! spelling degrades to a value of another kind, and **nothing panics**.
-//! A numeric literal must be **finite** (task P6-18 F9, the P6-11
-//! hardening): `1e999999`, `inf` and `nan` parse to the IEEE infinity
-//! or NaN and are rejected like a literal that does not parse — the
-//! writer refuses to write a non-finite number and the evaluator maps
-//! one to `#NUM!`, so a file holding one is malformed for us.
+//! A numeric literal must be **finite** (task P6-18 F9): `1e999999`,
+//! `inf` and `nan` parse to the IEEE infinity or NaN and the model has
+//! no number for them — the writer refuses to write a non-finite number
+//! and the evaluator maps one to `#NUM!`. Visio writes such a literal
+//! (`V='NaN'`, task P8-19 cause 3), so it is not an error: the value
+//! slot stays empty and `V` and `U` stay in `Preserved`, exactly like an
+//! error cell keeps its written value.
 
 // The never-crash lints apply to non-test code only (clippy.toml).
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
@@ -158,37 +160,45 @@ fn a_boolean_that_is_neither_zero_nor_one_is_an_error() {
     }
 }
 
-/// Task P6-18 F9 (the P6-11 hardening, changed deliberately): a huge
-/// numeric literal parses to the IEEE infinity and is **rejected** —
-/// one `InvalidPackage` naming the part and the cell, never the value.
+/// Task P6-18 F9 (the P6-11 hardening), task P8-19 cause 3: a huge
+/// numeric literal parses to the IEEE infinity and the model has no
+/// number for it — the value slot stays empty and `V` and `U` stay in
+/// `Preserved`, never an error and never a panic.
 #[test]
-fn a_huge_numeric_literal_is_rejected() {
+fn a_huge_numeric_literal_keeps_its_spelling_and_no_value() {
     let mut huge = String::from("9");
     huge.push_str(&"0".repeat(400));
     for v in ["1e999999", "-1e999999", huge.as_str()] {
-        let message = message(&[("N", "Width"), ("U", "IN"), ("V", v)]);
-        assert!(message.contains("page1.xml"), "{message}");
-        assert!(message.contains("Width"), "{message}");
-        assert!(message.contains("not finite"), "{message}");
-        assert!(!message.contains(v), "the value is never quoted: {message}");
+        let cell = read_cell(&[("N", "Width"), ("U", "IN"), ("V", v)]).expect("reads");
+        assert!(cell.value.is_none(), "V={v:?}: {:?}", cell.value);
+        assert!(has_preserved_attribute(&cell, "V", v), "V={v:?}");
+        assert!(has_preserved_attribute(&cell, "U", "IN"), "V={v:?}");
     }
 }
 
-/// Task P6-18 F9 (the P6-11 hardening, changed deliberately): `nan`
-/// and `inf` spellings are rejected the same way, and the no-`U` code
-/// path classifies by shape and rejects a non-finite number there too.
+/// Task P6-18 F9 (the P6-11 hardening), task P8-19 cause 3: `nan` and
+/// `inf` spellings degrade the same way under a numeric `U` code, and
+/// the no-`U` path classifies by shape and degrades there too.
 #[test]
-fn a_non_finite_spelling_is_rejected() {
+fn a_non_finite_spelling_keeps_its_spelling_and_no_value() {
     for v in ["nan", "inf", "-inf", "NaN", "INF"] {
-        assert!(
-            message(&[("N", "Width"), ("U", "IN"), ("V", v)]).contains("not finite"),
-            "U=IN V={v:?}"
-        );
-        assert!(
-            message(&[("N", "Width"), ("V", v)]).contains("not finite"),
-            "no U code V={v:?}"
-        );
+        let cell = read_cell(&[("N", "Width"), ("U", "IN"), ("V", v)]).expect("reads");
+        assert!(cell.value.is_none(), "U=IN V={v:?}: {:?}", cell.value);
+        assert!(has_preserved_attribute(&cell, "V", v), "U=IN V={v:?}");
+        assert!(has_preserved_attribute(&cell, "U", "IN"), "U=IN V={v:?}");
+        let cell = read_cell(&[("N", "Width"), ("V", v)]).expect("reads");
+        assert!(cell.value.is_none(), "no U V={v:?}: {:?}", cell.value);
+        assert!(has_preserved_attribute(&cell, "V", v), "no U V={v:?}");
     }
+}
+
+/// Whether the cell's preserved attributes carry `name` with exactly
+/// `value`.
+fn has_preserved_attribute(cell: &larrygram_model::Cell, name: &str, value: &str) -> bool {
+    cell.preserved
+        .attributes
+        .iter()
+        .any(|attribute| attribute.name.local == name && attribute.value == value)
 }
 
 /// Task P6-18 (the coverage report's reader item): a `V` declared
