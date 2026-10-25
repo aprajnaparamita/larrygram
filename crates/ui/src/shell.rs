@@ -734,7 +734,7 @@ impl Shell {
                 let produced = self
                     .tab_bar
                     .show_backstage(ui, set, &self.registry, &self.app);
-                let opened = matches!(&produced, Ok(intents) if !intents.is_empty());
+                let opened = leaves_file_view(&produced);
                 self.absorb(produced, intents);
                 if opened {
                     // A backstage command runs: leave the File view
@@ -1907,6 +1907,12 @@ fn select_intent(app: &AppCtx, shape: ShapeId) -> Option<Intent> {
     args.set("mode", ArgValue::Text("replace".to_owned()));
     let command = CommandId::parse("edit.select").ok()?;
     Some(Intent::new(command, Invocation::new(args, Source::Ui)))
+}
+
+/// Whether a backstage frame leaves the File view (ADR 0031): one of
+/// its controls dispatched.
+fn leaves_file_view(produced: &Result<Vec<Intent>, UiError>) -> bool {
+    matches!(produced, Ok(intents) if !intents.is_empty())
 }
 
 /// The right-click target under `pos`: the last (topmost) recorded
@@ -3682,6 +3688,23 @@ mod tests {
     /// A failing command's error reaches the status line and the
     /// frame keeps rendering (the "never crash" contract of AGENTS.md
     /// section 6; P7-12 major 3: no test provoked a shell error).
+    /// A backstage command leaves the File view (ADR 0031). The rule
+    /// is `leaves_file_view`: every committed backstage command is a
+    /// stub today, so the click path itself is pinned in the widget
+    /// sweep (`surfaces::the_fluent_backstage_...`) and the decision
+    /// here (P7-12 major 7).
+    #[test]
+    fn a_backstage_command_leaves_the_file_view() {
+        let produced: Result<Vec<Intent>, UiError> = Ok(vec![Intent::new(
+            CommandId::parse("file.new").expect("id"),
+            Invocation::empty(Source::Ui),
+        )]);
+        assert!(leaves_file_view(&produced));
+        assert!(!leaves_file_view(&Ok(Vec::new())), "no dispatch, no leave");
+        let failed: Result<Vec<Intent>, UiError> = Err(UiError::NotImplemented);
+        assert!(!leaves_file_view(&failed), "an error is not a dispatch");
+    }
+
     #[test]
     fn a_failing_command_shows_its_error_and_the_frame_survives() {
         let (mut shell, _id) = shell_with_shape();
