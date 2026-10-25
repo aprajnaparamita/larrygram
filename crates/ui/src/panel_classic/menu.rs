@@ -284,8 +284,8 @@ fn text_font(ui: &Ui) -> FontId {
     egui::TextStyle::Button.resolve(ui.style())
 }
 
-/// Paints the small icon mark of `key` into `rect` (the placeholder
-/// mark of `crates/ui/src/icons`, ADR 0030).
+/// Paints the icon of `key` into `rect` at the row's enabled state
+/// (ADR 0062: a disabled control draws its icon at 40% alpha).
 fn paint_icon(ui: &mut Ui, rect: Rect, key: &str, enabled: bool) {
     let cell = Rect::from_min_size(rect.min, Vec2::splat(ICON));
     let mut child = ui.new_child(
@@ -293,15 +293,10 @@ fn paint_icon(ui: &mut Ui, rect: Rect, key: &str, enabled: bool) {
             .max_rect(cell)
             .layout(egui::Layout::left_to_right(egui::Align::Center)),
     );
-    if enabled {
-        if let Some(theme) = crate::theme::current(child.ctx()) {
-            let _ = crate::icons::draw(&mut child, cell, key, ICON, &theme, true);
-        } else {
-            let _ = crate::icons::placeholder(&mut child, key, ICON);
-        }
+    if let Some(theme) = crate::theme::current(child.ctx()) {
+        let _ = crate::icons::draw(&mut child, cell, key, ICON, &theme, enabled);
     } else {
-        let faded = child.visuals().widgets.noninteractive.fg_stroke.color;
-        child.painter().rect_filled(rect, 0.0, faded);
+        let _ = crate::icons::placeholder(&mut child, key, ICON);
     }
 }
 

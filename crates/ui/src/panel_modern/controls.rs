@@ -91,7 +91,15 @@ fn button(
 ) -> Result<(), UiError> {
     let label = display_label(item, draw.app);
     let action = resolve(item);
-    let atoms = button_atoms(ui.ctx(), item, &label, placed.large, false, draw.metrics);
+    let atoms = button_atoms(
+        ui.ctx(),
+        item,
+        &label,
+        placed.large,
+        false,
+        enabled(&action),
+        draw.metrics,
+    );
     let widget = Button::new(atoms)
         .selected(latched(draw.toggles, item))
         .min_size(Vec2::new(placed.rect.width().min(MAX_W), 0.0));
@@ -230,7 +238,15 @@ fn split(
     };
 
     // The main part runs the command.
-    let atoms = button_atoms(ui.ctx(), item, &label, placed.large, false, draw.metrics);
+    let atoms = button_atoms(
+        ui.ctx(),
+        item,
+        &label,
+        placed.large,
+        false,
+        enabled(&action),
+        draw.metrics,
+    );
     let widget = Button::new(atoms);
     let response = put(ui, main, enabled(&action), widget, item, "main");
     let response = response.accessible_name(label.as_str());
@@ -275,7 +291,15 @@ fn dropdown(
 ) -> Result<(), UiError> {
     let label = display_label(item, draw.app);
     let action = resolve(item);
-    let atoms = button_atoms(ui.ctx(), item, &label, placed.large, true, draw.metrics);
+    let atoms = button_atoms(
+        ui.ctx(),
+        item,
+        &label,
+        placed.large,
+        true,
+        enabled(&action),
+        draw.metrics,
+    );
     let widget = Button::new(atoms).min_size(Vec2::new(placed.rect.width().min(MAX_W), 0.0));
     let response = put(ui, placed.rect, enabled(&action), widget, item, "main");
     let response = response.accessible_name(label.as_str());
@@ -355,7 +379,7 @@ fn show_menu_entry(
         | ItemKind::SplitRecent
             if !item.items.is_empty() =>
         {
-            let atoms = menu_row_atoms(ui.ctx(), item, &label);
+            let atoms = menu_row_atoms(ui.ctx(), item, &label, true);
             let button = Button::new(atoms).frame(false);
             // A submenu row opens its children on hover or click
             // (`SubMenuButton`), like the Panel Modern menus do.
@@ -372,7 +396,7 @@ fn show_menu_entry(
         }
         _ => {
             let action = resolve(item);
-            let atoms = menu_row_atoms(ui.ctx(), item, &label);
+            let atoms = menu_row_atoms(ui.ctx(), item, &label, enabled(&action));
             let widget = Button::new(atoms).frame(false);
             let response = ui
                 .add_enabled_ui(enabled(&action), |ui| ui.add(widget))
@@ -531,6 +555,7 @@ fn button_atoms(
     label: &str,
     large: bool,
     arrow: bool,
+    enabled: bool,
     m: &Metrics,
 ) -> Atoms<'static> {
     let mut builder = AtomsBuilder::new().push(spacer(2.0));
@@ -543,7 +568,7 @@ fn button_atoms(
         let below = below.build();
         builder = builder.push(Atom::container(
             ContainerAtom::new((
-                egui_ui_icon_or_gap(ctx, item, m.large_icon),
+                egui_ui_icon_or_gap(ctx, item, m.large_icon, enabled),
                 Atom::container(ContainerAtom::new(below).direction(Direction::LeftToRight)),
             ))
             .direction(Direction::TopDown)
@@ -551,7 +576,7 @@ fn button_atoms(
             .align2(Align2::CENTER_CENTER),
         ));
     } else if item.size == Some(ControlSize::Small) {
-        builder = builder.push(egui_ui_icon_or_gap(ctx, item, m.small_icon));
+        builder = builder.push(egui_ui_icon_or_gap(ctx, item, m.small_icon, enabled));
         if arrow {
             builder = builder
                 .push(spacer(2.0))
@@ -560,7 +585,7 @@ fn button_atoms(
     } else {
         if item.icon.is_some() {
             builder = builder
-                .push(egui_ui_icon(ctx, item, m.medium_icon))
+                .push(egui_ui_icon(ctx, item, m.medium_icon, enabled))
                 .push(spacer(4.0));
         }
         builder = builder.text(label);
@@ -575,11 +600,11 @@ fn button_atoms(
 
 /// The atoms of a menu row: the 24 px icon gutter, the label and the
 /// right-aligned shortcut text.
-fn menu_row_atoms(ctx: &egui::Context, item: &Item, label: &str) -> Atoms<'static> {
+fn menu_row_atoms(ctx: &egui::Context, item: &Item, label: &str, enabled: bool) -> Atoms<'static> {
     let mut builder = AtomsBuilder::new().push(spacer(2.0));
     if item.icon.is_some() {
         builder = builder
-            .push(egui_ui_icon(ctx, item, 16.0))
+            .push(egui_ui_icon(ctx, item, 16.0, enabled))
             .push(spacer(6.0));
     } else {
         builder = builder.push(spacer(GUTTER - 4.0));
@@ -598,15 +623,20 @@ fn menu_row_atoms(ctx: &egui::Context, item: &Item, label: &str) -> Atoms<'stati
 
 /// The icon atom of an item: the key into `ui-spec/icons.yaml` with
 /// the theme tint (P7-04's icon atoms, wired by task P7-09).
-fn egui_ui_icon(ctx: &egui::Context, item: &Item, size: f32) -> Atom<'static> {
+fn egui_ui_icon(ctx: &egui::Context, item: &Item, size: f32, enabled: bool) -> Atom<'static> {
     let key = item.icon.clone().unwrap_or_else(|| item.id.clone());
-    crate::icons::icon_themed(ctx, &key, size, true)
+    crate::icons::icon_themed(ctx, &key, size, enabled)
 }
 
 /// The icon atom of an item, or a gap when it has no icon.
-fn egui_ui_icon_or_gap(ctx: &egui::Context, item: &Item, size: f32) -> Atom<'static> {
+fn egui_ui_icon_or_gap(
+    ctx: &egui::Context,
+    item: &Item,
+    size: f32,
+    enabled: bool,
+) -> Atom<'static> {
     if item.icon.is_some() {
-        egui_ui_icon(ctx, item, size)
+        egui_ui_icon(ctx, item, size, enabled)
     } else {
         spacer(size)
     }

@@ -189,7 +189,7 @@ fn draw_button(
     let enabled = !matches!(activation, Activation::Disabled { .. });
     let label = item.label.clone().unwrap_or_default();
     let checked = rows::item_check(item, input, state, false).unwrap_or(false);
-    let response = match button_content(ui.ctx(), item, &label, checked) {
+    let response = match button_content(ui.ctx(), item, &label, checked, enabled) {
         Some(button) => {
             ui.add_enabled_ui(enabled, |ui| {
                 ui.add_sized(Vec2::new(23.0, BUTTON_HEIGHT), button)
@@ -222,16 +222,17 @@ fn button_content(
     item: &Item,
     label: &str,
     checked: bool,
+    enabled: bool,
 ) -> Option<egui::Button<'static>> {
     let display = item.display.unwrap_or(DisplayMode::Icon);
     match (display, item.icon.as_deref()) {
         (DisplayMode::Text, _) | (_, None) => None,
         (DisplayMode::Icon, Some(icon)) => Some(
-            egui::Button::new(icons::icon_themed(ctx, icon, menu::ICON, true)).selected(checked),
+            egui::Button::new(icons::icon_themed(ctx, icon, menu::ICON, enabled)).selected(checked),
         ),
         (DisplayMode::IconText, Some(icon)) => Some(
             egui::Button::new((
-                icons::icon_themed(ctx, icon, menu::ICON, true),
+                icons::icon_themed(ctx, icon, menu::ICON, enabled),
                 label.to_owned(),
             ))
             .selected(checked),
@@ -305,7 +306,7 @@ fn draw_split(
     let enabled = !matches!(main_activation, Activation::Disabled { .. });
     let main_label = main_item.label.clone().unwrap_or_else(|| label.clone());
     let main_checked = rows::item_check(&main_item, input, state, false).unwrap_or(false);
-    let response = match button_content(ui.ctx(), &main_item, &main_label, main_checked) {
+    let response = match button_content(ui.ctx(), &main_item, &main_label, main_checked, enabled) {
         Some(button) => {
             ui.add_enabled_ui(enabled, |ui| {
                 ui.add_sized(Vec2::new(23.0, BUTTON_HEIGHT), button)
@@ -365,7 +366,7 @@ fn draw_dropdown(
             ui.ctx(),
             item.icon.as_deref().unwrap_or(&item.id),
             menu::ICON,
-            true,
+            enabled,
         ),
         icons::dropdown_arrow(10.0),
     ));
