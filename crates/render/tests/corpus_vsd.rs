@@ -756,3 +756,107 @@ mod metric_tests {
         assert!(error.contains("dimensions differ"), "{error}");
     }
 }
+
+/// The per-section geometry flags reach the renderer from a `.vsdx`
+/// (P8-17 goal 2). The fault the fix addresses is the renderer's, not
+/// the importer's: a hand-built document with `NoFill`, `NoLine` and
+/// `NoShow` sections is saved through the `.vsdx` writer and read back
+/// through the reader before the scene builds, so the test sees the
+/// XML format's cells exactly as the reader maps them.
+#[test]
+fn a_vsdx_geometry_section_fills_and_strokes_on_its_own() {
+    use larrygram_model::{
+        Cell, CellName, CellValue, Document, Page, PageId, Row, Section, SectionName, Shape,
+        ShapeId,
+    };
+    use larrygram_render::scene::Node;
+    use larrygram_render::{BuildOptions, build_scene};
+
+    fn number(name: &'static str, value: f64) -> Cell {
+        let mut cell = Cell::new(CellName::from_static(name));
+        cell.value = Some(CellValue::Number(value));
+        cell
+    }
+    fn flag(name: &'static str, value: bool) -> Cell {
+        let mut cell = Cell::new(CellName::from_static(name));
+        cell.value = Some(CellValue::Bool(value));
+        cell
+    }
+    fn row(kind: &str, x: f64, y: f64) -> Row {
+        let mut row = Row::new();
+        row.row_type = Some(kind.to_owned());
+        row.cells.push(number("X", x));
+        row.cells.push(number("Y", y));
+        row
+    }
+
+    let mut document = Document::new();
+    let mut shape = Shape::new(ShapeId { index: 0 }, 1);
+    shape.sheet.cells = vec![
+        number("PinX", 1.0),
+        number("PinY", 1.0),
+        number("Width", 2.0),
+        number("Height", 2.0),
+        number("FillPattern", 1.0),
+        number("LinePattern", 1.0),
+    ];
+    let mut stroke_only = Section::new(SectionName::from_static("Geometry"));
+    stroke_only.cells.push(flag("NoFill", true));
+    stroke_only.rows = vec![row("MoveTo", 0.0, 0.0), row("LineTo", 2.0, 0.0)];
+    let mut fill_only = Section::new(SectionName::from_static("Geometry"));
+    fill_only.cells.push(flag("NoLine", true));
+    fill_only.rows = vec![
+        row("MoveTo", 0.0, 1.0),
+        row("LineTo", 2.0, 1.0),
+        row("LineTo", 2.0, 2.0),
+    ];
+    let mut hidden = Section::new(SectionName::from_static("Geometry"));
+    hidden.cells.push(flag("NoShow", true));
+    hidden.rows = vec![row("MoveTo", 0.0, 1.5), row("LineTo", 2.0, 1.5)];
+    shape.sheet.sections.push(stroke_only);
+    shape.sheet.sections.push(fill_only);
+    shape.sheet.sections.push(hidden);
+    let id = document.add_shape(shape);
+    let mut page = Page::new(PageId { index: 0 }, 0);
+    page.shapes.push(id);
+    document.pages.push(page);
+
+    let written = write_document(&document, &Package::new()).expect("saves as .vsdx");
+    let reopened = read_document(&written, &Limits::DEFAULT).expect("reopens");
+    let scene = build_scene(&reopened, PageId { index: 0 }, &BuildOptions::new()).expect("builds");
+    let nodes: Vec<&larrygram_render::scene::Shape> = scene
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            Node::Shape(shape) => Some(shape.as_ref()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(nodes.len(), 2, "one fill node and one stroke node");
+    let (fill_node, stroke_node) = (nodes[0], nodes[1]);
+    assert!(
+        fill_node.fill.is_some() && fill_node.stroke.is_none(),
+        "the fill node fills"
+    );
+    assert!(
+        stroke_node.fill.is_none() && stroke_node.stroke.is_some(),
+        "the stroke node strokes"
+    );
+    let has_point = |node: &larrygram_render::scene::Shape, x: f64, y: f64| {
+        node.path.segments().iter().any(
+            |segment| matches!(segment, larrygram_geom::Segment::LineTo(p) if (p.x - x).abs() < 1e-6 && (p.y - y).abs() < 1e-6),
+        )
+    };
+    assert!(
+        has_point(fill_node, 2.0, 2.0),
+        "the fill path carries the `NoLine` section"
+    );
+    assert!(
+        has_point(stroke_node, 2.0, 0.0),
+        "the stroke path carries the `NoFill` section"
+    );
+    assert!(
+        !has_point(fill_node, 2.0, 1.5) && !has_point(stroke_node, 2.0, 1.5),
+        "the `NoShow` section draws nothing"
+    );
+}

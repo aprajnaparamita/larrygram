@@ -380,6 +380,29 @@ mod tests {
     }
 
     #[test]
+    fn a_line_weight_scales_with_the_drawing() {
+        // The twin keeps the drawing's units in every length
+        // (`Visio6PlanWithDimensions`'s `LineWeight` is 48 times ours
+        // there), so the weight scales like the transform. What the
+        // PDFs show thicker is Visio flooring a hairline at one device
+        // pixel when it draws (P8-17 open issue).
+        let mut document = document();
+        if let Some(shape) = document.shapes.get_mut(0) {
+            shape.sheet.cells.push(number("LineWeight", 0.0033));
+        }
+        run(&mut document);
+        let k = 0.25 / 12.0;
+        assert!(
+            (value(&document, ShapeId { index: 0 }, "LineWeight").unwrap() - 0.0033 * k).abs()
+                < 1e-12
+        );
+        assert!(
+            (value(&document, ShapeId { index: 0 }, "PinX").unwrap() - 24.0 * k).abs() < 1e-12,
+            "the transform scales the same way"
+        );
+    }
+
+    #[test]
     fn a_curve_row_keeps_its_formula_encoded_values() {
         let mut row = Row::new();
         row.row_type = Some("NurbsTo".to_owned());
