@@ -1,8 +1,8 @@
 # Phase 7 report: Panel and Classic layouts, the rename, the welcome wizard
 
 Phase 7 gives Larrygram its two flagship window layouts — Panel Modern
-(ribbon) and Panel Classic (menu bars and toolbars) — as data-driven
-surfaces: four layout kinds load from `ui-spec/`, switch at run time,
+(command bar) and Panel Classic (menu bars and toolbars) — as
+data-driven surfaces: four layout kinds load from `ui-spec/`, switch at run time,
 and every control dispatches its command through the one registry.
 The phase also carried the product rename (Larrygram, ADR 0067's brand
 art), the welcome wizard and the About window. Started 2026-10-24,
