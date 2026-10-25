@@ -1066,9 +1066,12 @@ impl Edit for GeometryEdit {
 // The `edit.*` commands.
 // ---------------------------------------------------------------------------
 
-/// The implemented `edit.*` commands (task P5-04).
+/// The implemented `edit.*` commands (task P5-04; `edit.clear` added
+/// by task P7-20: the Classic Clear item and the Delete key dispatch
+/// it, so it runs the one delete handler).
 pub(crate) const TABLE: CommandTable = &[
     ("edit.delete", "Delete", has_selection, run_delete),
+    ("edit.clear", "Delete", has_selection, run_delete),
     ("edit.select", "Select", has_pages, run_select),
     (
         "edit.select_all",

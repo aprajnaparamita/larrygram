@@ -3,7 +3,8 @@
 //! pages, save it, reopen it and keep editing.
 //!
 //! One scripted test through `Shell` + the builtin registry with
-//! [`Source::Test`]: `file.new`, a page, ten `insert.shape` dispatches
+//! [`Source::Test`]: `file.new` (which opens its one page), a rename,
+//! ten `insert.shape` dispatches
 //! (a process/decision/terminator mix from the "Basic Flowchart"
 //! stencil), five glued connectors (three `connector.draw`, two
 //! `insert.shape` + `connector.glue_begin`/`connector.glue_end`, so
@@ -276,9 +277,11 @@ struct Flowchart {
 /// `connector.glue_begin`/`connector.glue_end`.
 fn build_flowchart(shell: &mut Shell) -> Flowchart {
     run(shell, "file.new", Args::new());
+    // Task P7-20: `file.new` opens a blank drawing with one page, so
+    // the flow page is that page renamed (it was `page.add` before).
     run(
         shell,
-        "page.add",
+        "page.rename",
         Args::new().with("name", ArgValue::Text("Flow".to_owned())),
     );
 

@@ -2076,7 +2076,7 @@ tabs:
           - aliases:
               - GroupShapeDesign
             bounds: null
-            command: format.line
+            command: shape.line
             icon_ref: null
             id: LineTool
             keytip: null
@@ -5017,7 +5017,7 @@ tabs:
           - aliases:
               - GroupTools
             bounds: null
-            command: format.line
+            command: shape.line
             icon_ref: null
             id: LineTool
             keytip: null
