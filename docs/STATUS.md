@@ -15,7 +15,7 @@ Task board. Only the master agent edits this file, on `main`.
 
 - Gate queue: `tools/gate-queue/gateq` (AGENTS.md section 7). Merge gates are `main --quick --corpus`; the idle full check is `main-full` in `/Volumes/Dara/larrygram/worktrees/main-full`.
 - Merged today: P8-04, P8-02, P8-05, P7-02 (merge gate green at `d156f9c`). P7-08 started; P7-06 and P7-07 resumed.
-- P7-03, P7-06, P7-07 and P8-07 merged (`5e6259f`, `d9c7490`, `5fe8f19`, `cb66c6c`). P7-16, P8-08 and P8-10 merged (the 12 new corpus files fetched into main). P7-09 merged. Ready: P7-10, P8-09, P8-11, P8-12, P8-13, P8-15.
+- P7-03, P7-06, P7-07 and P8-07 merged (`5e6259f`, `d9c7490`, `5fe8f19`, `cb66c6c`). P7-16, P8-08 and P8-10 merged (the 12 new corpus files fetched into main). P7-09 merged. Running: P8-09. Ready: P7-10, P8-15, P8-16. The Phase 8 audits wait for P8-15.
 - Merged since the restart: P8-06, P7-05, P7-15, P8-03, P7-04, P7-08; P8-07 ready; P7-09 waits for P7-06 and P7-07; P8-03 RED at `51ce31e7`, resubmitted at `fc3fec7b`. Queued (paused for the iTerm2 restart): P7-06, P7-05, P7-03, P7-07, P7-08, P8-03, P7-04, then `main-full` at `13942e0`.
 - Queued, not started: P7-16, P8-08.
 - Master items: the parity matrix's one column per layout (P7-02 open issue); `UiRequest::ShowWelcome` in the shell (P7-09); P8-02/P8-04/P8-05 open issues for P8-03, P8-07, P8-08, P8-10 (in their Result sections); the remote still holds the pre-R4 history until the user force-pushes, and the three backup files wait for that.
@@ -62,11 +62,12 @@ Phase 8: binary `.vsd`, `.vss` and `.vst` import, read-only, in `crates/vsd-bina
 | [P8-07](tasks/P8-07.md) | implementer | P8-02..P8-06 | B | merged (pages, masters, kind, properties, the `import` pipeline; all five corpus files import; open: connects unmapped, template marker, page-size field order for P8-10, summary code page and custom properties, style Font cell, pointer index on `Chunk`) | cb66c6c |
 | [P8-09](tasks/P8-09.md) | implementer | P8-07, P7-09 | C | waiting (open path) | — |
 | [P8-10](tasks/P8-10.md) | test-engineer | P8-07, P8-08 | D | merged (17-file corpus, round trip, 6 malformed fixtures, import fuzz target, 15 goldens, report; 5 fixes; parity 61.7% over 17 files; open: theme colours, shape-level line/fill rows, scaled-drawing geometry, group nesting, Gesture Format shape) | 88f8ddb |
-| [P8-11](tasks/P8-11.md) | reviewer | P8-10 | E | ready | — |
-| [P8-12](tasks/P8-12.md) | coverage-auditor | P8-10 | E | ready | — |
-| [P8-13](tasks/P8-13.md) | cleanroom-auditor | P8-10 | E | ready | — |
+| [P8-11](tasks/P8-11.md) | reviewer | P8-09, P8-10, P8-15 | E | waiting (after P8-15 rewrites the importer) | — |
+| [P8-12](tasks/P8-12.md) | coverage-auditor | P8-09, P8-10, P8-15 | E | waiting (after P8-15 rewrites the importer) | — |
+| [P8-13](tasks/P8-13.md) | cleanroom-auditor | P8-09, P8-10, P8-15 | E | waiting (after P8-15 rewrites the importer) | — |
 | [P8-14](tasks/P8-14.md) | implementer | P8-11..P8-13 | F | waiting (fixes, phase report) | — |
 | [P8-15](tasks/P8-15.md) | implementer | P8-10 | D+ | ready (.vsd import fidelity: styles, 1-D lines, groups, drawing scale, text, every page; the .vsdx twins when they arrive) | — |
+| [P8-16](tasks/P8-16.md) | researcher | P8-10 | D+ | ready (the wide corpus: 4 162 licensed GitHub files, fetch, classify, sweeps, curated proposals) | — |
 
 ## Phase 6 task board
 
