@@ -99,10 +99,25 @@ impl Command for Builtin {
 /// `page`, `format`, `scale`, `background` and `strict`, `file.export`
 /// takes `path`, `out`, `format`, `scale` and `strict`, `file.inspect`
 /// takes `path`, `page` and `json`, `view.zoom.fit` takes `width` and
-/// `height` (points), `view.units` takes `units` (a `DisplayUnits`
-/// name, P4-15), `help.welcome.next_start` takes `show` (`"on"` or
-/// `"off"`, P7-14), and `file.close` takes an optional `confirm` flag
-/// (the answer to its `ConfirmClose` request).
+/// `height` (points; optional since task P7-20, which falls back to the
+/// recorded `ViewState::viewport`), `view.units` takes `units` (a
+/// `DisplayUnits` name, P4-15), `help.welcome.next_start` takes `show`
+/// (`"on"` or `"off"`, P7-14), and `file.close` takes an optional
+/// `confirm` flag (the answer to its `ConfirmClose` request).
+///
+/// Task P7-20 contracts: `file.new.blank.drawing` (and its `.metric`
+/// and `.us` variants) takes no arguments and opens a blank drawing
+/// with one page; `view.custom`, `view.zoom.dialog` and
+/// `shape.draw.zoom` take `percent` (a number like `150`);
+/// `view.full_screen_mode` takes an optional `show` (`"on"` /
+/// `"off"`); `tools.options.page.setup` takes `width` and `height`
+/// (inches), `orientation` (`portrait` / `landscape`) and `units` (a
+/// `DisplayUnits` name) and requests its dialog with none of them;
+/// `format.set.page.orientation` takes `orientation`; `page.size.dlg`
+/// takes `width` and `height`; `tools.backgrounds` takes `background`
+/// (a page name or `none`); `tools.options.go.to.drawing` takes `page`
+/// (1-based) or `name`; `edit.paste.in.place` takes neither `x` nor
+/// `y`.
 const BUILTINS: &[(&str, &str, EnabledFn, RunFn)] = &[
     (
         "app.office.center.options",
@@ -112,6 +127,24 @@ const BUILTINS: &[(&str, &str, EnabledFn, RunFn)] = &[
     ),
     ("app.quit", "Exit", always, file::run_quit),
     ("file.new", "New", always, file::run_new),
+    (
+        "file.new.blank.drawing",
+        "New Drawing",
+        always,
+        file::run_new_blank,
+    ),
+    (
+        "file.new.blank.drawing.metric",
+        "New Drawing (Metric)",
+        always,
+        file::run_new_blank_metric,
+    ),
+    (
+        "file.new.blank.drawing.us",
+        "New Drawing (US Units)",
+        always,
+        file::run_new_blank_us,
+    ),
     ("file.open", "Open", always, file::run_open),
     ("file.save", "Save", has_document, file::run_save),
     ("file.save_as", "Save As", has_document, file::run_save_as),
@@ -134,6 +167,69 @@ const BUILTINS: &[(&str, &str, EnabledFn, RunFn)] = &[
         "Fit to Window",
         has_pages,
         view::run_zoom_fit,
+    ),
+    (
+        "view.fit.in.window",
+        "Whole Page",
+        has_pages,
+        view::run_zoom_fit,
+    ),
+    (
+        "view.zoom.page.width",
+        "Page Width",
+        has_pages,
+        view::run_zoom_page_width,
+    ),
+    ("view.view50", "50%", has_document, view::run_zoom_50),
+    ("view.view75", "75%", has_document, view::run_zoom_75),
+    ("view.view100", "100%", has_document, view::run_zoom_100),
+    ("view.view150", "150%", has_document, view::run_zoom_150),
+    ("view.view200", "200%", has_document, view::run_zoom_200),
+    ("view.view400", "400%", has_document, view::run_zoom_400),
+    // The zoom percentage box (Classic's Standard toolbar) and the two
+    // Zoom dialogs' argument form (task P7-20).
+    (
+        "shape.draw.zoom",
+        "Zoom",
+        has_document,
+        view::run_zoom_value,
+    ),
+    (
+        "view.zoom.dialog",
+        "Zoom",
+        has_document,
+        view::run_zoom_value,
+    ),
+    ("view.custom", "Zoom", has_document, view::run_zoom_value),
+    (
+        "view.toggle_guides",
+        "Guides",
+        has_document,
+        view::run_toggle_guides,
+    ),
+    (
+        "view.guides",
+        "Guides",
+        has_document,
+        view::run_toggle_guides,
+    ),
+    (
+        "view.show.page.breaks",
+        "Page Breaks",
+        has_document,
+        view::run_toggle_page_breaks,
+    ),
+    (
+        "view.page.breaks",
+        "Page Breaks",
+        has_document,
+        view::run_toggle_page_breaks,
+    ),
+    (
+        "view.full_screen_mode",
+        "Full Screen",
+        always,
+        view::run_full_screen,
     ),
     (
         "view.toggle_grid",
