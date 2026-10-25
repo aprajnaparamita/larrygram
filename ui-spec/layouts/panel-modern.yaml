@@ -451,9 +451,9 @@ tabs:
       - id: tab.home.tools.rectangle.line
         kind: button
         label: Line
-        command: format.line
+        command: shape.line
         fluent: LineTool
-        icon: format.line
+        icon: shape.line
       - id: tab.home.tools.rectangle.freeform
         kind: button
         label: Freeform

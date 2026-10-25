@@ -73,7 +73,7 @@ group tab_home.group_tools Some("Tools") layout=Stack rows=None
   tab_home.group_tools.drawing_tools_menu split label="Drawing Tools Menu" cmd=shape.drawing.tools fluent=DrawingToolsMenu icon=shape.drawing.tools
     tab_home.group_tools.drawing_tools_menu.rectangle_tool toggle label="Rectangle Tool" cmd=tools.rectangle fluent=RectangleTool icon=tools.rectangle
     tab_home.group_tools.drawing_tools_menu.ellipse_tool toggle label="Ellipse Tool" cmd=tools.ellipse fluent=EllipseTool icon=tools.ellipse
-    tab_home.group_tools.drawing_tools_menu.line_tool toggle label="Line Tool" cmd=format.line fluent=LineTool icon=format.line
+    tab_home.group_tools.drawing_tools_menu.line_tool toggle label="Line Tool" cmd=shape.line fluent=LineTool icon=shape.line
     tab_home.group_tools.drawing_tools_menu.arc_tool toggle label="Arc Tool" cmd=shape.arc fluent=ArcTool icon=shape.arc
     tab_home.group_tools.drawing_tools_menu.freeform_tool toggle label="Freeform Tool" cmd=tools.freeform fluent=FreeformTool icon=tools.freeform
     tab_home.group_tools.drawing_tools_menu.pencil_tool toggle label="Pencil Tool" cmd=tools.pencil fluent=PencilTool icon=tools.pencil
@@ -320,7 +320,7 @@ group tab_developer.group_shape_design Some("Shape Design") layout=Stack rows=No
   tab_developer.group_shape_design.developer_drawing_tools split label="Developer Drawing Tools" cmd=shape.drawing.tools fluent=DeveloperDrawingTools icon=shape.drawing.tools
     tab_developer.group_shape_design.developer_drawing_tools.rectangle_tool toggle label="Rectangle Tool" cmd=tools.rectangle fluent=RectangleTool icon=tools.rectangle
     tab_developer.group_shape_design.developer_drawing_tools.ellipse_tool toggle label="Ellipse Tool" cmd=tools.ellipse fluent=EllipseTool icon=tools.ellipse
-    tab_developer.group_shape_design.developer_drawing_tools.line_tool toggle label="Line Tool" cmd=format.line fluent=LineTool icon=format.line
+    tab_developer.group_shape_design.developer_drawing_tools.line_tool toggle label="Line Tool" cmd=shape.line fluent=LineTool icon=shape.line
     tab_developer.group_shape_design.developer_drawing_tools.arc_tool toggle label="Arc Tool" cmd=shape.arc fluent=ArcTool icon=shape.arc
     tab_developer.group_shape_design.developer_drawing_tools.freeform_tool toggle label="Freeform Tool" cmd=tools.freeform fluent=FreeformTool icon=tools.freeform
     tab_developer.group_shape_design.developer_drawing_tools.pencil_tool toggle label="Pencil Tool" cmd=tools.pencil fluent=PencilTool icon=tools.pencil
