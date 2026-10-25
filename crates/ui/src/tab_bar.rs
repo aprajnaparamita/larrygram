@@ -974,9 +974,7 @@ mod tests {
                         let set: &LayoutSet = match fixed {
                             Some(ref set) => set.as_ref(),
                             None => {
-                                dynamic = sets()
-                                    .get(tab_bar.borrow().kind())
-                                    ;
+                                dynamic = sets().get(tab_bar.borrow().kind());
                                 dynamic
                             }
                         };
@@ -1026,11 +1024,7 @@ mod tests {
 
         /// A rig for one committed layout, drawing the command bar.
         fn committed(kind: LayoutKind) -> Self {
-            Self::new(
-                kind,
-                sets().get(kind).clone(),
-                Surface::CommandBar,
-            )
+            Self::new(kind, sets().get(kind).clone(), Surface::CommandBar)
         }
 
         /// A rig over the committed layouts that follows the command bar's
@@ -2105,10 +2099,7 @@ mod tests {
     fn the_layout_counts_are_pinned() {
         let mut report = String::new();
         for kind in [LayoutKind::Panel2016, LayoutKind::Panel365] {
-            report.push_str(&counts_report(
-                kind,
-                sets().get(kind),
-            ));
+            report.push_str(&counts_report(kind, sets().get(kind)));
             report.push('\n');
         }
         insta::assert_snapshot!("layout_counts", report);
@@ -2119,9 +2110,7 @@ mod tests {
         // Every tab of the committed 2016 layout: open each dropdown
         // root and check the added widgets are exactly its nested
         // controls (ADR 0031).
-        let set = sets()
-            .get(LayoutKind::Panel2016)
-            ;
+        let set = sets().get(LayoutKind::Panel2016);
         let mut rig = Rig::committed(LayoutKind::Panel2016);
         rig.set_action(Action::Emit(intent("file.save")));
         rig.run();
@@ -2260,10 +2249,7 @@ mod tests {
     #[test]
     fn with_ui_renders_a_whole_command_bar_without_panicking() {
         // Smoke test on the plain egui test ui (no harness).
-        let set = sets()
-            .get(LayoutKind::Panel365)
-            
-            .clone();
+        let set = sets().get(LayoutKind::Panel365).clone();
         let mut tab_bar = TabBar::new(LayoutKind::Panel365);
         let registry = Registry::new();
         let app = AppCtx::new(Settings::default());

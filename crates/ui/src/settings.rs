@@ -196,7 +196,9 @@ pub fn show_options(ui: &mut Ui, settings: &Settings) -> Result<OptionsChange, U
     ui.checkbox(&mut show_wizard, "Show the welcome wizard on next start");
 
     let intents = option_changes(settings, &draft)?;
-    let show_wizard_next_start = (show_wizard != !settings.welcome_seen).then_some(show_wizard);
+    // The row changed when the wanted state (`show_wizard`) no
+    // longer matches the stored one (`welcome_seen`).
+    let show_wizard_next_start = (show_wizard == settings.welcome_seen).then_some(show_wizard);
     Ok(OptionsChange {
         intents,
         show_wizard_next_start,
@@ -624,7 +626,11 @@ mod welcome_row_tests {
             .to_owned(),
         ));
         let settings = load_settings(&mut store).expect("the Phase 6 store loads");
-        assert_eq!(settings.ui_layout, LayoutKind::Panel2016, "stored value kept");
+        assert_eq!(
+            settings.ui_layout,
+            LayoutKind::Panel2016,
+            "stored value kept"
+        );
         assert_eq!(settings.default_layout, LayoutKind::PanelModern);
         assert!(!settings.welcome_seen);
         assert!(

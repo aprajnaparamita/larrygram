@@ -19,7 +19,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use egui::accesskit::Role;
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::{Harness, Node};
-use larrygram_commands::app::{AppCtx, DocumentSession, Settings};
+use larrygram_commands::app::{AppCtx, DocumentSession};
 use larrygram_commands::{
     Command, CommandError, CommandId, CommandMeta, CommandStatus, Enabled, Invocation, Outcome,
     Registry, builtins,

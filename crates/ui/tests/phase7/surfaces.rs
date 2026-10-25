@@ -82,9 +82,15 @@ fn the_panel_modern_page_tabs_and_zoom_controls_work() {
     let mut rig = ShellRig::with_app(app(LayoutKind::PanelModern, true));
     let names = rig.names();
     assert!(names.contains_key("First"), "the page tab draws: {names:?}");
-    assert!(names.contains_key("Second"), "the page tab draws: {names:?}");
+    assert!(
+        names.contains_key("Second"),
+        "the page tab draws: {names:?}"
+    );
     assert!(names.contains_key("All"), "the All-pages menu draws");
-    assert!(names.contains_key("New page"), "the insert-page button draws");
+    assert!(
+        names.contains_key("New page"),
+        "the insert-page button draws"
+    );
     // The zoom controls of the status bar (docs/ui/panel-modern.md).
     for name in ["Zoom In", "Zoom Out", "Fit to Window"] {
         assert!(names.contains_key(name), "{name:?} draws: {names:?}");
@@ -123,7 +129,10 @@ fn the_panel_modern_page_tabs_and_zoom_controls_work() {
         .expect("a document")
         .view
         .zoom;
-    assert!(after > before, "Zoom In raises the zoom ({before} -> {after})");
+    assert!(
+        after > before,
+        "Zoom In raises the zoom ({before} -> {after})"
+    );
 }
 
 #[test]
@@ -168,10 +177,7 @@ fn the_panel_classic_status_bar_reports_the_selection() {
     {
         let mut shell = rig.shell.borrow_mut();
         let session = shell.app.active_document_mut().expect("a document");
-        let id = *session.document.pages[0]
-            .shapes
-            .first()
-            .expect("one shape");
+        let id = *session.document.pages[0].shapes.first().expect("one shape");
         shell.app.selection.shapes = vec![id];
         shell.app.selection.anchor = Some(id);
     }
@@ -186,4 +192,42 @@ fn the_panel_classic_status_bar_reports_the_selection() {
         !angles.is_empty(),
         "the status bar reports the selection angle: {names:?}"
     );
+}
+
+#[test]
+fn the_insert_page_button_adds_a_page() {
+    let mut rig = ShellRig::with_app(app(LayoutKind::PanelModern, true));
+    rig.click_named("New page");
+    rig.run();
+    let shell = rig.shell.borrow();
+    let session = shell.app.active_document().expect("a document");
+    assert_eq!(session.document.pages.len(), 3, "the \u{2295} button runs page.add");
+}
+
+#[test]
+fn the_classic_strip_next_button_runs_the_page_command() {
+    let mut rig = ShellRig::with_app(app(LayoutKind::PanelClassic, true));
+    rig.click_named(">");
+    rig.run();
+    assert_eq!(
+        rig.shell
+            .borrow()
+            .app
+            .active_document()
+            .expect("a document")
+            .active_page,
+        Some(PageId { index: 1 }),
+        "the Next page button runs page.next"
+    );
+}
+
+#[test]
+fn the_file_button_opens_the_file_view() {
+    let mut rig = ShellRig::with_app(app(LayoutKind::PanelModern, true));
+    rig.click_named("File");
+    rig.run();
+    let names = rig.names();
+    // The File view's navigation entries (docs/ui/panel-modern.md).
+    assert!(names.contains_key("Info"), "the File view opens: {names:?}");
+    assert!(names.contains_key("Open"), "the File view opens: {names:?}");
 }

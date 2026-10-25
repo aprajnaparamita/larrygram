@@ -65,8 +65,7 @@ fn switching_through_all_four_layouts_and_back_renders_every_frame() {
             let shell = rig.shell.borrow();
             assert_eq!(shell.layout_kind(), kind, "{previous:?} -> {kind:?}");
             assert_eq!(
-                shell.app.settings.default_layout,
-                kind,
+                shell.app.settings.default_layout, kind,
                 "the default layout stays in step (Goal 6)"
             );
         }
@@ -91,7 +90,10 @@ fn the_switch_works_in_both_directions_on_the_same_shell() {
         assert!(rig.has("Search for Shapes:"), "the classic frame draws");
         rig.dispatch("view.ui_layout.panel_modern");
         assert_eq!(rig.shell.borrow().layout_kind(), LayoutKind::PanelModern);
-        assert!(rig.has(&marker(LayoutKind::PanelModern)), "the modern frame draws");
+        assert!(
+            rig.has(&marker(LayoutKind::PanelModern)),
+            "the modern frame draws"
+        );
     }
 }
 

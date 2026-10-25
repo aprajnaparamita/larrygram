@@ -1062,11 +1062,13 @@ mod tests {
         // Borrows, so both sets stay usable.
         assert_eq!(sets.panel_2016.layout.product, "visio");
         assert_eq!(sets.panel_365.layout.source, "365");
-        assert!(LayoutSets::default()
-            .get(LayoutKind::Panel365)
-            .layout
-            .tabs
-            .is_empty());
+        assert!(
+            LayoutSets::default()
+                .get(LayoutKind::Panel365)
+                .layout
+                .tabs
+                .is_empty()
+        );
     }
 
     #[test]

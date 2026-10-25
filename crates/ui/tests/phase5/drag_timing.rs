@@ -26,7 +26,7 @@
 
 use std::time::{Duration, Instant};
 
-use larrygram_commands::app::{AppCtx, DocumentSession, Settings};
+use larrygram_commands::app::{AppCtx, DocumentSession};
 use larrygram_model::{Document, Page, PageId};
 
 use crate::{CanvasRig, PAGE_HEIGHT, ZOOM, cell, screen, shape};

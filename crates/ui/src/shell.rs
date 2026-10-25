@@ -20,11 +20,11 @@
 //! Owned by task P4-03.
 
 use egui::{Context, PointerButton, Ui};
+use larrygram_commands::DocumentSession;
 use larrygram_commands::{
     ActiveTool, AppCtx, ArgValue, CommandError, CommandId, Invocation, NeededInput, Outcome,
     PathPurpose, Payload, Registry, SessionId, Source, UiRequest,
 };
-use larrygram_commands::DocumentSession;
 use larrygram_model::{PageId, ShapeId, TextContent, TextPart};
 use larrygram_render::Overlay;
 use larrygram_ui_spec::{LayoutKind, LayoutSet, LayoutSets, ShortcutScope, Shortcuts};
@@ -477,11 +477,13 @@ impl Shell {
                     panel_classic::WindowMode::Shapesheet,
                     panel_classic::WindowMode::Stencil,
                 ] {
-                    let visible = self.panel_classic.toolbar_visible_in(&set.v2, mode, &toolbar.id);
-                    self.app.settings.panel_classic_toolbars.insert(
-                        format!("{}/{}", mode.id(), toolbar.id),
-                        visible,
-                    );
+                    let visible = self
+                        .panel_classic
+                        .toolbar_visible_in(&set.v2, mode, &toolbar.id);
+                    self.app
+                        .settings
+                        .panel_classic_toolbars
+                        .insert(format!("{}/{}", mode.id(), toolbar.id), visible);
                 }
             }
         }
@@ -517,10 +519,7 @@ impl Shell {
         let mut lists = ListData::new();
         for name in ["recent_files", "windows", "pages"] {
             let entries = live.list(name, &self.app);
-            lists.insert(
-                name,
-                entries.into_iter().map(|entry| entry.label).collect(),
-            );
+            lists.insert(name, entries.into_iter().map(|entry| entry.label).collect());
         }
         lists
     }
@@ -590,28 +589,27 @@ impl Shell {
                 {
                     let kind = self.app.settings.ui_layout;
                     let set = self.layouts.get(kind);
-                    match self.panel_modern.show_qat(ui, &set.v2, &self.app, &self.registry) {
+                    match self
+                        .panel_modern
+                        .show_qat(ui, &set.v2, &self.app, &self.registry)
+                    {
                         Ok(mut more) => produced.append(&mut more),
                         Err(error) => errors.push(error.to_string()),
                     }
                 }
                 ui.separator();
                 ui.label(self.title_text());
-                ui.with_layout(
-                    egui::Layout::right_to_left(egui::Align::Center),
-                    |ui| {
-                        ui.menu_button("Help", |ui| {
-                            for id in ["help.welcome", "help.about"] {
-                                if let Some(intent) =
-                                    menu_item(ui, &self.registry, &self.app, id, None)
-                                {
-                                    produced.push(intent);
-                                    ui.close();
-                                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.menu_button("Help", |ui| {
+                        for id in ["help.welcome", "help.about"] {
+                            if let Some(intent) = menu_item(ui, &self.registry, &self.app, id, None)
+                            {
+                                produced.push(intent);
+                                ui.close();
                             }
-                        });
-                    },
-                );
+                        }
+                    });
+                });
                 for error in errors {
                     self.note_error(error);
                 }
@@ -688,30 +686,9 @@ impl Shell {
         // Menu bar (File, View, Help).
         egui::Panel::top("shell-menu").show(ui, |ui| {
             egui::menu::MenuBar::default().ui(ui, |ui| {
-                show_menu(
-                    ui,
-                    &self.registry,
-                    &self.app,
-                    "File",
-                    FILE_MENU,
-                    intents,
-                );
-                show_menu(
-                    ui,
-                    &self.registry,
-                    &self.app,
-                    "View",
-                    VIEW_MENU,
-                    intents,
-                );
-                show_menu(
-                    ui,
-                    &self.registry,
-                    &self.app,
-                    "Help",
-                    HELP_MENU,
-                    intents,
-                );
+                show_menu(ui, &self.registry, &self.app, "File", FILE_MENU, intents);
+                show_menu(ui, &self.registry, &self.app, "View", VIEW_MENU, intents);
+                show_menu(ui, &self.registry, &self.app, "Help", HELP_MENU, intents);
             });
         });
 
@@ -859,8 +836,14 @@ impl Shell {
         ui.horizontal(|ui| {
             if let Ok(Some((bounds, angle))) = handles::selection_frame(&self.app, None) {
                 let units = self.app.settings.units;
-                ui.label(format!("W {}", canvas::format_length(bounds.width(), units)));
-                ui.label(format!("H {}", canvas::format_length(bounds.height(), units)));
+                ui.label(format!(
+                    "W {}",
+                    canvas::format_length(bounds.width(), units)
+                ));
+                ui.label(format!(
+                    "H {}",
+                    canvas::format_length(bounds.height(), units)
+                ));
                 ui.label(format!("A {:.0}\u{b0}", angle.degrees()));
             }
             ui.separator();
@@ -1071,8 +1054,7 @@ impl Shell {
                     } if modifiers.shift
                 )
             });
-            on_event
-                || (input.modifiers.shift && input.key_pressed(egui::Key::F10))
+            on_event || (input.modifiers.shift && input.key_pressed(egui::Key::F10))
         });
         if secondary.0 {
             let Some(pos) = secondary.1 else {
@@ -1087,10 +1069,10 @@ impl Shell {
             }
             match self.shape_under(pos, rect) {
                 Some(shape) => {
-                    if self.app.selection.anchor != Some(shape) {
-                        if let Some(intent) = select_intent(&self.app, shape) {
-                            intents.push(intent);
-                        }
+                    if self.app.selection.anchor != Some(shape)
+                        && let Some(intent) = select_intent(&self.app, shape)
+                    {
+                        intents.push(intent);
                     }
                     self.open_context_menu(HitTarget::Shape);
                 }
@@ -1114,8 +1096,12 @@ impl Shell {
         let session = self.app.active_document()?;
         let page = canvas::page_position(rect, session, screen)?;
         let zoom = session.view.zoom;
-        let hit = self.tools.state.scene(&self.app).ok().flatten().and_then(
-            |scene| {
+        self.tools
+            .state
+            .scene(&self.app)
+            .ok()
+            .flatten()
+            .and_then(|scene| {
                 let tolerance = 4.0 / (zoom * canvas::POINTS_PER_INCH);
                 let hits = larrygram_render::hit_test(
                     scene,
@@ -1124,9 +1110,7 @@ impl Shell {
                 )
                 .ok()?;
                 hits.iter().find_map(|hit| hit.shape_id)
-            },
-        );
-        hit
+            })
     }
 
     /// Consumes Escape while the text editor or a stencil drag owns it
@@ -1397,9 +1381,11 @@ impl Shell {
                 .collapsible(false)
                 .resizable(false)
                 .open(&mut open)
-                .show(ui.ctx(), |ui| match settings::show_options(ui, &self.app.settings) {
-                    Ok(value) => changed = value,
-                    Err(error) => failure = Some(error),
+                .show(ui.ctx(), |ui| {
+                    match settings::show_options(ui, &self.app.settings) {
+                        Ok(value) => changed = value,
+                        Err(error) => failure = Some(error),
+                    }
                 });
             self.options_open = open;
             if let Some(show) = changed.show_wizard_next_start {
@@ -2007,6 +1993,7 @@ mod tests {
 
     use super::*;
     use crate::dialogs::{OpenRequest, SaveRequest};
+    use crate::test_util::with_ui;
     use larrygram_commands::{
         Command, CommandMeta, CommandStatus, DocumentSession, Edit, Enabled, Settings, StubCommand,
     };
@@ -2225,8 +2212,7 @@ mod tests {
             ] {
                 let mut settings = seen_settings();
                 settings.ui_layout = kind;
-                let mut shell =
-                    Shell::new(Registry::new(), layouts.clone(), AppCtx::new(settings));
+                let mut shell = Shell::new(Registry::new(), layouts.clone(), AppCtx::new(settings));
                 assert_eq!(shell.layout_kind(), kind);
                 assert_eq!(shell.layout_set(), layouts.get(kind));
                 shell_frame(&mut shell, Vec::new(), 0.0);
@@ -2686,11 +2672,7 @@ mod tests {
     /// The committed `shortcuts.yaml` table (the loader's).
     #[allow(clippy::expect_used)] // test helper: a failure here is the bug
     fn committed_shortcuts() -> Shortcuts {
-        sets()
-            .get(LayoutKind::Panel2016)
-            
-            .shortcuts
-            .clone()
+        sets().get(LayoutKind::Panel2016).shortcuts.clone()
     }
 
     /// A two-chord sequence (`Alt+H, F`): the committed table has
@@ -3193,7 +3175,8 @@ mod tests {
     }
 
     fn test_shape(x: f64, y: f64, visio_id: i32) -> larrygram_model::Shape {
-        let mut shape = larrygram_model::Shape::new(larrygram_model::ShapeId { index: 0 }, visio_id);
+        let mut shape =
+            larrygram_model::Shape::new(larrygram_model::ShapeId { index: 0 }, visio_id);
         shape.sheet.cells = vec![
             test_cell("Width", 2.0),
             test_cell("Height", 1.0),
@@ -3235,10 +3218,7 @@ mod tests {
         let id = document.add_shape(test_shape(3.0, 3.0, 1));
         let mut page = larrygram_model::Page::new(PageId { index: 0 }, 1);
         page.shapes.push(id);
-        page.sheet.cells = vec![
-            test_cell("PageWidth", 8.5),
-            test_cell("PageHeight", 11.0),
-        ];
+        page.sheet.cells = vec![test_cell("PageWidth", 8.5), test_cell("PageHeight", 11.0)];
         document.pages.push(page);
         let mut settings = seen_settings();
         settings.ui_layout = LayoutKind::PanelClassic;
@@ -3345,12 +3325,15 @@ mod tests {
         let mut shell = full_shell();
         shell.set_layout_kind(LayoutKind::PanelClassic);
         let toolbar = sets().panel_classic.v2.toolbars[0].id.clone();
-        shell
-            .panel_classic
-            .set_toolbar_visible_in(panel_classic::WindowMode::Drawing, &toolbar, false);
+        shell.panel_classic.set_toolbar_visible_in(
+            panel_classic::WindowMode::Drawing,
+            &toolbar,
+            false,
+        );
         shell.record_layout_state();
         assert_eq!(
-            shell.app
+            shell
+                .app
                 .settings
                 .panel_classic_toolbars
                 .get(&format!("drawing/{toolbar}")),
@@ -3419,6 +3402,55 @@ mod tests {
             assert_eq!(checked, id == "view.ui_layout.panel_365", "{id}");
         }
         assert_eq!(layout_radio_checked(&shell.app, "file.new"), None);
+    }
+
+    #[test]
+    fn the_context_menu_seam_ignores_an_unmapped_target() {
+        // `contexts::menu_for` answers `None` for a target the layout
+        // does not define; the shell then keeps the previous menu
+        // (task P7-09 Goal 4).
+        let mut shell = full_shell();
+        shell.open_context_menu(HitTarget::Page);
+        assert_eq!(
+            shell.context_menu_id.as_deref(),
+            Some("context.page"),
+            "Panel Modern defines the empty-page menu"
+        );
+        shell.open_context_menu(HitTarget::CommentMark);
+        assert_eq!(
+            shell.context_menu_id.as_deref(),
+            Some("context.page"),
+            "Panel Modern has no comment menu: the previous one stays"
+        );
+    }
+
+    #[test]
+    fn the_file_view_covers_the_frame_below_the_title_bar() {
+        // Panel Modern's File view draws instead of the command bar
+        // and the canvas (task P7-09, `docs/ui/panel-modern.md`).
+        let mut shell = full_shell();
+        // The first frame builds the per-layout widgets (ADR 0032).
+        shell_frame(&mut shell, Vec::new(), 0.0);
+        shell.panel_modern.set_file_view_open(true);
+        shell_frame(&mut shell, Vec::new(), 1.0);
+        assert!(shell.panel_modern.is_file_view_open());
+    }
+
+    #[test]
+    fn the_free_helpers_handle_bad_input_without_panicking() {
+        // `menu_item` and `intent_for` refuse an id that is not a
+        // command id (AGENTS.md section 6: never crash).
+        with_ui(|ui| {
+            let registry = Registry::new();
+            let app = AppCtx::new(seen_settings());
+            assert_eq!(menu_item(ui, &registry, &app, "not an id", None), None);
+        });
+        assert!(intent_for("not an id").is_err());
+        let app = AppCtx::new(seen_settings());
+        assert_eq!(select_intent(&app, larrygram_model::ShapeId { index: 0 }), None);
+        for style in [FrameStyle::Classic, FrameStyle::Modern, FrameStyle::Fluent] {
+            let _ = style.shapes_header();
+        }
     }
 
     #[test]

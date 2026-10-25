@@ -661,7 +661,11 @@ mod tests {
             r#""units":"Inches","recent_files":["/tmp/a.vsdx"]}"#
         );
         let settings: Settings = serde_json::from_str(old).expect("the Phase 6 store loads");
-        assert_eq!(settings.ui_layout, LayoutKind::Panel2016, "stored value kept");
+        assert_eq!(
+            settings.ui_layout,
+            LayoutKind::Panel2016,
+            "stored value kept"
+        );
         assert_eq!(
             settings.default_layout,
             LayoutKind::PanelModern,

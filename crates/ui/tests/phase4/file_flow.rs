@@ -12,7 +12,7 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use larrygram_commands::app::{AppCtx, Settings};
+use larrygram_commands::app::AppCtx;
 use larrygram_commands::{ArgValue, Args, CommandError, Invocation, NeededInput, Source};
 use larrygram_commands::{CommandId, Outcome};
 use larrygram_ui::Intent;
@@ -76,7 +76,11 @@ impl FilePicker for FakePicker {
 /// A shell over the real registry with a recording picker.
 fn shell_with(picker: FakePicker) -> (Shell, Rc<RefCell<Vec<OpenRequest>>>) {
     let registry = larrygram_commands::builtins::registry().expect("the registry builds");
-    let mut shell = Shell::new(registry, sets().clone(), AppCtx::new(crate::phase4_settings()));
+    let mut shell = Shell::new(
+        registry,
+        sets().clone(),
+        AppCtx::new(crate::phase4_settings()),
+    );
     let calls = Rc::clone(&picker.open_calls);
     shell.set_picker(Box::new(picker));
     (shell, calls)
@@ -197,7 +201,11 @@ fn a_never_saved_document_asks_where_to_save_and_writes_there() {
         ..FakePicker::default()
     };
     let registry = larrygram_commands::builtins::registry().expect("the registry builds");
-    let mut shell = Shell::new(registry, sets().clone(), AppCtx::new(crate::phase4_settings()));
+    let mut shell = Shell::new(
+        registry,
+        sets().clone(),
+        AppCtx::new(crate::phase4_settings()),
+    );
     let save_calls = Rc::clone(&picker.save_calls);
     shell.set_picker(Box::new(picker));
 
