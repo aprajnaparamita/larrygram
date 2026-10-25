@@ -569,9 +569,9 @@ fn hidden_by_layer(ctx: &mut Ctx<'_>, page: PageId, id: ShapeId) -> bool {
 /// The path, paint, stroke, shadow and text of one shape.
 fn shape_content(
     ctx: &mut Ctx<'_>,
-    _page: PageId,
+    page: PageId,
     id: ShapeId,
-    _transform: Transform,
+    transform: Transform,
 ) -> (
     Path,
     Option<Paint>,
@@ -598,6 +598,7 @@ fn shape_content(
         }
     };
     let mut warnings = geometry.warnings;
+    let page_rect = page_rect_in_local(ctx, page, transform);
 
     let mut path = Path::new();
     let mut draw_fill = false;
@@ -613,6 +614,7 @@ fn shape_content(
             width,
             height,
             ctx.tolerance,
+            page_rect,
             sheet,
             &mut warnings,
             &mut path,
@@ -658,6 +660,19 @@ fn page_size(ctx: &mut Ctx<'_>, page: PageId) -> (f64, f64) {
     (width, height)
 }
 
+/// The page rectangle in the shape's local coordinates (the `InfiniteLine`
+/// clip), or `None` when the shape transform cannot be inverted.
+fn page_rect_in_local(ctx: &mut Ctx<'_>, page: PageId, transform: Transform) -> Option<[Point; 4]> {
+    let (width, height) = page_size(ctx, page);
+    let inverse = transform.invert().ok()?;
+    Some([
+        inverse.apply(Point::new(0.0, 0.0)),
+        inverse.apply(Point::new(width, 0.0)),
+        inverse.apply(Point::new(width, height)),
+        inverse.apply(Point::new(0.0, height)),
+    ])
+}
+
 // --- geometry rows ---------------------------------------------------
 
 /// The state of a `SplineStart` row awaiting its `SplineKnot` rows.
@@ -676,13 +691,16 @@ struct PendingSpline {
 
 /// Maps one `Geometry` section's rows onto `path` (ADR 0022).
 ///
-/// `warnings` collects the ADR 0021 warnings of rows the builder
-/// cannot draw faithfully.
+/// `page_rect` is the page rectangle in shape-local coordinates (for
+/// `InfiniteLine`); `warnings` collects the ADR 0021 warnings of rows the
+/// builder cannot draw faithfully.
+#[allow(clippy::too_many_arguments)] // one row-mapping entry point
 fn rows_to_path(
     rows: &[GeometryRow],
     width: f64,
     height: f64,
     tolerance: f64,
+    page_rect: Option<[Point; 4]>,
     sheet: SheetRef,
     warnings: &mut Vec<CellWarning>,
     path: &mut Path,
@@ -882,12 +900,12 @@ fn rows_to_path(
                 open = false;
             }
             GeometryRow::InfiniteLine { p1, p2 } => {
-                // The row's two points are the shape's own extent: a
-                // 1-D shape's line runs between them (the reference
-                // pictures draw the finite axis, never a page-wide
-                // line; P8-15).
-                path.push(Segment::MoveTo(*p1));
-                path.push(Segment::LineTo(*p2));
+                if let Some(rect) = page_rect
+                    && let Some((from, to)) = clip_infinite_line(*p1, *p2, &rect)
+                {
+                    path.push(Segment::MoveTo(from));
+                    path.push(Segment::LineTo(to));
+                }
                 current = None;
                 open = false;
             }
@@ -1134,6 +1152,61 @@ fn ellipse_cubics(center: Point, u: Point, v: Point, tolerance: f64) -> Vec<Cubi
         });
     }
     cubics
+}
+
+/// Clips the infinite line through `p1` and `p2` to the convex polygon
+/// `rect` (the page rectangle in shape-local coordinates), returning the
+/// segment inside it (ADR 0022: `InfiniteLine` renders clipped to the
+/// page).
+fn clip_infinite_line(p1: Point, p2: Point, rect: &[Point; 4]) -> Option<(Point, Point)> {
+    if !finite_point(p1) || !finite_point(p2) {
+        return None;
+    }
+    let dir = p2.sub(p1);
+    if dir.x == 0.0 && dir.y == 0.0 {
+        return None;
+    }
+    let mut poly = *rect;
+    let area = (0..4)
+        .map(|i| {
+            let next = (i + 1) % 4;
+            poly[i].x * poly[next].y - poly[next].x * poly[i].y
+        })
+        .sum::<f64>();
+    if area < 0.0 {
+        poly.reverse();
+    }
+    let mut low = f64::NEG_INFINITY;
+    let mut high = f64::INFINITY;
+    for i in 0..4 {
+        let next = (i + 1) % 4;
+        let edge = poly[next].sub(poly[i]);
+        let offset = edge.x * (p1.y - poly[i].y) - edge.y * (p1.x - poly[i].x);
+        let slope = edge.x * dir.y - edge.y * dir.x;
+        if slope == 0.0 {
+            if offset < 0.0 {
+                return None;
+            }
+        } else {
+            let t = -offset / slope;
+            if slope > 0.0 {
+                low = low.max(t);
+            } else {
+                high = high.min(t);
+            }
+        }
+    }
+    if !low.is_finite() || !high.is_finite() || low > high {
+        return None;
+    }
+    let from = Point::new(p1.x + dir.x * low, p1.y + dir.y * low);
+    let to = Point::new(p1.x + dir.x * high, p1.y + dir.y * high);
+    Some((from, to))
+}
+
+/// Whether both coordinates are finite.
+fn finite_point(point: Point) -> bool {
+    point.x.is_finite() && point.y.is_finite()
 }
 
 // --- paint, stroke, shadow -------------------------------------------
@@ -3163,6 +3236,28 @@ mod tests {
                 0.1
             )
             .is_empty()
+        );
+    }
+
+    #[test]
+    fn clip_infinite_line_cuts_and_rejects() {
+        let rect = [
+            Point::new(0.0, 0.0),
+            Point::new(10.0, 0.0),
+            Point::new(10.0, 8.0),
+            Point::new(0.0, 8.0),
+        ];
+        let (from, to) =
+            clip_infinite_line(Point::new(-5.0, 4.0), Point::new(15.0, 4.0), &rect).expect("clips");
+        assert_eq!(from, Point::new(0.0, 4.0));
+        assert_eq!(to, Point::new(10.0, 4.0));
+        assert_eq!(
+            clip_infinite_line(Point::new(-5.0, 20.0), Point::new(15.0, 20.0), &rect),
+            None
+        );
+        assert_eq!(
+            clip_infinite_line(Point::new(0.0, 0.0), Point::new(0.0, 0.0), &rect),
+            None
         );
     }
 
