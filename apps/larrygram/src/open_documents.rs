@@ -68,6 +68,11 @@ impl OpenQueue {
 /// thread drains each frame (task R8 Goal 2).
 pub(crate) static QUEUED: OpenQueue = OpenQueue::new();
 
+/// Serialises the tests that share [`QUEUED`] (unit tests run in
+/// parallel).
+#[cfg(test)]
+pub(crate) static QUEUE_TEST_LOCK: Mutex<()> = Mutex::new(());
+
 /// The `file.open` [`Intent`] for one path (task R8 Goal 1).
 ///
 /// `None` only when the command id stops parsing, which cannot happen
