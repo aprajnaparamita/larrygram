@@ -73,9 +73,11 @@ fn writer_spells_code(code: &str, value: Option<&CellValue>, unit: Unit) -> bool
 ///
 /// `N` is the name, `F` the formula, `V` the cached value, `U` the declared
 /// unit and `E` the cached error (see [`value`]). When `E` is present the
-/// value is the error and `V` and `U` stay preserved. A `U` code stays
-/// preserved only when the writer does not spell it back for this cell
-/// ([`writer_spells_code`]); codes it re-derives are consumed here.
+/// value is the error and `V` and `U` stay preserved; a `V` the model
+/// cannot hold (a non-finite number, task P8-19 cause 3) leaves the value
+/// slot empty and keeps `V` and `U` preserved the same way. A `U` code
+/// stays preserved only when the writer does not spell it back for this
+/// cell ([`writer_spells_code`]); codes it re-derives are consumed here.
 pub(crate) fn map_cell(node: &XmlNode, part: &str) -> Result<Option<Cell>, Error> {
     let Some(name) = node::attribute(node, "N") else {
         return Ok(None);
@@ -88,12 +90,21 @@ pub(crate) fn map_cell(node: &XmlNode, part: &str) -> Result<Option<Cell>, Error
     let v = node::attribute(node, "V").map(str::to_owned);
     let u = node::attribute(node, "U").map(str::to_owned);
     let mut cell = Cell::new(CellName::new(name.clone()));
+    // Whether `V` and `U` stay in `Preserved`: the error takes the value
+    // slot, and so does a literal with no model value.
+    let mut verbatim_value = error.is_some();
     cell.value = match (&error, &v) {
         (Some(error), _) => Some(CellValue::Error(error.clone())),
-        (None, Some(v)) => Some(value::value(v, u.as_deref(), part, &name)?),
+        (None, Some(literal)) => match value::value(literal, u.as_deref(), part, &name)? {
+            Some(value) => Some(value),
+            None => {
+                verbatim_value = true;
+                None
+            }
+        },
         (None, None) => None,
     };
-    cell.unit = if error.is_some() {
+    cell.unit = if verbatim_value {
         Unit::Unitsless
     } else {
         value::unit(u.as_deref()).unwrap_or(Unit::Unitsless)
@@ -106,13 +117,13 @@ pub(crate) fn map_cell(node: &XmlNode, part: &str) -> Result<Option<Cell>, Error
             "N" | "E" => {}
             "F" => cell.formula = Some(attribute.value.clone()),
             "V" => {
-                if error.is_some() {
-                    // The error takes the value slot; the written value stays.
+                if verbatim_value {
+                    // The error or the absent value leaves the written value alone.
                     cell.preserved.attributes.push(attribute.clone());
                 }
             }
             "U" => {
-                if error.is_some()
+                if verbatim_value
                     || !writer_spells_code(&attribute.value, cell.value.as_ref(), cell.unit)
                 {
                     cell.preserved.attributes.push(attribute.clone());
