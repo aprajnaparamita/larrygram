@@ -465,12 +465,17 @@ fn run_duplicate_page(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, Co
     let session = ctx.active_document().ok_or_else(super::no_document)?;
     let old = session.document.pages.clone();
     let old_active = session.active_page;
-    let (content, name) = {
+    let (content, name, sheet, background) = {
         let doc = &session.document;
         let entity = doc
             .page(page)
             .ok_or_else(|| CommandError::failed("the active page is gone"))?;
-        (page_fragment(doc, entity)?, entity.name.clone())
+        (
+            page_fragment(doc, entity)?,
+            entity.name.clone(),
+            entity.sheet.clone(),
+            entity.background,
+        )
     };
     let count = content.shapes.len();
     let label = page_label(
@@ -487,6 +492,12 @@ fn run_duplicate_page(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, Co
     let (new_list, copy) = {
         let doc = document_mut(ctx, session_id)?;
         let copy = doc.add_page(&name).map_err(model_error)?;
+        // The copy keeps the page's own sheet (its page setup) and its
+        // background assignment (task P7-20).
+        if let Some(entity) = doc.pages.iter_mut().find(|entry| entry.id == copy) {
+            entity.sheet = sheet;
+            entity.background = background;
+        }
         (doc.pages.clone(), copy)
     };
     let mut edit = CompositeEdit::new("Duplicate page");
@@ -1156,6 +1167,38 @@ mod tests {
         let session = ctx.active_document().expect("session");
         assert_eq!(session.document.pages.len(), 2, "redo brings it back");
         assert_eq!(session.document.pages[1].shapes.len(), 1, "with the shapes");
+    }
+
+    /// The copy keeps the page's own sheet (its page setup) and its
+    /// background assignment (task P7-20).
+    #[test]
+    fn duplicate_page_keeps_the_page_setup_and_background() {
+        let mut ctx = one_shape_ctx();
+        // A second page to point the background at.
+        run_add(
+            &mut ctx,
+            &invocation(&[("name", ArgValue::Text("Back".to_owned()))]),
+        )
+        .expect("add");
+        {
+            let session = ctx.active_document_mut().expect("session");
+            session.document.pages[0].background = Some(PageId { index: 1 });
+            session.active_page = Some(PageId { index: 0 });
+        }
+        run_page_setup(
+            &mut ctx,
+            &invocation(&[
+                ("width", ArgValue::Number(5.0)),
+                ("height", ArgValue::Number(7.0)),
+            ]),
+        )
+        .expect("size");
+        run_duplicate_page(&mut ctx, &Invocation::empty(crate::Source::Test)).expect("duplicate");
+        let session = ctx.active_document().expect("session");
+        assert_eq!(session.document.pages.len(), 3);
+        let copy = &session.document.pages[2];
+        assert_eq!(page_size(copy), (5.0, 7.0), "the copy keeps the page setup");
+        assert_eq!(copy.background, Some(PageId { index: 1 }));
     }
 
     /// `tools.options.go.to.drawing` switches by name or number and
