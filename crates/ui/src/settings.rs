@@ -211,8 +211,6 @@ pub fn option_changes(before: &Settings, after: &Settings) -> Result<Vec<Intent>
         let id = match after.ui_layout {
             LayoutKind::Panel2016 => "view.ui_layout.panel_2016",
             LayoutKind::Panel365 => "view.ui_layout.panel_365",
-            // The curated layouts gain their registry rows in P7-09;
-            // the dialog never offers them before then.
             LayoutKind::PanelModern => "view.ui_layout.panel_modern",
             LayoutKind::PanelClassic => "view.ui_layout.panel_classic",
         };
@@ -442,6 +440,32 @@ mod tests {
         let intent = &intents[0];
         assert_eq!(intent.command.as_str(), "help.welcome.next_start");
         assert_eq!(intent.invocation.args.text("show"), Some("on"));
+    }
+
+    /// Every layout radio maps to its registry command (P7-12
+    /// minor 2: the Panel Modern and Panel Classic arms were dark).
+    #[test]
+    fn every_layout_radio_maps_to_its_registry_command() {
+        for (kind, id) in [
+            (LayoutKind::Panel2016, "view.ui_layout.panel_2016"),
+            (LayoutKind::Panel365, "view.ui_layout.panel_365"),
+            (LayoutKind::PanelModern, "view.ui_layout.panel_modern"),
+            (LayoutKind::PanelClassic, "view.ui_layout.panel_classic"),
+        ] {
+            // The row changes away from another layout (the default
+            // is Panel Modern, so its case starts elsewhere).
+            let mut before = Settings::default();
+            before.ui_layout = if kind == LayoutKind::PanelModern {
+                LayoutKind::Panel2016
+            } else {
+                LayoutKind::PanelModern
+            };
+            let mut after = Settings::default();
+            after.ui_layout = kind;
+            let intents = option_changes(&before, &after).expect("intents");
+            assert_eq!(intents.len(), 1, "{kind:?} changes one row");
+            assert_eq!(intents[0].command.as_str(), id, "{kind:?} dispatches {id}");
+        }
     }
 
     #[test]
