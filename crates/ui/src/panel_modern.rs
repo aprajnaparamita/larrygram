@@ -917,35 +917,99 @@ fn launcher_item(
 }
 
 /// The widths one control takes, by kind and size: combos use their
-/// `width`, small controls the fixed icon width, the rest their label.
-fn measure_widths(ui: &Ui, items: &[&Item], m: &Metrics) -> Vec<f32> {
+/// `width` (at least their label), small controls the icon width, the
+/// rest the widest atom row the widget draws (the icon-over-label
+/// stack of a large control, the icon-and-label row of a medium one,
+/// the label-and-\u{25be} row of a large split's arrow part).
+///
+/// The constants are the frame and inter-atom spacing egui adds on
+/// top of the glyph and icon widths (calibrated against the atoms'
+/// preferred size, `panel_modern`'s tests). Under-measuring wraps the
+/// label one letter per line (P7-10's finding);
+/// `placement::every_drawn_control_fits_its_label` pins the rendered
+/// side. The widgets render at exactly these widths
+/// (`place::place`), so a caller can assert the fit.
+pub fn measure_widths(ui: &Ui, items: &[&Item], m: &Metrics) -> Vec<f32> {
     items
         .iter()
-        .map(|item| match item.kind {
-            ItemKind::Combo => (item.width.unwrap_or(107.0) as f32).clamp(16.0, 400.0),
-            ItemKind::Check => {
-                let label = item.label.clone().unwrap_or_default();
-                m.check_size + 4.0 + text_width(ui, &label) + 4.0
-            }
-            _ => {
-                let label = item.label.clone().unwrap_or_default();
-                let text = text_width(ui, &label);
-                if place::is_large(item) {
-                    (text + 8.0).clamp(m.large_min_width, 3.0 * m.large_min_width)
-                } else if item.size == Some(larrygram_ui_spec::v2::ControlSize::Small) {
-                    m.small_width
-                } else {
-                    let icon = if item.icon.is_some() {
-                        m.medium_icon + 4.0
+        .map(|item| {
+            let label = item.label.clone().unwrap_or_default();
+            let text = text_width(ui, &label);
+            let arrow = if matches!(
+                item.kind,
+                ItemKind::Dropdown | ItemKind::Gallery | ItemKind::Palette
+            ) {
+                ARROW_EXTRA
+            } else {
+                0.0
+            };
+            match item.kind {
+                ItemKind::Combo => (item.width.unwrap_or(107.0) as f32)
+                    .clamp(16.0, 400.0)
+                    .max(text + COMBO_EXTRA),
+                ItemKind::Check => m.check_size + 4.0 + text + CHECK_FRAME,
+                _ => {
+                    let split = matches!(item.kind, ItemKind::Split | ItemKind::SplitRecent);
+                    if place::is_large(item) {
+                        // The icon row and the label row (and, for a
+                        // split, the label-and-\u{25be} row of the arrow
+                        // part) all fit the column.
+                        let below = text + if split { ARROW_EXTRA } else { arrow };
+                        // The cap bounds a malformed label (400 px,
+                        // the combo cap): inside it no word is split.
+                        (m.large_icon.max(below) + LARGE_FRAME)
+                            .clamp(m.large_min_width, MAX_LABEL_W)
+                    } else if item.size == Some(larrygram_ui_spec::v2::ControlSize::Small) {
+                        // Icon only, with the arrow part of a split
+                        // beside it.
+                        let arrow_part = if split { m.split_arrow_width } else { arrow };
+                        (m.small_icon + SMALL_FRAME + arrow_part).max(m.small_width)
                     } else {
-                        0.0
-                    };
-                    text + icon + 12.0
+                        let icon = if item.icon.is_some() {
+                            m.medium_icon + ICON_EXTRA
+                        } else {
+                            0.0
+                        };
+                        let arrow_part = if split { m.split_arrow_width } else { arrow };
+                        (text + icon + arrow_part + ATOM_FRAME).min(MAX_LABEL_W)
+                    }
                 }
             }
         })
         .collect()
 }
+
+/// The width of a \u{25be} arrow in the command bar (`arrow_atom(10.0, ...)`)
+/// plus its spacing.
+const ARROW_EXTRA: f32 = 20.0;
+
+/// The icon's width allowance over the label on the same row (the
+/// icon plus its spacing).
+const ICON_EXTRA: f32 = 28.0;
+
+/// The frame and atom spacing of a medium command-bar button (plus
+/// the slack that keeps a text atom from shrinking into a wrap).
+const ATOM_FRAME: f32 = 36.0;
+
+/// The frame and atom spacing of a large button (the icon-over-label
+/// stack), plus the same slack.
+const LARGE_FRAME: f32 = 38.0;
+
+/// The frame and atom spacing of a small (icon-only) button.
+const SMALL_FRAME: f32 = 32.0;
+
+/// The frame and atom spacing of a check box with its label, plus
+/// slack.
+const CHECK_FRAME: f32 = 18.0;
+
+/// The space a combo takes around its label (padding and the arrow),
+/// plus slack.
+const COMBO_EXTRA: f32 = 30.0;
+
+/// The widest a measured control gets: a malformed label (or a huge
+/// theme font) cannot take the whole command bar (AGENTS.md section
+/// 6: bounded allocations on input-derived values).
+const MAX_LABEL_W: f32 = 400.0;
 
 /// The width of `text` in the UI font, in logical pixels.
 fn text_width(ui: &Ui, text: &str) -> f32 {
