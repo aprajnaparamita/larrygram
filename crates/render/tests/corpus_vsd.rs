@@ -29,12 +29,13 @@
 use std::path::{Path, PathBuf};
 
 /// The `.vsdx` twin comparison (P8-15 goal 8): the shared comparison
-/// of one import against its twin. It lives beside the corpus tests of
-/// `larrygram-vsd-binary` (`crates/vsd-binary/tests/twins.rs` owns it
-/// and its contract); this suite drives it because the `.vsdx` reader
-/// is a same-layer crate `larrygram-vsd-binary` may not depend on
-/// (ADR 0002).
-#[path = "../../vsd-binary/tests/twins/compare.rs"]
+/// of one import against its twin. It lives in this suite's `twins/`
+/// (`crates/render/tests/twins/compare.rs`, MIT: our own code, not
+/// derived from libvisio) and is included from the `larrygram-vsd-binary`
+/// suite too, where its contract has hand-built tests; this suite
+/// drives the corpus run because the `.vsdx` reader is a same-layer
+/// crate `larrygram-vsd-binary` may not depend on (ADR 0002).
+#[path = "twins/compare.rs"]
 mod twin_compare;
 
 use larrygram_render::{PngOptions, SvgOptions, render_png, render_svg};
@@ -621,7 +622,7 @@ fn the_vsd_imports_match_their_vsdx_twins() {
     if require_corpus_or(&files) {
         return;
     }
-    let mut compared = 0usize;
+    let mut compared_files = 0usize;
     let mut failures = Vec::new();
     for file in &files {
         let name = file
@@ -638,13 +639,20 @@ fn the_vsd_imports_match_their_vsdx_twins() {
         };
         let twin = read_document(&twin_bytes, &Limits::DEFAULT)
             .unwrap_or_else(|e| panic!("{stem}.vsdx: does not read: {e:?}"));
-        let mismatches = twin_compare::compare_documents(&imported.document, &twin);
+        let (mismatches, cells) =
+            twin_compare::compare_documents_counted(&imported.document, &twin);
+        println!(
+            "twin {name}: {} of {} compared cells agree, {} differ",
+            cells.saturating_sub(mismatches.len()),
+            cells,
+            mismatches.len()
+        );
         if !mismatches.is_empty() {
             failures.push(format!("{name}:\n  {}", mismatches.join("\n  ")));
         }
-        compared += 1;
+        compared_files += 1;
     }
-    if compared == 0 {
+    if compared_files == 0 {
         eprintln!(
             "skipping the twin comparison: no corpus file has a twin under {} yet",
             dir.display()
