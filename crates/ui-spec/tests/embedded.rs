@@ -38,7 +38,7 @@ fn from_embedded_matches_load_for_each_kind() {
     for kind in [LayoutKind::Panel2016, LayoutKind::Panel365] {
         assert_eq!(
             embedded.get(kind),
-            Some(&loader.load(kind).expect("the committed file loads")),
+            &loader.load(kind).expect("the committed file loads"),
             "kind {kind:?} differs"
         );
     }

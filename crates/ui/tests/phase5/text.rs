@@ -11,7 +11,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use egui_kittest::Harness;
-use larrygram_commands::app::{AppCtx, DocumentSession, Settings};
+use larrygram_commands::app::{AppCtx, DocumentSession};
 use larrygram_commands::{CommandId, Invocation, Source};
 use larrygram_model::{
     Document, PageId, Row, Section, SectionName, Shape, ShapeId, TextContent, TextPart,
@@ -38,7 +38,7 @@ fn fixture() -> (AppCtx, ShapeId) {
         ],
     };
     doc.set_shape_text(shape, old).expect("text");
-    let mut app = AppCtx::new(Settings::default());
+    let mut app = AppCtx::new(crate::phase5_settings());
     app.open_document(DocumentSession::new(doc, None));
     app.selection.shapes = vec![shape];
     app.selection.anchor = Some(shape);

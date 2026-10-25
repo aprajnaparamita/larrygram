@@ -32,7 +32,7 @@ use std::collections::BTreeSet;
 use egui::accesskit::Role;
 use egui::{Color32, Context, RawInput, Rect, Shape};
 use larrygram_commands::Source;
-use larrygram_commands::app::{AppCtx, DocumentSession, Settings};
+use larrygram_commands::app::{AppCtx, DocumentSession};
 use larrygram_model::{Document, Page, PageId};
 use larrygram_ui::canvas::{self, CanvasCache};
 use larrygram_ui_spec::LayoutKind;
@@ -43,7 +43,6 @@ use crate::{ShellRig, sets};
 fn tab_labels(kind: LayoutKind) -> BTreeSet<String> {
     sets()
         .get(kind)
-        .expect("the committed set")
         .layout
         .tabs
         .iter()
@@ -201,7 +200,6 @@ fn the_close_confirmation_dialog_closes_the_document_on_confirm() {
 fn the_file_button_opens_the_backstage_with_its_entries() {
     let entries: Vec<String> = sets()
         .get(LayoutKind::Panel2016)
-        .expect("the committed set")
         .layout
         .backstage
         .tabs
@@ -344,7 +342,7 @@ fn clicking_a_page_tab_switches_the_active_page() {
     second.name = "Second".to_owned();
     document.pages.push(first);
     document.pages.push(second);
-    let mut app = AppCtx::new(Settings::default());
+    let mut app = AppCtx::new(crate::phase4_settings());
     app.open_document(DocumentSession::new(document, None));
     let mut rig = ShellRig::with_app(app);
     rig.run();

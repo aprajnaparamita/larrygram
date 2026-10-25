@@ -134,8 +134,8 @@ fn get_switches_between_the_two_layouts() {
     let sets = loader.load_all().unwrap();
     let set_2016 = loader.load(LayoutKind::Panel2016).unwrap();
     let set_365 = loader.load(LayoutKind::Panel365).unwrap();
-    assert_eq!(sets.get(LayoutKind::Panel2016), Some(&set_2016));
-    assert_eq!(sets.get(LayoutKind::Panel365), Some(&set_365));
+    assert_eq!(sets.get(LayoutKind::Panel2016), &set_2016);
+    assert_eq!(sets.get(LayoutKind::Panel365), &set_365);
 }
 
 #[test]
@@ -244,11 +244,11 @@ fn load_all_matches_loading_each_kind() {
     let sets = loader.load_all().unwrap();
     assert_eq!(
         sets.get(LayoutKind::Panel2016),
-        Some(&loader.load(LayoutKind::Panel2016).unwrap())
+        &loader.load(LayoutKind::Panel2016).unwrap()
     );
     assert_eq!(
         sets.get(LayoutKind::Panel365),
-        Some(&loader.load(LayoutKind::Panel365).unwrap())
+        &loader.load(LayoutKind::Panel365).unwrap()
     );
     // The shared tables are identical in both sets.
     assert_eq!(sets.panel_2016.commands, sets.panel_365.commands);
@@ -281,7 +281,6 @@ fn empty_shortcut_table_loads() {
             .load_all()
             .unwrap()
             .get(LayoutKind::Panel2016)
-            .expect("the set")
             .shortcuts
             .entries
             .is_empty()
@@ -339,7 +338,6 @@ quick_access_toolbar:
             .load_all()
             .unwrap()
             .get(LayoutKind::Panel365)
-            .expect("the set")
             .commands
             .entries
             .is_empty()
@@ -428,14 +426,8 @@ fn json_data_files_load_too() {
     assert_eq!(set.commands.entries.len(), 1);
     assert_eq!(set.shortcuts.entries.len(), 1);
     let sets = loader.load_all().unwrap();
-    assert_eq!(
-        sets.get(LayoutKind::Panel2016).map(|s| &s.commands),
-        Some(&set.commands)
-    );
-    assert_eq!(
-        sets.get(LayoutKind::Panel365).map(|s| &s.commands),
-        Some(&set.commands)
-    );
+    assert_eq!(&sets.get(LayoutKind::Panel2016).commands, &set.commands);
+    assert_eq!(&sets.get(LayoutKind::Panel365).commands, &set.commands);
 }
 
 #[test]

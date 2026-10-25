@@ -189,7 +189,7 @@ fn draw_button(
     let enabled = !matches!(activation, Activation::Disabled { .. });
     let label = item.label.clone().unwrap_or_default();
     let checked = rows::item_check(item, input, state, false).unwrap_or(false);
-    let response = match button_content(item, &label, checked) {
+    let response = match button_content(ui.ctx(), item, &label, checked) {
         Some(button) => {
             ui.add_enabled_ui(enabled, |ui| {
                 ui.add_sized(Vec2::new(23.0, BUTTON_HEIGHT), button)
@@ -217,15 +217,24 @@ fn draw_button(
 
 /// The content of a toolbar button per `display` (`icon`, `text`,
 /// `icon_text`): `None` shows the label only.
-fn button_content(item: &Item, label: &str, checked: bool) -> Option<egui::Button<'static>> {
+fn button_content(
+    ctx: &egui::Context,
+    item: &Item,
+    label: &str,
+    checked: bool,
+) -> Option<egui::Button<'static>> {
     let display = item.display.unwrap_or(DisplayMode::Icon);
     match (display, item.icon.as_deref()) {
         (DisplayMode::Text, _) | (_, None) => None,
-        (DisplayMode::Icon, Some(icon)) => {
-            Some(egui::Button::new(icons::icon(icon, menu::ICON)).selected(checked))
-        }
+        (DisplayMode::Icon, Some(icon)) => Some(
+            egui::Button::new(icons::icon_themed(ctx, icon, menu::ICON, true)).selected(checked),
+        ),
         (DisplayMode::IconText, Some(icon)) => Some(
-            egui::Button::new((icons::icon(icon, menu::ICON), label.to_owned())).selected(checked),
+            egui::Button::new((
+                icons::icon_themed(ctx, icon, menu::ICON, true),
+                label.to_owned(),
+            ))
+            .selected(checked),
         ),
     }
 }
@@ -296,7 +305,7 @@ fn draw_split(
     let enabled = !matches!(main_activation, Activation::Disabled { .. });
     let main_label = main_item.label.clone().unwrap_or_else(|| label.clone());
     let main_checked = rows::item_check(&main_item, input, state, false).unwrap_or(false);
-    let response = match button_content(&main_item, &main_label, main_checked) {
+    let response = match button_content(ui.ctx(), &main_item, &main_label, main_checked) {
         Some(button) => {
             ui.add_enabled_ui(enabled, |ui| {
                 ui.add_sized(Vec2::new(23.0, BUTTON_HEIGHT), button)
@@ -352,7 +361,12 @@ fn draw_dropdown(
     let activation = rows::button_activation(item, input, Source::Ui, Args::new());
     let enabled = !matches!(activation, Activation::Disabled { .. });
     let content = egui::Button::new((
-        icons::icon(item.icon.as_deref().unwrap_or(&item.id), menu::ICON),
+        icons::icon_themed(
+            ui.ctx(),
+            item.icon.as_deref().unwrap_or(&item.id),
+            menu::ICON,
+            true,
+        ),
         icons::dropdown_arrow(10.0),
     ));
     let response = ui.add_enabled_ui(enabled, |ui| {

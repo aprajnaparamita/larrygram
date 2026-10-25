@@ -103,7 +103,7 @@ impl DocKind {
 ///
 /// let loader = Loader::new(".")?;
 /// let both = loader.load_all()?;
-/// let set_2016 = both.get(LayoutKind::Panel2016).expect("the Panel (2016 data) set");
+/// let set_2016 = both.get(LayoutKind::Panel2016);
 /// let lookup = set_2016.command_lookup();
 /// assert_eq!(
 ///     lookup.commands.get(&FluentId::new("FileSave")),
@@ -209,7 +209,7 @@ impl Loader {
     /// # use larrygram_ui_spec::{LayoutKind, Loader};
     /// let loader = Loader::new(".")?;
     /// let sets = loader.load_all()?;
-    /// let set_365 = sets.get(LayoutKind::Panel365).expect("the Panel (365 data) set");
+    /// let set_365 = sets.get(LayoutKind::Panel365);
     /// # Ok::<(), larrygram_ui_spec::LoadError>(())
     /// ```
     pub fn load_all(&self) -> Result<LayoutSets, LoadError> {
@@ -1097,11 +1097,11 @@ mod tests {
         // Same data as loading each kind on its own.
         assert_eq!(
             sets.get(LayoutKind::Panel2016),
-            Some(&loader.load(LayoutKind::Panel2016).expect("2016 loads"))
+            &loader.load(LayoutKind::Panel2016).expect("2016 loads")
         );
         assert_eq!(
             sets.get(LayoutKind::Panel365),
-            Some(&loader.load(LayoutKind::Panel365).expect("365 loads"))
+            &loader.load(LayoutKind::Panel365).expect("365 loads")
         );
         // Distinct layouts, shared tables.
         assert_ne!(sets.panel_2016.layout, sets.panel_365.layout);
