@@ -118,7 +118,7 @@ description in our own words, an input schema (JSON Schema 2020-12,
 every property described, `additionalProperties: false`) and
 `annotations.readOnlyHint`.
 
-**Generic tools, not one tool per command.** The registry has 88
+**Generic tools, not one tool per command.** The registry has 89
 implemented commands and 1026 stubs (the parity matrix, 2026-10-25); one tool each would
 fill a model's context with tools it never uses, and the tool list
 would change whenever a command lands. `list_commands`,
