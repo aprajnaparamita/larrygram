@@ -669,6 +669,7 @@ impl Open {
                     .unwrap_or(usize::MAX)
             });
         }
+        let mut rows = without_repeated_points(rows);
         for (position, (_, row)) in rows.iter_mut().enumerate() {
             row.ix = Some(
                 i32::try_from(position)
@@ -1312,6 +1313,54 @@ fn reference(value: Option<u32>) -> Option<u32> {
         Some(value) if value != u32::MAX => Some(value),
         _ => None,
     }
+}
+
+/// Drops the rows the drawing does not have (P8-17 goal 1): a `MoveTo`
+/// or `LineTo` row whose point repeats the previous row's draws
+/// nothing, and two `MoveTo` rows in a row keep the last one. A curved
+/// row keeps its place: a curve is its shape, not its end point.
+fn without_repeated_points(rows: Vec<(u32, Row)>) -> Vec<(u32, Row)> {
+    let mut kept: Vec<(u32, Row)> = Vec::with_capacity(rows.len());
+    for index in 0..rows.len() {
+        let Some((id, row)) = rows.get(index) else {
+            continue;
+        };
+        let repeats = kept
+            .last()
+            .is_some_and(|(_, previous)| same_draw_point(previous, row));
+        let superseded = row.row_type.as_deref() == Some("MoveTo")
+            && rows
+                .get(index.saturating_add(1))
+                .is_some_and(|(_, next)| next.row_type.as_deref() == Some("MoveTo"));
+        if repeats || superseded {
+            continue;
+        }
+        kept.push((*id, row.clone()));
+    }
+    kept
+}
+
+/// Whether both rows draw to the same point (both are `MoveTo` or
+/// `LineTo` rows with equal `X` and `Y`).
+fn same_draw_point(previous: &Row, row: &Row) -> bool {
+    let point_row =
+        |row: &Row| matches!(row.row_type.as_deref(), Some("MoveTo") | Some("LineTo"));
+    if !point_row(previous) || !point_row(row) {
+        return false;
+    }
+    let value = |row: &Row, name: &str| {
+        row.cells
+            .iter()
+            .find(|cell| cell.name.as_str() == name)
+            .and_then(|cell| match cell.value {
+                Some(CellValue::Number(value)) => Some(value),
+                _ => None,
+            })
+    };
+    matches!(
+        (value(previous, "X"), value(previous, "Y"), value(row, "X"), value(row, "Y")),
+        (Some(px), Some(py), Some(x), Some(y)) if px == x && py == y
+    )
 }
 
 /// Whether `record` is a geometry row record.
@@ -4027,5 +4076,39 @@ mod tests {
             cell_str(&section(&document).rows[0].cells, "A"),
             Some(&CellValue::Str("POLYLINE(0, 1)".to_owned()))
         );
+    }
+    #[test]
+    fn a_row_repeating_the_previous_point_is_dropped() {
+        // P8-17 goal 1: the `no-bgcolor` box's rows carry every point
+        // twice over and the drawing has them once. Two `MoveTo` rows
+        // in a row keep the last one.
+        let point = |kind: &str, x: f64, y: f64| {
+            let mut row = Row::new();
+            row.row_type = Some(kind.to_owned());
+            row.cells.push(number_cell("X", x, Unit::Inches));
+            row.cells.push(number_cell("Y", y, Unit::Inches));
+            row
+        };
+        let rows = vec![
+            (1, point("MoveTo", 1.0, 0.0)),
+            (2, point("LineTo", 1.0, 0.0)),
+            (3, point("LineTo", 0.0, 0.0)),
+            (4, point("LineTo", 0.0, 0.0)),
+            (5, point("LineTo", 1.0, 0.0)),
+        ];
+        let kept = without_repeated_points(rows);
+        let kinds: Vec<&str> = kept
+            .iter()
+            .filter_map(|(_, row)| row.row_type.as_deref())
+            .collect();
+        assert_eq!(kinds, ["MoveTo", "LineTo", "LineTo"]);
+        let rows = vec![
+            (1, point("MoveTo", 0.0, 0.0)),
+            (2, point("MoveTo", 0.0, 0.5)),
+            (3, point("LineTo", 1.0, 0.5)),
+        ];
+        let kept = without_repeated_points(rows);
+        assert_eq!(kept.len(), 2, "the superseded `MoveTo` row is dropped");
+        assert_eq!(kept[0].0, 2);
     }
 }
