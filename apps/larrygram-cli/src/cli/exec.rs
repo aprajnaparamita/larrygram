@@ -672,6 +672,102 @@ mod tests {
         }
     }
 
+    // --- the binary input formats (task P8-09) -----------------------
+
+    /// The named committed fixture under `corpus/fixtures/` (always
+    /// present; the fetched corpus is not, ADR 0005).
+    fn fixture(name: &str) -> PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("corpus")
+            .join("fixtures")
+            .join(name)
+    }
+
+    /// The named fetched corpus `.vsd` (ADR 0005), or `None` when the
+    /// corpus is absent: the test skips then, and fails instead when
+    /// `LARRYGRAM_REQUIRE_CORPUS=1` is set (the Phase 3 convention).
+    fn corpus_vsd(name: &str) -> Option<PathBuf> {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("corpus")
+            .join("vsd")
+            .join(name);
+        if path.is_file() {
+            return Some(path);
+        }
+        assert!(
+            std::env::var_os("LARRYGRAM_REQUIRE_CORPUS").is_none(),
+            "corpus/vsd is missing and LARRYGRAM_REQUIRE_CORPUS=1 is set"
+        );
+        eprintln!("skipping: corpus/vsd is absent; run `cargo xtask corpus`");
+        None
+    }
+
+    /// Task P8-09 goal 3: the CLI accepts a binary `.vsd` input file
+    /// (the same registry, so the open path routes the extension).
+    #[test]
+    fn a_binary_vsd_input_inspects_through_the_registry() {
+        let file = fixture("minimal-drawing.vsd");
+        let command = Command::Inspect(Inspect {
+            file,
+            json: false,
+            page: None,
+        });
+        let (result, stdout, stderr) = run_buffered(&command);
+        assert_eq!(result, Ok(exit::OK));
+        assert!(stdout.contains("kind: drawing"), "{stdout}");
+        assert!(stdout.contains("pages: 1"), "{stdout}");
+        assert!(
+            stderr.contains("warning: "),
+            "import warnings surface on stderr: {stderr}"
+        );
+    }
+
+    /// Task P8-09: a binary input renders like an XML one.
+    #[test]
+    fn a_binary_vsd_input_renders() {
+        let dir = temp_dir();
+        let out = dir.join("page.png");
+        let command = render_command(&fixture("minimal-drawing.vsd"), &out);
+        let (result, _, _) = run_buffered(&Command::Render(command));
+        assert_eq!(result, Ok(exit::OK));
+        let bytes = std::fs::read(&out).expect("png");
+        assert_eq!(&bytes[..4], &[0x89, b'P', b'N', b'G']);
+    }
+
+    /// Task P8-09 goal 3: an unsupported file version is the input
+    /// error (exit 2) with the reason named, never a panic.
+    #[test]
+    fn an_unsupported_vsd_version_is_exit_two_and_names_the_reason() {
+        let Some(file) = corpus_vsd("Visio5PlanWithDimensions.vsd") else {
+            return;
+        };
+        let command = Command::Inspect(Inspect {
+            file,
+            json: false,
+            page: None,
+        });
+        let (result, stdout, stderr) = run_buffered(&command);
+        assert_eq!(result, Ok(exit::READ));
+        assert!(stdout.is_empty(), "{stdout}");
+        assert!(stderr.starts_with("error: cannot read input:"), "{stderr}");
+        assert!(stderr.contains("unsupported file version 5"), "{stderr}");
+    }
+
+    /// Task P8-09: the help names every input format the CLI accepts.
+    #[test]
+    fn usage_text_names_the_input_formats() {
+        for extension in [".vsdx", ".vssx", ".vstx", ".vsd", ".vss", ".vst"] {
+            assert!(
+                USAGE_TEXT.contains(extension),
+                "usage text misses {extension}"
+            );
+        }
+    }
+
     #[test]
     fn strict_exit_only_fails_with_warnings() {
         assert_eq!(strict_exit(true, 0), exit::OK);
