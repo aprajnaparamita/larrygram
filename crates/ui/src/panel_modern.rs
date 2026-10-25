@@ -982,13 +982,7 @@ pub fn fit_group_sizes(
     // Give the room left back, left to right: a group grows one stage
     // at a time while everything still fits.
     for index in 0..sizes.len() {
-        loop {
-            let Some(current) = sizes.get(index).copied() else {
-                break;
-            };
-            let Some(bigger) = larger(current) else {
-                break;
-            };
+        while let Some(bigger) = sizes.get(index).copied().and_then(larger) {
             let mut trial = sizes.clone();
             if let Some(size) = trial.get_mut(index) {
                 *size = bigger;

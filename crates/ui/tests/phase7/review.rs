@@ -244,7 +244,9 @@ fn common_surfaces() -> Vec<(String, bool, Prepare)> {
     ]
 }
 
-/// One click of `button` at `pos`, pressed and released in two frames.
+/// One click of `button` at `pos`: the pointer moves there in one
+/// frame, then presses and releases in the next (a slow press would
+/// stop being a click while the frames run on).
 pub fn click_at(rig: &mut ShellRig, pos: egui::Pos2, button: egui::PointerButton) {
     rig.harness().event(egui::Event::PointerMoved(pos));
     rig.run();
@@ -255,8 +257,8 @@ pub fn click_at(rig: &mut ShellRig, pos: egui::Pos2, button: egui::PointerButton
             pressed,
             modifiers: egui::Modifiers::NONE,
         });
-        rig.run();
     }
+    rig.run();
 }
 
 /// Writes one render.

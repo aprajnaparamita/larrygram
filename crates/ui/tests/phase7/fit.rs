@@ -26,11 +26,13 @@ pub struct Control {
     pub rect: Rect,
 }
 
-/// The roles the checks treat as controls.
+/// The roles the checks treat as controls (labels included: a status
+/// text under a button is an overlap too).
 fn is_control(role: Role) -> bool {
     matches!(
         role,
         Role::Button
+            | Role::Label
             | Role::CheckBox
             | Role::ComboBox
             | Role::RadioButton
@@ -128,13 +130,20 @@ fn collect_wraps(shape: &egui::Shape, out: &mut Vec<String>) {
     }
 }
 
-/// The chrome regions of a frame: the controls above `top` (the title
-/// bar, the tab strip and the command bar or the menu bar and
-/// toolbars) and below `bottom` (the status bar and page tabs).
-fn chrome(controls: &[Control], top: f32, bottom: f32) -> Vec<Control> {
+/// The chrome of a frame around `canvas`: the controls above it (the
+/// title bar, the tab strip and the command bar, or the menu bar and
+/// toolbars) and the ones under it (the page tabs and the status bar).
+/// The panes beside the canvas scroll their own content, which may run
+/// past the window inside its clip, so they are not chrome.
+fn chrome(controls: &[Control], canvas: Rect) -> Vec<Control> {
     controls
         .iter()
-        .filter(|control| control.rect.max.y <= top || control.rect.min.y >= bottom)
+        .filter(|control| {
+            control.rect.max.y <= canvas.min.y + 0.5
+                || (control.rect.min.y >= canvas.max.y - 0.5
+                    && control.rect.min.x >= canvas.min.x - 0.5
+                    && control.rect.max.x <= canvas.max.x + 0.5)
+        })
         .cloned()
         .collect()
 }
@@ -193,7 +202,8 @@ fn check_layout(kind: LayoutKind) {
             let canvas = canvas(&mut rig);
             let all = controls(&mut rig);
             let tag = format!("{kind:?} {size:?} x{scale}");
-            for control in &all {
+            let chrome = chrome(&all, canvas);
+            for control in &chrome {
                 if !screen(size).expand(0.5).contains_rect(control.rect) {
                     failures.push(format!(
                         "{tag}: {} {:?} leaves the window",
@@ -201,7 +211,6 @@ fn check_layout(kind: LayoutKind) {
                     ));
                 }
             }
-            let chrome = chrome(&all, canvas.min.y, canvas.max.y);
             for (a, b) in overlaps(&chrome, 1.0) {
                 failures.push(format!("{tag}: {a} overlaps {b}"));
             }
@@ -274,7 +283,8 @@ fn chrome_keeps_the_controls_outside_the_canvas_band() {
         "low",
         Rect::from_min_max(egui::pos2(0.0, 95.0), egui::pos2(10.0, 99.0)),
     );
-    let kept: Vec<String> = chrome(&[top, mid, low], 20.0, 90.0)
+    let canvas = Rect::from_min_max(egui::pos2(0.0, 20.0), egui::pos2(50.0, 90.0));
+    let kept: Vec<String> = chrome(&[top, mid, low], canvas)
         .into_iter()
         .map(|control| control.name)
         .collect();

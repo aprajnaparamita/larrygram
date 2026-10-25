@@ -253,11 +253,10 @@ impl FileView {
     /// New: Blank Drawing, then Larrygram's template tiles, in one
     /// wrapped row of equal tiles.
     ///
-    /// Blank Drawing runs `file.new`, the command Panel Classic's File
-    /// > New > New Drawing from Template and every other New entry
-    /// that creates a document share (task P7-17: the stub
-    /// `file.new.blank.drawing` left the tile disabled). An empty
-    /// template list draws no tile at all.
+    /// Blank Drawing runs `file.new`, the one implemented New command,
+    /// which Panel Classic's New Drawing from Template runs too (task
+    /// P7-17: the stub `file.new.blank.drawing` left the tile
+    /// disabled). An empty template list draws no tile at all.
     fn show_new(&self, ui: &mut Ui, lists: &ListData, resolve: Resolve<'_>, out: &mut Vec<Intent>) {
         page_heading(ui, "New");
         let templates = match lists.entries("template_categories") {

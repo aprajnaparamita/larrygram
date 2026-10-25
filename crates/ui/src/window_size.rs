@@ -11,6 +11,13 @@
 
 use egui::{Rect, Vec2};
 
+/// The egui id source of the welcome wizard's window (its area's id
+/// is `egui::Id::unique(WIZARD_WINDOW)`).
+pub const WIZARD_WINDOW: &str = "larrygram.window.wizard";
+
+/// The egui id source of the About window.
+pub const ABOUT_WINDOW: &str = "larrygram.window.about";
+
 /// The height of the footer row that holds a window's buttons.
 pub const FOOTER_HEIGHT: f32 = 40.0;
 

@@ -154,23 +154,34 @@ fn launcher(
 ) -> Result<(), UiError> {
     let label = display_label(item, draw.app);
     let action = resolve(item);
-    let response = launcher_button(ui, placed.rect, enabled(&action), item, &label);
+    let response = fixed_button(
+        ui,
+        placed.rect,
+        enabled(&action),
+        item,
+        "launcher",
+        &label,
+        Arrow::Right,
+    );
     finish(response, &action, &tooltip_text(&label, item), out);
     Ok(())
 }
 
-/// The launcher's own small button: exactly `rect` (the caption row's
-/// corner), a frame on hover and a right-pointing arrow (task P7-17:
-/// an egui button grew to its padded content, 42 pt wide, over the
-/// caption text).
-fn launcher_button(
+/// A small button that takes exactly `rect` and draws one arrow: the
+/// launcher in the caption row's corner and the arrow part of a
+/// medium or small split (task P7-17: an egui button grows to its
+/// padded content, which spilled over the caption text and over the
+/// split's main part).
+fn fixed_button(
     ui: &mut Ui,
     rect: Rect,
     enabled: bool,
     item: &Item,
+    part: &'static str,
     label: &str,
+    arrow: Arrow,
 ) -> egui::Response {
-    let id = ui.make_persistent_id((item.id.as_str(), "launcher"));
+    let id = ui.make_persistent_id((item.id.as_str(), part));
     let sense = if enabled {
         egui::Sense::click()
     } else {
@@ -183,7 +194,7 @@ fn launcher_button(
     } else {
         &ui.visuals().widgets.noninteractive
     };
-    if response.hovered() && enabled {
+    if enabled && (response.hovered() || response.is_pointer_button_down_on()) {
         ui.painter()
             .rect_filled(rect.shrink(1.0), 2.0, visuals.weak_bg_fill);
     }
@@ -192,14 +203,27 @@ fn launcher_button(
     } else {
         crate::theme::color_at(ui.ctx(), "chrome.text_disabled")
     };
-    let half = (rect.width().min(rect.height()) * 0.2).max(1.0);
+    let half = (rect.width().min(rect.height()) * 0.2).clamp(1.0, 4.0);
     let center = rect.center();
-    ui.painter().add(egui::Shape::convex_polygon(
-        vec![
+    let points = match arrow {
+        Arrow::Down => vec![
+            egui::pos2(center.x - half, center.y - half * 0.6),
+            egui::pos2(center.x + half, center.y - half * 0.6),
+            egui::pos2(center.x, center.y + half * 0.8),
+        ],
+        Arrow::Left => vec![
+            egui::pos2(center.x + half * 0.6, center.y - half),
+            egui::pos2(center.x - half * 0.8, center.y),
+            egui::pos2(center.x + half * 0.6, center.y + half),
+        ],
+        Arrow::Right => vec![
             egui::pos2(center.x - half * 0.6, center.y - half),
             egui::pos2(center.x + half * 0.8, center.y),
             egui::pos2(center.x - half * 0.6, center.y + half),
         ],
+    };
+    ui.painter().add(egui::Shape::convex_polygon(
+        points,
         color,
         egui::Stroke::NONE,
     ));
@@ -387,20 +411,21 @@ fn split(
     let response = response.accessible_name(label.as_str());
     finish(response, &action, &tooltip_text(&label, item), out);
 
-    // The arrow part opens the menu.
-    let arrow_atoms = if placed.large {
-        AtomsBuilder::new()
+    // The arrow part opens the menu. A medium or small split's arrow
+    // is a fixed 12 pt strip: an egui button grew to 30 pt over the
+    // main part (task P7-17).
+    let opens = enabled(&action) || menu_reachable(item, resolve, depth);
+    let response = if placed.large {
+        let arrow_atoms = AtomsBuilder::new()
             .text(&label)
             .push(spacer(2.0))
             .push(arrow_atom(10.0, Arrow::Down))
-            .build()
+            .build();
+        let widget = Button::new(arrow_atoms).small();
+        put(ui, arrow, opens, widget, item, "arrow")
     } else {
-        AtomsBuilder::new()
-            .push(arrow_atom(10.0, Arrow::Down))
-            .build()
+        fixed_button(ui, arrow, opens, item, "arrow", DROPDOWN_TIP, Arrow::Down)
     };
-    let widget = Button::new(arrow_atoms).small();
-    let response = put(ui, arrow, enabled(&action), widget, item, "arrow");
     let response = response
         .accessible_name(DROPDOWN_TIP)
         .on_hover_text(DROPDOWN_TIP);
@@ -436,9 +461,15 @@ fn dropdown(
         enabled(&action),
         draw.metrics,
     );
+    let opens = enabled(&action) || menu_reachable(item, resolve, depth);
     let widget = Button::new(atoms).min_size(Vec2::new(placed.rect.width().min(MAX_W), 0.0));
-    let response = put(ui, placed.rect, enabled(&action), widget, item, "main");
+    let response = put(ui, placed.rect, opens, widget, item, "main");
     let response = response.accessible_name(label.as_str());
+    let response = if opens && !enabled(&action) {
+        response.on_hover_text(tooltip_text(&label, item))
+    } else {
+        response
+    };
     finish(response.clone(), &action, &tooltip_text(&label, item), out);
     if let Some(inner) = Popup::menu(&response).show(|ui| -> Result<(), UiError> {
         if item.kind == ItemKind::Gallery {
@@ -464,6 +495,29 @@ fn palette(
     depth: u32,
 ) -> Result<(), UiError> {
     dropdown(ui, item, placed, draw, resolve, out, depth)
+}
+
+/// Whether a dropdown's or split's menu holds anything that runs: a
+/// child whose command is enabled, a list or options row that runs
+/// the opener's command, or such a row in a submenu (bounded by
+/// [`MAX_DEPTH`]).
+///
+/// A menu control whose own command is a stub still opens when its
+/// menu is reachable (task P7-17: a stub opener disabled its whole
+/// menu, so no submenu of the committed layout could open).
+pub(crate) fn menu_reachable(item: &Item, resolve: Resolve<'_>, depth: u32) -> bool {
+    if depth >= MAX_DEPTH {
+        return false;
+    }
+    let inherited = inherited_resolve(item, resolve);
+    item.items.iter().any(|child| match child.kind {
+        ItemKind::Heading => false,
+        ItemKind::Submenu => menu_reachable(child, resolve, depth + 1),
+        _ => {
+            matches!(inherited(child), Action::Emit(_))
+                || (!child.items.is_empty() && menu_reachable(child, resolve, depth + 1))
+        }
+    })
 }
 
 /// The resolver for a popup's child rows: an `options` or `list` row

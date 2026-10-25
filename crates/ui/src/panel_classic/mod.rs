@@ -322,6 +322,9 @@ pub struct PanelClassic {
     toolbar_visible: BTreeMap<String, bool>,
     /// `split_recent` item id to the last child chosen.
     split_recent: BTreeMap<String, String>,
+    /// Toolbar item id to the width it took last frame, spacing
+    /// included (the docked rows wrap with it, task P7-17).
+    toolbar_widths: BTreeMap<String, f32>,
     /// Combo id to the text being edited.
     combo_text: BTreeMap<String, String>,
     /// Combo id to the last applied text (Esc reverts to it).
@@ -370,6 +373,7 @@ impl Default for PanelClassic {
             level_rects: Vec::new(),
             toolbar_visible: BTreeMap::new(),
             split_recent: BTreeMap::new(),
+            toolbar_widths: BTreeMap::new(),
             combo_text: BTreeMap::new(),
             combo_applied: BTreeMap::new(),
             open_popup: None,
