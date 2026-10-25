@@ -1,4 +1,5 @@
-//! `cargo xtask scout`: fetch and classify the wide corpus (task P8-16).
+//! `cargo xtask scout`: fetch, classify, risk-filter and select the
+//! wide corpus (tasks P8-16 and P8-18).
 //!
 //! `cargo xtask scout fetch <csv>` reads the BigQuery export of public
 //! GitHub files (`repo_name,ref,path,blob_id,license`), downloads every
@@ -10,11 +11,19 @@
 //!
 //! `cargo xtask scout classify` turns the fetched files into `index.csv`
 //! (one row per kept file: identity, real kind, the `.vsd` version byte,
-//! stencil/template reality and the Microsoft-content filter) and
-//! `excluded.csv` (the filtered-out files). The OLE facts of `.vsd`,
-//! `.vss` and `.vst` files come from `ole-facts.csv`, which the sweep
-//! tests write through `larrygram-vsd-binary`'s public API; xtask reads
-//! the OLE side of a file only through that file.
+//! stencil/template reality, the Microsoft-content filter and the risk
+//! facts of task P8-18) and `excluded.csv` (the filtered-out files).
+//! The OLE facts of `.vsd`, `.vss` and `.vst` files come from
+//! `ole-facts.csv`, which the sweep tests write through
+//! `larrygram-vsd-binary`'s public API; xtask reads the OLE side of a
+//! file only through that file. `--clamav <log>` adds the hits of a
+//! `clamscan --infected` run (the scan itself is run elsewhere).
+//!
+//! `cargo xtask scout select` picks the gate-corpus proposals and
+//! writes `export-set.csv` (task P8-18 goal 2, the port of the local
+//! `select.py` helper): Tier A files the sweeps opened, spread over
+//! the coverage buckets, one file per repository in the gate set.
+//! Files with a non-empty `risk` column are never eligible.
 //!
 //! Everything lands under `reference/wide-corpus/` (gitignored, ADR
 //! 0005): no file-specific content is ever committed. Files excluded by
@@ -47,6 +56,12 @@ pub const OLE_FACTS_CSV: &str = "ole-facts.csv";
 pub const INDEX_CSV: &str = "index.csv";
 /// The excluded files, with their reason.
 pub const EXCLUDED_CSV: &str = "excluded.csv";
+/// The selected export set (task P8-18 goal 3).
+pub const EXPORT_SET_CSV: &str = "export-set.csv";
+/// The `import` sweep results the selection reads.
+pub const SWEEP_VSD_CSV: &str = "sweep-vsd.csv";
+/// The `.vsdx` reader sweep results the selection reads.
+pub const SWEEP_VSDX_CSV: &str = "sweep-vsdx.csv";
 /// The size cap of one download (20 MB).
 pub const MAX_DOWNLOAD: u64 = 20 * 1024 * 1024;
 /// How many requests run at once (a few: polite to the host).
@@ -65,7 +80,13 @@ pub enum ScoutCommand {
         csv: PathBuf,
     },
     /// `scout classify`: write `index.csv` and `excluded.csv`.
-    Classify,
+    Classify {
+        /// The `clamscan --infected` log to merge, when one exists.
+        clamav: Option<PathBuf>,
+    },
+    /// `scout select`: write `export-set.csv` and print the
+    /// gate-corpus proposals (task P8-18 goal 2).
+    Select,
 }
 
 /// Parsed command-line options for the scout task.
@@ -80,6 +101,7 @@ pub struct Options {
 /// Parses the arguments after `cargo xtask scout`.
 pub fn parse_args(args: &[String]) -> Result<Options> {
     let mut out = None;
+    let mut clamav: Option<PathBuf> = None;
     let mut positional: Vec<String> = Vec::new();
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -88,6 +110,10 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
                 let dir = it.next().ok_or("--out needs a directory")?;
                 out = Some(PathBuf::from(dir));
             }
+            "--clamav" => {
+                let log = it.next().ok_or("--clamav needs a log file")?;
+                clamav = Some(PathBuf::from(log));
+            }
             other if other.starts_with('-') => {
                 return Err(format!("unknown scout argument `{other}`"));
             }
@@ -95,7 +121,7 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
         }
     }
     let Some(verb) = positional.first().map(String::as_str) else {
-        return Err("scout needs a subcommand: fetch <csv> or classify".into());
+        return Err("scout needs a subcommand: fetch <csv>, classify or select".into());
     };
     let command = match verb {
         "fetch" => {
@@ -108,6 +134,9 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
                     positional.len() - 1
                 ));
             }
+            if clamav.is_some() {
+                return Err("--clamav belongs to scout classify".into());
+            }
             ScoutCommand::Fetch {
                 csv: PathBuf::from(csv),
             }
@@ -116,7 +145,16 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
             if positional.len() > 1 {
                 return Err("scout classify takes no arguments".into());
             }
-            ScoutCommand::Classify
+            ScoutCommand::Classify { clamav }
+        }
+        "select" => {
+            if positional.len() > 1 {
+                return Err("scout select takes no arguments".into());
+            }
+            if clamav.is_some() {
+                return Err("--clamav belongs to scout classify".into());
+            }
+            ScoutCommand::Select
         }
         other => return Err(format!("unknown scout subcommand `{other}`")),
     };
@@ -1038,6 +1076,27 @@ pub struct Facts {
     /// excluded: the project's precedent (ADR 0005) uses such files in
     /// tests and never commits them.
     pub template_origin: bool,
+    /// A VBA project: macros (task P8-18 goal 1). OLE: a VBA
+    /// storage's streams (through `ole-facts.csv`); OPC: a VBA project
+    /// part or relationship.
+    pub vba: bool,
+    /// Embedded OLE objects (task P8-18 goal 1): OLE-object foreign
+    /// data (through `ole-facts.csv`), or OPC parts under
+    /// `visio/embeddings/` and OLE object relationships.
+    pub embedded_object: usize,
+    /// External targets (task P8-18 goal 1): OPC relationships with
+    /// `TargetMode="External"`, or hyperlinks to executables or UNC
+    /// paths in the binary records.
+    pub external_target: usize,
+    /// The total uncompressed size of a zip package's entries,
+    /// `None` when the file is not a zip.
+    pub zip_uncompressed: Option<u64>,
+    /// The largest entry compression ratio of a zip package (100 is
+    /// 100:1), `None` when the file is not a zip.
+    pub zip_max_ratio: Option<u64>,
+    /// The antivirus signature a `clamscan` log named for this file,
+    /// empty when no scan flagged it (task P8-18 goal 6).
+    pub antivirus: String,
 }
 
 impl Facts {
@@ -1160,15 +1219,83 @@ fn zip_facts(bytes: &[u8], ext: FileExt, file_name: &str) -> Facts {
     let title = core.as_deref().and_then(|xml| tag_text(xml, "title"));
     let company = app.as_deref().and_then(|xml| tag_text(xml, "Company"));
     let template = app.as_deref().and_then(|xml| tag_text(xml, "Template"));
-    facts_from_properties(
-        kind,
-        ext,
-        file_name,
-        creator.as_deref(),
-        company.as_deref(),
-        title.as_deref(),
-        template.as_deref(),
-    )
+    let (vba, embedded_object, external_target, zip_uncompressed, zip_max_ratio) =
+        zip_risk_facts(&mut archive, &names);
+    Facts {
+        vba,
+        embedded_object,
+        external_target,
+        zip_uncompressed: Some(zip_uncompressed),
+        zip_max_ratio: Some(zip_max_ratio),
+        ..facts_from_properties(
+            kind,
+            ext,
+            file_name,
+            creator.as_deref(),
+            company.as_deref(),
+            title.as_deref(),
+            template.as_deref(),
+        )
+    }
+}
+
+/// The risk facts of one OPC package (task P8-18 goal 1): a VBA
+/// project part or relationship (macros), parts under
+/// `visio/embeddings/` and OLE object relationships (embedded
+/// objects), relationships with `TargetMode="External"` (external
+/// targets) and the zip entries' total uncompressed size and largest
+/// compression ratio (container anomalies).
+fn zip_risk_facts(
+    archive: &mut zip::ZipArchive<std::io::Cursor<&[u8]>>,
+    names: &[String],
+) -> (bool, usize, usize, u64, u64) {
+    /// The cap of one relationship part read.
+    const MAX_RELS: u64 = 4 * 1024 * 1024;
+    let mut vba = false;
+    let mut embedded_object = 0usize;
+    let mut external_target = 0usize;
+    let mut total: u64 = 0;
+    let mut max_ratio: u64 = 0;
+    for name in names {
+        let lower = name.to_ascii_lowercase();
+        if lower.contains("vbaproject") {
+            vba = true;
+        }
+        if lower.starts_with("visio/embeddings/") {
+            embedded_object = embedded_object.saturating_add(1);
+        }
+    }
+    for index in 0..archive.len() {
+        let Ok(entry) = archive.by_index(index) else {
+            continue;
+        };
+        let size = entry.size();
+        let compressed = entry.compressed_size();
+        total = total.saturating_add(size);
+        let ratio = match size.checked_div(compressed) {
+            Some(ratio) => ratio,
+            None if size > 0 => u64::MAX,
+            None => 0,
+        };
+        max_ratio = max_ratio.max(ratio);
+    }
+    for name in names {
+        if !name.ends_with(".rels") {
+            continue;
+        }
+        let Some(text) = read_zip_entry(archive, name, MAX_RELS) else {
+            continue;
+        };
+        let lower = text.to_ascii_lowercase();
+        if lower.contains("vbaproject") {
+            vba = true;
+        }
+        embedded_object = embedded_object.saturating_add(lower.matches("oleobject").count());
+        external_target = external_target
+            .saturating_add(lower.matches("targetmode=\"external\"").count())
+            .saturating_add(lower.matches("targetmode='external'").count());
+    }
+    (vba, embedded_object, external_target, total, max_ratio)
 }
 
 /// Builds the filter flags from the document properties (the shared
@@ -1195,6 +1322,7 @@ fn facts_from_properties(
         ms_company,
         template_copy,
         template_origin,
+        ..Facts::default()
     }
 }
 
@@ -1307,6 +1435,139 @@ pub fn tag_text(xml: &str, local_name: &str) -> Option<String> {
     None
 }
 
+// ------------------------------------------------------------------ risk
+
+/// The risk reasons of the `risk` column (task P8-18 goal 1), in the
+/// fixed order the column writes them.
+pub const RISK_REASONS: [&str; 6] = [
+    "macros",
+    "embedded-object",
+    "external-target",
+    "container-anomaly",
+    "provenance",
+    "antivirus",
+];
+
+/// The provenance words of the risk filter (task P8-18 goal 1): a
+/// repository name or path that carries one of them may come from a
+/// fuzzing corpus, a CVE proof of concept or a scanner test set.
+pub const PROVENANCE_WORDS: [&str; 13] = [
+    "cve",
+    "exploit",
+    "poc",
+    "payload",
+    "malware",
+    "virus",
+    "fuzz",
+    "crash",
+    "afl",
+    "oss-fuzz",
+    "clusterfuzz",
+    "testcase",
+    "corpus",
+];
+
+/// Whether the repository name or upstream path carries a provenance
+/// word (task P8-18 goal 1): the words are matched case-insensitively
+/// as whole words or as whole path segments. A word matches as the
+/// rule word itself, as its plural, or — for rule words of four
+/// characters or more — as a word that starts with it (`fuzzing`,
+/// `payloads`); the hyphenated word `oss-fuzz` also matches its two
+/// parts in sequence. Conservative: a false positive costs one file.
+pub fn risky_provenance(repo: &str, path: &str) -> bool {
+    let hay = format!("{repo}/{path}").to_ascii_lowercase();
+    for segment in hay.split(['/', '\\']) {
+        if PROVENANCE_WORDS.contains(&segment) {
+            return true;
+        }
+        let words: Vec<&str> = segment
+            .split(|c: char| !c.is_ascii_alphanumeric())
+            .filter(|w| !w.is_empty())
+            .collect();
+        for word in PROVENANCE_WORDS {
+            let parts: Vec<&str> = word.split('-').collect();
+            if parts.len() > 1 {
+                if words
+                    .windows(parts.len())
+                    .any(|window| window == parts.as_slice())
+                {
+                    return true;
+                }
+                continue;
+            }
+            if words.iter().any(|w| word_matches(w, word)) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Whether one word of a name or path matches one provenance rule
+/// word: the word itself, its plural, or (for rule words of four
+/// characters or more) a word that starts with it.
+fn word_matches(word: &str, rule: &str) -> bool {
+    word == rule
+        || word.strip_suffix('s') == Some(rule)
+        || (rule.len() >= 4 && word.starts_with(rule))
+}
+
+/// The `risk` column of one file: the reasons behind its facts, in
+/// the fixed order of [`RISK_REASONS`], `;`-separated (empty when the
+/// file carries no risk fact).
+pub fn risk_reasons(facts: &Facts, repo: &str, path: &str) -> Vec<&'static str> {
+    let mut out = Vec::new();
+    if facts.vba {
+        out.push(RISK_REASONS[0]);
+    }
+    if facts.embedded_object > 0 {
+        out.push(RISK_REASONS[1]);
+    }
+    if facts.external_target > 0 {
+        out.push(RISK_REASONS[2]);
+    }
+    let container_broken = matches!(
+        facts.kind.as_str(),
+        "ole-invalid" | "ole-unreadable" | "ole-panic" | "zip-invalid"
+    );
+    let zip_bomb = facts
+        .zip_uncompressed
+        .is_some_and(|total| total > 200 * 1024 * 1024)
+        || facts.zip_max_ratio.is_some_and(|ratio| ratio > 100);
+    if container_broken || zip_bomb {
+        out.push(RISK_REASONS[3]);
+    }
+    if risky_provenance(repo, path) {
+        out.push(RISK_REASONS[4]);
+    }
+    if !facts.antivirus.is_empty() {
+        out.push(RISK_REASONS[5]);
+    }
+    out
+}
+
+/// The hits of a `clamscan --infected` log (task P8-18 goal 6): the
+/// file name stem (the blob id) to the signature name. Lines that do
+/// not name a hit are ignored.
+pub fn clamav_hits(text: &str) -> BTreeMap<String, String> {
+    let mut out = BTreeMap::new();
+    for line in text.lines() {
+        let Some((path, rest)) = line.split_once(": ") else {
+            continue;
+        };
+        let Some(hit) = rest.strip_suffix(" FOUND") else {
+            continue;
+        };
+        let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
+        let stem = name.rsplit_once('.').map(|(s, _)| s).unwrap_or(name);
+        if stem.is_empty() {
+            continue;
+        }
+        out.insert(stem.to_owned(), hit.trim().to_owned());
+    }
+    out
+}
+
 // --------------------------------------------------------------- ole facts
 
 /// One row of `ole-facts.csv`, written by the sweep tests through
@@ -1327,6 +1588,13 @@ pub struct OleFactsRow {
     pub template_copy: bool,
     /// The file was made from a Visio stock template.
     pub template_origin: bool,
+    /// The container holds a VBA project (task P8-18 goal 1).
+    pub vba: bool,
+    /// The file embeds an OLE object (task P8-18 goal 1).
+    pub ole_object: bool,
+    /// A hyperlink record points at an executable or a UNC path
+    /// (task P8-18 goal 1).
+    pub hyperlink_target: bool,
 }
 
 /// Parses `ole-facts.csv`.
@@ -1334,12 +1602,12 @@ pub fn ole_facts_rows(text: &str) -> Result<Vec<OleFactsRow>> {
     let rows = csv_rows(text)?;
     let mut out = Vec::new();
     for (i, row) in rows.iter().enumerate() {
-        if i == 0 && row.len() == 7 && row.first().map(String::as_str) == Some("blob_id") {
+        if i == 0 && row.len() == 10 && row.first().map(String::as_str) == Some("blob_id") {
             continue;
         }
-        if row.len() != 7 {
+        if row.len() != 10 {
             return Err(format!(
-                "ole-facts.csv row {}: expected 7 fields, got {}",
+                "ole-facts.csv row {}: expected 10 fields, got {}",
                 i,
                 row.len()
             ));
@@ -1353,6 +1621,9 @@ pub fn ole_facts_rows(text: &str) -> Result<Vec<OleFactsRow>> {
             ms_company: get(4) == "1",
             template_copy: get(5) == "1",
             template_origin: get(6) == "1",
+            vba: get(7) == "1",
+            ole_object: get(8) == "1",
+            hyperlink_target: get(9) == "1",
         });
     }
     Ok(out)
@@ -1371,6 +1642,7 @@ impl IndexRow {
     /// The row as one `index.csv` line.
     pub fn line(&self) -> String {
         let reason = self.facts.excluded_reason().unwrap_or_default();
+        let risk = risk_reasons(&self.facts, &self.state.repo, &self.state.path).join(";");
         csv_line(&[
             self.state.blob_id.clone(),
             self.state.tier.clone(),
@@ -1390,6 +1662,19 @@ impl IndexRow {
             flag(self.facts.template_origin),
             flag(self.facts.excluded_reason().is_some()).to_owned(),
             reason.to_owned(),
+            flag(self.facts.vba),
+            self.facts.embedded_object.to_string(),
+            self.facts.external_target.to_string(),
+            self.facts
+                .zip_uncompressed
+                .map(|v| v.to_string())
+                .unwrap_or_default(),
+            self.facts
+                .zip_max_ratio
+                .map(|v| v.to_string())
+                .unwrap_or_default(),
+            self.facts.antivirus.clone(),
+            risk,
         ])
     }
 }
@@ -1397,8 +1682,63 @@ impl IndexRow {
 /// The header line of `index.csv` (and of `excluded.csv`).
 pub fn index_header() -> String {
     "blob_id,tier,license,repo,commit,path,ext,sha256,size,kind,version,kind_matches_ext,\
-     ms_author,ms_company,template_copy,template_origin,excluded,exclude_reason"
+     ms_author,ms_company,template_copy,template_origin,excluded,exclude_reason,\
+     vba,embedded_object,external_target,zip_uncompressed,zip_max_ratio,antivirus,risk"
         .to_owned()
+}
+
+/// Parses `index.csv` (or `excluded.csv`) back into rows. The `risk`
+/// column is derived from the facts ([`risk_reasons`]), so parsing
+/// and writing round-trip.
+pub fn index_rows(text: &str) -> Result<Vec<IndexRow>> {
+    let rows = csv_rows(text)?;
+    let mut out = Vec::new();
+    for (i, row) in rows.iter().enumerate() {
+        if i == 0 && row.first().map(String::as_str) == Some("blob_id") {
+            continue;
+        }
+        if row.len() < 18 {
+            return Err(format!(
+                "index.csv row {}: expected at least 18 fields, got {}",
+                i,
+                row.len()
+            ));
+        }
+        let get = |j: usize| -> String { row.get(j).cloned().unwrap_or_default() };
+        let number = |j: usize| -> u64 { get(j).parse::<u64>().unwrap_or(0) };
+        let facts = Facts {
+            kind: get(9),
+            version: get(10),
+            kind_matches_ext: get(11),
+            ms_author: get(12) == "1",
+            ms_company: get(13) == "1",
+            template_copy: get(14) == "1",
+            template_origin: get(15) == "1",
+            vba: get(18) == "1",
+            embedded_object: number(19) as usize,
+            external_target: number(20) as usize,
+            zip_uncompressed: row.get(21).filter(|v| !v.is_empty()).map(|_| number(21)),
+            zip_max_ratio: row.get(22).filter(|v| !v.is_empty()).map(|_| number(22)),
+            antivirus: get(23),
+        };
+        out.push(IndexRow {
+            state: StateRow {
+                blob_id: get(0),
+                tier: get(1),
+                license: get(2),
+                repo: get(3),
+                commit: get(4),
+                path: get(5),
+                ext: get(6),
+                sha256: get(7),
+                size: number(8),
+                status: "kept".to_owned(),
+                note: String::new(),
+            },
+            facts,
+        });
+    }
+    Ok(out)
 }
 
 fn flag(value: bool) -> String {
@@ -1418,12 +1758,14 @@ pub struct ClassifySummary {
     pub excluded: usize,
     /// Kept OLE files whose facts `ole-facts.csv` did not name.
     pub ole_missing: usize,
+    /// Files per risk reason, in the order of [`RISK_REASONS`].
+    pub risk: [usize; RISK_REASONS.len()],
 }
 
 /// Runs the classification: reads every kept file, merges the OLE
-/// facts, applies the filter, and writes `index.csv` and
-/// `excluded.csv`.
-pub fn run_classify(out_dir: &Path) -> Result<ClassifySummary> {
+/// facts and the antivirus hits, applies the filter and the risk
+/// facts, and writes `index.csv` and `excluded.csv`.
+pub fn run_classify(out_dir: &Path, clamav: Option<&Path>) -> Result<ClassifySummary> {
     let state_path = out_dir.join(FETCH_CSV);
     let state = read_state_file(&state_path)?;
     let ole_path = out_dir.join(OLE_FACTS_CSV);
@@ -1432,6 +1774,12 @@ pub fn run_classify(out_dir: &Path) -> Result<ClassifySummary> {
         for row in ole_facts_rows(&text)? {
             ole.insert(row.blob_id.clone(), row);
         }
+    }
+    let mut hits: BTreeMap<String, String> = BTreeMap::new();
+    if let Some(log) = clamav {
+        let text = std::fs::read_to_string(log)
+            .map_err(|e| format!("cannot read {}: {e}", log.display()))?;
+        hits = clamav_hits(&text);
     }
 
     let mut summary = ClassifySummary::default();
@@ -1463,9 +1811,23 @@ pub fn run_classify(out_dir: &Path) -> Result<ClassifySummary> {
                     facts.ms_company = ole_row.ms_company;
                     facts.template_copy = ole_row.template_copy;
                     facts.template_origin = ole_row.template_origin;
+                    facts.vba = ole_row.vba;
+                    facts.embedded_object = usize::from(ole_row.ole_object);
+                    facts.external_target = usize::from(ole_row.hyperlink_target);
                     facts.kind_matches_ext = kind_matches_ext(&facts.kind, ext);
                 }
                 None => summary.ole_missing += 1,
+            }
+        }
+        if let Some(signature) = hits.get(blob_id) {
+            facts.antivirus = signature.clone();
+        }
+        let risk = risk_reasons(&facts, &row.repo, &row.path);
+        for (slot, reason) in RISK_REASONS.iter().enumerate() {
+            if risk.contains(reason)
+                && let Some(count) = summary.risk.get_mut(slot)
+            {
+                *count = count.saturating_add(1);
             }
         }
         let entry = IndexRow {
@@ -1494,6 +1856,548 @@ pub fn run_classify(out_dir: &Path) -> Result<ClassifySummary> {
     crate::util::write_atomic_bytes(&out_dir.join(INDEX_CSV), index_text.as_bytes())?;
     crate::util::write_atomic_bytes(&out_dir.join(EXCLUDED_CSV), excluded_text.as_bytes())?;
     Ok(summary)
+}
+
+// ---------------------------------------------------------------- select
+
+/// The coverage facts of one sweep row (task P8-18 goal 2): the
+/// columns of `sweep-vsd.csv` and `sweep-vsdx.csv` the selection sorts
+/// on. Columns a sweep does not write stay zero.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SweepFacts {
+    /// The git blob SHA-1.
+    pub blob_id: String,
+    /// `opened`, `error` or `panic`.
+    pub outcome: String,
+    /// Page count.
+    pub pages: usize,
+    /// Shape count.
+    pub shapes: usize,
+    /// Group shapes.
+    pub groups: usize,
+    /// Connect records.
+    pub connects: usize,
+    /// 1-D shapes.
+    pub one_d: usize,
+    /// Total text length.
+    pub text_chars: usize,
+    /// Theme parts (the `.vsdx` sweep only).
+    pub themes: usize,
+    /// The page's `DrawingScale` cell, when set.
+    pub drawing_scale: String,
+}
+
+/// Parses one sweep CSV into [`SweepFacts`] rows. Columns are found by
+/// header name, so the two sweeps' headers both parse.
+pub fn sweep_rows(text: &str) -> Result<Vec<SweepFacts>> {
+    let rows = csv_rows(text)?;
+    let mut out = Vec::new();
+    let Some(header) = rows.first() else {
+        return Ok(out);
+    };
+    if !header.iter().any(|h| h == "blob_id") {
+        return Err("sweep csv: no blob_id column".into());
+    }
+    let column = |name: &str| -> Option<usize> { header.iter().position(|h| h == name) };
+    for row in rows.iter().skip(1) {
+        let get = |name: &str| -> String {
+            column(name)
+                .and_then(|j| row.get(j).cloned())
+                .unwrap_or_default()
+        };
+        let count = |name: &str| -> usize { get(name).parse::<u64>().unwrap_or(0) as usize };
+        out.push(SweepFacts {
+            blob_id: get("blob_id"),
+            outcome: get("outcome"),
+            pages: count("pages"),
+            shapes: count("shapes"),
+            groups: count("groups"),
+            connects: count("connects"),
+            one_d: count("one_d"),
+            text_chars: count("text_chars"),
+            themes: count("themes"),
+            drawing_scale: get("drawing_scale"),
+        });
+    }
+    Ok(out)
+}
+
+/// One selection candidate (task P8-18 goal 2): the identity of one
+/// index row plus the coverage facts of its sweep row.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Candidate {
+    /// The git blob SHA-1.
+    pub blob_id: String,
+    /// The tier directory (`a` or `b`).
+    pub tier: String,
+    /// The SPDX licence id.
+    pub license: String,
+    /// The GitHub `owner/name` the file came from.
+    pub repo: String,
+    /// The pinned upstream commit.
+    pub commit: String,
+    /// The upstream path.
+    pub path: String,
+    /// The lowercase hex sha256 of the file.
+    pub sha256: String,
+    /// The size in bytes.
+    pub size: u64,
+    /// The file extension.
+    pub ext: String,
+    /// The real kind.
+    pub kind: String,
+    /// The `.vsd` version byte as decimal.
+    pub version: String,
+    /// Page count.
+    pub pages: usize,
+    /// Shape count.
+    pub shapes: usize,
+    /// Group shapes.
+    pub groups: usize,
+    /// Connect records.
+    pub connects: usize,
+    /// 1-D shapes.
+    pub one_d: usize,
+    /// Total text length.
+    pub text_chars: usize,
+    /// Theme parts.
+    pub themes: usize,
+    /// The page's `DrawingScale` cell, when set.
+    pub scale: String,
+    /// Whether a sweep opened the file.
+    pub opened: bool,
+    /// The bucket that kept the file, set by [`select`].
+    pub reason: String,
+}
+
+/// Builds the candidates of the selection (task P8-18 goal 2): one per
+/// index row, joined with its sweep row. A file with a non-empty
+/// `risk` column is never eligible.
+pub fn candidates(index: &[IndexRow], sweeps: &[SweepFacts]) -> Vec<Candidate> {
+    let mut out = Vec::new();
+    for row in index {
+        let risk = risk_reasons(&row.facts, &row.state.repo, &row.state.path);
+        if !risk.is_empty() {
+            continue;
+        }
+        let sweep = sweeps
+            .iter()
+            .find(|s| s.blob_id == row.state.blob_id && s.outcome == "opened");
+        out.push(Candidate {
+            blob_id: row.state.blob_id.clone(),
+            tier: row.state.tier.clone(),
+            license: row.state.license.clone(),
+            repo: row.state.repo.clone(),
+            commit: row.state.commit.clone(),
+            path: row.state.path.clone(),
+            sha256: row.state.sha256.clone(),
+            size: row.state.size,
+            ext: row.state.ext.clone(),
+            kind: row.facts.kind.clone(),
+            version: row.facts.version.clone(),
+            pages: sweep.map(|s| s.pages).unwrap_or(0),
+            shapes: sweep.map(|s| s.shapes).unwrap_or(0),
+            groups: sweep.map(|s| s.groups).unwrap_or(0),
+            connects: sweep.map(|s| s.connects).unwrap_or(0),
+            one_d: sweep.map(|s| s.one_d).unwrap_or(0),
+            text_chars: sweep.map(|s| s.text_chars).unwrap_or(0),
+            themes: sweep.map(|s| s.themes).unwrap_or(0),
+            scale: sweep.map(|s| s.drawing_scale.clone()).unwrap_or_default(),
+            opened: sweep.is_some(),
+            reason: String::new(),
+        });
+    }
+    out
+}
+
+/// Whether a drawing scale is a non-default scale (the P8-16 rule):
+/// not 1 and not one inch per millimetre.
+fn scaled(scale: &str) -> bool {
+    if scale.is_empty() {
+        return false;
+    }
+    let Ok(v) = scale.parse::<f64>() else {
+        return false;
+    };
+    let v = v.abs();
+    (v - 1.0).abs() > 0.01 && (v - 1.0 / 25.4).abs() > 0.001
+}
+
+/// The state one selection fills into (the P8-16 helper's `taken` and
+/// `repos` sets).
+#[derive(Debug, Default)]
+struct Taken {
+    /// The blobs already selected.
+    blobs: BTreeSet<String>,
+    /// The repositories already used, when the bucket dedupes them.
+    repos: Option<BTreeSet<String>>,
+}
+
+/// Takes the first `n` free candidates in key order (the P8-16 `pick`
+/// rule): skip taken blobs, files over `max_size`, and (when
+/// [`Taken::repos`] is set) repositories already used.
+fn pick<K: Ord>(
+    pool: &[Candidate],
+    n: usize,
+    key: impl Fn(&Candidate) -> K,
+    max_size: u64,
+    reason: &str,
+    state: &mut Taken,
+    out: &mut Vec<Candidate>,
+) {
+    let mut items: Vec<&Candidate> = pool.iter().collect();
+    items.sort_by_key(|c| key(c));
+    let base = out.len();
+    for c in items {
+        if out.len() - base >= n {
+            break;
+        }
+        if state.blobs.contains(&c.blob_id) || c.size > max_size {
+            continue;
+        }
+        if let Some(repos) = state.repos.as_ref()
+            && repos.contains(&c.repo)
+        {
+            continue;
+        }
+        state.blobs.insert(c.blob_id.clone());
+        if let Some(repos) = state.repos.as_mut() {
+            repos.insert(c.repo.clone());
+        }
+        out.push(Candidate {
+            reason: reason.to_owned(),
+            ..c.clone()
+        });
+    }
+}
+
+/// Takes `n` candidates evenly spaced over the pool in key order (the
+/// P8-16 `spread` rule). The filters are the ones of [`pick`].
+fn spread<K: Ord>(
+    pool: &[Candidate],
+    n: usize,
+    key: impl Fn(&Candidate) -> K,
+    max_size: u64,
+    reason: &str,
+    state: &mut Taken,
+    out: &mut Vec<Candidate>,
+) {
+    if n == 0 {
+        return;
+    }
+    let mut sorted: Vec<&Candidate> = pool.iter().collect();
+    sorted.sort_by_key(|c| key(c));
+    let items: Vec<&Candidate> = sorted
+        .into_iter()
+        .filter(|c| {
+            !state.blobs.contains(&c.blob_id)
+                && c.size <= max_size
+                && state
+                    .repos
+                    .as_ref()
+                    .is_none_or(|repos| !repos.contains(&c.repo))
+        })
+        .collect();
+    if items.is_empty() {
+        return;
+    }
+    let step = std::cmp::max(1, items.len() / n);
+    for c in items.into_iter().step_by(step).take(n) {
+        state.blobs.insert(c.blob_id.clone());
+        if let Some(repos) = state.repos.as_mut() {
+            repos.insert(c.repo.clone());
+        }
+        out.push(Candidate {
+            reason: reason.to_owned(),
+            ..c.clone()
+        });
+    }
+}
+
+/// The gate-corpus proposals and the export set of one selection (task
+/// P8-18 goal 2): the coverage buckets of the P8-16 helper, over Tier
+/// A files the sweeps opened, with risky files already dropped by
+/// [`candidates`]. Gate files are capped at 2 MB and one per
+/// repository; export files at 5 MB.
+pub fn select(pool: &[Candidate]) -> Selection {
+    const GATE_CAP: u64 = 2 * 1024 * 1024;
+    const EXPORT_CAP: u64 = 5 * 1024 * 1024;
+    let opened: Vec<Candidate> = pool
+        .iter()
+        .filter(|c| c.tier == "a" && c.opened)
+        .cloned()
+        .collect();
+    let pool_where = |test: &dyn Fn(&Candidate) -> bool| -> Vec<Candidate> {
+        opened.iter().filter(|c| test(c)).cloned().collect()
+    };
+    let vsd6 = pool_where(&|c| c.ext == "vsd" && c.version == "6");
+    let vsd11 = pool_where(&|c| c.ext == "vsd" && c.version == "11");
+    let connectors = pool_where(&|c| c.one_d > 0 || c.connects > 0);
+    let pages = pool_where(&|c| c.pages >= 2);
+    let groups = pool_where(&|c| c.groups >= 1);
+    let text = pool_where(&|c| c.text_chars > 0);
+    let scaled_pool = pool_where(&|c| scaled(&c.scale));
+    let stencils = pool_where(&|c| matches!(c.ext.as_str(), "vss" | "vst" | "vssx" | "vstx"));
+    let themes = pool_where(&|c| c.themes > 0);
+
+    let mut state = Taken {
+        blobs: BTreeSet::new(),
+        repos: Some(BTreeSet::new()),
+    };
+    let mut gate = Vec::new();
+    pick(
+        &vsd6,
+        6,
+        |c| (c.size, c.blob_id.clone()),
+        GATE_CAP,
+        "version 6 .vsd",
+        &mut state,
+        &mut gate,
+    );
+    spread(
+        &vsd11,
+        5,
+        |c| (c.shapes, c.blob_id.clone()),
+        GATE_CAP,
+        "version 11 .vsd, shape-count spread",
+        &mut state,
+        &mut gate,
+    );
+    pick(
+        &connectors,
+        4,
+        |c| (-(c.connects as i64), -(c.one_d as i64), c.blob_id.clone()),
+        GATE_CAP,
+        "connectors (1-D shapes or connect records)",
+        &mut state,
+        &mut gate,
+    );
+    spread(
+        &pages,
+        3,
+        |c| (c.pages, c.blob_id.clone()),
+        GATE_CAP,
+        "multi-page drawing",
+        &mut state,
+        &mut gate,
+    );
+    spread(
+        &groups,
+        3,
+        |c| (c.groups, c.blob_id.clone()),
+        GATE_CAP,
+        "group shapes",
+        &mut state,
+        &mut gate,
+    );
+    pick(
+        &text,
+        3,
+        |c| (-(c.text_chars as i64), c.blob_id.clone()),
+        GATE_CAP,
+        "text-heavy drawing",
+        &mut state,
+        &mut gate,
+    );
+    pick(
+        &scaled_pool,
+        2,
+        |c| c.blob_id.clone(),
+        GATE_CAP,
+        "non-default drawing scale",
+        &mut state,
+        &mut gate,
+    );
+    pick(
+        &stencils,
+        3,
+        |c| c.blob_id.clone(),
+        GATE_CAP,
+        "real stencil or template (.vss/.vst, for the template marker)",
+        &mut state,
+        &mut gate,
+    );
+    pick(
+        &themes,
+        3,
+        |c| (-(c.themes as i64), c.blob_id.clone()),
+        GATE_CAP,
+        ".vsdx with themes",
+        &mut state,
+        &mut gate,
+    );
+
+    let mut export = gate.clone();
+    let mut state = Taken {
+        blobs: gate.iter().map(|c| c.blob_id.clone()).collect(),
+        repos: None,
+    };
+    for (reason, bucket, n) in [
+        ("version 6 .vsd", vsd6, 15),
+        ("version 11 .vsd", vsd11, 35),
+        ("connectors", connectors, 20),
+        ("multi-page", pages, 15),
+        ("groups", groups, 15),
+        ("text-heavy", pool_where(&|c| c.text_chars > 500), 15),
+        ("stencil or template", stencils, 12),
+        ("drawing scales", scaled_pool, 12),
+        (".vsdx", pool_where(&|c| c.ext == "vsdx"), 25),
+        ("themes", themes, 10),
+    ] {
+        pick(
+            &bucket,
+            n,
+            |c| (c.size, c.blob_id.clone()),
+            EXPORT_CAP,
+            reason,
+            &mut state,
+            &mut export,
+        );
+    }
+    export.sort_by(|a, b| (&a.reason, &a.repo).cmp(&(&b.reason, &b.repo)));
+    Selection { gate, export }
+}
+
+/// The gate-corpus proposals and the export set of one selection.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Selection {
+    /// The gate-corpus proposals, in bucket order.
+    pub gate: Vec<Candidate>,
+    /// The export set, sorted by (reason, repository).
+    pub export: Vec<Candidate>,
+}
+
+/// One gate proposal as the Result section lists it (the P8-16
+/// spelling), plus the `corpus/manifest.toml` rows the master needs.
+pub fn gate_proposals(gate: &[Candidate]) -> String {
+    let mut out = format!("# gate corpus proposals: {}\n", gate.len());
+    for c in gate {
+        out.push_str(&format!("# {}\n", c.reason));
+        out.push_str(&format!(
+            "repo={} commit={} path={}\n",
+            c.repo, c.commit, c.path
+        ));
+        out.push_str(&format!(
+            "  sha256={} size={} license={} kind={} version={} pages={} shapes={} \
+             groups={} one_d={} connects={} text={} themes={}\n",
+            c.sha256,
+            c.size,
+            c.license,
+            c.kind,
+            c.version,
+            c.pages,
+            c.shapes,
+            c.groups,
+            c.one_d,
+            c.connects,
+            c.text_chars,
+            c.themes
+        ));
+    }
+    out.push_str("\n# manifest rows (corpus/manifest.toml)\n");
+    let mut sources: Vec<(&str, &Candidate)> = Vec::new();
+    for c in gate {
+        if !sources.iter().any(|(repo, _)| *repo == c.repo) {
+            sources.push((&c.repo, c));
+        }
+    }
+    for (repo, c) in &sources {
+        out.push_str(&format!(
+            "\n[sources.{}]\nrepo = \"https://github.com/{repo}\"\n\
+             mirror_raw = \"https://raw.githubusercontent.com/{repo}/{{commit}}/{{path}}\"\n\
+             commit = \"{}\"\nlicense = \"{}\"\n",
+            source_key(repo),
+            c.commit,
+            c.license
+        ));
+    }
+    for c in gate {
+        out.push_str(&format!(
+            "\n[[file]]\nname = \"{}\"\nsource = \"{}\"\npath = \"{}\"\n\
+             sha256 = \"{}\"\nsize = {}\n",
+            manifest_name(c),
+            source_key(&c.repo),
+            c.path,
+            c.sha256,
+            c.size
+        ));
+    }
+    out
+}
+
+/// The `sources` key of one repository in `corpus/manifest.toml`.
+fn source_key(repo: &str) -> String {
+    let name: String = repo
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    format!("gh-{name}")
+}
+
+/// The corpus file name of one proposal (`<kind dir>/<blob8>-<name>`).
+fn manifest_name(c: &Candidate) -> String {
+    let dir = match c.ext.as_str() {
+        "vsdx" | "vssx" | "vstx" => "vsdx",
+        "vdx" => "vdx",
+        _ => "vsd",
+    };
+    let base = c.path.rsplit('/').next().unwrap_or(c.path.as_str());
+    let base: String = base
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_') {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let head = c.blob_id.get(..8).unwrap_or(c.blob_id.as_str());
+    format!("{dir}/{head}-{base}")
+}
+
+/// One `export-set.csv` line (the P8-16 column order).
+fn export_line(c: &Candidate) -> String {
+    csv_line(&[
+        c.blob_id.clone(),
+        c.tier.clone(),
+        c.license.clone(),
+        c.repo.clone(),
+        c.commit.clone(),
+        c.path.clone(),
+        c.sha256.clone(),
+        c.size.to_string(),
+        c.reason.clone(),
+    ])
+}
+
+/// Runs the selection over the local CSVs (task P8-18 goal 2): writes
+/// `export-set.csv` and returns the gate proposals.
+pub fn run_select(out_dir: &Path) -> Result<Selection> {
+    let index_text = std::fs::read_to_string(out_dir.join(INDEX_CSV))
+        .map_err(|e| format!("cannot read {}: {e}", out_dir.join(INDEX_CSV).display()))?;
+    let index = index_rows(&index_text)?;
+    let mut sweeps: Vec<SweepFacts> = Vec::new();
+    for name in [SWEEP_VSD_CSV, SWEEP_VSDX_CSV] {
+        if let Ok(text) = std::fs::read_to_string(out_dir.join(name)) {
+            sweeps.append(&mut sweep_rows(&text)?);
+        }
+    }
+    let pool = candidates(&index, &sweeps);
+    let selection = select(&pool);
+    let mut text = String::from("blob_id,tier,license,repo,commit,path,sha256,size,reason\n");
+    for c in &selection.export {
+        text.push_str(&export_line(c));
+        text.push('\n');
+    }
+    crate::util::write_atomic_bytes(&out_dir.join(EXPORT_SET_CSV), text.as_bytes())?;
+    Ok(selection)
 }
 
 // ----------------------------------------------------------------- driver
@@ -1530,12 +2434,24 @@ pub fn run(opts: &Options) -> Result<()> {
             );
             Ok(())
         }
-        ScoutCommand::Classify => {
-            let summary = run_classify(&out_dir)?;
+        ScoutCommand::Classify { clamav } => {
+            let summary = run_classify(&out_dir, clamav.as_deref())?;
             println!(
                 "scout: classified {} files, excluded {} ({} OLE files had no facts)",
                 summary.files, summary.excluded, summary.ole_missing
             );
+            let counts: Vec<String> = RISK_REASONS
+                .iter()
+                .zip(summary.risk)
+                .map(|(reason, count)| format!("{reason} {count}"))
+                .collect();
+            println!("scout: risk ({})", counts.join(", "));
+            Ok(())
+        }
+        ScoutCommand::Select => {
+            let selection = run_select(&out_dir)?;
+            print!("{}", gate_proposals(&selection.gate));
+            println!("# export-set.csv: {} rows", selection.export.len());
             Ok(())
         }
     }
@@ -1555,7 +2471,9 @@ mod tests {
 
     /// The header line of `ole-facts.csv` (the same one the sweep writes).
     fn ole_facts_header() -> String {
-        "blob_id,kind,version,ms_author,ms_company,template_copy,template_origin".to_owned()
+        "blob_id,kind,version,ms_author,ms_company,template_copy,template_origin,\
+         vba,ole_object,hyperlink_target"
+            .to_owned()
     }
 
     #[test]
@@ -1569,8 +2487,17 @@ mod tests {
         );
         assert_eq!(opts.out, None);
         let opts = parse_args(&args(&["classify", "--out", "/tmp/w"])).unwrap();
-        assert_eq!(opts.command, ScoutCommand::Classify);
+        assert_eq!(opts.command, ScoutCommand::Classify { clamav: None });
         assert_eq!(opts.out, Some(PathBuf::from("/tmp/w")));
+        let opts = parse_args(&args(&["classify", "--clamav", "scan.log"])).unwrap();
+        assert_eq!(
+            opts.command,
+            ScoutCommand::Classify {
+                clamav: Some(PathBuf::from("scan.log"))
+            }
+        );
+        let opts = parse_args(&args(&["select"])).unwrap();
+        assert_eq!(opts.command, ScoutCommand::Select);
     }
 
     #[test]
@@ -1579,9 +2506,13 @@ mod tests {
         assert!(parse_args(&args(&["fetch"])).is_err());
         assert!(parse_args(&args(&["fetch", "a.csv", "b.csv"])).is_err());
         assert!(parse_args(&args(&["classify", "extra"])).is_err());
+        assert!(parse_args(&args(&["select", "extra"])).is_err());
         assert!(parse_args(&args(&["bogus"])).is_err());
         assert!(parse_args(&args(&["--out"])).is_err());
         assert!(parse_args(&args(&["--bogus"])).is_err());
+        assert!(parse_args(&args(&["--clamav"])).is_err());
+        assert!(parse_args(&args(&["select", "--clamav", "x"])).is_err());
+        assert!(parse_args(&args(&["fetch", "x.csv", "--clamav", "x"])).is_err());
     }
 
     #[test]
@@ -2244,7 +3175,7 @@ mod tests {
     #[test]
     fn parses_ole_facts() {
         let text = format!(
-            "{}\n{},ole-stencil,11,1,0,0,0\n",
+            "{}\n{},ole-stencil,11,1,0,0,0,1,1,0\n",
             ole_facts_header(),
             "a".repeat(40)
         );
@@ -2253,6 +3184,9 @@ mod tests {
         assert_eq!(rows[0].kind, "ole-stencil");
         assert_eq!(rows[0].version, "11");
         assert!(rows[0].ms_author);
+        assert!(rows[0].vba);
+        assert!(rows[0].ole_object);
+        assert!(!rows[0].hyperlink_target);
         // a header-only file is empty, a malformed row is an error
         assert!(ole_facts_rows(&ole_facts_header()).unwrap().is_empty());
         assert!(ole_facts_rows(&format!("{}\nx,y\n", ole_facts_header())).is_err());
@@ -2295,14 +3229,14 @@ mod tests {
         }
         std::fs::write(out.join(FETCH_CSV), state).unwrap();
         let ole_facts = format!(
-            "{}\n{ms},ole-template,11,0,0,1,0\n{vsd},ole-drawing,6,0,0,0,0\n",
+            "{}\n{ms},ole-template,11,0,0,1,0,0,0,0\n{vsd},ole-drawing,6,0,0,0,0,0,0,0\n",
             ole_facts_header()
         );
         std::fs::write(out.join(OLE_FACTS_CSV), ole_facts).unwrap();
 
         // the OLE facts say `{ms}` is a template copy: excluded. The
         // zip scan sees nothing Microsoft about its bytes.
-        let summary = run_classify(out).unwrap();
+        let summary = run_classify(out, None).unwrap();
         assert_eq!(summary.files, 3);
         assert_eq!(summary.excluded, 1);
         assert_eq!(summary.ole_missing, 0);
@@ -2344,9 +3278,453 @@ mod tests {
         )
         .unwrap();
 
-        let summary = run_classify(out).unwrap();
+        let summary = run_classify(out, None).unwrap();
         assert_eq!(summary.ole_missing, 1);
         let index = std::fs::read_to_string(out.join(INDEX_CSV)).unwrap();
         assert!(index.contains("ole"));
+    }
+
+    // ---- risk (task P8-18) ----------------------------------------
+
+    #[test]
+    fn matches_the_provenance_words() {
+        // whole words and path segments
+        assert!(risky_provenance("alice/cve-2017-0199", "poc/drawing.vsd"));
+        assert!(risky_provenance("alice/visio", "a/Exploit Notes.vsd"));
+        assert!(risky_provenance("alice/oss-fuzz", "cases/x.vsd"));
+        assert!(risky_provenance("clusterfuzz-testcase-minimized", "x.vsd"));
+        assert!(risky_provenance("alice/afl-out", "crashes/x.vsd"));
+        assert!(risky_provenance("alice/visio", "malware-sample.vsd"));
+        assert!(risky_provenance("alice/virus-scan", "x.vsd"));
+        // plurals and longer words that start with a rule word
+        assert!(risky_provenance("alice/visio", "pocs/x.vsd"));
+        assert!(risky_provenance("alice/visio", "payloads/x.vsd"));
+        assert!(risky_provenance("alice/visio", "fuzzing/x.vsd"));
+        assert!(risky_provenance("alice/visio", "testcases/x.vsd"));
+        assert!(risky_provenance("alice/visio", "corpus/x.vsd"));
+        // nothing risky
+        assert!(!risky_provenance("alice/visio", "drawings/flowchart.vsd"));
+        assert!(!risky_provenance("alice/pocket-calculator", "x.vsd"));
+        assert!(!risky_provenance("alice/visio", "corporate/x.vsd"));
+        assert!(!risky_provenance("alice/visio", "half/x.vsd"));
+    }
+
+    /// Hand-built facts with no risk at all.
+    fn facts(kind: &str) -> Facts {
+        Facts {
+            kind: kind.to_owned(),
+            ..Facts::default()
+        }
+    }
+
+    #[test]
+    fn names_the_risk_reasons_in_order() {
+        assert_eq!(
+            risk_reasons(&facts("ole-drawing"), "alice/visio", "p/x.vsd"),
+            Vec::<&str>::new()
+        );
+        let mut risky = facts("ole-drawing");
+        risky.antivirus = "Eicar-Test-Signature".to_owned();
+        risky.external_target = 2;
+        risky.vba = true;
+        risky.embedded_object = 1;
+        assert_eq!(
+            risk_reasons(&risky, "alice/visio", "p/x.vsd"),
+            vec!["macros", "embedded-object", "external-target", "antivirus"]
+        );
+        // a broken container, a zip bomb and a risky path
+        assert_eq!(
+            risk_reasons(&facts("ole-unreadable"), "alice/visio", "p/x.vsd"),
+            vec!["container-anomaly"]
+        );
+        let mut bomb = facts("ooxml-drawing");
+        bomb.zip_uncompressed = Some(300 * 1024 * 1024);
+        assert_eq!(
+            risk_reasons(&bomb, "alice/visio", "p/x.vsd"),
+            vec!["container-anomaly"]
+        );
+        let mut ratio = facts("ooxml-drawing");
+        ratio.zip_max_ratio = Some(101);
+        assert_eq!(
+            risk_reasons(&ratio, "alice/visio", "p/x.vsd"),
+            vec!["container-anomaly"]
+        );
+        // a ratio of 100:1 exactly is not over the cap
+        let mut ratio = facts("ooxml-drawing");
+        ratio.zip_max_ratio = Some(100);
+        ratio.zip_uncompressed = Some(200 * 1024 * 1024);
+        assert_eq!(
+            risk_reasons(&ratio, "alice/visio", "p/x.vsd"),
+            Vec::<&str>::new()
+        );
+        assert_eq!(
+            risk_reasons(&facts("ole-invalid"), "alice/corpus", "p/x.vsd"),
+            vec!["container-anomaly", "provenance"]
+        );
+    }
+
+    #[test]
+    fn parses_a_clamav_log() {
+        let log = "/w/a/\
+                   1111111111111111111111111111111111111111.vsd: Eicar-Test-Signature FOUND\n\
+                   /w/a/2222222222222222222222222222222222222222.vsdx: Trojan.Agent-123 FOUND\n\
+                   ----------- SCAN SUMMARY -----------\n\
+                   Infected files: 2\n";
+        let hits = clamav_hits(log);
+        assert_eq!(hits.len(), 2);
+        assert_eq!(
+            hits.get("1111111111111111111111111111111111111111"),
+            Some(&"Eicar-Test-Signature".to_owned())
+        );
+        assert_eq!(
+            hits.get("2222222222222222222222222222222222222222"),
+            Some(&"Trojan.Agent-123".to_owned())
+        );
+        assert!(clamav_hits("").is_empty());
+    }
+
+    #[test]
+    fn classify_records_the_risk_facts() {
+        let t = TempDir::new("scout-risk");
+        let out = t.path();
+        std::fs::create_dir_all(out.join("a")).unwrap();
+        let risky_zip = make_zip(&[
+            ("[Content_Types].xml", CONTENT_TYPES_DRAWING),
+            ("visio/document.xml", "<VisioDocument/>"),
+            ("visio/vbaProject.bin", "vba"),
+            ("visio/embeddings/oleObject1.bin", "ole"),
+            (
+                "visio/_rels/document.xml.rels",
+                r#"<Relationships><Relationship Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/oleObject"
+                    Target="embeddings/oleObject1.bin"/>
+                    <Relationship Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink"
+                    Target="https://example.com/x" TargetMode="External"/></Relationships>"#,
+            ),
+        ]);
+        let risky = "5".repeat(40);
+        std::fs::write(out.join(format!("a/{risky}.vsdx")), &risky_zip).unwrap();
+        let row = StateRow {
+            blob_id: risky.clone(),
+            tier: "a".to_owned(),
+            license: "mit".to_owned(),
+            repo: "alice/oss-fuzz".to_owned(),
+            commit: String::new(),
+            path: "cases/x.vsdx".to_owned(),
+            ext: "vsdx".to_owned(),
+            sha256: String::new(),
+            size: 1,
+            status: "kept".to_owned(),
+            note: String::new(),
+        };
+        std::fs::write(
+            out.join(FETCH_CSV),
+            format!("{}\n{}\n", state_header(), row.line()),
+        )
+        .unwrap();
+        let log = format!("/w/a/{risky}.vsdx: Eicar-Test-Signature FOUND\n");
+        let log_path = out.join("clamav.log");
+        std::fs::write(&log_path, log).unwrap();
+
+        let summary = run_classify(out, Some(&log_path)).unwrap();
+        assert_eq!(summary.files, 1);
+        assert_eq!(
+            summary.risk,
+            [
+                1, // macros
+                1, // embedded-object
+                1, // external-target
+                0, // container-anomaly
+                1, // provenance
+                1, // antivirus
+            ]
+        );
+        let index = std::fs::read_to_string(out.join(INDEX_CSV)).unwrap();
+        let rows = index_rows(&index).unwrap();
+        assert_eq!(rows.len(), 1);
+        let parsed = &rows[0].facts;
+        assert!(parsed.vba);
+        // one embedding part plus the two `oleObject` strings of the
+        // relationship part
+        assert_eq!(parsed.embedded_object, 3);
+        assert_eq!(parsed.external_target, 1);
+        assert_eq!(parsed.antivirus, "Eicar-Test-Signature");
+        assert!(parsed.zip_uncompressed.is_some());
+        assert!(
+            rows[0]
+                .line()
+                .ends_with(",macros;embedded-object;external-target;provenance;antivirus")
+        );
+    }
+
+    #[test]
+    fn flags_a_zip_bomb() {
+        use std::io::Write as _;
+        let mut cursor = std::io::Cursor::new(Vec::new());
+        {
+            let mut writer = zip::ZipWriter::new(&mut cursor);
+            let options = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated);
+            writer.start_file("visio/document.xml", options).unwrap();
+            writer.write_all(&vec![b'0'; 500_000]).unwrap();
+            writer.finish().unwrap();
+        }
+        let bytes = cursor.into_inner();
+        let facts = classify_bytes(&bytes, FileExt::Vsdx, "bomb.vsdx");
+        let ratio = facts.zip_max_ratio.unwrap_or(0);
+        assert!(ratio > 100, "ratio {ratio}");
+        assert_eq!(
+            risk_reasons(&facts, "alice/visio", "p/x.vsdx"),
+            vec!["container-anomaly"]
+        );
+    }
+
+    #[test]
+    fn index_rows_round_trip() {
+        let row = IndexRow {
+            state: StateRow {
+                blob_id: "a".repeat(40),
+                tier: "a".to_owned(),
+                license: "mit".to_owned(),
+                repo: "alice/visio".to_owned(),
+                commit: "c".to_owned(),
+                path: "p/x.vsdx".to_owned(),
+                ext: "vsdx".to_owned(),
+                sha256: "s".to_owned(),
+                size: 7,
+                status: "kept".to_owned(),
+                note: String::new(),
+            },
+            facts: Facts {
+                kind: "ooxml-drawing".to_owned(),
+                kind_matches_ext: "yes".to_owned(),
+                vba: true,
+                embedded_object: 2,
+                external_target: 1,
+                zip_uncompressed: Some(99),
+                zip_max_ratio: Some(3),
+                antivirus: "Sig".to_owned(),
+                ..Facts::default()
+            },
+        };
+        let text = format!("{}\n{}\n", index_header(), row.line());
+        let rows = index_rows(&text).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0], row);
+        assert!(
+            rows[0]
+                .line()
+                .ends_with("1,2,1,99,3,Sig,macros;embedded-object;external-target;antivirus")
+        );
+    }
+
+    // ---- select (task P8-18) --------------------------------------
+
+    /// A hand-built selection candidate.
+    fn cand(blob: char, repo: &str, ext: &str, version: &str) -> Candidate {
+        Candidate {
+            blob_id: blob.to_string().repeat(40),
+            tier: "a".to_owned(),
+            license: "mit".to_owned(),
+            repo: repo.to_owned(),
+            commit: "c".to_owned(),
+            path: format!("p/{blob}.{ext}"),
+            sha256: "s".to_owned(),
+            size: 1000,
+            ext: ext.to_owned(),
+            kind: "ole-drawing".to_owned(),
+            version: version.to_owned(),
+            opened: true,
+            ..Candidate::default()
+        }
+    }
+
+    #[test]
+    fn parses_both_sweep_headers() {
+        let vsd = format!(
+            "blob_id,tier,ext,kind,version,outcome,error_kind,panic,warnings_total,\
+             warning_skipped_record,warning_dropped,warning_unresolved_reference,\
+             warning_bad_value,warning_unsupported,pages,masters,shapes,groups,connects,\
+             one_d,text_chars,drawing_scale\n\
+             {},a,vsd,drawing,11,opened,,0,0,0,0,0,0,0,2,1,10,2,3,4,500,0.5\n",
+            "a".repeat(40)
+        );
+        let rows = sweep_rows(&vsd).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].outcome, "opened");
+        assert_eq!(rows[0].pages, 2);
+        assert_eq!(rows[0].shapes, 10);
+        assert_eq!(rows[0].themes, 0);
+        assert_eq!(rows[0].drawing_scale, "0.5");
+        let vsdx = format!(
+            "blob_id,tier,ext,kind,version,outcome,error_kind,panic,warnings_total,\
+             warning_skipped_record,warning_dropped,warning_unresolved_reference,\
+             warning_bad_value,warning_unsupported,pages,masters,shapes,groups,connects,\
+             one_d,text_chars,drawing_scale,themes,properties\n\
+             {},a,vsdx,drawing,,opened,,0,0,0,0,0,0,0,1,0,5,0,0,1,20,,3,1\n",
+            "b".repeat(40)
+        );
+        let rows = sweep_rows(&vsdx).unwrap();
+        assert_eq!(rows[0].themes, 3);
+        assert!(sweep_rows("x,y\n1,2\n").is_err());
+    }
+
+    #[test]
+    fn the_selection_never_takes_a_risky_file() {
+        // Hand-built index rows: the first file carries a VBA project,
+        // the rest are clean.
+        let mut rows: Vec<IndexRow> = Vec::new();
+        for (i, blob) in "abcdefg".chars().enumerate() {
+            let mut facts = facts("ole-drawing");
+            facts.version = "6".to_owned();
+            facts.vba = i == 0;
+            rows.push(IndexRow {
+                state: StateRow {
+                    blob_id: blob.to_string().repeat(40),
+                    tier: "a".to_owned(),
+                    license: "mit".to_owned(),
+                    repo: format!("owner{i}/repo"),
+                    commit: "c".to_owned(),
+                    path: format!("p/{blob}.vsd"),
+                    ext: "vsd".to_owned(),
+                    sha256: "s".to_owned(),
+                    size: 100 + i as u64,
+                    status: "kept".to_owned(),
+                    note: String::new(),
+                },
+                facts,
+            });
+        }
+        let sweeps: Vec<SweepFacts> = rows
+            .iter()
+            .map(|r| SweepFacts {
+                blob_id: r.state.blob_id.clone(),
+                outcome: "opened".to_owned(),
+                ..SweepFacts::default()
+            })
+            .collect();
+        let pool = candidates(&rows, &sweeps);
+        assert_eq!(pool.len(), 6, "the risky file is never a candidate");
+        let selection = select(&pool);
+        assert_eq!(
+            selection.gate.len(),
+            6,
+            "the bucket fills from its own pool"
+        );
+        for c in selection.gate.iter().chain(&selection.export) {
+            assert_ne!(c.blob_id, "a".repeat(40), "a risky file is never selected");
+        }
+        // the export set keeps the whole gate set
+        assert!(selection.export.len() >= selection.gate.len());
+    }
+
+    #[test]
+    fn the_gate_set_is_one_file_per_repository() {
+        let mut a = cand('a', "one/r", "vsd", "6");
+        a.size = 10;
+        let mut b = cand('b', "one/r", "vsd", "6");
+        b.size = 20;
+        let mut c = cand('c', "two/r", "vsd", "6");
+        c.size = 30;
+        let selection = select(&[a, b, c]);
+        assert_eq!(selection.gate.len(), 2);
+        assert_eq!(selection.gate[0].blob_id, "a".repeat(40));
+        assert_eq!(selection.gate[1].blob_id, "c".repeat(40));
+    }
+
+    #[test]
+    fn the_gate_set_spreads_over_the_sorted_pool() {
+        let pool: Vec<Candidate> = "abcdefghij"
+            .chars()
+            .enumerate()
+            .map(|(i, blob)| {
+                let mut c = cand(blob, &format!("owner{i}/r"), "vsd", "11");
+                c.shapes = i + 1;
+                c
+            })
+            .collect();
+        // sorted by shape count the pool is `a`..`j`; spread 5 over 10
+        // candidates takes every second one
+        let selection = select(&pool);
+        let spread: Vec<&Candidate> = selection
+            .gate
+            .iter()
+            .filter(|c| c.reason == "version 11 .vsd, shape-count spread")
+            .collect();
+        assert_eq!(spread.len(), 5);
+        assert_eq!(spread[0].blob_id, "a".repeat(40));
+        assert_eq!(spread[1].blob_id, "c".repeat(40));
+        assert_eq!(spread[2].blob_id, "e".repeat(40));
+        assert_eq!(spread[3].blob_id, "g".repeat(40));
+        assert_eq!(spread[4].blob_id, "i".repeat(40));
+    }
+
+    #[test]
+    fn names_the_drawing_scales() {
+        assert!(scaled("0.5"));
+        assert!(scaled("25.4"));
+        assert!(!scaled(""));
+        assert!(!scaled("1"));
+        assert!(!scaled("not a number"));
+        assert!(!scaled("0.03937007874015748"));
+    }
+
+    #[test]
+    fn writes_the_gate_proposals_with_manifest_rows() {
+        let mut a = cand('a', "one/r", "vsdx", "");
+        a.kind = "ooxml-drawing".to_owned();
+        let text = gate_proposals(&[a]);
+        assert!(text.starts_with("# gate corpus proposals: 1\n"));
+        assert!(text.contains("repo=one/r commit=c path=p/a.vsdx"));
+        assert!(text.contains("# manifest rows (corpus/manifest.toml)"));
+        assert!(text.contains("[sources.gh-one-r]"));
+        assert!(
+            text.contains(
+                "mirror_raw = \"https://raw.githubusercontent.com/one/r/{commit}/{path}\""
+            )
+        );
+        assert!(text.contains("name = \"vsdx/"));
+        assert!(text.contains("sha256 = \"s\""));
+    }
+
+    #[test]
+    fn select_writes_the_export_set() {
+        let t = TempDir::new("scout-select");
+        let out = t.path();
+        let row = IndexRow {
+            state: StateRow {
+                blob_id: "a".repeat(40),
+                tier: "a".to_owned(),
+                license: "mit".to_owned(),
+                repo: "one/r".to_owned(),
+                commit: "c".to_owned(),
+                path: "p/x.vsd".to_owned(),
+                ext: "vsd".to_owned(),
+                sha256: "s".to_owned(),
+                size: 1000,
+                status: "kept".to_owned(),
+                note: String::new(),
+            },
+            facts: {
+                let mut f = facts("ole-drawing");
+                f.version = "6".to_owned();
+                f
+            },
+        };
+        std::fs::write(
+            out.join(INDEX_CSV),
+            format!("{}\n{}\n", index_header(), row.line()),
+        )
+        .unwrap();
+        let sweep = format!(
+            "blob_id,outcome,pages,shapes\n{},opened,1,5\n",
+            "a".repeat(40)
+        );
+        std::fs::write(out.join(SWEEP_VSD_CSV), sweep).unwrap();
+
+        let selection = run_select(out).unwrap();
+        assert_eq!(selection.gate.len(), 1);
+        let text = std::fs::read_to_string(out.join(EXPORT_SET_CSV)).unwrap();
+        assert!(text.starts_with("blob_id,tier,license,repo,commit,path,sha256,size,reason\n"));
+        assert!(text.contains("version 6 .vsd"), "{text}");
     }
 }
