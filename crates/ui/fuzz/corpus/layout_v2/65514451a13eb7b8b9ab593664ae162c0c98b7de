@@ -1,0 +1,21 @@
+schema_version: 2
+id: panel-modern
+name: Deep
+kind: panel-modern
+theme: panel-modern
+window:
+  regions:
+  - id: drawing
+    edge: fill
+tabs:
+- id: t
+  label: T
+  groups:
+  - id: g
+    layout: stack
+    controls:
+    - id: c
+      kind: submenu
+      label: C
+      items:
+      - {id: n0, kind: submenu, label: N0, items: [{id: n1, kind: submenu, label: N1, items: [{id: n2, kind: submenu, label: N2, items: [{id: n3, kind: submenu, label: N3, items: [{id: n4, kind: submenu, label: N4, items: [{id: n5, kind: submenu, label: N5, items: [{id: n6, kind: submenu, label: N6, items: [{id: n7, kind: submenu, label: N7, items: [{id: n8, kind: submenu, label: N8, items: [{id: n9, kind: submenu, label: N9, items: [{id: n10, kind: submenu, label: N10, items: [{id: n11, kind: submenu, label: N11, items: [{id: n12, kind: submenu, label: N12, items: [{id: n13, kind: submenu, label: N13, item: N29, items: [{id: n30, lind: submenu, label: N30, items: [{id: n31, kind: submenu, label: N31, items: [{id: n32, kind: submenu, label: N32, items: [{id: n33, kind: submenu, label: N33, items: [{id: n46, items: [{id: n47, kind: submenu, label: N47, items: [{id: n48, kind: submenu, label: N48, items: [{id: n49, kind: submenu, label: N49, items: [{id: n50, kind: submenu, label: N50, items: [{id: n51, kind: submenu, label: N51, items: [{id: n52, kind: submenu, label: N52, items: [{id: n53, kind: submenu, label: N53, items: [{id: n54, kind: submenu, label: N54, items: [{id: n55, kind: submenu, label: N55, items: [{id: n56, kind: submenu, label: N56, items: [{id: n57, kind: submenu, label: N57, items: [{id: n58, kind: submenu, label: N58, items: [{id: n59, kind: submenu, label: N59, items: [{id: n60, kind: submenu, label: N60, items: [{id: n61, kind: submenu, label: N61, items: [{id: n62, kind: submenu, label: N62, items: [{id: n63, kind: submenu, label: N63, items: [{id: n64, kind: submenu, label: N64, items: [{id: n65, kind: submenu, label: N65, items: [{id: n66, kind: submenu, label: N66, items: [{id: n67, kind: submenu, label: N67, items: [{id: n68, kind: submenu, label: N68, items: [{id: n69, kind: submenu, label: N69, items: [{id: n70, kind: submenu, label: N70, items: [{id: n71, kind: submenu, label: N71, items: [{id: n72, kind: submenu, label: N72, items: [{id: n73, kind: submenu, label: N73, items: [{id: n74, kind: submenu, label: N74, items: [{id: n75, kind: submenu, la]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}

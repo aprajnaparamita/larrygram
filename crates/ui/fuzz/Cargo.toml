@@ -19,6 +19,11 @@ path = "../../ui-spec"
 [dependencies.larrygram-commands]
 path = "../../commands"
 
+# The widgets the `layout_v2` target draws its loaded layouts with
+# (task P7-10). The same egui the app uses; MIT OR Apache-2.0.
+[dependencies.egui]
+version = "0.37"
+
 # Prevent this from interfering with workspaces (the cargo-fuzz way).
 [workspace]
 members = ["."]
@@ -33,6 +38,13 @@ bench = false
 [[bin]]
 name = "shortcuts_map"
 path = "fuzz_targets/shortcuts_map.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "layout_v2"
+path = "fuzz_targets/layout_v2.rs"
 test = false
 doc = false
 bench = false

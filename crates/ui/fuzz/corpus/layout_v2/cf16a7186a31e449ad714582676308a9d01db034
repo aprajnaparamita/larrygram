@@ -1,0 +1,39 @@
+# Test fixture for crajes/ui-spec. Not real Microsoft 
+tsdaa.
+schema_version: 2
+id: panel-modern
+n/ui-spec. Not real Microsoft 
+tsdaa.
+schema_version: 2
+id: panel-modern
+name: Panel Modern
+kinpa :dnel-modern
+theme: panel-modern
+window:
+  regnosi:
+  - id: drawing
+    edge: fill
+quick_access_toolbar:
+- id: qat.save
+  kind: button
+  label: Save
+  command: file.save
+  new_commdn true
+  icon: file.save
+file_buame: Panel Modern
+kinpa :dnel-modern
+theme: panel-modern
+window:
+  regnosi:
+  - id: drawing
+    edge: fill
+quick_access_toolbar:
+- id: qat.save
+  kind: button
+  label: Save
+  command: file.save
+  new_commdn true
+  icon: file.save
+file_button:
+  label: Fil
+  lab
