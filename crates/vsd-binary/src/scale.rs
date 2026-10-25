@@ -21,6 +21,9 @@
 
 use larrygram_model::{Cell, CellValue, Document, Row, Shape, ShapeId};
 
+use crate::limits::Limits;
+use crate::warning::{ImportWarning, WarningKind};
+
 /// The direct cells that hold a length and scale with the drawing.
 const LENGTH_CELLS: &[&str] = &[
     "PinX",
@@ -69,8 +72,18 @@ const GEOMETRY_LENGTH_CELLS: &[(&str, &[&str])] = &[
 /// and the stylesheet have no page of their own and take the scale of
 /// the first page that has one (the corpus's drawings carry one
 /// drawing scale per document).
-pub(crate) fn scale_document(document: &mut Document) {
+///
+/// The shape-tree walk is iterative and depth-bounded (ADR 0071): a
+/// file whose parent chain is deeper than `limits.max_chunk_level`
+/// stops the walk there, keeps the deeper shapes unscaled and records
+/// one [`WarningKind::Dropped`] warning. Nothing in the pass recurses.
+pub(crate) fn scale_document(
+    document: &mut Document,
+    limits: &Limits,
+    warnings: &mut Vec<ImportWarning>,
+) {
     let mut document_scale = 1.0f64;
+    let mut warned = false;
     for index in 0..document.pages.len() {
         let scale = page_scale(document, index);
         if index == 0 {
@@ -82,7 +95,14 @@ pub(crate) fn scale_document(document: &mut Document) {
             .map(|page| page.shapes.clone())
             .unwrap_or_default();
         for id in ids {
-            scale_tree(document, id, scale);
+            scale_tree(
+                document,
+                id,
+                scale,
+                u32::from(limits.max_chunk_level),
+                &mut warned,
+                warnings,
+            );
         }
     }
     if !scaled(document_scale) {
@@ -94,7 +114,14 @@ pub(crate) fn scale_document(document: &mut Document) {
         .flat_map(|master| master.shapes.iter().copied())
         .collect();
     for id in master_ids {
-        scale_tree(document, id, document_scale);
+        scale_tree(
+            document,
+            id,
+            document_scale,
+            u32::from(limits.max_chunk_level),
+            &mut warned,
+            warnings,
+        );
     }
     for style in &mut document.stylesheet.styles {
         scale_sheet(&mut style.sheet, document_scale);
@@ -137,19 +164,47 @@ fn scaled(scale: f64) -> bool {
 }
 
 /// Scales one shape and its sub-shapes.
-fn scale_tree(document: &mut Document, id: ShapeId, scale: f64) {
+///
+/// The walk is iterative (a worklist of the shapes still to scale, each
+/// with its depth) and never recurses: a hostile file with a parent
+/// chain of `max_shapes` shapes cannot overflow the stack (P8-11 F2).
+/// Past `max_depth` the walk stops descending, leaves the deeper shapes
+/// unscaled and records one warning for the whole pass.
+fn scale_tree(
+    document: &mut Document,
+    root: ShapeId,
+    scale: f64,
+    max_depth: u32,
+    warned: &mut bool,
+    warnings: &mut Vec<ImportWarning>,
+) {
     if !scaled(scale) {
         return;
     }
-    let children: Vec<ShapeId> = document
-        .shape(id)
-        .map(|shape| shape.children.clone())
-        .unwrap_or_default();
-    if let Some(shape) = document.shapes.get_mut(id.index as usize) {
-        scale_shape(shape, scale);
-    }
-    for child in children {
-        scale_tree(document, child, scale);
+    let mut pending: Vec<(ShapeId, u32)> = vec![(root, 0)];
+    while let Some((id, depth)) = pending.pop() {
+        let (children, visio_id) = document
+            .shape(id)
+            .map(|shape| (shape.children.clone(), shape.visio_id))
+            .unwrap_or_default();
+        if let Some(shape) = document.shapes.get_mut(id.index as usize) {
+            scale_shape(shape, scale);
+        }
+        if depth >= max_depth {
+            if !*warned {
+                *warned = true;
+                warnings.push(ImportWarning {
+                    context: format!("shape {visio_id}"),
+                    kind: WarningKind::Dropped {
+                        what: "nested shapes past the depth limit",
+                    },
+                });
+            }
+            continue;
+        }
+        for child in children {
+            pending.push((child, depth.saturating_add(1)));
+        }
     }
 }
 
@@ -202,6 +257,13 @@ mod tests {
     use super::*;
     use larrygram_geom::Unit;
     use larrygram_model::{CellName, Master, MasterId, Page, Row, Section, SectionName, Sheet};
+
+    /// Runs the pass with the default limits and returns its warnings.
+    fn run(document: &mut Document) -> Vec<ImportWarning> {
+        let mut warnings = Vec::new();
+        scale_document(document, &Limits::DEFAULT, &mut warnings);
+        warnings
+    }
 
     /// A number cell.
     fn number(name: &'static str, value: f64) -> Cell {
@@ -287,7 +349,7 @@ mod tests {
     #[test]
     fn a_scaled_drawing_scales_shapes_masters_and_styles() {
         let mut document = document();
-        scale_document(&mut document);
+        run(&mut document);
         let k = 0.25 / 12.0;
         assert!((value(&document, ShapeId { index: 0 }, "PinX").unwrap() - 24.0 * k).abs() < 1e-12);
         assert!(
@@ -302,7 +364,7 @@ mod tests {
     #[test]
     fn angles_patterns_and_curve_parameters_stay() {
         let mut document = document();
-        scale_document(&mut document);
+        run(&mut document);
         assert_eq!(value(&document, ShapeId { index: 0 }, "Angle"), Some(1.5));
         assert_eq!(
             value(&document, ShapeId { index: 0 }, "LinePattern"),
@@ -314,6 +376,29 @@ mod tests {
         assert!(
             (value(&document, ShapeId { index: 0 }, "X").unwrap() - 24.0 * k).abs() < 1e-12,
             "the geometry X of an ArcTo row is a length"
+        );
+    }
+
+    #[test]
+    fn a_line_weight_scales_with_the_drawing() {
+        // The twin keeps the drawing's units in every length
+        // (`Visio6PlanWithDimensions`'s `LineWeight` is 48 times ours
+        // there), so the weight scales like the transform. What the
+        // PDFs show thicker is Visio flooring a hairline at one device
+        // pixel when it draws (P8-17 open issue).
+        let mut document = document();
+        if let Some(shape) = document.shapes.get_mut(0) {
+            shape.sheet.cells.push(number("LineWeight", 0.0033));
+        }
+        run(&mut document);
+        let k = 0.25 / 12.0;
+        assert!(
+            (value(&document, ShapeId { index: 0 }, "LineWeight").unwrap() - 0.0033 * k).abs()
+                < 1e-12
+        );
+        assert!(
+            (value(&document, ShapeId { index: 0 }, "PinX").unwrap() - 24.0 * k).abs() < 1e-12,
+            "the transform scales the same way"
         );
     }
 
@@ -342,7 +427,7 @@ mod tests {
     fn an_unscaled_drawing_passes_through() {
         let mut document = document();
         document.pages[0].sheet = page_sheet(1.0, 1.0);
-        scale_document(&mut document);
+        run(&mut document);
         assert_eq!(value(&document, ShapeId { index: 0 }, "PinX"), Some(24.0));
         assert_eq!(value(&document, ShapeId { index: 1 }, "PinX"), Some(24.0));
     }
@@ -353,7 +438,7 @@ mod tests {
         // divides as 1.
         let mut document = document();
         document.pages[0].sheet = page_sheet(0.25, 0.0);
-        scale_document(&mut document);
+        run(&mut document);
         let k = 0.25;
         assert!((value(&document, ShapeId { index: 0 }, "PinX").unwrap() - 24.0 * k).abs() < 1e-12);
     }
@@ -362,7 +447,7 @@ mod tests {
     fn a_page_without_the_scale_pair_passes_through() {
         let mut document = document();
         document.pages[0].sheet = Sheet::new();
-        scale_document(&mut document);
+        run(&mut document);
         assert_eq!(value(&document, ShapeId { index: 0 }, "PinX"), Some(24.0));
     }
 
@@ -370,7 +455,7 @@ mod tests {
     fn a_scale_pair_that_overflows_scales_by_one() {
         let mut document = document();
         document.pages[0].sheet = page_sheet(f64::MAX, f64::MIN_POSITIVE);
-        scale_document(&mut document);
+        run(&mut document);
         assert_eq!(value(&document, ShapeId { index: 0 }, "PinX"), Some(24.0));
     }
 
@@ -382,7 +467,7 @@ mod tests {
         text.value = Some(CellValue::Str("quarter".to_owned()));
         sheet.cells[0] = text;
         document.pages[0].sheet = sheet;
-        scale_document(&mut document);
+        run(&mut document);
         // The unreadable `PageScale` reads as 1, so the pair still
         // scales by `1 / DrawingScale`.
         let k = 1.0 / 12.0;
@@ -402,6 +487,87 @@ mod tests {
     fn a_stale_shape_reference_never_panics() {
         let mut document = document();
         document.pages[0].shapes.push(ShapeId { index: 99 });
-        scale_document(&mut document);
+        run(&mut document);
+    }
+
+    /// A document whose shapes form one parent chain `depth` deep on
+    /// the scaled page (P8-11 F2: the walk must return and warn, never
+    /// overflow the stack).
+    fn chained_document(depth: usize) -> Document {
+        let mut document = Document::new();
+        let mut page = Page::new(larrygram_model::PageId { index: 0 }, 0);
+        page.sheet = page_sheet(0.25, 12.0);
+        page.shapes.push(ShapeId { index: 0 });
+        document.pages.push(page);
+        for index in 0..depth {
+            let mut shape = shape_with_geometry();
+            shape.id = ShapeId {
+                index: u32::try_from(index).unwrap_or(u32::MAX),
+            };
+            shape.visio_id = i32::try_from(index).unwrap_or(i32::MAX);
+            document.shapes.push(shape);
+        }
+        for index in 1..depth {
+            let child = ShapeId {
+                index: u32::try_from(index).unwrap_or(u32::MAX),
+            };
+            if let Some(parent) = document.shapes.get_mut(index - 1) {
+                parent.children.push(child);
+            }
+        }
+        document
+    }
+
+    #[test]
+    fn a_deep_parent_chain_returns_with_a_warning_never_a_crash() {
+        // Deeper than any recursive walk could go (P8-11 F2).
+        let mut document = chained_document(50_000);
+        let warnings = run(&mut document);
+        let k = 0.25 / 12.0;
+        assert!(
+            (value(&document, ShapeId { index: 0 }, "PinX").unwrap() - 24.0 * k).abs() < 1e-12,
+            "the top of the chain scales"
+        );
+        assert_eq!(
+            warnings
+                .iter()
+                .filter(|warning| warning.kind
+                    == WarningKind::Dropped {
+                        what: "nested shapes past the depth limit"
+                    })
+                .count(),
+            1,
+            "one warning names the truncation"
+        );
+    }
+
+    #[test]
+    fn the_depth_bound_stops_the_walk_with_one_warning() {
+        let depth = usize::from(Limits::DEFAULT.max_chunk_level) + 2;
+        let mut document = chained_document(depth);
+        let warnings = run(&mut document);
+        let k = 0.25 / 12.0;
+        let last = ShapeId {
+            index: u32::try_from(depth - 1).unwrap_or(u32::MAX),
+        };
+        assert_eq!(
+            value(&document, last, "PinX"),
+            Some(24.0),
+            "the shape past the bound keeps its unscaled value"
+        );
+        assert!(
+            (value(&document, ShapeId { index: 0 }, "PinX").unwrap() - 24.0 * k).abs() < 1e-12,
+            "the shapes inside the bound scale"
+        );
+        assert_eq!(
+            warnings,
+            vec![ImportWarning {
+                context: format!("shape {}", usize::from(Limits::DEFAULT.max_chunk_level)),
+                kind: WarningKind::Dropped {
+                    what: "nested shapes past the depth limit",
+                },
+            }],
+            "exactly one warning, on the shape that stops the walk"
+        );
     }
 }

@@ -74,7 +74,7 @@ pub fn import(bytes: &[u8], limits: &Limits) -> Result<Import, Error> {
     )?;
     // A scaled drawing stores its lengths in the units it is scaled
     // in; the model keeps physical inches (P8-15 goal 4).
-    crate::scale::scale_document(&mut document);
+    crate::scale::scale_document(&mut document, limits, &mut warnings);
     Ok(Import { document, warnings })
 }
 

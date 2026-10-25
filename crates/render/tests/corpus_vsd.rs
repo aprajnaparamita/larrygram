@@ -13,7 +13,9 @@
 //! imported corpus drawings (every page of each file that draws,
 //! named `<name>-p<N>.png`), compared with
 //! the ADR 0027 metric as `tests/golden.rs` implements it (a local
-//! copy: test binaries cannot share code). A background page (P8-15:
+//! copy: test binaries cannot share code). A file in [`NO_GOLDEN`]
+//! renders without a golden: it is Microsoft sample content and no
+//! picture of it may be committed. A background page (P8-15:
 //! `tdf76829-datetime-format.vsd`'s `VHintergrund`) has no golden of
 //! its own: it draws composited behind its foreground page, as Visio
 //! draws it. Regenerate with
@@ -27,18 +29,46 @@
 use std::path::{Path, PathBuf};
 
 /// The `.vsdx` twin comparison (P8-15 goal 8): the shared comparison
-/// of one import against its twin. It lives beside the corpus tests of
-/// `larrygram-vsd-binary` (`crates/vsd-binary/tests/twins.rs` owns it
-/// and its contract); this suite drives it because the `.vsdx` reader
-/// is a same-layer crate `larrygram-vsd-binary` may not depend on
-/// (ADR 0002).
-#[path = "../../vsd-binary/tests/twins/compare.rs"]
+/// of one import against its twin. It lives in this suite's `twins/`
+/// (`crates/render/tests/twins/compare.rs`, MIT: our own code, not
+/// derived from libvisio) and is included from the `larrygram-vsd-binary`
+/// suite too, where its contract has hand-built tests; this suite
+/// drives the corpus run because the `.vsdx` reader is a same-layer
+/// crate `larrygram-vsd-binary` may not depend on (ADR 0002).
+#[path = "twins/compare.rs"]
 mod twin_compare;
 
 use larrygram_render::{PngOptions, SvgOptions, render_png, render_svg};
 use larrygram_vsd_binary::{Error, Limits as VsdLimits, import};
 use larrygram_vsdx::{Limits, Package, read_document, write_document};
 use tiny_skia::{Pixmap, PremultipliedColorU8};
+
+/// Files that render but carry no golden picture (clean-room, the
+/// master's P8-13 F1 ruling). The tests still import and render every
+/// page of them; they compare no picture, because no picture of them
+/// may be committed.
+///
+/// - `tdf76829-datetime-format.vsd`: Microsoft sample content (a stock
+///   template, a sample company and long-form sample text).
+const NO_GOLDEN: &[&str] = &["tdf76829-datetime-format.vsd"];
+
+/// One file that renders without a golden: name, page count, page
+/// sizes in inches and shape count.
+type NoGoldenNumbers = (&'static str, usize, &'static [(f64, f64)], usize);
+
+/// The structural numbers that pin the import of every file in
+/// [`NO_GOLDEN`] in place of its picture: page count, each page's size
+/// in inches (the model's `PageWidth`/`PageHeight`) and the shape
+/// count. Numbers only; the drawing's content never enters the repo.
+const NO_GOLDEN_NUMBERS: &[NoGoldenNumbers] = &[(
+    "tdf76829-datetime-format.vsd",
+    2,
+    &[
+        (11.692_913_385_826_772, 8.267_716_535_433_07),
+        (11.692_913_385_826_772, 8.267_716_535_433_07),
+    ],
+    188,
+)];
 
 /// The largest per-channel difference, of 255 (ADR 0027).
 const MAX_CHANNEL_DELTA: u8 = 2;
@@ -475,6 +505,34 @@ fn text_of(content: Option<&larrygram_model::TextContent>) -> String {
         .collect()
 }
 
+/// Pins the import of a file in [`NO_GOLDEN`] by its numbers (page
+/// count, page sizes in inches, shape count) in place of its picture.
+fn assert_no_golden_numbers(name: &str, document: &larrygram_model::Document) {
+    let Some((_, pages, sizes, shapes)) = NO_GOLDEN_NUMBERS
+        .iter()
+        .find(|(file, ..)| *file == name)
+        .copied()
+    else {
+        return;
+    };
+    assert_eq!(document.pages.len(), pages, "{name}: the page count");
+    assert_eq!(document.shapes.len(), shapes, "{name}: the shape count");
+    let mut reader = larrygram_model::CellReader::new(document);
+    for (page, (width, height)) in document.pages.iter().zip(sizes.iter()) {
+        let sheet = larrygram_model::SheetRef::Page(page.id);
+        let got_width = reader
+            .number(sheet, &larrygram_model::CellName::from_static("PageWidth"))
+            .unwrap_or(f64::NAN);
+        let got_height = reader
+            .number(sheet, &larrygram_model::CellName::from_static("PageHeight"))
+            .unwrap_or(f64::NAN);
+        assert!(
+            (got_width - width).abs() < 1e-6 && (got_height - height).abs() < 1e-6,
+            "{name}: page size {got_width}x{got_height}"
+        );
+    }
+}
+
 /// The golden images of the imported corpus drawings: every page of
 /// each importable corpus file, in `tests/golden/vsd/` as
 /// `<name>-p<N>.png` (page numbers from 1).
@@ -495,6 +553,9 @@ fn golden_images_of_the_imported_corpus_drawings() {
             continue;
         };
         let stem = name.strip_suffix(".vsd").unwrap_or(&name);
+        if NO_GOLDEN.contains(&name.as_str()) {
+            assert_no_golden_numbers(&name, &imported.document);
+        }
         for (index, scene) in drawing_scenes(&imported.document).iter().enumerate() {
             let rendered = render_png(
                 scene,
@@ -504,6 +565,11 @@ fn golden_images_of_the_imported_corpus_drawings() {
                 },
             )
             .unwrap_or_else(|e| panic!("{name} page {}: render_png: {e}", index + 1));
+            if NO_GOLDEN.contains(&name.as_str()) {
+                // Rendered (no panic), but no picture of it is
+                // compared or committed (clean-room; [`NO_GOLDEN`]).
+                continue;
+            }
             let golden_name = format!("{stem}-p{}.png", index + 1);
             let path = golden_vsd_dir().join(&golden_name);
             if update {
@@ -560,7 +626,7 @@ fn the_vsd_imports_match_their_vsdx_twins() {
     if require_corpus_or(&files) {
         return;
     }
-    let mut compared = 0usize;
+    let mut compared_files = 0usize;
     let mut failures = Vec::new();
     for file in &files {
         let name = file
@@ -577,13 +643,20 @@ fn the_vsd_imports_match_their_vsdx_twins() {
         };
         let twin = read_document(&twin_bytes, &Limits::DEFAULT)
             .unwrap_or_else(|e| panic!("{stem}.vsdx: does not read: {e:?}"));
-        let mismatches = twin_compare::compare_documents(&imported.document, &twin);
+        let (mismatches, cells) =
+            twin_compare::compare_documents_counted(&imported.document, &twin);
+        println!(
+            "twin {name}: {} of {} compared cells agree, {} differ",
+            cells.saturating_sub(mismatches.len()),
+            cells,
+            mismatches.len()
+        );
         if !mismatches.is_empty() {
             failures.push(format!("{name}:\n  {}", mismatches.join("\n  ")));
         }
-        compared += 1;
+        compared_files += 1;
     }
-    if compared == 0 {
+    if compared_files == 0 {
         eprintln!(
             "skipping the twin comparison: no corpus file has a twin under {} yet",
             dir.display()
@@ -694,4 +767,108 @@ mod metric_tests {
         let error = compare_images(&a, &b).expect_err("dimensions differ");
         assert!(error.contains("dimensions differ"), "{error}");
     }
+}
+
+/// The per-section geometry flags reach the renderer from a `.vsdx`
+/// (P8-17 goal 2). The fault the fix addresses is the renderer's, not
+/// the importer's: a hand-built document with `NoFill`, `NoLine` and
+/// `NoShow` sections is saved through the `.vsdx` writer and read back
+/// through the reader before the scene builds, so the test sees the
+/// XML format's cells exactly as the reader maps them.
+#[test]
+fn a_vsdx_geometry_section_fills_and_strokes_on_its_own() {
+    use larrygram_model::{
+        Cell, CellName, CellValue, Document, Page, PageId, Row, Section, SectionName, Shape,
+        ShapeId,
+    };
+    use larrygram_render::scene::Node;
+    use larrygram_render::{BuildOptions, build_scene};
+
+    fn number(name: &'static str, value: f64) -> Cell {
+        let mut cell = Cell::new(CellName::from_static(name));
+        cell.value = Some(CellValue::Number(value));
+        cell
+    }
+    fn flag(name: &'static str, value: bool) -> Cell {
+        let mut cell = Cell::new(CellName::from_static(name));
+        cell.value = Some(CellValue::Bool(value));
+        cell
+    }
+    fn row(kind: &str, x: f64, y: f64) -> Row {
+        let mut row = Row::new();
+        row.row_type = Some(kind.to_owned());
+        row.cells.push(number("X", x));
+        row.cells.push(number("Y", y));
+        row
+    }
+
+    let mut document = Document::new();
+    let mut shape = Shape::new(ShapeId { index: 0 }, 1);
+    shape.sheet.cells = vec![
+        number("PinX", 1.0),
+        number("PinY", 1.0),
+        number("Width", 2.0),
+        number("Height", 2.0),
+        number("FillPattern", 1.0),
+        number("LinePattern", 1.0),
+    ];
+    let mut stroke_only = Section::new(SectionName::from_static("Geometry"));
+    stroke_only.cells.push(flag("NoFill", true));
+    stroke_only.rows = vec![row("MoveTo", 0.0, 0.0), row("LineTo", 2.0, 0.0)];
+    let mut fill_only = Section::new(SectionName::from_static("Geometry"));
+    fill_only.cells.push(flag("NoLine", true));
+    fill_only.rows = vec![
+        row("MoveTo", 0.0, 1.0),
+        row("LineTo", 2.0, 1.0),
+        row("LineTo", 2.0, 2.0),
+    ];
+    let mut hidden = Section::new(SectionName::from_static("Geometry"));
+    hidden.cells.push(flag("NoShow", true));
+    hidden.rows = vec![row("MoveTo", 0.0, 1.5), row("LineTo", 2.0, 1.5)];
+    shape.sheet.sections.push(stroke_only);
+    shape.sheet.sections.push(fill_only);
+    shape.sheet.sections.push(hidden);
+    let id = document.add_shape(shape);
+    let mut page = Page::new(PageId { index: 0 }, 0);
+    page.shapes.push(id);
+    document.pages.push(page);
+
+    let written = write_document(&document, &Package::new()).expect("saves as .vsdx");
+    let reopened = read_document(&written, &Limits::DEFAULT).expect("reopens");
+    let scene = build_scene(&reopened, PageId { index: 0 }, &BuildOptions::new()).expect("builds");
+    let nodes: Vec<&larrygram_render::scene::Shape> = scene
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            Node::Shape(shape) => Some(shape.as_ref()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(nodes.len(), 2, "one fill node and one stroke node");
+    let (fill_node, stroke_node) = (nodes[0], nodes[1]);
+    assert!(
+        fill_node.fill.is_some() && fill_node.stroke.is_none(),
+        "the fill node fills"
+    );
+    assert!(
+        stroke_node.fill.is_none() && stroke_node.stroke.is_some(),
+        "the stroke node strokes"
+    );
+    let has_point = |node: &larrygram_render::scene::Shape, x: f64, y: f64| {
+        node.path.segments().iter().any(
+            |segment| matches!(segment, larrygram_geom::Segment::LineTo(p) if (p.x - x).abs() < 1e-6 && (p.y - y).abs() < 1e-6),
+        )
+    };
+    assert!(
+        has_point(fill_node, 2.0, 2.0),
+        "the fill path carries the `NoLine` section"
+    );
+    assert!(
+        has_point(stroke_node, 2.0, 0.0),
+        "the stroke path carries the `NoFill` section"
+    );
+    assert!(
+        !has_point(fill_node, 2.0, 1.5) && !has_point(stroke_node, 2.0, 1.5),
+        "the `NoShow` section draws nothing"
+    );
 }
