@@ -415,6 +415,11 @@ pub enum UiRequest {
     ShowWelcome,
     /// Show the View/Options dialog (ADR 0032).
     ShowOptions,
+    /// Show the Page Setup dialog (task P7-20: `tools.options.page.setup`
+    /// with no arguments; the dialog collects the page size,
+    /// orientation and units and re-dispatches the command with them
+    /// as arguments — its body is task P7-21's).
+    ShowPageSetup,
     /// Ask the user to confirm closing a document.
     ConfirmClose {
         /// The document's display name.
