@@ -179,13 +179,13 @@ Counts only (no file names):
 
 GitHub does not virus-scan repository contents, and some repositories
 hold malformed Office files on purpose: fuzzing corpora, CVE proofs of
-concept, scanner test sets. The risk is downstream: the reference
-export run opens files in Visio 2013, which no longer gets security
-fixes, and the gate-corpus proposals become files every gate reads. A
-file that could attack Visio must never reach either list, so the
+concept, scanner test sets. The risk is downstream: the export set
+holds files that are opened outside our own readers, and the
+gate-corpus proposals become files every gate reads. A file that
+could attack another reader must never reach either list, so the
 selection below never takes a file with a risk reason. The flag is
 conservative: a false positive costs one file, a false negative may
-cost the Windows box.
+cost the machine that opens it.
 
 Every file's facts sit in `index.csv` beside its identity: `vba`,
 `embedded_object`, `external_target`, `zip_uncompressed`,
@@ -250,7 +250,7 @@ entry compression ratios of 101:1 and 157:1; no package totals 200 MB
 
 In the task Result sections (not here): 32 Tier A files for the gate
 corpus with full manifest rows, and 206 Tier A files in
-`reference/wide-corpus/export-set.csv` for a reference export run.
+`reference/wide-corpus/export-set.csv` for the export set.
 Both are chosen for coverage (versions 6 and 11, drawing scales,
 groups, connectors, text-heavy drawings, multi-page drawings, real
 `.vss`/`.vst` files, `.vsdx` files with themes) by
