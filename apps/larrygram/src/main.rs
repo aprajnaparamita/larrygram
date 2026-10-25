@@ -228,21 +228,31 @@ fn run_with(args: &[String]) -> Result<(), AppError> {
     let layouts = Loader::from_embedded().map_err(|error| AppError::new(error.to_string()))?;
     let cli_layout = options.ui_layout;
     let cli_paths = options.paths;
+    // The macOS open-documents hook (task R8 Goal 2, ADR 0073) goes in
+    // before the event loop starts: macOS can deliver the launch event
+    // before the first frame, and a hook added later loses it to the
+    // system document machinery (which shows a "could not be opened"
+    // dialog). A failure reaches the status line; the app still starts
+    // (AGENTS.md section 6).
+    #[cfg(target_os = "macos")]
+    let open_documents_error = macos_open_urls::install()
+        .err()
+        .map(|error| error.to_string());
+    #[cfg(not(target_os = "macos"))]
+    let open_documents_error: Option<String> = None;
     let native_options = native_options();
     eframe::run_native(
         APP_NAME,
         native_options,
         Box::new(move |cc| {
             larrygram_ui::install_image_loaders(&cc.egui_ctx);
+            // Queued open paths wake the UI (task R8 Goal 2): an idle
+            // window runs no frame until a repaint is requested.
+            let repaint = cc.egui_ctx.clone();
+            open_documents::set_wake(Box::new(move || repaint.request_repaint()));
             let mut shell = build_shell(cc.storage, registry, layouts, cli_layout)?;
-            // The macOS open-documents delegate (task R8 Goal 2, ADR
-            // 0073): registered after the winit event loop exists and
-            // before the first frame, so the launch event is still
-            // queued. A failure is one status-line warning; the app
-            // still starts (AGENTS.md section 6).
-            #[cfg(target_os = "macos")]
-            if let Err(error) = macos_open_urls::install() {
-                shell.note_error(error.to_string());
+            if let Some(message) = open_documents_error {
+                shell.note_error(message);
             }
             // The command-line paths open at startup through
             // `file.open` (task R8 Goal 1).

@@ -11,10 +11,18 @@
 //! registered"). Taking that slot therefore aborts the process, which
 //! is what the first task R8 build did (2026-10-25, SIGABRT 1.5 s
 //! after launch). This module never touches the delegate slot. It adds
-//! the one method `application:openURLs:` to the class of the delegate
-//! the app already has, the same method injection winit itself uses
-//! for `NSApplication::sendEvent:`, and AppKit then calls it like any
-//! delegate method.
+//! the one method `application:openURLs:` to `NSObject`, the root of
+//! the delegate's class hierarchy, the same method injection winit
+//! itself uses for `NSApplication::sendEvent:`, and AppKit then calls
+//! it like any delegate method.
+//!
+//! The method must be in place **before the event loop starts**: the
+//! launch event is delivered as soon as the app finishes launching,
+//! before the first frame, and a hook added later loses it to the
+//! system document machinery (which shows "The document ... could not
+//! be opened"). `NSObject` is the only class of the delegate's
+//! hierarchy that already exists at that point (winit builds its
+//! delegate class inside `EventLoop::new`), so the hook goes there.
 //!
 //! The callback only queues the paths;
 //! `crate::open_documents` dispatches them as `file.open` on the UI
@@ -29,12 +37,13 @@ use std::ffi::CString;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use objc2::ClassType;
 use objc2::MainThreadMarker;
 use objc2::encode::Encoding;
 use objc2::runtime::{AnyClass, AnyObject, Imp, Sel};
 use objc2::{ffi, sel};
 use objc2_app_kit::NSApplication;
-use objc2_foundation::{NSArray, NSURL};
+use objc2_foundation::{NSArray, NSObject, NSURL};
 
 use crate::AppError;
 use crate::open_documents;
@@ -71,7 +80,7 @@ unsafe extern "C" fn open_urls(
     _application: Option<&NSApplication>,
     urls: &NSArray<NSURL>,
 ) {
-    guard(|| open_documents::QUEUED.queue_paths(file_paths(urls)));
+    guard(|| open_documents::queue_paths(file_paths(urls)));
 }
 
 /// Runs the callback body so that a failure is logged and dropped,
@@ -154,11 +163,10 @@ fn add_hook(class: &AnyClass) -> Result<(), AppError> {
 
 /// Installs the open-documents hook (task R8 Goal 2).
 ///
-/// Call it on the main thread after the winit event loop exists (the
-/// winit macOS documentation) and before the first frame, so the
-/// launch event is still queued when the hook is in place. Off the
-/// main thread it answers an error, never a panic (AGENTS.md section
-/// 6).
+/// Call it on the main thread **before** the event loop starts (the
+/// launch event is delivered before the first frame; see the module
+/// docs). Off the main thread it answers an error, never a panic
+/// (AGENTS.md section 6).
 pub(crate) fn install() -> Result<(), AppError> {
     if INSTALLED.swap(true, Ordering::SeqCst) {
         return Ok(());
@@ -172,17 +180,12 @@ pub(crate) fn install() -> Result<(), AppError> {
 
 /// The body of [`install`], without the once-only guard.
 fn install_inner() -> Result<(), AppError> {
-    let Some(mtm) = MainThreadMarker::new() else {
+    let Some(_mtm) = MainThreadMarker::new() else {
         return Err(AppError::new(
             "open documents: the app is not on the main thread",
         ));
     };
-    let app = NSApplication::sharedApplication(mtm);
-    let delegate = app
-        .delegate()
-        .ok_or_else(|| AppError::new("open documents: the application has no delegate to hook"))?;
-    let object: &AnyObject = AsRef::<AnyObject>::as_ref(&*delegate);
-    add_hook(object.class())
+    add_hook(NSObject::class())
 }
 
 #[cfg(test)]
