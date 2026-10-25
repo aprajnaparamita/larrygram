@@ -147,10 +147,11 @@ fn the_committed_shortcut_table_loads() {
     assert!(!committed.entries.is_empty());
     let map = map_of(committed.entries.clone());
     assert!(!map.is_empty());
-    // One binding per (sequence, scope) pair: the 90 entries of the
-    // committed table collapse into 74 bindings and 16 exact repeats,
-    // all dropped silently (P4-14).
-    assert_eq!(map.len(), 74);
+    // One binding per (sequence, scope) pair: the 94 entries of the
+    // committed table collapse into 78 bindings and 16 exact repeats,
+    // all dropped silently (P4-14). P7-20 adds the four OWN_SHORTCUTS
+    // bindings (Ctrl+N, Ctrl+O, Ctrl+S, Ctrl+Alt+P).
+    assert_eq!(map.len(), 78);
     assert_eq!(map.len() + 16, committed.entries.len());
 }
 
@@ -167,8 +168,9 @@ fn the_committed_table_has_no_sequence_scope_conflict() {
 fn len_counts_the_bindings_of_the_committed_table() {
     let map = map_of(committed_shortcuts().entries.clone());
     // `len()` counts bindings, not source entries and not sequences:
-    // 61 distinct sequences, 74 (sequence, scope) pairs.
-    assert_eq!(map.len(), 74);
+    // 65 distinct sequences, 78 (sequence, scope) pairs (61 and 74
+    // before P7-20's four own bindings).
+    assert_eq!(map.len(), 78);
 }
 
 #[test]
