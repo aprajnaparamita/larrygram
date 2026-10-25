@@ -123,20 +123,32 @@ choices for each mode are remembered separately.
 
 - A right-click selects what it hits first (if it is not already
   selected), then opens the matching menu. P7-08 maps hit targets to
-  menus:
+  menus. The rows marked *pending* are not routed yet: the shell
+  routes the canvas (a shape, the page, text being edited), the Shapes
+  window, the Shape Data and Size & Position panes, the page tabs and
+  the page navigation buttons (P7-14); the pending targets need
+  window state that does not exist yet (a full-screen view, master
+  editing, embedded objects) or hit rects inside one more widget:
 
-  | Target | Menu |
-  |---|---|
-  | A shape | `context.shape` |
-  | Text being edited | `context.text_edit` |
-  | A page tab | `context.page_tab` |
-  | A connection point (with the connection point tool) | `context.connection_point` |
-  | A comment mark | `context.comment` |
-  | A hyperlink in text | `context.hyperlink` |
-  | A docked window's title | `context.window_title` |
-  | The Shapes window | `context.shapes_window` |
-  | The Shape Data window | `context.shape_data_window` |
-  | Inside a ShapeSheet window | `context.shapesheet` |
+  | Target | Menu | State |
+  |---|---|---|
+  | A shape | `context.shape` | routed |
+  | An empty part of the page | `context.page` | routed |
+  | Text being edited | `context.text_edit` | routed |
+  | A page tab | `context.page_tab` | routed |
+  | The page navigation buttons | `context.page_tab_navigation` | routed (no menu in the classic data yet) |
+  | The Shapes window | `context.shapes_window` | routed |
+  | The Shape Data window | `context.shape_data_window` | routed |
+  | The Size & Position window | `context.size_position_window` | routed |
+  | A connection point (with the connection point tool) | `context.connection_point` | pending |
+  | A comment mark | `context.comment` | pending |
+  | A hyperlink in text | `context.hyperlink` | pending |
+  | A docked window's title | `context.window_title` | pending |
+  | Inside a ShapeSheet window | `context.shapesheet` | pending |
+  | A master in an editable stencil | `context.stencil_edit` | pending |
+  | The page of a master being edited | `context.master_edit` | pending |
+  | An embedded object | `context.embedded_object` | pending |
+  | The drawing in full-screen view | `context.full_screen` | pending |
 
 - They look and behave like menus, and Shift+F10 opens the one for the
   current selection.
