@@ -2306,6 +2306,7 @@ dependencies = [
  "larrygram-ui-spec",
  "proptest",
  "regex-lite",
+ "resvg",
  "roxmltree 0.21.1",
  "rustls-native-certs",
  "serde-saphyr",

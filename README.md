@@ -109,9 +109,12 @@ cargo xtask gate --quick  # skip coverage, wasm and fuzz
 tools/gate-queue/gateq submit <id> --skip wasm,fuzz   # agents: run the gate through the queue
 cargo xtask codegen       # regenerate the ShapeSheet table
 cargo xtask corpus        # fetch the test corpus (needs network)
+cargo xtask dist mac      # macOS: build Larrygram.app and the .dmg (Apple silicon)
 ```
 
 The gate needs `cargo-deny`, `cargo-llvm-cov`, a nightly toolchain with `cargo-fuzz`, and the `wasm32-unknown-unknown` target.
+
+The macOS `.app` and `.dmg` for the testers come from `cargo xtask dist mac`: it builds the Apple silicon release bundle, signs it ad-hoc and packs a `Larrygram-<version>.dmg` under `/Volumes/Dara/larrygram/dist/`. See [docs/building/macos.md](docs/building/macos.md) for the build, the first-launch note for an unsigned app, and the testers' check list.
 
 ## License
 
