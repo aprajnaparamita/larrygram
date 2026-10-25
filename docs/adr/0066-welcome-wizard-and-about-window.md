@@ -43,9 +43,13 @@ an interface.
   - Clicking a button selects it.
   - Bottom row: **Back** and **Start**. Start saves the choice as the
     default layout, applies it at once and closes the wizard.
-- Cancel on either page closes the wizard and keeps Panel Modern. The
-  wizard is marked as seen in both cases, so it does not open again on
-  the next launch.
+- Cancel on either page closes the wizard and keeps the current
+  layout (Panel Modern on a first launch, where it is the default).
+  A wizard re-opened from Help > Welcome must not reset a Panel
+  Classic user to Panel Modern (amended at P7-14, ruling on P7-11
+  F4: the code behaviour was right, this line was wrong). The
+  wizard is marked as seen in both cases, so it does not open again
+  on the next launch.
 
 ### The About window
 
