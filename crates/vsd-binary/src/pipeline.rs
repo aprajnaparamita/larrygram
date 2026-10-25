@@ -18,7 +18,9 @@
 //!    shapes by stream order, P8-05).
 //!
 //! The document properties of the summary streams are mapped first of
-//! all (they belong to the document, not to any record group). Every
+//! all (they belong to the document, not to any record group). The
+//! last step, [`crate::scale`], turns the stored units of a scaled
+//! drawing into physical inches. Every
 //! step records degradations in [`crate::ImportWarning`] values; only a
 //! structural failure is an [`crate::Error`] (ADR 0071).
 //!
@@ -70,6 +72,9 @@ pub fn import(bytes: &[u8], limits: &Limits) -> Result<Import, Error> {
             limits: limits.clone(),
         },
     )?;
+    // A scaled drawing stores its lengths in the units it is scaled
+    // in; the model keeps physical inches (P8-15 goal 4).
+    crate::scale::scale_document(&mut document);
     Ok(Import { document, warnings })
 }
 
