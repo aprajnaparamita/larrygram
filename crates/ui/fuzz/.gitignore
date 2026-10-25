@@ -1,10 +1,17 @@
 # cargo-fuzz output; never committed. The seed corpus IS committed (ADR 0027
-# section 6 convention), so it is re-included here over the root
-# `**/fuzz/corpus/` rule: the seeds are hand-written bytes of our own
-# (task P4-17, one row in `ATTRIBUTION.md`), per target in
-# `corpus/settings_json/` and `corpus/shortcuts_map/`.
-corpus
+# section 6 convention), so the named seeds are re-included here over the root
+# `**/fuzz/corpus/` rule: they are hand-written bytes of our own (task P4-17,
+# one row in `ATTRIBUTION.md`) and copies of the committed fixtures (task
+# P7-10), one directory per fuzz target. Fuzzer-generated corpus entries (sha1
+# names) and everything else `cargo fuzz` writes stay untracked.
 !corpus/
+corpus/**
+!corpus/settings_json/
+!corpus/settings_json/*.json
+!corpus/shortcuts_map/
+!corpus/shortcuts_map/*.bin
+!corpus/layout_v2/
+!corpus/layout_v2/*.yaml
 artifacts
 coverage
 target
