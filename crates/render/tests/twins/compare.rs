@@ -1031,6 +1031,13 @@ mod tests {
     }
 
     #[test]
+    fn the_counted_report_wraps_the_rich_one() {
+        let (messages, compared) = compare_documents_counted(&document(), &scaled_twin());
+        assert!(messages.is_empty(), "{messages:?}");
+        assert!(compared > 0);
+    }
+
+    #[test]
     fn the_family_names_are_the_report_columns() {
         let names: Vec<&str> = Family::ALL.iter().map(|family| family.as_str()).collect();
         assert_eq!(
