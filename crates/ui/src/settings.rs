@@ -159,9 +159,7 @@ pub fn show_options(ui: &mut Ui, settings: &Settings) -> Result<OptionsChange, U
     let mut draft = settings.clone();
     let mut show_wizard = !draft.welcome_seen;
 
-    ui.heading("Options");
-    ui.separator();
-    ui.label("Panel layout");
+    ui.label(egui::RichText::new("Panel layout").strong());
     for kind in [
         LayoutKind::PanelModern,
         LayoutKind::PanelClassic,

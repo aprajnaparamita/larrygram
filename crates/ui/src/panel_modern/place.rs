@@ -43,6 +43,68 @@ pub fn visible_controls(group: &Group) -> Vec<&Item> {
     out
 }
 
+/// How far a group is reduced to fit the command bar's width (task
+/// P7-17, `docs/ui/panel-modern.md` "Narrow windows"). The stages run
+/// in this order; each one is narrower than the one before.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum GroupSize {
+    /// As the layout data places it.
+    Large,
+    /// Large controls become medium (icon beside the label) and every
+    /// control packs into the stack rows in file order.
+    Medium,
+    /// Every control with an icon becomes small (icon only); combos,
+    /// check boxes and controls with no icon stay medium.
+    Small,
+    /// The whole group is one large button with the group's caption;
+    /// it opens the full group as a popup.
+    Collapsed,
+}
+
+impl GroupSize {
+    /// The reduction stages after [`GroupSize::Large`], in order.
+    pub const STAGES: [GroupSize; 3] = [GroupSize::Medium, GroupSize::Small, GroupSize::Collapsed];
+}
+
+/// The controls of `group` rewritten for one [`GroupSize`] stage.
+///
+/// [`GroupSize::Large`] and [`GroupSize::Collapsed`] return the group
+/// unchanged (a collapsed group's popup shows it at full size), as does
+/// any stage of a `rows` group, whose controls are small already. A
+/// reduced `stack` group packs its visible controls into the stack
+/// rows in their slot order (column, then row, then file order), so a
+/// column that held one large control now holds up to three medium or
+/// small ones.
+pub fn reduce(group: &Group, size: GroupSize, m: &Metrics) -> Group {
+    if matches!(size, GroupSize::Large | GroupSize::Collapsed) || group.layout == GroupLayout::Rows
+    {
+        return group.clone();
+    }
+    let rows = group.rows.unwrap_or(m.stack_rows).max(1);
+    let mut items: Vec<(usize, &Item)> = visible_controls(group).into_iter().enumerate().collect();
+    items.sort_by_key(|(index, item)| (item.column.unwrap_or(0), item.row.unwrap_or(0), *index));
+    let mut reduced = group.clone();
+    reduced.controls = items
+        .into_iter()
+        .enumerate()
+        .map(|(slot, (_, item))| {
+            let mut item = item.clone();
+            let slot = u32::try_from(slot).unwrap_or(u32::MAX);
+            item.column = Some(slot / rows);
+            item.row = Some(slot % rows);
+            let keeps_label = matches!(item.kind, ItemKind::Combo | ItemKind::Check)
+                || super::common::icon_key(&item).is_none();
+            item.size = Some(if size == GroupSize::Small && !keeps_label {
+                ControlSize::Small
+            } else {
+                ControlSize::Medium
+            });
+            item
+        })
+        .collect();
+    reduced
+}
+
 /// True for a control that spans its column from the top of the group
 /// down to the caption (`size: large`).
 pub fn is_large(item: &Item) -> bool {

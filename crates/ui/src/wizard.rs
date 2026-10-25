@@ -118,7 +118,55 @@ where
     Ok(outcome)
 }
 
+/// The heading on the Choose your layout page.
+const LAYOUT_HEADING: &str = "Choose your layout";
+
+/// The share of the Welcome page's width the picture takes.
+const ART_SHARE: f32 = 0.55;
+
+/// Width over height of the brand art (`viewBox="0 0 1600 1000"`).
+const ART_ASPECT: f32 = 1.6;
+
+/// The body text size at a text scale of 1, in points.
+const BODY_SIZE: f32 = 14.0;
+
+/// The heading text size at a text scale of 1, in points.
+const HEADING_SIZE: f32 = 22.0;
+
+/// The height of a layout choice's name button.
+const CHOICE_BUTTON_HEIGHT: f32 = 32.0;
+
+/// The gap between a layout choice's picture and its name button.
+const CHOICE_GAP: f32 = 8.0;
+
+/// One footer button, sized with the window's text scale.
+fn footer_button(ui: &mut Ui, label: &str, scale: f32) -> egui::Response {
+    ui.add(
+        egui::Button::new(egui::RichText::new(label).size(BODY_SIZE * scale))
+            .min_size(egui::vec2(80.0 * scale, 0.0)),
+    )
+}
+
+/// The whole drawing rect of one wizard frame: everything the caller's
+/// ui offers (the shell sizes its window with
+/// [`window_size::WIZARD`](crate::window_size::WIZARD)).
+fn frame_rect(ui: &mut Ui) -> egui::Rect {
+    let rect = ui.available_rect_before_wrap();
+    ui.allocate_rect(rect, egui::Sense::hover());
+    rect
+}
+
+/// A child ui over `rect` with `layout`, for one region of the page.
+fn region(ui: &mut Ui, rect: egui::Rect, layout: egui::Layout) -> Ui {
+    ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(layout))
+}
+
 /// Draws page 1 and returns its outcome.
+///
+/// The picture fills the left [`ART_SHARE`] of the body at its own
+/// aspect ratio; the title, the description and **Why Larrygram?** sit
+/// on the right; Cancel and Next sit in the footer along the bottom
+/// edge. The text grows with the window (task P7-17).
 fn welcome_page<F>(
     ui: &mut Ui,
     state: &mut State,
@@ -127,47 +175,55 @@ fn welcome_page<F>(
 where
     F: FnMut(&mut Ui) -> Result<about::Outcome, UiError>,
 {
+    use crate::window_size::{GAP, fit_aspect, split_footer, text_scale};
+
     let mut outcome = None;
     let mut open_about = state.about_open;
     let mut close_about = false;
 
-    let content_size = content_size(ui);
-    ui.allocate_ui_with_layout(
-        content_size,
-        egui::Layout::top_down(egui::Align::Min),
-        |ui| {
-            ui.columns(2, |columns| {
-                columns[0].vertical_centered(|ui| {
-                    ui.add(
-                        egui::Image::new(egui::include_image!("../assets/brand/about_screen.svg"))
-                            .fit_to_fraction(egui::vec2(1.0, 1.0))
-                            .maintain_aspect_ratio(true)
-                            .alt_text("Larrygram welcome picture"),
-                    );
-                });
-
-                columns[1].vertical(|ui| {
-                    ui.add_space(16.0);
-                    ui.heading(TITLE);
-                    ui.add_space(12.0);
-                    ui.label(DESCRIPTION);
-                    ui.add_space(18.0);
-                    if ui.button("Why Larrygram?").clicked() {
-                        open_about = true;
-                        close_about = false;
-                    }
-                });
-            });
-        },
+    let rect = frame_rect(ui);
+    let (body, footer) = split_footer(rect);
+    let scale = text_scale(rect.width());
+    let art_box = egui::Rect::from_min_size(
+        body.min,
+        egui::vec2((body.width() * ART_SHARE).round(), body.height()),
     );
+    let art = fit_aspect(art_box, ART_ASPECT);
+    ui.put(
+        art,
+        egui::Image::new(egui::include_image!("../assets/brand/about_screen.svg"))
+            .fit_to_exact_size(art.size())
+            .alt_text("Larrygram welcome picture"),
+    );
+    let text = egui::Rect::from_min_max(egui::pos2(art_box.max.x + GAP, body.min.y), body.max);
+    let mut column = region(ui, text, egui::Layout::top_down(egui::Align::Min));
+    column.add_space(GAP);
+    column.label(
+        egui::RichText::new(TITLE)
+            .size(HEADING_SIZE * scale)
+            .strong(),
+    );
+    column.add_space(GAP * 0.75);
+    column.label(egui::RichText::new(DESCRIPTION).size(BODY_SIZE * scale));
+    column.add_space(GAP);
+    if column
+        .button(egui::RichText::new("Why Larrygram?").size(BODY_SIZE * scale))
+        .clicked()
+    {
+        open_about = true;
+        close_about = false;
+    }
 
     if open_about {
         let mut window_open = true;
         let mut about_error = None;
+        let screen = ui.ctx().content_rect();
         egui::Window::new(ABOUT_TITLE)
             .open(&mut window_open)
             .resizable(false)
             .collapsible(false)
+            .fixed_size(crate::window_size::ABOUT.size(screen.size()))
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
             .show(ui.ctx(), |ui| match about_window(ui) {
                 Ok(about::Outcome::Open) => {}
                 Ok(about::Outcome::Close) => close_about = true,
@@ -185,50 +241,77 @@ where
         state.about_open = false;
     }
 
-    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        if ui.button("Next").clicked() {
-            state.page = Page::ChooseLayout;
-            state.about_open = false;
-        }
-        if ui.button("Cancel").clicked() {
-            state.about_open = false;
-            outcome = Some(Outcome::Cancel);
-        }
-    });
+    let mut buttons = region(ui, footer, egui::Layout::right_to_left(egui::Align::Center));
+    if footer_button(&mut buttons, "Next", scale).clicked() {
+        state.page = Page::ChooseLayout;
+        state.about_open = false;
+    }
+    if footer_button(&mut buttons, "Cancel", scale).clicked() {
+        state.about_open = false;
+        outcome = Some(Outcome::Cancel);
+    }
 
     Ok(outcome)
 }
 
 /// Draws page 2 (the two layout choices) and returns its outcome.
+///
+/// The heading runs across the top; the two pictures share the body
+/// in two equal columns at the art's aspect ratio, each with its name
+/// button under it; Back and Start sit in the footer.
 fn choose_layout_page(ui: &mut Ui, state: &mut State) -> Option<Outcome> {
+    use crate::window_size::{GAP, split_footer, text_scale};
+
     let mut outcome = None;
     let mut layout = state.default_layout;
-    let content_size = content_size(ui);
-    let (modern, classic) = ui
-        .allocate_ui_with_layout(
-            content_size,
-            egui::Layout::top_down(egui::Align::Min),
-            |ui| {
-                ui.columns_const::<2, _>(|columns| {
-                    let modern = layout_choice(
-                        &mut columns[0],
-                        "Panel Modern",
-                        egui::include_image!("../assets/brand/panel-layout.svg"),
-                        "Panel Modern layout picture",
-                        layout == LayoutKind::PanelModern,
-                    );
-                    let classic = layout_choice(
-                        &mut columns[1],
-                        "Panel Classic",
-                        egui::include_image!("../assets/brand/classic-layout.svg"),
-                        "Panel Classic layout picture",
-                        layout == LayoutKind::PanelClassic,
-                    );
-                    (modern, classic)
-                })
-            },
-        )
-        .inner;
+    let rect = frame_rect(ui);
+    let (body, footer) = split_footer(rect);
+    let scale = text_scale(rect.width());
+
+    let mut heading = region(ui, body, egui::Layout::top_down(egui::Align::Min));
+    heading.add_space(GAP * 0.5);
+    heading.label(
+        egui::RichText::new(LAYOUT_HEADING)
+            .size(HEADING_SIZE * scale)
+            .strong(),
+    );
+    let top = heading.min_rect().max.y + GAP;
+    let choices = egui::Rect::from_min_max(egui::pos2(body.min.x, top), body.max);
+    let column_width = ((choices.width() - GAP) * 0.5).max(0.0);
+    // The two choices sit in the middle of the space under the heading.
+    let block =
+        (column_width / ART_ASPECT + CHOICE_GAP + CHOICE_BUTTON_HEIGHT).min(choices.height());
+    let choices = egui::Rect::from_min_size(
+        egui::pos2(
+            choices.min.x,
+            choices.min.y + ((choices.height() - block) * 0.5).max(0.0),
+        ),
+        egui::vec2(choices.width(), block),
+    );
+    let columns = [
+        egui::Rect::from_min_size(choices.min, egui::vec2(column_width, choices.height())),
+        egui::Rect::from_min_size(
+            egui::pos2(choices.min.x + column_width + GAP, choices.min.y),
+            egui::vec2(column_width, choices.height()),
+        ),
+    ];
+    let [modern_rect, classic_rect] = columns;
+    let modern = layout_choice(
+        ui,
+        modern_rect,
+        "Panel Modern",
+        egui::include_image!("../assets/brand/panel-layout.svg"),
+        "Panel Modern layout picture",
+        layout == LayoutKind::PanelModern,
+    );
+    let classic = layout_choice(
+        ui,
+        classic_rect,
+        "Panel Classic",
+        egui::include_image!("../assets/brand/classic-layout.svg"),
+        "Panel Classic layout picture",
+        layout == LayoutKind::PanelClassic,
+    );
     if modern {
         layout = LayoutKind::PanelModern;
     }
@@ -237,60 +320,58 @@ fn choose_layout_page(ui: &mut Ui, state: &mut State) -> Option<Outcome> {
     }
     state.default_layout = layout;
 
-    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        if ui.button("Start").clicked() {
-            outcome = Some(Outcome::Start {
-                default_layout: state.default_layout,
-            });
-        }
-        if ui.button("Back").clicked() {
-            state.page = Page::Welcome;
-        }
-    });
+    let mut buttons = region(ui, footer, egui::Layout::right_to_left(egui::Align::Center));
+    if footer_button(&mut buttons, "Start", scale).clicked() {
+        outcome = Some(Outcome::Start {
+            default_layout: state.default_layout,
+        });
+    }
+    if footer_button(&mut buttons, "Back", scale).clicked() {
+        state.page = Page::Welcome;
+    }
 
     outcome
 }
 
-/// The content area above the bottom row, leaving room for the
-/// footer buttons inside small windows too.
-fn content_size(ui: &Ui) -> egui::Vec2 {
-    const FOOTER_HEIGHT: f32 = 40.0;
-    let height = (ui.available_height() - FOOTER_HEIGHT).max(160.0);
-    egui::vec2(ui.available_width(), height)
-}
-
-/// Draws one large layout button: its picture with the name under it.
+/// Draws one large layout button in `column`: its picture at the art's
+/// aspect ratio, with the name under it at the picture's width.
 ///
 /// Returns `true` when the picture or the name was clicked. The name is
 /// a selectable button, so it carries the accessible name and the
 /// selected state; the picture is clickable too.
 fn layout_choice(
     ui: &mut Ui,
+    column: egui::Rect,
     name: &str,
     image: egui::ImageSource<'static>,
     alt_text: &str,
     selected: bool,
 ) -> bool {
-    let mut clicked = false;
-    ui.vertical(|ui| {
-        let picture = ui.add(
-            egui::Image::new(image)
-                .max_height(240.0)
-                .fit_to_fraction(egui::vec2(1.0, 1.0))
-                .maintain_aspect_ratio(true)
-                .sense(egui::Sense::click())
-                .alt_text(alt_text),
-        );
-        clicked |= picture.clicked();
-        let button_width = ui.available_width().min(320.0);
-        clicked |= ui
-            .add_sized(
-                [button_width, 32.0],
-                egui::Button::selectable(selected, name),
-            )
-            .clicked();
-    });
-    clicked
+    use crate::window_size::fit_aspect;
+
+    let picture_box = egui::Rect::from_min_max(
+        column.min,
+        egui::pos2(
+            column.max.x,
+            (column.max.y - CHOICE_BUTTON_HEIGHT - CHOICE_GAP).max(column.min.y),
+        ),
+    );
+    let mut picture_rect = fit_aspect(picture_box, ART_ASPECT);
+    // The picture sits at the top of its box, the button right under it.
+    picture_rect = picture_rect.translate(egui::vec2(0.0, picture_box.min.y - picture_rect.min.y));
+    let picture = ui.put(
+        picture_rect,
+        egui::Image::new(image)
+            .fit_to_exact_size(picture_rect.size())
+            .sense(egui::Sense::click())
+            .alt_text(alt_text),
+    );
+    let button_rect = egui::Rect::from_min_size(
+        egui::pos2(picture_rect.min.x, picture_rect.max.y + CHOICE_GAP),
+        egui::vec2(picture_rect.width(), CHOICE_BUTTON_HEIGHT),
+    );
+    let button = ui.put(button_rect, egui::Button::selectable(selected, name));
+    picture.clicked() || button.clicked()
 }
 
 #[cfg(test)]

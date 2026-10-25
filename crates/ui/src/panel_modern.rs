@@ -31,7 +31,7 @@ use crate::{Intent, UiError};
 use common::{Action, Resolve, Toggles, display_label, finish, tooltip_text};
 use controls::Draw;
 use metrics::Metrics;
-use place::Placed;
+use place::{GroupSize, Placed};
 
 /// The label of an empty run-time list (`docs/ui/layout-format.md`).
 const NONE: &str = "(none)";
@@ -427,6 +427,12 @@ impl PanelModern {
         let width = ui.available_width();
         let (strip, strip_response) =
             ui.allocate_exact_size(Vec2::new(width, m.tab_strip_height), Sense::hover());
+        // The strip's widgets sit at absolute rects inside it: a child
+        // ui keeps their `put` calls from moving the parent's cursor
+        // (each one added the item spacing, so the command bar started
+        // 24 px below the strip; task P7-17).
+        let mut strip_ui = ui.new_child(UiBuilder::new().max_rect(strip));
+        let ui = &mut strip_ui;
 
         // The File button.
         let file_label = layout
@@ -476,9 +482,16 @@ impl PanelModern {
                     };
                     let text = egui::RichText::new(shown.as_str())
                         .color(crate::theme::color_at(ui.ctx(), token));
+                    // A contextual tab carries its tab-set name in
+                    // front of its label (task P7-17: drawn over the
+                    // label, the two were unreadable).
+                    let atoms = match tab_set_caption(ui.ctx(), tab) {
+                        Some(caption) => egui::Atoms::new((caption, text)),
+                        None => egui::Atoms::new(text),
+                    };
                     ui.put(
                         rect,
-                        Button::new(text)
+                        Button::new(atoms)
                             .selected(active == Some(index))
                             .frame(true),
                     )
@@ -500,7 +513,6 @@ impl PanelModern {
                 }
             }
         }
-
         // The tab-set captions, one per visible contextual set.
         self.paint_tab_set_captions(ui, tabs, strip, file_rect.max.x);
 
@@ -554,27 +566,16 @@ impl PanelModern {
         {
             let (set_x, tab_width) = slots.get(index).copied().unwrap_or((start_x, 0.0));
             let set_name = tab.tab_set.clone().unwrap_or_default();
-            let (band_token, _, text_token) = contextual_tokens(
+            let (band_token, _, _) = contextual_tokens(
                 set_family(ui.ctx(), &set_name)
                     .as_deref()
                     .unwrap_or_default(),
             );
-            // The caption block sits above the tab, inside the strip:
-            // a 4 px band across the top, then the set name.
+            // A 4 px band across the top of the tab; the set name is
+            // the first atom of the tab's button ([`tab_set_caption`]).
             let band =
                 Rect::from_min_size(egui::pos2(set_x, strip.min.y), Vec2::new(tab_width, 4.0));
             painter.rect_filled(band, 0.0, crate::theme::color_at(ui.ctx(), band_token));
-            let caption_rect = Rect::from_min_size(
-                egui::pos2(set_x, strip.min.y + 4.0),
-                Vec2::new(tab_width, strip.height() - 4.0),
-            );
-            painter.text(
-                caption_rect.left_top() + Vec2::new(2.0, 0.0),
-                egui::Align2::LEFT_TOP,
-                set_name,
-                egui::FontId::proportional(9.0),
-                crate::theme::color_at(ui.ctx(), text_token),
-            );
         }
     }
 
@@ -636,23 +637,25 @@ impl PanelModern {
             .active_index(tabs)
             .and_then(|index| tabs.get(index).copied())
         {
-            ui.scope_builder(
+            // The groups leave the ^ button's corner free (task P7-17:
+            // it drew over the last group).
+            let room = (inner.width() - m.qat_button.x - 4.0).max(0.0);
+            let mut groups = ui.new_child(
                 UiBuilder::new()
                     .max_rect(inner)
                     .layout(Layout::left_to_right(egui::Align::TOP)),
-                |ui| {
-                    self.show_groups(ui, tab, app, lists, resolve, out)?;
-                    Ok::<(), UiError>(())
-                },
-            )
-            .inner?;
+            );
+            groups.set_clip_rect(inner.intersect(ui.clip_rect()));
+            self.show_groups(&mut groups, tab, app, lists, resolve, out, room)?;
         }
         self.paint_collapse_button(ui, bar, "Collapse the command bar", out);
         Ok(())
     }
 
     /// Draws the groups of one tab left to right, separated by 1 px
-    /// lines (`docs/ui/panel-modern.md`).
+    /// lines (`docs/ui/panel-modern.md`), each at the size
+    /// [`fit_group_sizes`] picks for `room` points of width.
+    #[allow(clippy::too_many_arguments)] // the drawing context plus the room
     fn show_groups(
         &mut self,
         ui: &mut Ui,
@@ -661,12 +664,69 @@ impl PanelModern {
         lists: &ListData,
         resolve: Resolve<'_>,
         out: &mut Vec<Intent>,
+        room: f32,
     ) -> Result<(), UiError> {
+        let m = self.metrics.clone();
+        let sizes = fit_group_sizes(ui, &tab.groups, &m, room);
         for (index, group) in tab.groups.iter().enumerate() {
             if index > 0 {
                 self.paint_separator(ui);
             }
-            self.show_group(ui, group, app, lists, resolve, out)?;
+            match sizes.get(index).copied().unwrap_or(GroupSize::Large) {
+                GroupSize::Collapsed => {
+                    self.show_collapsed_group(ui, group, app, lists, resolve, out)?;
+                }
+                size => {
+                    let group = place::reduce(group, size, &m);
+                    self.show_group(ui, &group, app, lists, resolve, out)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Draws one collapsed group: a large button with the group's
+    /// caption that opens the whole group, at full size, as a popup
+    /// (task P7-17). The popup closes after one of its commands runs,
+    /// on a click outside it, or on Esc.
+    fn show_collapsed_group(
+        &mut self,
+        ui: &mut Ui,
+        group: &larrygram_ui_spec::v2::Group,
+        app: &AppCtx,
+        lists: &ListData,
+        resolve: Resolve<'_>,
+        out: &mut Vec<Intent>,
+    ) -> Result<(), UiError> {
+        let m = self.metrics.clone();
+        let width = collapsed_width(ui, group, &m);
+        let rect = ui
+            .allocate_exact_size(
+                Vec2::new(width, m.content_height() + m.group_caption_height),
+                Sense::hover(),
+            )
+            .0;
+        let button = Rect::from_min_size(
+            egui::pos2(rect.min.x + m.group_padding_x, rect.min.y),
+            Vec2::new(
+                (width - 2.0 * m.group_padding_x).max(0.0),
+                m.content_height(),
+            ),
+        );
+        // The button carries the group's caption, so the caption row
+        // stays empty.
+        let response = controls::collapsed_group_button(ui, group, button, &m);
+        let popup_id = response.id.with("collapsed_group");
+        let before = out.len();
+        let shown = egui::Popup::menu(&response)
+            .id(popup_id)
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+            .show(|ui| self.show_group(ui, group, app, lists, resolve, out));
+        if let Some(inner) = shown {
+            inner.inner?;
+        }
+        if out.len() > before {
+            egui::Popup::close_id(ui.ctx(), popup_id);
         }
         Ok(())
     }
@@ -705,14 +765,14 @@ impl PanelModern {
         let placed = place::place(group, &widths, &m);
         let content_height = m.content_height();
         let group_height = content_height + m.group_caption_height;
-        let group_width = placed
-            .iter()
-            .map(|p| p.rect.max.x)
-            .fold(m.group_padding_x, f32::max)
-            + m.group_padding_x;
+        let group_width = placed_width(&placed, &m);
         let rect = ui
             .allocate_exact_size(Vec2::new(group_width, group_height), Sense::hover())
             .0;
+        // The controls sit at absolute rects inside the group: a child
+        // ui keeps their `put` calls from moving the parent's cursor.
+        let mut child = ui.new_child(UiBuilder::new().max_rect(rect));
+        let ui = &mut child;
 
         for (item, p) in items.iter().zip(&placed) {
             let abs = Placed {
@@ -730,18 +790,7 @@ impl PanelModern {
 
         // The caption row: the label centred, the launcher in the
         // bottom-right corner.
-        let caption = Rect::from_min_size(
-            egui::pos2(rect.min.x, rect.min.y + content_height),
-            Vec2::new(group_width, m.group_caption_height),
-        );
-        let text = group.label.clone().unwrap_or_default();
-        ui.painter().text(
-            caption.center(),
-            egui::Align2::CENTER_CENTER,
-            text,
-            egui::FontId::proportional(12.0),
-            crate::theme::color_at(ui.ctx(), "group.caption.text"),
-        );
+        let caption = paint_caption(ui, group, rect, &m);
         if let Some(launcher) = &group.launcher {
             let item = launcher_item(group, launcher);
             let size = m.launcher_size;
@@ -802,7 +851,8 @@ impl PanelModern {
                                 .active_index(tabs)
                                 .and_then(|index| tabs.get(index).copied())
                             {
-                                self.show_groups(ui, tab, app, lists, resolve, out)?;
+                                let room = ui.ctx().content_rect().width() - 8.0;
+                                self.show_groups(ui, tab, app, lists, resolve, out, room)?;
                             }
                             Ok::<(), UiError>(())
                         },
@@ -839,6 +889,146 @@ impl PanelModern {
     }
 }
 
+/// The width a group's placed controls take, with the group padding
+/// on both sides.
+fn placed_width(placed: &[Placed], m: &Metrics) -> f32 {
+    placed
+        .iter()
+        .map(|p| p.rect.max.x)
+        .filter(|x| x.is_finite())
+        .fold(m.group_padding_x, f32::max)
+        + m.group_padding_x
+}
+
+/// The width `group` takes at one [`GroupSize`] stage.
+fn group_width(ui: &Ui, group: &larrygram_ui_spec::v2::Group, size: GroupSize, m: &Metrics) -> f32 {
+    if size == GroupSize::Collapsed {
+        return collapsed_width(ui, group, m);
+    }
+    let group = place::reduce(group, size, m);
+    let items = place::visible_controls(&group);
+    let widths = measure_widths(ui, &items, m);
+    let width = placed_width(&place::place(&group, &widths, m), m);
+    // The caption and the launcher fit under the controls too.
+    let caption = text_width(ui, group.label.as_deref().unwrap_or_default())
+        + if group.launcher.is_some() {
+            2.0 * m.launcher_size.x
+        } else {
+            0.0
+        }
+        + 2.0 * m.group_padding_x;
+    width.max(caption)
+}
+
+/// The width of a collapsed group's button, with the group padding.
+fn collapsed_width(ui: &Ui, group: &larrygram_ui_spec::v2::Group, m: &Metrics) -> f32 {
+    let item = controls::collapsed_group_item(group);
+    let widths = measure_widths(ui, &[&item], m);
+    widths.first().copied().unwrap_or(m.large_min_width) + 2.0 * m.group_padding_x
+}
+
+/// The size of each group of a tab when the command bar has `room`
+/// points (task P7-17, `docs/ui/panel-modern.md` "Narrow windows").
+///
+/// Every group starts at [`GroupSize::Large`]. While the groups do not
+/// fit, the next stage of [`GroupSize::STAGES`] applies to one group
+/// at a time, from the rightmost group leftwards; only when every
+/// group has reached a stage does the next stage start. The result
+/// is the first assignment that fits, or every group collapsed.
+pub fn fit_group_sizes(
+    ui: &Ui,
+    groups: &[larrygram_ui_spec::v2::Group],
+    m: &Metrics,
+    room: f32,
+) -> Vec<GroupSize> {
+    let spacing = ui.spacing().item_spacing.x;
+    let widths: Vec<[f32; 4]> = groups
+        .iter()
+        .map(|group| {
+            [
+                GroupSize::Large,
+                GroupSize::Medium,
+                GroupSize::Small,
+                GroupSize::Collapsed,
+            ]
+            .map(|size| group_width(ui, group, size, m))
+        })
+        .collect();
+    let total = |sizes: &[GroupSize]| -> f32 {
+        let gaps = spacing * sizes.len().saturating_sub(1) as f32;
+        sizes
+            .iter()
+            .zip(&widths)
+            .map(|(size, widths)| widths.get(*size as usize).copied().unwrap_or(0.0))
+            .sum::<f32>()
+            + gaps
+    };
+    let mut sizes = vec![GroupSize::Large; groups.len()];
+    if total(&sizes) <= room {
+        return sizes;
+    }
+    'reduce: for stage in GroupSize::STAGES {
+        for index in (0..sizes.len()).rev() {
+            if let Some(size) = sizes.get_mut(index)
+                && *size < stage
+            {
+                *size = stage;
+            }
+            if total(&sizes) <= room {
+                break 'reduce;
+            }
+        }
+    }
+    // Give the room left back, left to right: a group grows one stage
+    // at a time while everything still fits.
+    for index in 0..sizes.len() {
+        loop {
+            let Some(current) = sizes.get(index).copied() else {
+                break;
+            };
+            let Some(bigger) = larger(current) else {
+                break;
+            };
+            let mut trial = sizes.clone();
+            if let Some(size) = trial.get_mut(index) {
+                *size = bigger;
+            }
+            if total(&trial) > room {
+                break;
+            }
+            sizes = trial;
+        }
+    }
+    sizes
+}
+
+/// The stage before `size` (one step larger), if any.
+fn larger(size: GroupSize) -> Option<GroupSize> {
+    match size {
+        GroupSize::Large => None,
+        GroupSize::Medium => Some(GroupSize::Large),
+        GroupSize::Small => Some(GroupSize::Medium),
+        GroupSize::Collapsed => Some(GroupSize::Small),
+    }
+}
+
+/// Paints a group's caption, centred along the bottom of `rect`, and
+/// returns the caption row.
+fn paint_caption(ui: &Ui, group: &larrygram_ui_spec::v2::Group, rect: Rect, m: &Metrics) -> Rect {
+    let caption = Rect::from_min_size(
+        egui::pos2(rect.min.x, rect.min.y + m.content_height()),
+        Vec2::new(rect.width(), m.group_caption_height),
+    );
+    ui.painter().text(
+        caption.center(),
+        egui::Align2::CENTER_CENTER,
+        group.label.clone().unwrap_or_default(),
+        egui::FontId::proportional(12.0),
+        crate::theme::color_at(ui.ctx(), "group.caption.text"),
+    );
+    caption
+}
+
 /// Where each tab draws in the strip: `(x, width)` in tab order,
 /// starting at `start_x`. The tab buttons and the contextual set
 /// captions read the same table, so a caption block sits exactly
@@ -848,7 +1038,22 @@ fn tab_slots(ui: &Ui, tabs: &[&Tab], m: &Metrics, start_x: f32) -> Vec<(f32, f32
     let mut x = start_x;
     for tab in tabs {
         let shown = tab.label.clone().unwrap_or_default().to_uppercase();
-        let width = text_width(ui, &shown) + 2.0 * m.tab_padding_x;
+        let caption = match tab.shown_in {
+            Some(_) => {
+                let name = tab.tab_set.clone().unwrap_or_default();
+                ui.painter()
+                    .layout_no_wrap(
+                        name,
+                        egui::FontId::proportional(TAB_SET_SIZE),
+                        egui::Color32::WHITE,
+                    )
+                    .rect
+                    .width()
+                    + ui.spacing().icon_spacing.max(4.0)
+            }
+            None => 0.0,
+        };
+        let width = text_width(ui, &shown) + caption + 2.0 * m.tab_padding_x;
         out.push((x, width));
         x += width;
     }
@@ -994,7 +1199,7 @@ pub fn measure_widths(ui: &Ui, items: &[&Item], m: &Metrics) -> Vec<f32> {
                         let arrow_part = if split { m.split_arrow_width } else { arrow };
                         (m.small_icon + SMALL_FRAME + arrow_part).max(m.small_width)
                     } else {
-                        let icon = if item.icon.is_some() {
+                        let icon = if common::icon_key(item).is_some() {
                             m.medium_icon + ICON_EXTRA
                         } else {
                             0.0
@@ -1033,23 +1238,41 @@ const CHECK_FRAME: f32 = 18.0;
 
 /// The space a combo takes around its label (padding and the arrow),
 /// plus slack.
-const COMBO_EXTRA: f32 = 30.0;
+const COMBO_EXTRA: f32 = 60.0;
 
 /// The widest a measured control gets: a malformed label (or a huge
 /// theme font) cannot take the whole command bar (AGENTS.md section
 /// 6: bounded allocations on input-derived values).
 const MAX_LABEL_W: f32 = 400.0;
 
-/// The width of `text` in the UI font, in logical pixels.
+/// The width of `text` in the font the buttons draw with (the
+/// theme's `ui` font once the theme applies), in logical pixels.
+///
+/// Measuring in egui's default proportional font under-measured the
+/// theme's Selawik labels, so a combo label was cut short (task P7-17).
 fn text_width(ui: &Ui, text: &str) -> f32 {
+    let font = egui::TextStyle::Button.resolve(ui.style());
     ui.painter()
-        .layout_no_wrap(
-            text.to_owned(),
-            egui::FontId::proportional(12.0),
-            egui::Color32::WHITE,
-        )
+        .layout_no_wrap(text.to_owned(), font, egui::Color32::WHITE)
         .rect
         .width()
+}
+
+/// The size of a contextual tab's tab-set name, in points.
+const TAB_SET_SIZE: f32 = 10.0;
+
+/// The tab-set name of a contextual tab, small and in the set's text
+/// colour, or `None` for a core tab.
+fn tab_set_caption(ctx: &egui::Context, tab: &Tab) -> Option<egui::RichText> {
+    tab.shown_in?;
+    let name = tab.tab_set.clone().unwrap_or_default();
+    let (_, _, text_token) =
+        contextual_tokens(set_family(ctx, &name).as_deref().unwrap_or_default());
+    Some(
+        egui::RichText::new(name)
+            .size(TAB_SET_SIZE)
+            .color(crate::theme::color_at(ctx, text_token)),
+    )
 }
 
 /// Paints the contextual-tab look of one tab: the set's fill behind

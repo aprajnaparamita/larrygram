@@ -32,6 +32,7 @@ pub mod tab_bar;
 pub mod text_edit;
 pub mod theme;
 pub mod tools;
+pub mod window_size;
 pub mod wizard;
 
 use std::fmt;
