@@ -19,6 +19,10 @@ larrygram-model = { path = "../model" }
 larrygram-render = { path = "../render" }
 # The recalc hook after an edit (ADR 0056) drives the ShapeSheet engine.
 larrygram-shapesheet = { path = "../shapesheet" }
+# The binary `.vsd`/`.vss`/`.vst` import of the open path (P8-09, ADR 0070):
+# `file.open` and the CLI route those extensions here. MPL-2.0, the one
+# allowed MPL crate (ADR 0003).
+larrygram-vsd-binary = { path = "../vsd-binary" }
 larrygram-ui-spec = { path = "../ui-spec" }
 larrygram-vsdx = { path = "../vsdx" }
 serde = { version = "1", features = ["derive"] }

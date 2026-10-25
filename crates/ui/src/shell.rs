@@ -83,8 +83,13 @@ const MIN_ZOOM: f64 = 0.1;
 /// The largest zoom of the status-bar slider (see [`MIN_ZOOM`]).
 const MAX_ZOOM: f64 = 64.0;
 
-/// The file extensions the picker accepts (ADR 0036).
-const OPEN_EXTENSIONS: &[&str] = &["vsdx", "vssx", "vstx"];
+/// The file extensions the picker accepts (ADR 0036, task P8-09): the
+/// XML packages and the read-only binary formats.
+const OPEN_EXTENSIONS: &[&str] = &["vsdx", "vssx", "vstx", "vsd", "vss", "vst"];
+
+/// The file extensions a save dialog offers (task P8-09): the XML
+/// formats only, the binary ones being read-only inputs.
+const SAVE_EXTENSIONS: &[&str] = &["vsdx", "vssx", "vstx"];
 
 /// The default file name of a save dialog for a never-saved document.
 const DEFAULT_SAVE_NAME: &str = "drawing.vsdx";
@@ -1614,6 +1619,7 @@ impl Shell {
                 let request = SaveRequest {
                     title: format!("Save ({command})"),
                     default_name,
+                    extensions: SAVE_EXTENSIONS.iter().map(|e| (*e).to_owned()).collect(),
                 };
                 // Empty data: ask for the target only (the command
                 // writes the file when dispatched with `path`).
@@ -1654,6 +1660,7 @@ impl Shell {
             let request = SaveRequest {
                 title: "Save".to_owned(),
                 default_name: name.clone(),
+                extensions: SAVE_EXTENSIONS.iter().map(|e| (*e).to_owned()).collect(),
             };
             self.picker.save(&request, data)?;
         }
@@ -2051,6 +2058,123 @@ mod tests {
         }
         fn poll(&self) -> PickState {
             self.poll_state.clone()
+        }
+    }
+
+    /// A picker that records the requests it gets and never picks
+    /// anything (the dialog-filter tests of task P8-09).
+    #[derive(Default)]
+    struct RecordingPicker {
+        opens: Rc<RefCell<Vec<OpenRequest>>>,
+        saves: Rc<RefCell<Vec<SaveRequest>>>,
+    }
+
+    impl FilePicker for RecordingPicker {
+        fn open(&self, request: &OpenRequest) -> Result<Option<FileChoice>, UiError> {
+            self.opens.borrow_mut().push(request.clone());
+            Ok(None)
+        }
+        fn save(&self, request: &SaveRequest, _data: &[u8]) -> Result<Option<FileChoice>, UiError> {
+            self.saves.borrow_mut().push(request.clone());
+            Ok(None)
+        }
+    }
+
+    /// Task P8-09: a `.vsd` picked in the open dialog opens through
+    /// the shell's pick flow into the model the editor shows.
+    #[test]
+    fn a_picked_vsd_opens_through_the_open_flow() {
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("corpus")
+            .join("fixtures")
+            .join("minimal-drawing.vsd");
+        let mut shell = full_shell();
+        shell.set_picker(Box::new(FakePicker {
+            choice: Some(FileChoice::Path(fixture)),
+            ..FakePicker::default()
+        }));
+        let results = shell
+            .dispatch(&[intent("file.open", Source::Ui)])
+            .expect("dispatch");
+        let outcome = results[0].as_ref().expect("opened");
+        assert!(
+            outcome
+                .message
+                .as_deref()
+                .is_some_and(|message| message.starts_with("Opened ")),
+            "{:?}",
+            outcome.message
+        );
+        let session = shell.app.active_document().expect("session");
+        assert_eq!(session.document.pages.len(), 1, "pages in the open model");
+        assert!(
+            !outcome.warnings.is_empty(),
+            "the import warnings surface as a list"
+        );
+    }
+
+    /// Task P8-09: the open dialog lists the binary formats beside the
+    /// XML ones.
+    #[test]
+    fn the_open_dialog_filter_lists_the_binary_formats() {
+        let mut shell = shell();
+        let picker = RecordingPicker::default();
+        let opens = Rc::clone(&picker.opens);
+        shell.set_picker(Box::new(picker));
+        let command = CommandId::parse("file.open").expect("command id");
+        let invocation = Invocation::empty(Source::Ui);
+        let needed = NeededInput::Path {
+            purpose: PathPurpose::OpenFile,
+            suggested: None,
+        };
+        assert!(matches!(
+            shell.ask_picker(&command, &invocation, &needed),
+            Ok(Ask::Cancelled)
+        ));
+        let opens = opens.borrow();
+        let request = opens.first().expect("one open request");
+        for extension in ["vsdx", "vssx", "vstx", "vsd", "vss", "vst"] {
+            assert!(
+                request.extensions.iter().any(|e| e == extension),
+                "the open filter misses {extension}"
+            );
+        }
+    }
+
+    /// Task P8-09: the Save As dialog offers the XML formats only, the
+    /// binary ones being read-only.
+    #[test]
+    fn the_save_dialog_filter_is_the_xml_formats_only() {
+        let mut shell = shell();
+        let picker = RecordingPicker::default();
+        let saves = Rc::clone(&picker.saves);
+        shell.set_picker(Box::new(picker));
+        let command = CommandId::parse("file.save").expect("command id");
+        let invocation = Invocation::empty(Source::Ui);
+        let needed = NeededInput::Path {
+            purpose: PathPurpose::SaveFile,
+            suggested: Some(std::path::PathBuf::from("plan.vsdx")),
+        };
+        assert!(matches!(
+            shell.ask_picker(&command, &invocation, &needed),
+            Ok(Ask::Cancelled)
+        ));
+        let saves = saves.borrow();
+        let request = saves.first().expect("one save request");
+        assert_eq!(request.default_name, "plan.vsdx");
+        for extension in ["vsdx", "vssx", "vstx"] {
+            assert!(
+                request.extensions.iter().any(|e| e == extension),
+                "the save filter misses {extension}"
+            );
+        }
+        for extension in ["vsd", "vss", "vst"] {
+            assert!(
+                !request.extensions.iter().any(|e| e == extension),
+                "the save filter offers the read-only {extension}"
+            );
         }
     }
 

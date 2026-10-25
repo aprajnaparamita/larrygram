@@ -1,6 +1,12 @@
 //! The `file.*` commands (ADR 0026, ADR 0036): new, open, save, close,
 //! quit, inspect, render and export.
 //!
+//! The open path accepts both format families (task P8-09): the XML
+//! packages `.vsdx`/`.vssx`/`.vstx` and the binary `.vsd`/`.vss`/`.vst`
+//! files, which route to `larrygram-vsd-binary`'s `import` (ADR 0070).
+//! The binary formats are read-only: a document opened from one saves
+//! as its XML counterpart (the document-kind mapping of the writer).
+//!
 //! The `inspect`, `render` and `export` bodies are the ADR 0026 CLI
 //! seam: the CLI's `Command` enum dispatches here, so the CLI, the
 //! control channel (Phase 8) and MCP share one implementation. Failures
@@ -14,6 +20,7 @@ use larrygram_model::{CellValue, Document, DocumentKind, Page, PageId, SheetRef}
 use larrygram_render::{
     BuildOptions, PngOptions, Rgba, Scene, SvgOptions, build_scene, render_png, render_svg,
 };
+use larrygram_vsd_binary as binary;
 use larrygram_vsdx::{Limits, Package, read_package, to_model, write_document};
 
 use crate::app::{AppCtx, DocumentSession, ViewState};
@@ -186,6 +193,81 @@ fn render_error(cause: impl std::fmt::Display) -> CommandError {
 }
 
 // ---------------------------------------------------------------------------
+// Input and output formats (task P8-09)
+// ---------------------------------------------------------------------------
+
+/// The binary extensions the open path accepts (read-only).
+const BINARY_EXTENSIONS: &[&str] = &["vsd", "vss", "vst"];
+
+/// The lower-cased extension of `path`, empty when there is none.
+fn extension_text(path: &Path) -> String {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.to_ascii_lowercase())
+        .unwrap_or_default()
+}
+
+/// Whether `path` names a binary `.vsd`, `.vss` or `.vst` file.
+fn is_binary(path: &Path) -> bool {
+    let extension = extension_text(path);
+    BINARY_EXTENSIONS.iter().any(|ext| *ext == extension)
+}
+
+/// The XML extension of a document kind: the same mapping the writer's
+/// content types use (`larrygram-vsdx`, ADR 0070).
+fn xml_extension(kind: DocumentKind) -> &'static str {
+    match kind {
+        DocumentKind::Stencil => "vssx",
+        DocumentKind::Template => "vstx",
+        _ => "vsdx",
+    }
+}
+
+/// Where `file.save` writes a document whose session path is `path`:
+/// the binary formats are read-only, so a `.vsd`/`.vss`/`.vst` path
+/// maps to the XML format of the document kind.
+fn save_target(path: &Path, kind: DocumentKind) -> PathBuf {
+    if is_binary(path) {
+        path.with_extension(xml_extension(kind))
+    } else {
+        path.to_owned()
+    }
+}
+
+/// The default save name of a document kind ("drawing.vsdx").
+fn default_save_name(kind: DocumentKind) -> &'static str {
+    match kind {
+        DocumentKind::Stencil => "stencil.vssx",
+        DocumentKind::Template => "template.vstx",
+        _ => "drawing.vsdx",
+    }
+}
+
+/// The read-only refusal of a save target in a binary format (the ADR
+/// 0026 `cannot write output:` prefix; task P8-09).
+fn read_only_save_error(path: &Path, kind: DocumentKind) -> CommandError {
+    write_error_text(format!(
+        "{}: the binary Visio formats are read-only; save as {}",
+        path.display(),
+        save_target(path, kind).display()
+    ))
+}
+
+/// One import warning as a status line (ADR 0071: every degradation
+/// surfaces, never silently).
+fn import_warning_line(warning: &binary::ImportWarning) -> String {
+    let what = match &warning.kind {
+        binary::WarningKind::SkippedRecord { name } => format!("skipped record {name}"),
+        binary::WarningKind::Dropped { what } => format!("dropped {what}"),
+        binary::WarningKind::UnresolvedReference { what } => format!("unresolved {what}"),
+        binary::WarningKind::BadValue { what } => format!("unparsable {what}, using a default"),
+        binary::WarningKind::Unsupported { what } => format!("unsupported {what}"),
+        other => format!("{other:?}"),
+    };
+    format!("{}: {what}", warning.context)
+}
+
+// ---------------------------------------------------------------------------
 // Reading and writing
 // ---------------------------------------------------------------------------
 
@@ -240,11 +322,41 @@ fn fill_read_document(ctx: &mut AppCtx, document: &mut Document) {
     }
 }
 
-/// Reads and parses the input file (ADR 0026 exit code 2).
-fn load(ctx: &mut AppCtx, path: &Path) -> Result<(Document, Option<Package>), CommandError> {
+/// Reads and parses the input file in the format its extension names
+/// (ADR 0026 exit code 2; task P8-09): a binary `.vsd`, `.vss` or
+/// `.vst` goes to `larrygram-vsd-binary`, every other extension to the
+/// `.vsdx` reader. The import warnings come back with the document.
+fn load(
+    ctx: &mut AppCtx,
+    path: &Path,
+) -> Result<(Document, Option<Package>, Vec<String>), CommandError> {
     let bytes = std::fs::read(path).map_err(|error| read_error(path, error))?;
-    let (document, package) = read_package_document(ctx, &bytes, path)?;
-    Ok((document, Some(package)))
+    read_input_document(ctx, &bytes, path)
+}
+
+/// Reads one input file in the format `label`'s extension names (task
+/// P8-09). `label` names the file in every error; on wasm it is the
+/// upload's file name (ADR 0036).
+///
+/// The document lands in the same model either way, so the editor,
+/// `inspect`, `render` and `export` see one shape of a document
+/// (ADR 0070). Every import warning is returned as one status line.
+fn read_input_document(
+    ctx: &mut AppCtx,
+    bytes: &[u8],
+    label: &Path,
+) -> Result<(Document, Option<Package>, Vec<String>), CommandError> {
+    if is_binary(label) {
+        let imported = binary::import(bytes, &binary::Limits::DEFAULT)
+            .map_err(|error| read_error(label, error))?;
+        let warnings: Vec<String> = imported.warnings.iter().map(import_warning_line).collect();
+        let mut document = imported.document;
+        fill_read_document(ctx, &mut document);
+        Ok((document, None, warnings))
+    } else {
+        let (document, package) = read_package_document(ctx, bytes, label)?;
+        Ok((document, Some(package), Vec::new()))
+    }
 }
 
 /// Writes one output file (ADR 0026 exit code 3).
@@ -308,22 +420,29 @@ pub(super) fn run_new(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, Co
 /// `file.open`: reads `path` (or `name` + `data` on wasm, ADR 0036)
 /// into a new session, which becomes active. The session's view
 /// toggles are seeded from the settings defaults (ADR 0032 amendment).
+///
+/// The format follows the extension (task P8-09): `.vsd`, `.vss` and
+/// `.vst` import through `larrygram-vsd-binary`, the rest through the
+/// `.vsdx` reader. Every import warning surfaces as a status line
+/// (ADR 0071).
 pub(super) fn run_open(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError> {
-    let (document, package, path, label) = match inv.args.path("path") {
+    let (document, package, warnings, path, label) = match inv.args.path("path") {
         Some(path) => {
             let bytes = std::fs::read(path).map_err(|error| read_error(path, error))?;
-            let (document, package) = read_package_document(ctx, &bytes, path)?;
+            let (document, package, warnings) = read_input_document(ctx, &bytes, path)?;
             (
                 document,
                 package,
+                warnings,
                 Some(path.to_owned()),
                 path.display().to_string(),
             )
         }
         None => match (inv.args.text("name"), inv.args.bytes("data")) {
             (Some(name), Some(data)) => {
-                let (document, package) = read_package_document(ctx, data, Path::new(name))?;
-                (document, package, None, name.to_owned())
+                let (document, package, warnings) =
+                    read_input_document(ctx, data, Path::new(name))?;
+                (document, package, warnings, None, name.to_owned())
             }
             _ => {
                 return Err(CommandError::NeedsInput(NeededInput::Path {
@@ -334,13 +453,17 @@ pub(super) fn run_open(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, Co
         },
     };
     let recent = path.clone();
-    let mut session = DocumentSession::new(document, path).with_preserve(package);
+    let mut session = DocumentSession::new(document, path);
+    if let Some(package) = package {
+        session = session.with_preserve(package);
+    }
     session.view = ViewState::from_settings(&ctx.settings);
     ctx.open_document(session);
     if let Some(path) = recent {
         remember_recent(&mut ctx.settings, path);
     }
-    Ok(outcome(format!("Opened {label}"), Vec::new()))
+    record_warnings(ctx, &warnings);
+    Ok(outcome(format!("Opened {label}"), warnings))
 }
 
 /// Records a recently opened file: most recent first, de-duplicated and
@@ -384,9 +507,27 @@ fn save_document(
     if arg_path.is_some() {
         return payload_save(ctx);
     }
+    let kind = ctx
+        .active_document()
+        .map(|session| session.document.kind)
+        .unwrap_or_default();
+    // The binary formats are read-only (task P8-09): they name an
+    // input, never a save target.
+    if let Some(path) = &arg_path
+        && is_binary(path)
+    {
+        return Err(read_only_save_error(path, kind));
+    }
+    // The target: the `path` argument, or the session's own path
+    // mapped out of the read-only binary format (task P8-09), so a
+    // document opened from `plan.vsd` saves as `plan.vsdx`.
+    let own = ctx
+        .active_document()
+        .and_then(|session| session.path.clone());
+    let mapped = arg_path.is_none() && own.as_deref().is_some_and(is_binary);
     let target = arg_path
         .clone()
-        .or_else(|| ctx.active_document().and_then(|s| s.path.clone()));
+        .or_else(|| own.as_deref().map(|path| save_target(path, kind)));
     let Some(path) = target else {
         return save_without_path(ctx);
     };
@@ -396,7 +537,9 @@ fn save_document(
     let encoded = write_document(&session.document, preserve);
     let bytes = encoded.map_err(|error| io_error(&path, error))?;
     write_file(&path, &bytes)?;
-    if set_path {
+    // A mapped save re-homes the session on the file it just wrote, so
+    // the next save goes to the same place and the title follows.
+    if set_path || mapped {
         session.path = Some(path.clone());
     }
     session.dirty = false;
@@ -404,12 +547,18 @@ fn save_document(
 }
 
 /// The no-target save of a never-saved document on the desktop: the
-/// caller gets [`CommandError::NeedsInput`] and picks a path (ADR 0036).
+/// caller gets [`CommandError::NeedsInput`] and picks a path (ADR
+/// 0036). The suggested name follows the document kind (task P8-09:
+/// `stencil.vssx`, `template.vstx`, `drawing.vsdx`).
 #[cfg(not(target_arch = "wasm32"))]
-fn save_without_path(_ctx: &mut AppCtx) -> Result<Outcome, CommandError> {
+fn save_without_path(ctx: &mut AppCtx) -> Result<Outcome, CommandError> {
+    let kind = ctx
+        .active_document()
+        .map(|session| session.document.kind)
+        .unwrap_or_default();
     Err(CommandError::NeedsInput(NeededInput::Path {
         purpose: PathPurpose::SaveFile,
-        suggested: None,
+        suggested: Some(PathBuf::from(default_save_name(kind))),
     }))
 }
 
@@ -431,7 +580,7 @@ fn payload_save(ctx: &mut AppCtx) -> Result<Outcome, CommandError> {
     let empty = Package::new();
     let preserve = session.preserve.as_ref().unwrap_or(&empty);
     let bytes = write_document(&session.document, preserve).map_err(write_error_text)?;
-    let name = download_name(&session.display_name());
+    let name = download_name(&session.display_name(), session.document.kind);
     session.dirty = false;
     Ok(Outcome {
         message: Some(format!("Saved {name}")),
@@ -440,13 +589,16 @@ fn payload_save(ctx: &mut AppCtx) -> Result<Outcome, CommandError> {
     })
 }
 
-/// The suggested download name of a never-saved document.
+/// The suggested download name of a never-saved document (task P8-09:
+/// a binary source name maps to the XML format of its kind).
 #[cfg(any(test, target_arch = "wasm32"))]
-fn download_name(display_name: &str) -> String {
-    if display_name.contains('.') {
-        display_name.to_owned()
+fn download_name(display_name: &str, kind: DocumentKind) -> String {
+    let mapped = save_target(Path::new(display_name), kind);
+    let name = mapped.to_string_lossy().into_owned();
+    if name.contains('.') {
+        name
     } else {
-        format!("{display_name}.vsdx")
+        format!("{name}.{}", xml_extension(kind))
     }
 }
 
@@ -502,8 +654,10 @@ pub(super) fn run_inspect(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome,
     let page = optional_page(&inv.args)?;
     let (text, warnings) = match inv.args.path("path") {
         Some(path) => {
-            let (document, _package) = load(ctx, path)?;
-            inspect_document(&document, page, json)?
+            let (document, _package, mut warnings) = load(ctx, path)?;
+            let (text, scene_warnings) = inspect_document(&document, page, json)?;
+            warnings.extend(scene_warnings);
+            (text, warnings)
         }
         None => match ctx.active_document() {
             Some(session) => inspect_document(&session.document, page, json)?,
@@ -567,7 +721,7 @@ pub(super) fn run_render(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, 
     let scale = scale_arg(&inv.args)?;
     let background = background_arg(&inv.args)?;
     let page = page_arg(&inv.args)?;
-    let (document, _package) = load(ctx, &path)?;
+    let (document, _package, mut warnings) = load(ctx, &path)?;
     let selected = select_page(&document, Some(page))?;
     let mut scene = build(&document, selected.id, scale)?;
     match background {
@@ -575,11 +729,12 @@ pub(super) fn run_render(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, 
         Background::Transparent => scene.background = None,
         Background::Color(color) => scene.background = Some(color),
     }
-    let warnings: Vec<String> = scene
+    let scene_warnings: Vec<String> = scene
         .warnings
         .iter()
         .map(|warning| warning_line(&document, warning))
         .collect();
+    warnings.extend(scene_warnings);
     let bytes = encode(&scene, format, scale)?;
     write_file(&out, &bytes)?;
     record_warnings(ctx, &warnings);
@@ -593,12 +748,11 @@ pub(super) fn run_export(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, 
     let out = need_path(&inv.args, "out", PathPurpose::SaveFile)?;
     let format = format_arg(&inv.args, &out)?;
     let scale = scale_arg(&inv.args)?;
-    let (document, _package) = load(ctx, &path)?;
+    let (document, _package, mut warnings) = load(ctx, &path)?;
     if document.pages.is_empty() {
         return Err(read_error_text("the document has no pages to export"));
     }
     std::fs::create_dir_all(&out).map_err(|error| io_error(&out, error))?;
-    let mut warnings = Vec::new();
     for (index, page) in document.pages.iter().enumerate() {
         let number = index.saturating_add(1);
         let scene = build(&document, page.id, scale)?;
@@ -1024,7 +1178,314 @@ mod tests {
 
     #[test]
     fn download_name_keeps_real_names_and_extends_bare_ones() {
-        assert_eq!(download_name("drawing.vsdx"), "drawing.vsdx");
-        assert_eq!(download_name("Untitled"), "Untitled.vsdx");
+        assert_eq!(
+            download_name("drawing.vsdx", DocumentKind::Drawing),
+            "drawing.vsdx"
+        );
+        assert_eq!(
+            download_name("Untitled", DocumentKind::Drawing),
+            "Untitled.vsdx"
+        );
+        // Task P8-09: a binary source name maps to its XML format.
+        assert_eq!(
+            download_name("plan.vsd", DocumentKind::Drawing),
+            "plan.vsdx"
+        );
+        assert_eq!(
+            download_name("parts.vss", DocumentKind::Stencil),
+            "parts.vssx"
+        );
+        assert_eq!(
+            download_name("Untitled", DocumentKind::Stencil),
+            "Untitled.vssx"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // The open path over both format families (task P8-09)
+    // -----------------------------------------------------------------------
+
+    /// The named committed fixture under `corpus/fixtures/` (always
+    /// present, ADR 0005's committed table).
+    fn fixture(name: &str) -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("corpus")
+            .join("fixtures")
+            .join(name)
+    }
+
+    /// The named fetched corpus `.vsd` (ADR 0005), or `None` when the
+    /// corpus is absent: the test skips then, and fails instead when
+    /// `LARRYGRAM_REQUIRE_CORPUS=1` is set (the Phase 3 convention).
+    fn corpus_vsd(name: &str) -> Option<PathBuf> {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("corpus")
+            .join("vsd")
+            .join(name);
+        if path.is_file() {
+            return Some(path);
+        }
+        assert!(
+            std::env::var_os("LARRYGRAM_REQUIRE_CORPUS").is_none(),
+            "corpus/vsd is missing and LARRYGRAM_REQUIRE_CORPUS=1 is set"
+        );
+        eprintln!("skipping: corpus/vsd is absent; run `cargo xtask corpus`");
+        None
+    }
+
+    /// A private scratch directory for one test.
+    fn scratch_dir() -> PathBuf {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static COUNTER: AtomicU32 = AtomicU32::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "larrygram-file-{}-{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir).expect("scratch directory");
+        dir
+    }
+
+    /// A `file.open` invocation for `path`.
+    fn open_invocation(path: &Path) -> Invocation {
+        Invocation::new(
+            Args::new().with("path", ArgValue::Path(path.to_owned())),
+            Source::Ui,
+        )
+    }
+
+    #[test]
+    fn the_binary_extensions_are_vsd_vss_and_vst() {
+        assert!(is_binary(Path::new("a.vsd")));
+        assert!(is_binary(Path::new("a.vss")));
+        assert!(is_binary(Path::new("a.vst")));
+        assert!(is_binary(Path::new("dir/A.VSD")), "case-insensitive");
+        assert!(!is_binary(Path::new("a.vsdx")));
+        assert!(!is_binary(Path::new("a.vssx")));
+        assert!(!is_binary(Path::new("a.txt")));
+        assert!(!is_binary(Path::new("vsd")), "no extension");
+    }
+
+    #[test]
+    fn the_save_target_maps_the_binary_formats_to_their_xml_ones() {
+        assert_eq!(
+            save_target(Path::new("plan.vsd"), DocumentKind::Drawing),
+            PathBuf::from("plan.vsdx")
+        );
+        assert_eq!(
+            save_target(Path::new("parts.vss"), DocumentKind::Stencil),
+            PathBuf::from("parts.vssx")
+        );
+        assert_eq!(
+            save_target(Path::new("start.vst"), DocumentKind::Template),
+            PathBuf::from("start.vstx")
+        );
+        assert_eq!(
+            save_target(Path::new("plan.vsdx"), DocumentKind::Drawing),
+            PathBuf::from("plan.vsdx"),
+            "an XML path is its own target"
+        );
+    }
+
+    #[test]
+    fn the_default_save_names_follow_the_document_kind() {
+        assert_eq!(default_save_name(DocumentKind::Drawing), "drawing.vsdx");
+        assert_eq!(default_save_name(DocumentKind::Stencil), "stencil.vssx");
+        assert_eq!(default_save_name(DocumentKind::Template), "template.vstx");
+    }
+
+    #[test]
+    fn import_warning_lines_name_every_kind() {
+        use binary::{ImportWarning, WarningKind};
+        let cases = [
+            (
+                ImportWarning {
+                    context: "page 1".to_owned(),
+                    kind: WarningKind::SkippedRecord { name: "OLE data" },
+                },
+                "page 1: skipped record OLE data",
+            ),
+            (
+                ImportWarning {
+                    context: "shape 2".to_owned(),
+                    kind: WarningKind::Dropped {
+                        what: "embedded OLE object",
+                    },
+                },
+                "shape 2: dropped embedded OLE object",
+            ),
+            (
+                ImportWarning {
+                    context: "shape 3".to_owned(),
+                    kind: WarningKind::UnresolvedReference { what: "master 7" },
+                },
+                "shape 3: unresolved master 7",
+            ),
+            (
+                ImportWarning {
+                    context: "page 1".to_owned(),
+                    kind: WarningKind::BadValue {
+                        what: "fill colour",
+                    },
+                },
+                "page 1: unparsable fill colour, using a default",
+            ),
+            (
+                ImportWarning {
+                    context: "document".to_owned(),
+                    kind: WarningKind::Unsupported {
+                        what: "version 5 chunk format",
+                    },
+                },
+                "document: unsupported version 5 chunk format",
+            ),
+        ];
+        for (warning, expected) in cases {
+            assert_eq!(import_warning_line(&warning), expected);
+        }
+    }
+
+    #[test]
+    fn an_unsupported_version_error_names_the_reason() {
+        let message =
+            read_error(Path::new("old.vsd"), binary::Error::UnsupportedVersion(5)).to_string();
+        assert!(message.contains("cannot read input: old.vsd"), "{message}");
+        assert!(message.contains("unsupported file version 5"), "{message}");
+    }
+
+    /// The committed `.vsd` fixture opens through `file.open`, lands in
+    /// the model and surfaces every import warning (task P8-09 goal 1).
+    #[test]
+    fn a_vsd_fixture_opens_through_the_open_command_with_its_warnings() {
+        let path = fixture("minimal-drawing.vsd");
+        let mut ctx = AppCtx::new(crate::Settings::default());
+        let outcome = run_open(&mut ctx, &open_invocation(&path)).expect("open");
+        assert_eq!(
+            outcome.message.as_deref(),
+            Some(format!("Opened {}", path.display()).as_str())
+        );
+        let session = ctx.active_document().expect("session");
+        assert_eq!(session.document.pages.len(), 1, "pages landed in the model");
+        assert_eq!(session.path.as_deref(), Some(path.as_path()));
+        assert!(
+            session.preserve.is_none(),
+            "a binary file has no package to preserve"
+        );
+        assert!(!outcome.warnings.is_empty(), "import warnings surface");
+        assert_eq!(
+            outcome.warnings, ctx.warnings,
+            "the warnings are also on the status list"
+        );
+    }
+
+    /// A document opened from a binary file saves as its XML format and
+    /// the session moves to the file it wrote (task P8-09 goal 2).
+    #[test]
+    fn a_document_opened_from_a_vsd_saves_as_vsdx() {
+        let dir = scratch_dir();
+        let source = fixture("minimal-drawing.vsd");
+        let vsd = dir.join("plan.vsd");
+        std::fs::copy(&source, &vsd).expect("copy");
+        let mut ctx = AppCtx::new(crate::Settings::default());
+        run_open(&mut ctx, &open_invocation(&vsd)).expect("open");
+        // The document edits before it saves (task P8-09 goal 1).
+        let session = ctx.active_document_mut().expect("session");
+        session.document.add_page("Page-2").expect("page");
+        session.dirty = true;
+        let outcome = run_save(&mut ctx, &Invocation::new(Args::new(), Source::Ui)).expect("save");
+        let vsdx = dir.join("plan.vsdx");
+        assert_eq!(
+            outcome.message.as_deref(),
+            Some(format!("Saved {}", vsdx.display()).as_str())
+        );
+        assert!(vsdx.is_file(), "the .vsdx was written");
+        let bytes = std::fs::read(&vsdx).expect("read back");
+        let package = read_package(&bytes, &Limits::DEFAULT).expect("package");
+        let document = to_model(&package).expect("model");
+        assert_eq!(document.pages.len(), 2, "the round trip keeps the edit");
+        let session = ctx.active_document().expect("session");
+        assert_eq!(session.path.as_deref(), Some(vsdx.as_path()));
+        assert!(!session.dirty);
+        assert!(vsd.is_file(), "the read-only source is never overwritten");
+        std::fs::remove_dir_all(&dir).expect("clean up");
+    }
+
+    /// The binary formats name inputs, never save targets (task P8-09
+    /// goal 2): `file.save_as other.vsd` is refused with the reason and
+    /// writes nothing.
+    #[test]
+    fn a_save_into_a_binary_format_is_refused() {
+        let dir = scratch_dir();
+        let mut ctx = AppCtx::new(crate::Settings::default());
+        ctx.open_document(DocumentSession::new(Document::new(), None));
+        let target = dir.join("other.vsd");
+        let invocation = Invocation::new(
+            Args::new().with("path", ArgValue::Path(target.clone())),
+            Source::Ui,
+        );
+        let error = run_save_as(&mut ctx, &invocation).expect_err("read-only");
+        let message = error.to_string();
+        assert!(message.starts_with("cannot write output:"), "{message}");
+        assert!(message.contains("read-only"), "{message}");
+        assert!(message.contains("other.vsdx"), "{message} names the target");
+        assert!(!target.exists(), "nothing was written");
+        std::fs::remove_dir_all(&dir).expect("clean up");
+    }
+
+    /// The no-target save of a never-saved document suggests the name
+    /// of its kind (task P8-09 goal 2).
+    #[test]
+    fn the_no_target_save_suggests_a_name_of_the_document_kind() {
+        let mut document = Document::new();
+        document.kind = DocumentKind::Stencil;
+        let mut ctx = AppCtx::new(crate::Settings::default());
+        ctx.open_document(DocumentSession::new(document, None));
+        let error =
+            run_save(&mut ctx, &Invocation::new(Args::new(), Source::Ui)).expect_err("no target");
+        let CommandError::NeedsInput(NeededInput::Path {
+            purpose: PathPurpose::SaveFile,
+            suggested,
+        }) = error
+        else {
+            panic!("expected a save-path request, got {error}");
+        };
+        assert_eq!(suggested, Some(PathBuf::from("stencil.vssx")));
+    }
+
+    /// The Phase 8 acceptance criterion: a corpus `.vsd` opens through
+    /// the command with its pages in the model.
+    #[test]
+    fn a_corpus_vsd_opens_through_the_open_command() {
+        let Some(path) = corpus_vsd("dwg.vsd") else {
+            return;
+        };
+        let mut ctx = AppCtx::new(crate::Settings::default());
+        let outcome = run_open(&mut ctx, &open_invocation(&path)).expect("open");
+        assert!(outcome.message.is_some());
+        let session = ctx.active_document().expect("session");
+        assert_eq!(session.document.kind, DocumentKind::Drawing);
+        assert!(
+            !session.document.pages.is_empty(),
+            "the corpus drawing has pages"
+        );
+    }
+
+    /// An unsupported version fails with the clear message naming the
+    /// reason; nothing panics (task P8-09 goal 3).
+    #[test]
+    fn an_unsupported_corpus_version_fails_with_the_clear_message() {
+        let Some(path) = corpus_vsd("Visio5PlanWithDimensions.vsd") else {
+            return;
+        };
+        let mut ctx = AppCtx::new(crate::Settings::default());
+        let error = run_open(&mut ctx, &open_invocation(&path)).expect_err("version 5");
+        let message = error.to_string();
+        assert!(message.contains("cannot read input:"), "{message}");
+        assert!(message.contains("unsupported file version 5"), "{message}");
+        assert!(ctx.active_document().is_none());
     }
 }

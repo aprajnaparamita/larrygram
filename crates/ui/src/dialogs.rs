@@ -59,7 +59,8 @@ impl FileChoice {
 pub struct OpenRequest {
     /// Dialog title.
     pub title: String,
-    /// Accepted extensions without the dot (`vsdx`, `vssx`, `vstx`).
+    /// Accepted extensions without the dot (`vsdx`, `vssx`, `vstx`,
+    /// `vsd`, `vss`, `vst`; task P8-09).
     pub extensions: Vec<String>,
     /// The suggested starting path, when the command supplied one.
     pub suggested: Option<PathBuf>,
@@ -72,6 +73,10 @@ pub struct SaveRequest {
     pub title: String,
     /// The default file name (e.g. `drawing.vsdx`).
     pub default_name: String,
+    /// Accepted extensions without the dot. The save dialog offers the
+    /// XML formats only (`vsdx`, `vssx`, `vstx`): the binary `.vsd`,
+    /// `.vss` and `.vst` formats are read-only inputs (task P8-09).
+    pub extensions: Vec<String>,
 }
 
 /// The state of an asynchronous pick (the wasm bridge, ADR 0036).
@@ -128,9 +133,12 @@ impl FilePicker for NativeFilePicker {
     }
 
     fn save(&self, request: &SaveRequest, data: &[u8]) -> Result<Option<FileChoice>, UiError> {
-        let dialog = rfd::FileDialog::new()
+        let mut dialog = rfd::FileDialog::new()
             .set_title(request.title.as_str())
             .set_file_name(request.default_name.as_str());
+        if !request.extensions.is_empty() {
+            dialog = dialog.add_filter("Visio files", &request.extensions);
+        }
         save_picked(|| dialog.save_file(), data)
     }
 }
@@ -360,6 +368,7 @@ mod tests {
         let save = SaveRequest {
             title: "Save".into(),
             default_name: "drawing.vsdx".into(),
+            extensions: vec!["vsdx".into()],
         };
         assert_eq!(open, open.clone());
         assert_eq!(save, save.clone());
