@@ -113,7 +113,7 @@ impl FileView {
                     ui.put(
                         rect,
                         Button::new(crate::panel_modern::common::arrow_atom(
-                            12.0,
+                            16.0,
                             crate::panel_modern::common::Arrow::Left,
                         ))
                         .frame(false),
@@ -176,14 +176,21 @@ impl FileView {
             crate::theme::color_at(ui.ctx(), "file_view.background"),
         );
         let page_id = self.page.clone();
+        let before = out.len();
         ui.scope_builder(
-            UiBuilder::new().max_rect(page.shrink(12.0)),
+            UiBuilder::new().max_rect(page.shrink(PAGE_MARGIN)),
             |ui| -> Result<(), UiError> {
                 self.show_page(ui, &page_id, app, lists, resolve, &mut out);
                 Ok(())
             },
         )
         .inner?;
+        // A page action that ran a command (New, Open, Print, ...)
+        // closes the view, as the command entries do (task P7-17: New
+        // shows the new drawing at once).
+        if out.len() > before {
+            close = true;
+        }
         Ok((out, close))
     }
 
@@ -224,7 +231,7 @@ impl FileView {
     /// Info: document properties, the file path and the protection
     /// status.
     fn show_info(&self, ui: &mut Ui, app: &AppCtx) {
-        ui.heading("Info");
+        page_heading(ui, "Info");
         let (name, location, pages) = match app.active_document() {
             Some(session) => (
                 session.display_name(),
@@ -243,54 +250,33 @@ impl FileView {
         ui.label("Protection: none");
     }
 
-    /// New: Larrygram's template tiles plus Blank Drawing.
+    /// New: Blank Drawing, then Larrygram's template tiles, in one
+    /// wrapped row of equal tiles.
+    ///
+    /// Blank Drawing runs `file.new`, the one implemented New command,
+    /// which Panel Classic's New Drawing from Template runs too (task
+    /// P7-17: the stub `file.new.blank.drawing` left the tile
+    /// disabled). An empty template list draws no tile at all.
     fn show_new(&self, ui: &mut Ui, lists: &ListData, resolve: Resolve<'_>, out: &mut Vec<Intent>) {
-        ui.heading("New");
-        ui.label("Templates");
-        let tiles = match lists.entries("template_categories") {
-            ListEntries::Empty => vec![NONE.to_owned()],
+        page_heading(ui, "New");
+        let templates = match lists.entries("template_categories") {
+            ListEntries::Empty => Vec::new(),
             ListEntries::Some(entries) => entries.to_vec(),
         };
-        for tile in tiles {
-            let placeholder = tile == NONE;
-            let item = item_with_command("file_view.new.template", &tile, Some("file.new"));
-            let action = resolve(&item);
-            let enabled = matches!(action, Action::Emit(_)) && !placeholder;
-            let response = ui
-                .add_enabled_ui(enabled, |ui| {
-                    ui.add(Button::new(tile.as_str()).min_size(Vec2::new(96.0, 48.0)))
-                })
-                .inner
-                .accessible_name(tile.as_str());
-            if placeholder {
-                response.on_disabled_hover_text(NONE);
-            } else {
-                finish(response, &action, &tooltip_text(&tile, &item), out);
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = Vec2::splat(TILE_GAP);
+            let item = item_with_command("file_view.new.blank", "Blank Drawing", Some("file.new"));
+            new_tile(ui, &item, "Blank Drawing", resolve, out);
+            for tile in &templates {
+                let item = item_with_command("file_view.new.template", tile, Some("file.new"));
+                new_tile(ui, &item, tile, resolve, out);
             }
-        }
-        let item = item_with_command(
-            "file_view.new.blank",
-            "Blank Drawing",
-            Some("file.new.blank.drawing"),
-        );
-        let action = resolve(&item);
-        let response = ui
-            .add_enabled_ui(matches!(action, Action::Emit(_)), |ui| {
-                ui.add(Button::new("Blank Drawing").min_size(Vec2::new(96.0, 48.0)))
-            })
-            .inner
-            .accessible_name("Blank Drawing");
-        finish(
-            response,
-            &action,
-            tooltip_text("Blank Drawing", &item).as_str(),
-            out,
-        );
+        });
     }
 
     /// Open: the recent files, then Browse.
     fn show_open(&self, ui: &mut Ui, app: &AppCtx, resolve: Resolve<'_>, out: &mut Vec<Intent>) {
-        ui.heading("Open");
+        page_heading(ui, "Open");
         ui.label("Recent files");
         if app.settings.recent_files.is_empty() {
             ui.add_enabled_ui(false, |ui| ui.label(NONE));
@@ -327,7 +313,7 @@ impl FileView {
 
     /// Save As: Browse.
     fn show_save_as(&self, ui: &mut Ui, resolve: Resolve<'_>, out: &mut Vec<Intent>) {
-        ui.heading("Save As");
+        page_heading(ui, "Save As");
         let item = item_with_command("file_view.save_as.browse", "Browse…", Some("file.save_as"));
         let action = resolve(&item);
         let response = ui
@@ -344,7 +330,7 @@ impl FileView {
 
     /// Print: the print settings and a preview placeholder.
     fn show_print(&self, ui: &mut Ui, resolve: Resolve<'_>, out: &mut Vec<Intent>) {
-        ui.heading("Print");
+        page_heading(ui, "Print");
         ui.label("Printer: Default");
         ui.label("Copies: 1");
         ui.label("Preview");
@@ -364,7 +350,7 @@ impl FileView {
 
     /// Export: the export formats.
     fn show_export(&self, ui: &mut Ui, resolve: Resolve<'_>, out: &mut Vec<Intent>) {
-        ui.heading("Export");
+        page_heading(ui, "Export");
         for format in ["PNG", "SVG", "PDF"] {
             let item = item_with_command("file_view.export.format", format, Some("file.export"));
             let action = resolve(&item);
@@ -379,6 +365,36 @@ impl FileView {
 
 /// The label of an empty list.
 const NONE: &str = "(none)";
+
+/// The margin around the page on the right of the nav column.
+const PAGE_MARGIN: f32 = 24.0;
+
+/// The size of one New tile.
+const TILE_SIZE: Vec2 = Vec2::new(160.0, 96.0);
+
+/// The gap between two New tiles.
+const TILE_GAP: f32 = 12.0;
+
+/// The size of a page heading, in points.
+const HEADING_SIZE: f32 = 24.0;
+
+/// A page heading: the page name, large, with room under it.
+fn page_heading(ui: &mut Ui, text: &str) {
+    ui.label(egui::RichText::new(text).size(HEADING_SIZE));
+    ui.add_space(HEADING_SIZE * 0.5);
+}
+
+/// One New tile: a fixed-size button that runs `item`'s command.
+fn new_tile(ui: &mut Ui, item: &Item, label: &str, resolve: Resolve<'_>, out: &mut Vec<Intent>) {
+    let action = resolve(item);
+    let response = ui
+        .add_enabled_ui(matches!(action, Action::Emit(_)), |ui| {
+            ui.add_sized(TILE_SIZE, Button::new(label).wrap())
+        })
+        .inner
+        .accessible_name(label);
+    finish(response, &action, tooltip_text(label, item).as_str(), out);
+}
 
 /// A minimal [`Item`] for the widgets: an id, a label and a command
 /// id (the File view pages build their entries in code).

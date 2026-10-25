@@ -419,37 +419,44 @@ pub fn show_with_overlay(
         cache.pointer_down = false;
     }
 
-    // Paint: backdrop, then the grid, then the page, then the overlay.
+    // Paint: backdrop, then the page, the grid on the page, the page
+    // raster, then the overlay. The grid sits on the page only, under
+    // the shapes (task P7-17: drawn under the opaque page fill it
+    // showed only off the page).
     let colors = CanvasColors::active(ui.ctx());
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 0.0, colors.background);
     let k = points_per_inch(zoom);
-    if session.view.show_grid {
-        draw_grid(&painter, viewport, session.view.pan, k);
-    }
-    if let Some(texture) = cache.texture_id() {
-        let origin = egui::pos2(
-            viewport.min.x + (session.view.pan.x * k) as f32,
-            viewport.min.y + (session.view.pan.y * k) as f32,
-        );
-        let size = egui::vec2(
-            (cache.page_size.0 * k) as f32,
-            (cache.page_size.1 * k) as f32,
-        );
-        let dest = Rect::from_min_size(origin, size);
-        if dest.is_positive() {
-            let shadow = Rect::from_min_size(dest.min + egui::vec2(3.0, 3.0), dest.size());
-            painter.rect_filled(shadow, 0.0, colors.page_shadow);
-            painter.rect_filled(dest, 0.0, colors.page_background);
+    // The page draws from the raster's size, or the document's before
+    // a raster exists (the grid shows on a new page at once).
+    let (page_w, page_h) = if cache.page_size.0 > 0.0 && cache.page_size.1 > 0.0 {
+        cache.page_size
+    } else {
+        page_size(&session.document, session.active_page)
+    };
+    let origin = egui::pos2(
+        viewport.min.x + (session.view.pan.x * k) as f32,
+        viewport.min.y + (session.view.pan.y * k) as f32,
+    );
+    let dest = Rect::from_min_size(origin, egui::vec2((page_w * k) as f32, (page_h * k) as f32));
+    if dest.is_positive() {
+        let shadow = Rect::from_min_size(dest.min + egui::vec2(3.0, 3.0), dest.size());
+        painter.rect_filled(shadow, 0.0, colors.page_shadow);
+        painter.rect_filled(dest, 0.0, colors.page_background);
+        if session.view.show_grid {
+            let on_page = painter.with_clip_rect(dest.intersect(painter.clip_rect()));
+            draw_grid(&on_page, viewport, session.view.pan, k);
+        }
+        if let Some(texture) = cache.texture_id() {
             let uv = Rect::from_min_max(Pos2::ZERO, egui::pos2(1.0, 1.0));
             painter.image(texture, dest, uv, Color32::WHITE);
-            painter.rect_stroke(
-                dest,
-                0.0,
-                Stroke::new(1.0, colors.page_border),
-                StrokeKind::Inside,
-            );
         }
+        painter.rect_stroke(
+            dest,
+            0.0,
+            Stroke::new(1.0, colors.page_border),
+            StrokeKind::Inside,
+        );
     }
     draw_overlay(
         &painter,
@@ -1168,7 +1175,8 @@ fn clamp_scale(ctx: &Context, width_in: f64, height_in: f64, wanted: f64) -> f64
     wanted.clamp(floor, cap)
 }
 
-/// The grid behind the texture (ADR 0033): lines at [`TICK_IN`] inches,
+/// The grid on the page, behind the texture (ADR 0033): lines at
+/// [`TICK_IN`] inches,
 /// a stronger line every inch.
 fn draw_grid(painter: &egui::Painter, viewport: Rect, pan: Point, k: f64) {
     for (x, major) in tick_positions(viewport.min.x, viewport.width(), pan.x, k) {

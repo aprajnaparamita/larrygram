@@ -90,18 +90,77 @@ impl WindowMode {
     }
 }
 
+/// The pointer-leave rule of the submenus (task P7-17): once the
+/// pointer has moved outside every open level (`rects`, this frame's)
+/// and stayed outside for [`SUBMENU_DELAY`], the open submenus close.
+/// The top level stays open until a click outside or Esc.
+///
+/// Only a pointer move starts the timer, so a submenu the keyboard
+/// opened stays open under a pointer that rests outside the menus.
+/// Returns `true` when the submenus must close now; `left` is the time
+/// the pointer left, kept across frames.
+pub(crate) fn close_on_leave(
+    ui: &Ui,
+    rects: &[Rect],
+    submenu_open: bool,
+    left: &mut Option<f64>,
+) -> bool {
+    if !submenu_open {
+        *left = None;
+        return false;
+    }
+    let (pos, moved, now) = ui.input(|i| {
+        (
+            i.pointer.hover_pos(),
+            i.pointer.delta() != Vec2::ZERO,
+            i.time,
+        )
+    });
+    if pos.is_some_and(|pos| rects.iter().any(|rect| rect.contains(pos))) {
+        *left = None;
+        return false;
+    }
+    match *left {
+        Some(start) if now - start >= SUBMENU_DELAY => {
+            *left = None;
+            return true;
+        }
+        Some(start) => {
+            let wait = (SUBMENU_DELAY - (now - start)).max(0.0);
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_secs_f64(wait));
+        }
+        None if moved => {
+            *left = Some(now);
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_secs_f64(SUBMENU_DELAY));
+        }
+        None => {}
+    }
+    false
+}
+
 /// The submenu hover rules of one row chain (the menu bars' rule, as
 /// `PanelClassic::update_context_hover` documents): a submenu opens
 /// after [`SUBMENU_DELAY`], any other row closes the deeper levels.
 /// The chain stays open while the pointer moves into a child level
-/// (P7-12 major 4).
+/// (P7-12 major 4), and closes once the pointer leaves every level
+/// ([`close_on_leave`], task P7-17).
+#[allow(clippy::too_many_arguments)] // the chain state is three fields of the caller
 pub(crate) fn update_chain_hover(
     ui: &Ui,
     levels: &[Vec<Row>],
+    rects: &[Rect],
     hover: Option<(usize, usize)>,
     chain: &mut Vec<usize>,
     pending: &mut Option<(usize, usize, f64)>,
+    left: &mut Option<f64>,
 ) {
+    if close_on_leave(ui, rects, !chain.is_empty(), left) {
+        chain.clear();
+        *pending = None;
+        return;
+    }
     let Some((level, index)) = hover else {
         *pending = None;
         return;
@@ -245,6 +304,9 @@ pub struct PanelClassic {
     chain: Vec<usize>,
     /// A pending submenu hover: (level, row, start time).
     hover_timer: Option<(usize, usize, f64)>,
+    /// When the pointer left the open menu levels (the leave rule,
+    /// [`close_on_leave`]).
+    menu_left: Option<f64>,
     /// Alt was tapped with no other key (toggles the bar focus).
     alt_tapped: bool,
     /// The open menu was switched by hovering a title: the click on it
@@ -260,6 +322,9 @@ pub struct PanelClassic {
     toolbar_visible: BTreeMap<String, bool>,
     /// `split_recent` item id to the last child chosen.
     split_recent: BTreeMap<String, String>,
+    /// Toolbar item id to the width it took last frame, spacing
+    /// included (the docked rows wrap with it, task P7-17).
+    toolbar_widths: BTreeMap<String, f32>,
     /// Combo id to the text being edited.
     combo_text: BTreeMap<String, String>,
     /// Combo id to the last applied text (Esc reverts to it).
@@ -277,11 +342,19 @@ pub struct PanelClassic {
     context_chain: Vec<usize>,
     /// A pending context-menu submenu hover: (level, row, start time).
     context_hover: Option<(usize, usize, f64)>,
+    /// When the pointer left the context-menu levels.
+    context_left: Option<f64>,
+    /// The context menu opened this frame: the click that opened it is
+    /// not a click outside it (task P7-17: a right-click opened the
+    /// menu and closed it in the same frame).
+    context_fresh: bool,
     /// The open toolbar-popup submenu chain (the `context_chain`
     /// rules, P7-12 major 4): one row index per open level.
     popup_chain: Vec<usize>,
     /// A pending toolbar-popup submenu hover: (level, row, start time).
     popup_hover: Option<(usize, usize, f64)>,
+    /// When the pointer left the toolbar-popup levels.
+    popup_left: Option<f64>,
     /// The context menu Shift+F10 opens (P7-08's hit-target mapping).
     context_target: Option<String>,
     /// The help search box text ("Type a question for help").
@@ -297,12 +370,14 @@ impl Default for PanelClassic {
             highlight: Vec::new(),
             chain: Vec::new(),
             hover_timer: None,
+            menu_left: None,
             alt_tapped: false,
             hover_switched: false,
             title_rects: Vec::new(),
             level_rects: Vec::new(),
             toolbar_visible: BTreeMap::new(),
             split_recent: BTreeMap::new(),
+            toolbar_widths: BTreeMap::new(),
             combo_text: BTreeMap::new(),
             combo_applied: BTreeMap::new(),
             open_popup: None,
@@ -311,8 +386,11 @@ impl Default for PanelClassic {
             context_pos: Pos2::ZERO,
             context_chain: Vec::new(),
             context_hover: None,
+            context_left: None,
+            context_fresh: false,
             popup_chain: Vec::new(),
             popup_hover: None,
+            popup_left: None,
             context_target: None,
             help_search: String::new(),
         }
@@ -366,6 +444,15 @@ impl PanelClassic {
         self.context = Some(menu_id.into());
         self.context_chain.clear();
         self.context_hover = None;
+        self.context_left = None;
+        self.context_fresh = true;
+    }
+
+    /// [`PanelClassic::open_context_menu`] with the menu's top-left
+    /// corner at `pos` (the right-click that opened it).
+    pub fn open_context_menu_at(&mut self, menu_id: impl Into<String>, pos: Pos2) {
+        self.context_pos = pos;
+        self.open_context_menu(menu_id);
     }
 
     /// Draws the chrome (the menu bar and the toolbars) and returns
@@ -403,6 +490,7 @@ impl PanelClassic {
         {
             self.context = Some(menu_id.to_owned());
             self.context_pos = trigger.rect.center();
+            self.context_fresh = true;
         }
         if self.context.as_deref() != Some(menu_id) {
             return Ok(intents);
@@ -440,6 +528,7 @@ impl PanelClassic {
         }
         let mut pos = self.context_pos;
         let mut area = egui::Rect::NOTHING;
+        let mut rects = Vec::with_capacity(levels.len());
         let mut activated: Option<(usize, usize)> = None;
         let mut open_child: Option<(usize, usize)> = None;
         let mut hover: Option<(usize, usize)> = None;
@@ -456,6 +545,7 @@ impl PanelClassic {
                     });
                 });
             area = area.union(inner.response.rect);
+            rects.push(inner.response.rect);
             if let Some(index) = outcome.clicked {
                 if rows.get(index).is_some_and(Row::has_children) {
                     open_child = Some((level, index));
@@ -473,7 +563,7 @@ impl PanelClassic {
                 pos = rect.right_top();
             }
         }
-        self.update_context_hover(ui, &levels, hover);
+        self.update_context_hover(ui, &levels, &rects, hover);
         if let Some((level, index)) = open_child {
             self.context_chain.truncate(level);
             self.context_chain.push(index);
@@ -482,9 +572,11 @@ impl PanelClassic {
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.close_context_menu();
         }
+        let fresh = std::mem::take(&mut self.context_fresh);
         if let Some(pointer) = ui.input(|i| i.pointer.interact_pos())
             && ui.input(|i| i.pointer.any_click())
             && !area.contains(pointer)
+            && !fresh
         {
             self.close_context_menu();
         }
@@ -506,6 +598,7 @@ impl PanelClassic {
         self.context = None;
         self.context_chain.clear();
         self.context_hover = None;
+        self.context_left = None;
     }
 
     /// Closes the open toolbar popup and its submenu chain.
@@ -513,6 +606,7 @@ impl PanelClassic {
         self.open_popup = None;
         self.popup_chain.clear();
         self.popup_hover = None;
+        self.popup_left = None;
     }
 
     /// The context-menu hover rules (the menu bars' [`Self::update_hover`]
@@ -522,14 +616,17 @@ impl PanelClassic {
         &mut self,
         ui: &Ui,
         levels: &[Vec<Row>],
+        rects: &[Rect],
         hover: Option<(usize, usize)>,
     ) {
         update_chain_hover(
             ui,
             levels,
+            rects,
             hover,
             &mut self.context_chain,
             &mut self.context_hover,
+            &mut self.context_left,
         );
     }
 
@@ -561,6 +658,7 @@ impl PanelClassic {
         self.chain.clear();
         self.highlight.clear();
         self.hover_timer = None;
+        self.menu_left = None;
         self.open_popup = None;
     }
 
@@ -727,8 +825,20 @@ impl PanelClassic {
         }
 
         // Hover: start or continue the submenu timer, close deeper
-        // levels when the hover moves to a leaf row.
-        self.update_hover(ui, levels, hover);
+        // levels when the hover moves to a leaf row, and close every
+        // submenu once the pointer leaves the menus (task P7-17).
+        if close_on_leave(
+            ui,
+            &level_rects,
+            !self.chain.is_empty(),
+            &mut self.menu_left,
+        ) {
+            self.chain.clear();
+            self.highlight.truncate(1);
+            self.hover_timer = None;
+        } else {
+            self.update_hover(ui, levels, hover);
+        }
         if let Some((level, index)) = open_child {
             self.chain.truncate(level);
             self.chain.push(index);
