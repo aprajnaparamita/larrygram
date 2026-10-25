@@ -77,11 +77,17 @@
 //!
 //! - a missing or dangling part, relationship or `Rel` reference leaves the
 //!   entity empty (`Master::shapes` is empty, a page has no shapes);
+//! - a `Shape` whose `ID` the model's id cannot hold (Visio writes
+//!   `ID='4294967295'` on a deleted sub-shape placeholder, task P8-19) is
+//!   kept verbatim, like every other unmapped element;
 //! - a `Master` or `BackPage` reference that names nothing stays in
 //!   `Preserved` instead of being resolved;
 //! - a `Connect` element with text, a comment or a processing instruction is
 //!   kept verbatim rather than modeled; its other unmapped attributes and
 //!   children go to [`Connect::preserved`](larrygram_model::Connect);
+//! - a cached value the model cannot hold (a non-finite number; task P8-19)
+//!   leaves the value slot empty and keeps its `V` and `U` spellings in
+//!   `Preserved`, exactly like an error cell keeps its value;
 //! - a numeric or boolean value that does not parse is
 //!   [`Error::InvalidPackage`] naming the part and the cell.
 
@@ -186,6 +192,22 @@ fn parse_attr_int(value: &str, part: &str, attribute: &str) -> Result<i32, Error
     parse_int(value).map_err(|()| {
         Error::InvalidPackage(format!("{part}: attribute `{attribute}`: not an integer"))
     })
+}
+
+/// The Visio `ID` of a `Shape` element the model can name, or `Ok(None)`
+/// when the id is a valid [MS-VSDX] unsigned id the model's signed 32-bit id
+/// cannot hold (Visio writes `ID='4294967295'` on a deleted sub-shape
+/// placeholder, task P8-19 cause 1). An `ID` that is no id at all is
+/// [`Error::InvalidPackage`] naming the part and the attribute; a `Shape`
+/// without an `ID` attribute keeps the model's default id of zero.
+fn shape_visio_id(node: &XmlNode, part: &str) -> Result<Option<i32>, Error> {
+    match node::attribute(node, "ID") {
+        None => Ok(Some(0)),
+        Some(id) => match id.trim().parse::<u32>() {
+            Ok(unsigned) => Ok(i32::try_from(unsigned).ok()),
+            Err(_) => parse_attr_int(id, part, "ID").map(Some),
+        },
+    }
 }
 
 /// An unsigned integer attribute value (a style reference or a stylesheet
@@ -556,8 +578,15 @@ impl Mapper<'_> {
         let mut stack: Vec<(&XmlNode, Option<ShapeId>)> = vec![(wrapper, None)];
         while let Some((container, parent)) = stack.pop() {
             for element in elements(container) {
-                if element.name.local != "Shape" {
-                    // The wrapper's own unmapped content follows its owner.
+                let visio_id = match element.name.local.as_str() {
+                    "Shape" => shape_visio_id(element, part)?,
+                    _ => None,
+                };
+                let Some(visio_id) = visio_id else {
+                    // The wrapper's own unmapped content follows its owner,
+                    // and so does a `Shape` whose unsigned `ID` the model's
+                    // id cannot hold (task P8-19 cause 1: Visio writes
+                    // `ID='4294967295'` on a deleted sub-shape placeholder).
                     match parent {
                         None => extras.children.push(element.clone()),
                         Some(group) => {
@@ -568,8 +597,8 @@ impl Mapper<'_> {
                         }
                     }
                     continue;
-                }
-                let id = self.add_shape(element, parent, part)?;
+                };
+                let id = self.add_shape(element, parent, part, visio_id)?;
                 match parent {
                     None => top.push(id),
                     Some(group) => {
@@ -589,12 +618,15 @@ impl Mapper<'_> {
         Ok((top, extras))
     }
 
-    /// Maps one `Shape` element into a new arena shape.
+    /// Maps one `Shape` element into a new arena shape. The Visio `ID` is
+    /// passed in already parsed ([`shape_visio_id`]): a `Shape` the model
+    /// cannot name never reaches here.
     fn add_shape(
         &mut self,
         node: &XmlNode,
         parent: Option<ShapeId>,
         part: &str,
+        visio_id: i32,
     ) -> Result<ShapeId, Error> {
         // The `Master` reference is resolved before the attribute pass, so an
         // unknown reference stays in `Preserved` in document order.
@@ -605,14 +637,14 @@ impl Mapper<'_> {
                 self.master_id(visio_id)
             }
         };
-        let mut shape = Shape::new(ShapeId { index: 0 }, 0);
+        let mut shape = Shape::new(ShapeId { index: 0 }, visio_id);
         shape.parent = parent;
         for attribute in &node.attributes {
             if is_namespace_declaration(attribute) {
                 continue;
             }
             match attribute.name.local.as_str() {
-                "ID" => shape.visio_id = parse_attr_int(&attribute.value, part, "ID")?,
+                "ID" => {}
                 "Name" => shape.name = attribute.value.clone(),
                 "NameU" => shape.name_u = attribute.value.clone(),
                 "LineStyle" => {
