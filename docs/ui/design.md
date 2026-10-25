@@ -1,7 +1,8 @@
 # Design language
 
-Status: **proposal** (task P7-18, step 1). The user approves it before
-any widget changes.
+Status: **accepted** (task P7-18; the user approved the proposal and
+its five choices on 2026-10-26). The palette, type and metrics live in
+`ui-spec/themes/base.yaml`.
 
 Larrygram has two layouts. Panel Modern has a command bar with tabs.
 Panel Classic has a menu bar with docked toolbars. Each layout keeps
@@ -152,19 +153,20 @@ same position: the shadow and the fill change mark the page.
 
 ## Type
 
-One family, Selawik (OFL, bundled), at four sizes. Both layouts use
-the same scale.
+One family, Selawik (OFL, bundled). Both layouts use the same scale;
+the role names are the font roles of `base.yaml`, and a widget asks for
+one with `theme::font_at`.
 
 | Role | Face | Size | Use |
 |---|---|---|---|
-| `caption` | Regular | 11 px | Group captions, status bar, ruler numbers |
-| `body` | Regular | 12 px | Labels, menus, buttons, tabs, fields |
-| `strong` | Semibold | 12 px | Pane titles, dialog section headings, the selected File view entry |
-| `title` | Semibold | 15 px | Dialog and wizard titles, File view page titles |
-| `display` | Light | 22 px | The wizard welcome heading and the About window name |
+| `caption` | Regular | 11 px | Group captions, contextual tab-set names, egui's small text |
+| `ui` | Regular | 12 px | Labels, menus, buttons, tabs, fields |
+| `strong` | Semibold | 12 px | Dialog section headings, the selected File view entry |
+| `lead` | Regular | 14 px | The wizard and About body text, which grows with the window |
+| `title` | Semibold | 15 px | Dialog titles (egui's heading style) |
+| `display` | Light | 22 px | Wizard headings, File view page titles |
 
-Tab captions are drawn in title case, as the data has them. The
-upper-case transform goes (a choice for the user, below).
+Tab captions are drawn in title case, as the data has them.
 
 ## Spacing, radii and borders
 
@@ -198,9 +200,14 @@ value:
 | `button.pressed.border`, `menu.bar.open.border` | `selected.border` |
 | `canvas.background`, `page.*` | the drawing-area values |
 
-Step 2 adds the tokens the palette needs and the widgets do not have
-yet: `pressed`, `focus`, `border.strong`, `text.muted`,
-`accent.hover`, `accent.pressed`, and the radius and spacing metrics.
+The design added these tokens: `button.active.fill` (`pressed`),
+`focus`, `control.border` (`border.strong`), `chrome.text_muted`
+(`text.muted`), `accent.hover`, `accent.pressed`, `button.fill` (a
+button at rest: transparent), `button.raised.fill` (a standard
+button: white), `shadow`, and the metrics `radius.control`,
+`radius.popup`, `focus.width`, `tab.underline` and
+`file_view.nav.indicator`. Tooltips draw with the menu tokens (egui
+gives them the popup frame), so the `tooltip.*` tokens went.
 
 ## Where the layouts differ
 
@@ -214,50 +221,85 @@ Only structure differs. Colours never do.
 | File commands | The File view | The File menu |
 | Shared | Status bar, panes, Shapes window, page tabs, rulers, canvas, dialogs, wizard, About window, context menus |
 
-Both layouts share one theme file for colours and type
-(`ui-spec/themes/base.yaml`, step 2). A layout's own file holds only
-its metrics: bar heights, button sizes and toolbar widths.
+Both layouts share one theme file for colours and type,
+`ui-spec/themes/base.yaml`. A layout's own file holds only its
+structure: the Panel Modern contextual tab sets, and the Panel Classic
+title bar, Shapes window and page-tab heights. The loader refuses a
+layout file that sets a colour or a font.
 
-## Choices for the user
+## The choices (approved 2026-10-26)
 
-1. **File view navigation.** Neutral (`surface`, with the selected
-   entry in the selected tint and an accent bar at its left) as
-   proposed, or an accent-filled rail as before.
-2. **Status bar.** Neutral (`surface`, muted text) as proposed, or
-   accent-filled.
-3. **Tab captions.** Title case as proposed, or upper case as before.
-4. **Selected tab.** Accent caption with a 2 px accent underline as
-   proposed, or a raised white tab with a border.
-5. **Accent hue.** `#1f5bc4` is the brand blue of the Larrygram art
-   (`#1e66e0`), deepened until it passes AA on every surface, so the
-   wizard pictures and the chrome agree. A quieter slate blue
-   (`#3a5ba0`) is the alternative.
+1. **File view navigation**: neutral (`surface`), the selected entry in
+   the selected tint with a 3 px accent bar at its left.
+2. **Status bar**: neutral (`surface`).
+3. **Tab captions**: title case.
+4. **Selected tab**: accent caption with a 2 px accent underline.
+5. **Accent hue**: `#1f5bc4`, the brand blue of the Larrygram art
+   (`#1e66e0`) deepened until it passes AA on every surface, so the
+   wizard pictures and the chrome agree.
 
-## The mock-ups
+## How the widgets apply it
+
+- `theme::apply` maps the tokens onto egui: buttons are flat at rest
+  (`button.fill`), take `button.hover.*` under the pointer,
+  `button.active.fill` while held, and the selected tint with an
+  accent label when selected. The active (held or focused) state has a
+  `focus.width` accent edge. Every widget state has the
+  `radius.control` corners; popups and windows have `radius.popup`.
+- `theme::raise_controls` gives the controls of a ui the standard
+  frame (`button.raised.fill`, `control.border`); check boxes and
+  radio buttons in that ui get the same edge. The wizard, the About
+  window and the File view pages use it.
+- `theme::accent_controls` makes a ui's buttons default buttons
+  (`accent`, `accent.hover`, `accent.pressed`, `accent.text`): the
+  File button, the wizard's Next and Start.
+- A disabled icon is tinted `chrome.text_disabled`, like a disabled
+  label (it was a 40% alpha).
+- The test `crates/ui/tests/phase7/palette.rs` draws the surfaces of
+  both layouts and fails when any shape outside the canvas paints a
+  colour that is not a theme token.
+
+egui 0.37's per-widget style providers would let check boxes carry an
+edge everywhere while buttons stay flat, but they sit behind egui's
+`experimental` feature. Until then a surface with check boxes calls
+`raise_controls`.
+
+## The pictures
 
 The pictures are local (never in git), under
-`/Volumes/Dara/larrygram/reference/ui-review/design/`:
+`/Volumes/Dara/larrygram/reference/ui-review/design/`, every surface of
+both layouts at 1440 x 900, scales 1 and 2:
 
-- `before/`: every surface of both layouts today, at 1440 x 900,
-  scales 1 and 2;
-- `proposal/`: the same surfaces with the palette in both theme files
-  and the egui mapping of `theme.rs` (flat buttons at rest, 4 px and
-  6 px radii, the accent for selection and links). No widget code
-  changed;
-- `proposal/contact-sheet.html`: before and proposal side by side.
+- `before/`: the two layouts before the design pass;
+- `proposal/`: the approved mock-ups (the palette applied through the
+  theme alone), with `contact-sheet.html`;
+- `after/`: the result, with `contact-sheet.html` (before and after side
+  by side).
 
-What the mock-ups cannot show yet, because it needs widget changes in
-step 2:
+They come from the P7-17 review sweep:
 
-- the selected-tab underline, title-case tab captions and the accent
-  bar on the selected File view entry;
-- a standard frame (white fill, `border.strong` edge) for dialog
-  buttons, the wizard's Back and Start and the File view tiles. The
-  flat rest state leaves them as bare text in the mock-ups;
-- the focus ring and the check box and radio edges in
-  `border.strong`;
-- the disabled-icon treatment (today a faint alpha; step 2 draws it
-  in `text.disabled`);
-- the type scale (the caption and title sizes);
-- the canvas grid, selection, handles and the Shapes window title.
-  These are in P7-19's files: step 2 lists the tokens they need.
+```sh
+LARRYGRAM_UI_REVIEW_DIR=/Volumes/Dara/larrygram/reference/ui-review/design/after \
+LARRYGRAM_UI_REVIEW_ONLY=1440x900 \
+  cargo test -p larrygram-ui --test phase7 review -- --ignored
+```
+
+## Still to adopt the design
+
+These surfaces are drawn by files outside task P7-18 (`shell.rs`,
+`panes.rs`, `shapes_window.rs`, `canvas.rs`), so they keep some of
+their own constants for now:
+
+- the Options window body should call `theme::raise_controls`, so its
+  check boxes and radio buttons get the `control.border` edge;
+- the canvas grid, the selection, the handles, the snap guides and the
+  marquee are constants in `canvas.rs`; they need tokens
+  (`canvas.grid.minor`, `canvas.grid.major`, `canvas.selection`,
+  `canvas.handle.fill`, `canvas.snap_guide`) added to `base.yaml` in the
+  same change that reads them;
+- the Shapes window title is Selawik Light 22 px from a constant; it
+  should use the `strong` role;
+- the status bar ("PAGE 1 OF 1") and the Shapes window links
+  ("STENCILS", "SEARCH") are upper-cased in code; title case matches the
+  tabs;
+- the Shape Data fields in the panes have no `control.border` edge.
