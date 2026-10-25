@@ -893,6 +893,10 @@ impl<'a> Walker<'a> {
         self.next_index += 1;
         let (visio_id, missing) = self.take_shape_id(chunk);
         let mut shape = Shape::new(id, visio_id);
+        // A guide shape record draws on screen only: the renderer skips
+        // it (P8-15: `Visio6PlanWithDimensions.vsd`'s six dimension
+        // guides drew as lines across the page).
+        shape.is_guide = chunk.record == SHAPE_GUIDE;
         let context = format!("shape {visio_id}");
         if missing {
             warnings.push(bad_value(context.clone(), "shape id"));
@@ -3300,6 +3304,23 @@ mod tests {
                 what: "shape record"
             }]
         );
+    }
+
+    #[test]
+    fn a_guide_shape_record_marks_the_shape_as_a_guide() {
+        // P8-15: `Visio6PlanWithDimensions.vsd`'s six dimension guides
+        // are guide shape records (`0x4d`): Visio draws guides on
+        // screen only, so the renderer skips them.
+        let chunks = vec![chunk(0x4d, 1, 44, shape_record_with_parent(0))];
+        let mut document = Document::new();
+        let mut warnings = Vec::new();
+        collect(&chunks, &mut document, &mut warnings).expect("collect");
+        assert!(document.shapes[0].is_guide);
+
+        let chunks = vec![chunk(0x48, 1, 45, shape_record_with_parent(0))];
+        let mut document = Document::new();
+        collect(&chunks, &mut document, &mut warnings).expect("collect");
+        assert!(!document.shapes[0].is_guide);
     }
 
     #[test]
