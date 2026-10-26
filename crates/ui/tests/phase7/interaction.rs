@@ -20,6 +20,11 @@ const WINDOW: egui::Vec2 = egui::vec2(1400.0, 900.0);
 /// A shell over `app` at `scale`, one frame drawn.
 fn rig(app: AppCtx, scale: f32) -> ShellRig {
     let mut rig = ShellRig::with_app_at(app, WINDOW, scale);
+    // The harness advances its clock between steps; keep two clicks
+    // in one double-click window.
+    rig.harness().ctx.options_mut(|options| {
+        options.input_options.max_double_click_delay = 10.0;
+    });
     rig.run();
     rig
 }
@@ -75,9 +80,20 @@ fn drag(rig: &mut ShellRig, from: egui::Pos2, to: egui::Pos2, modifiers: egui::M
     release(rig, to, modifiers);
 }
 
+/// A press and a release in one frame (one harness `run` steps its
+/// clock past egui's click time).
 fn click(rig: &mut ShellRig, pos: egui::Pos2) {
-    press(rig, pos, egui::Modifiers::NONE);
-    release(rig, pos, egui::Modifiers::NONE);
+    rig.harness().event(egui::Event::PointerMoved(pos));
+    rig.run();
+    for pressed in [true, false] {
+        rig.harness().event(egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+    }
+    rig.run();
 }
 
 fn double_click(rig: &mut ShellRig, pos: egui::Pos2) {
@@ -106,7 +122,10 @@ fn page_shape_count(rig: &ShellRig) -> usize {
     let shell = rig.shell.borrow();
     let session = shell.app.active_document().expect("session");
     let page = session.active_page.expect("page");
-    session.document.page(page).map_or(0, |page| page.shapes.len())
+    session
+        .document
+        .page(page)
+        .map_or(0, |page| page.shapes.len())
 }
 
 fn undo_len(rig: &ShellRig) -> usize {
@@ -222,8 +241,14 @@ fn a_tile_dragged_by_its_preview_drops_one_master_on_the_page() {
         assert_eq!(page_shape_count(&rig), before + 1, "scale {scale}");
         assert_eq!(undo_len(&rig), undo + 1, "one undo step, scale {scale}");
         let shape = last_shape(&rig);
-        assert!((number(&rig, shape, "PinX") - 5.0).abs() < 0.05, "scale {scale}");
-        assert!((number(&rig, shape, "PinY") - 7.0).abs() < 0.05, "scale {scale}");
+        assert!(
+            (number(&rig, shape, "PinX") - 5.0).abs() < 0.05,
+            "scale {scale}"
+        );
+        assert!(
+            (number(&rig, shape, "PinY") - 7.0).abs() < 0.05,
+            "scale {scale}"
+        );
         let selected = rig.shell.borrow().shapes_window().selected().copied();
         assert_eq!(selected.map(|pick| pick.master), Some("Ellipse"));
     }
@@ -254,12 +279,16 @@ fn a_tile_click_selects_and_the_keys_move_and_drop() {
         assert_ne!(next, Some("Rectangle"), "Down moves the selection");
         key(&mut rig, egui::Key::ArrowUp);
         key(&mut rig, egui::Key::Enter);
-        assert_eq!(page_shape_count(&rig), before + 1, "Enter drops, scale {scale}");
+        assert_eq!(
+            page_shape_count(&rig),
+            before + 1,
+            "Enter drops, scale {scale}"
+        );
         let shape = last_shape(&rig);
         let (width, height) = {
             let shell = rig.shell.borrow();
             let session = shell.app.active_document().expect("session");
-            larrygram_ui::canvas::page_size_of(&session.document, session.active_page)
+            larrygram_ui::canvas::page_size(&session.document, session.active_page)
         };
         assert!((number(&rig, shape, "PinX") - width / 2.0).abs() < 1.0e-6);
         assert!((number(&rig, shape, "PinY") - height / 2.0).abs() < 1.0e-6);
@@ -284,7 +313,8 @@ fn a_tile_double_click_drops_at_the_page_centre() {
     let mut rig = rig(rich(), 1.0);
     let before = page_shape_count(&rig);
     let rect = tile(&mut rig, "Triangle");
-    double_click(&mut rig, egui::pos2(rect.max.x - 10.0, rect.center().y));
+    // Past the label, short of the list's scroll bar.
+    double_click(&mut rig, egui::pos2(rect.max.x - 30.0, rect.center().y));
     assert_eq!(page_shape_count(&rig), before + 1);
 }
 
@@ -302,14 +332,23 @@ fn the_header_row_collapses_and_the_search_filters() {
             .map(|node| node.rect())
             .find(|rect| rect.center().x < 400.0)
             .expect("the Basic Shapes header");
-        // The far right of the row, away from the arrow and the name.
-        click(&mut rig, egui::pos2(header.max.x - 6.0, header.center().y));
+        // Right of the name, short of the list's scroll bar.
+        let row = egui::pos2(header.max.x - 30.0, header.center().y);
+        click(&mut rig, row);
         assert!(!has_tile(&mut rig, "Rectangle"), "collapsed, scale {scale}");
-        assert!(rig.shell.borrow().shapes_window().is_collapsed("Basic Shapes"));
-        click(&mut rig, egui::pos2(header.max.x - 6.0, header.center().y));
+        assert!(
+            rig.shell
+                .borrow()
+                .shapes_window()
+                .is_collapsed("Basic Shapes")
+        );
+        click(&mut rig, row);
         assert!(has_tile(&mut rig, "Rectangle"), "expanded, scale {scale}");
 
-        rig.shell.borrow_mut().shapes_window_mut().set_search("ellip");
+        rig.shell
+            .borrow_mut()
+            .shapes_window_mut()
+            .set_search("ellip");
         assert!(has_tile(&mut rig, "Ellipse"));
         assert!(!has_tile(&mut rig, "Rectangle"), "filtered out");
         rig.shell.borrow_mut().shapes_window_mut().set_search("");
@@ -331,7 +370,12 @@ fn a_splitter_drag_resizes_by_the_drag_distance_within_the_limits() {
         let edge = zone(&rig, "shapes");
         // From the pane side of the edge.
         let from = egui::pos2(edge.min.x + 1.0, edge.center().y);
-        drag(&mut rig, from, from + egui::vec2(60.0, 0.0), egui::Modifiers::NONE);
+        drag(
+            &mut rig,
+            from,
+            from + egui::vec2(60.0, 0.0),
+            egui::Modifiers::NONE,
+        );
         assert_eq!(size(&rig, "shapes"), default + 60.0, "scale {scale}");
         assert_eq!(
             rig.shell.borrow().app.settings.pane_sizes.get("shapes"),
@@ -342,7 +386,12 @@ fn a_splitter_drag_resizes_by_the_drag_distance_within_the_limits() {
         // starts no marquee (the selection stays).
         let edge = zone(&rig, "shapes");
         let from = egui::pos2(edge.max.x - 1.0, edge.center().y);
-        drag(&mut rig, from, from - egui::vec2(30.0, 0.0), egui::Modifiers::NONE);
+        drag(
+            &mut rig,
+            from,
+            from - egui::vec2(30.0, 0.0),
+            egui::Modifiers::NONE,
+        );
         assert_eq!(size(&rig, "shapes"), default + 30.0, "scale {scale}");
         assert_eq!(rig.shell.borrow().app.selection.shapes, selection);
         // Far past the maximum: the 45% limit.
@@ -356,7 +405,13 @@ fn a_splitter_drag_resizes_by_the_drag_distance_within_the_limits() {
         assert_eq!(size(&rig, "shapes"), WINDOW.x * 0.45, "the maximum");
         // Below the minimum but above half of it: the minimum.
         let edge = zone(&rig, "shapes");
-        let left = rig.shell.borrow().shapes_window_left();
+        let left = rig
+            .shell
+            .borrow()
+            .shapes_window_rect()
+            .expect("the Shapes window drew")
+            .min
+            .x;
         drag(
             &mut rig,
             edge.center(),
@@ -414,7 +469,13 @@ fn a_pane_collapses_reopens_and_its_width_survives_a_restart() {
             egui::Modifiers::NONE,
         );
         let width = size(&rig, "shapes");
-        let left = rig.shell.borrow().shapes_window_left();
+        let left = rig
+            .shell
+            .borrow()
+            .shapes_window_rect()
+            .expect("the Shapes window drew")
+            .min
+            .x;
         let edge = zone(&rig, "shapes");
         drag(
             &mut rig,
@@ -486,7 +547,22 @@ fn a_splitter_hover_shows_the_resize_cursor() {
 /// panned to the middle of the canvas.
 fn handle_rig(zoom: f64, scale: f32) -> ShellRig {
     let mut rig = rig(rich(), scale);
-    rig.shell.borrow_mut().center_view_on(zoom, larrygram_geom::Point::new(3.0, 3.0));
+    let viewport = rig
+        .shell
+        .borrow()
+        .canvas_viewport()
+        .expect("the canvas drew");
+    {
+        let mut shell = rig.shell.borrow_mut();
+        let session = shell.app.active_document_mut().expect("session");
+        let height = larrygram_ui::canvas::page_size(&session.document, session.active_page).1;
+        let k = 96.0 * zoom;
+        session.view.zoom = zoom;
+        session.view.pan = larrygram_geom::Point::new(
+            f64::from(viewport.width()) / 2.0 / k - 3.0,
+            f64::from(viewport.height()) / 2.0 / k - (height - 3.0),
+        );
+    }
     rig.run();
     rig.run();
     rig
@@ -600,4 +676,78 @@ fn the_cursor_shows_the_handle_operation() {
             egui::CursorIcon::Grab
         );
     }
+}
+
+// --- full screen and the measured viewport ----------------------------
+
+/// Full screen hides the chrome, panes and splitters; Esc leaves it,
+/// and Esc outside full screen never enters it (task P7-19, P7-20's
+/// `view.full_screen_mode`).
+#[test]
+fn full_screen_hides_the_chrome_and_esc_only_leaves() {
+    for scale in SCALES {
+        let mut rig = rig(rich(), scale);
+        key(&mut rig, egui::Key::Escape);
+        assert!(!rig.shell.borrow().app.full_screen, "Esc never enters");
+        assert!(has_tile(&mut rig, "Rectangle"));
+
+        rig.dispatch("view.full_screen_mode");
+        rig.run();
+        assert!(rig.shell.borrow().app.full_screen);
+        assert!(!has_tile(&mut rig, "Rectangle"), "no Shapes window");
+        assert!(
+            rig.shell
+                .borrow()
+                .splitter("shapes")
+                .and_then(|s| s.zone())
+                .is_none(),
+            "no splitter zones"
+        );
+        let viewport = rig.shell.borrow().canvas_viewport().expect("the canvas");
+        assert!(
+            viewport.width() > WINDOW.x - 60.0,
+            "the drawing takes the window"
+        );
+
+        key(&mut rig, egui::Key::Escape);
+        assert!(
+            !rig.shell.borrow().app.full_screen,
+            "Esc leaves, scale {scale}"
+        );
+        assert!(has_tile(&mut rig, "Rectangle"), "the chrome is back");
+        // F5 toggles in as well as out.
+        key(&mut rig, egui::Key::F5);
+        assert!(rig.shell.borrow().app.full_screen);
+        key(&mut rig, egui::Key::F5);
+        assert!(!rig.shell.borrow().app.full_screen);
+    }
+}
+
+/// The canvas records its viewport each frame, so Fit to Window runs
+/// without asking for the rectangle.
+#[test]
+fn the_canvas_records_the_viewport_for_the_fit_commands() {
+    let mut rig = rig(rich(), 1.0);
+    let viewport = rig.shell.borrow().canvas_viewport().expect("the canvas");
+    let recorded = rig
+        .shell
+        .borrow()
+        .app
+        .active_document()
+        .and_then(|session| session.view.viewport)
+        .expect("the viewport is recorded");
+    assert_eq!(
+        recorded,
+        (f64::from(viewport.width()), f64::from(viewport.height()))
+    );
+    rig.dispatch("view.zoom.fit");
+    rig.run();
+    let zoom = rig
+        .shell
+        .borrow()
+        .app
+        .active_document()
+        .map(|session| session.view.zoom)
+        .expect("session");
+    assert!(zoom > 0.0 && zoom < 1.0, "fitted: {zoom}");
 }

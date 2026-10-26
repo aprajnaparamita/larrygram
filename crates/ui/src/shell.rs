@@ -95,6 +95,9 @@ const PANE_MIN_WIDTH: f32 = 120.0;
 /// dragged, in points.
 const PANE_MIN_HEIGHT: f32 = 60.0;
 
+/// The full-screen toggle (task P7-20's `view.full_screen_mode`).
+const FULL_SCREEN: &str = "view.full_screen_mode";
+
 /// The settings key of the Shapes window width.
 const SHAPES_PANE: &str = "shapes";
 
@@ -178,6 +181,9 @@ pub struct Shell {
     /// A press landed on a splitter: the canvas ignores the pointer
     /// until the release.
     canvas_blocked: bool,
+    /// Whether the window was last put in full screen (the viewport
+    /// command goes out on a change only).
+    full_screen_drawn: bool,
     /// The canvas raster cache (ADR 0033).
     cache: CanvasCache,
     /// The dialog seam (ADR 0036); tests inject a fake picker.
@@ -190,6 +196,9 @@ pub struct Shell {
     focus: ShortcutScope,
     /// The canvas area of the previous frame (focus tracking).
     canvas_rect: Option<egui::Rect>,
+    /// The page viewport of the previous frame: the canvas area inside
+    /// the rulers (task P7-19, [`Shell::page_to_screen`]).
+    canvas_viewport: Option<egui::Rect>,
     /// The right-click targets of the last frame and their rects (the
     /// page-tab strip and the two panes; P7-14's routing and the
     /// tests' hit points).
@@ -271,11 +280,13 @@ impl Shell {
                 Splitter::new(SHAPE_DATA_PANE, Edge::Bottom),
             ],
             canvas_blocked: false,
+            full_screen_drawn: false,
             cache: CanvasCache::new(),
             picker: Box::new(NativeFilePicker),
             shortcuts,
             focus: ShortcutScope::Global,
             canvas_rect: None,
+            canvas_viewport: None,
             context_rects: Vec::new(),
             canvas_id: None,
             last_page: None,
@@ -361,6 +372,35 @@ impl Shell {
     /// The Shapes window widget, to set the search text.
     pub fn shapes_window_mut(&mut self) -> &mut ShapesWindow {
         &mut self.shapes
+    }
+
+    /// The screen point of a page point (inches) in the last frame's
+    /// canvas, or `None` before the canvas drew (task P7-19: tests and
+    /// tools aim at handles with it).
+    pub fn page_to_screen(&self, point: larrygram_geom::Point) -> Option<egui::Pos2> {
+        let viewport = self.canvas_viewport?;
+        let session = self.app.active_document()?;
+        let zoom = if session.view.zoom.is_finite() && session.view.zoom > 0.0 {
+            session.view.zoom
+        } else {
+            1.0
+        };
+        let k = canvas::POINTS_PER_INCH * zoom;
+        let height = canvas::page_size(&session.document, session.active_page).1;
+        let x = f64::from(viewport.min.x) + (session.view.pan.x + point.x) * k;
+        let y = f64::from(viewport.min.y) + (session.view.pan.y + (height - point.y)) * k;
+        (x.is_finite() && y.is_finite()).then(|| egui::pos2(x as f32, y as f32))
+    }
+
+    /// The page viewport of the last frame: the canvas area inside the
+    /// rulers.
+    pub fn canvas_viewport(&self) -> Option<egui::Rect> {
+        self.canvas_viewport
+    }
+
+    /// The Shapes window's rect of the last frame.
+    pub fn shapes_window_rect(&self) -> Option<egui::Rect> {
+        self.shapes_rect
     }
 
     /// The commands-layer active tool (task P5-17).
@@ -501,9 +541,32 @@ impl Shell {
             self.shapes.handle_keys(ui.ctx());
         }
         self.begin_splitters(ui.ctx());
+        // `Esc` and `F5` both toggle `view.full_screen_mode` in the
+        // shortcut table; Esc only leaves full screen, it never enters
+        // it (task P7-19).
+        let (escape, f5) = ui.input(|input| {
+            (
+                input.key_pressed(egui::Key::Escape),
+                input.key_pressed(egui::Key::F5),
+            )
+        });
         match shortcuts::dispatch(ui.ctx(), &mut self.shortcuts, &self.app, self.focus) {
-            Ok(produced) => intents.extend(produced),
+            Ok(mut produced) => {
+                if escape && !f5 && !self.app.full_screen {
+                    produced.retain(|intent| intent.command.as_str() != FULL_SCREEN);
+                }
+                intents.extend(produced);
+            }
             Err(error) => self.note_error(error.to_string()),
+        }
+        self.sync_full_screen(ui.ctx());
+        if self.app.full_screen {
+            self.show_full_screen_frame(ui, &mut intents);
+            self.end_splitters(ui);
+            self.route_context_click(ui);
+            self.draw_context_menus(ui, &mut intents);
+            self.show_dialogs(ui, &mut intents);
+            return Ok(intents);
         }
 
         match self.app.settings.ui_layout {
@@ -519,6 +582,29 @@ impl Shell {
         self.show_dialogs(ui, &mut intents);
         self.record_layout_state();
         Ok(intents)
+    }
+
+    /// Puts the window in and out of full screen when
+    /// [`AppCtx::full_screen`] changed (task P7-19, P7-20's
+    /// `view.full_screen_mode`).
+    fn sync_full_screen(&mut self, ctx: &Context) {
+        if self.full_screen_drawn != self.app.full_screen {
+            self.full_screen_drawn = self.app.full_screen;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(self.app.full_screen));
+        }
+    }
+
+    /// The full-screen frame: the drawing alone, no chrome, panes,
+    /// page tabs or status bar (task P7-19). Esc or F5 leaves.
+    fn show_full_screen_frame(&mut self, ui: &mut Ui, intents: &mut Vec<Intent>) {
+        self.tab_bar_rect = None;
+        self.shapes_rect = None;
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE)
+            .show(ui, |ui| {
+                self.show_canvas_area(ui, intents);
+                self.show_editor(ui, intents);
+            });
     }
 
     /// Rebuilds the per-layout widgets when the layout kind changed
@@ -933,10 +1019,10 @@ impl Shell {
         let shapes_rect = shapes.response.rect;
         self.shapes_rect = Some(shapes_rect);
         self.place_splitter(SHAPES_PANE, shapes_rect);
-        if self.shapes.take_close_requested() {
-            if let Some(splitter) = self.splitter_mut(SHAPES_PANE) {
-                splitter.collapse();
-            }
+        if self.shapes.take_close_requested()
+            && let Some(splitter) = self.splitter_mut(SHAPES_PANE)
+        {
+            splitter.collapse();
         }
         if let Some(pick) = self.shapes.take_drop_requested()
             && let Some(intent) = drop_at_centre_intent(&self.app, pick)
@@ -1212,7 +1298,8 @@ impl Shell {
 
     /// "Page n of m" with `join` between the numbers ("of" for Panel
     /// Modern, "/" for Panel Classic); empty with no document open
-    /// (task P7-17: it read "PAGE 0 OF 1").
+    /// (task P7-17: it read "PAGE 0 OF 1"; task P7-19: title case, as
+    /// the tabs).
     fn page_count_label(&self, join: &str) -> String {
         let (current, total) = match self.app.active_document() {
             Some(session) => {
@@ -1233,7 +1320,7 @@ impl Shell {
             None => return String::new(),
         };
         if join == "of" {
-            format!("PAGE {current} {join} {}", total.max(1)).to_uppercase()
+            format!("Page {current} {join} {}", total.max(1))
         } else {
             format!("Page {current}{join}{}", total.max(1))
         }
@@ -1330,6 +1417,7 @@ impl Shell {
                         Ok(output) => {
                             produced.extend(output.intents);
                             events = output.events;
+                            self.canvas_viewport = output.viewport;
                             if let Some(id) = output.focus_id {
                                 self.canvas_id = Some(id);
                             }
@@ -1746,6 +1834,9 @@ impl Shell {
                 .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
                 .open(&mut open)
                 .show(ui.ctx(), |ui| {
+                    // The bordered check boxes and radio buttons of the
+                    // design pass (P7-18's `raise_controls`).
+                    theme::raise_controls(ui);
                     match settings::show_options(ui, &self.app.settings) {
                         Ok(value) => changed = value,
                         Err(error) => failure = Some(error),
@@ -2514,9 +2605,13 @@ fn with_choice(invocation: &Invocation, choice: FileChoice) -> Invocation {
 }
 
 /// Draws the status-bar buttons flat: the bar's own colour behind
-/// them and a light fill on hover only (task P7-17: the default
-/// pale button fill under the bar's white text was unreadable).
+/// them and the theme's hover and press fills (task P7-17: the default
+/// pale button fill under the bar's white text was unreadable; task
+/// P7-19: the white-alpha fills made for the blue bar barely showed on
+/// the neutral one).
 fn flat_status_buttons(ui: &mut Ui) {
+    let hover = theme::color_at(ui.ctx(), "button.hover.fill");
+    let active = theme::color_at(ui.ctx(), "button.active.fill");
     let visuals = ui.visuals_mut();
     for widgets in [
         &mut visuals.widgets.inactive,
@@ -2526,8 +2621,8 @@ fn flat_status_buttons(ui: &mut Ui) {
         widgets.bg_fill = egui::Color32::TRANSPARENT;
         widgets.bg_stroke = egui::Stroke::NONE;
     }
-    visuals.widgets.hovered.weak_bg_fill = egui::Color32::from_white_alpha(40);
-    visuals.widgets.active.weak_bg_fill = egui::Color32::from_white_alpha(64);
+    visuals.widgets.hovered.weak_bg_fill = hover;
+    visuals.widgets.active.weak_bg_fill = active;
 }
 
 /// Dispatches one already-built invocation; the seam the CLI and the

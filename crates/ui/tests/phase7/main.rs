@@ -23,6 +23,7 @@ mod expect;
 mod first_run;
 mod fit;
 mod golden;
+mod interaction;
 mod layouts;
 mod menus;
 mod modern;

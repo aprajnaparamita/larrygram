@@ -41,8 +41,8 @@ pub enum Header {
     /// "Search for Shapes:" (docs/ui/panel-classic.md).
     #[default]
     Classic,
-    /// Panel Modern: a large "Shapes" title with the STENCILS and
-    /// SEARCH headings (docs/ui/panel-modern.md).
+    /// Panel Modern: a "Shapes" title with the Stencils and Search
+    /// headings (docs/ui/panel-modern.md).
     Modern,
 }
 
@@ -501,7 +501,7 @@ impl ShapesWindow {
                 painter.rect_stroke(
                     preview,
                     0.0,
-                    egui::Stroke::new(1.0, egui::Color32::GRAY),
+                    egui::Stroke::new(1.0, crate::theme::color_at(ui.ctx(), "chrome.border")),
                     egui::StrokeKind::Inside,
                 );
             }
@@ -547,14 +547,13 @@ impl ShapesWindow {
                 "type a word"
             }
             Header::Modern => {
-                // The large pane title (`pane_title`, 22 px).
-                ui.label(
-                    egui::RichText::new("Shapes")
-                        .size(PANE_TITLE_SIZE)
-                        .color(title_text),
-                );
-                ui.label(egui::RichText::new("STENCILS").color(title_text));
-                ui.label(egui::RichText::new("SEARCH").color(title_text));
+                // The pane title in the `strong` type role, the two
+                // headings in title case (task P7-19, after the P7-18
+                // design pass).
+                let strong = crate::theme::font_at(ui.ctx(), "strong");
+                ui.label(egui::RichText::new("Shapes").font(strong).color(title_text));
+                ui.label(egui::RichText::new("Stencils").color(title_text));
+                ui.label(egui::RichText::new("Search").color(title_text));
                 "Search for shapes"
             }
         };
@@ -595,10 +594,6 @@ impl ShapesWindow {
         }
     }
 }
-
-/// The size of the Panel Modern pane title (the theme's `pane_title`
-/// font, `docs/ui/panel-modern.md`: a large "Shapes" title).
-const PANE_TITLE_SIZE: f32 = 22.0;
 
 /// The margin around a preview's master, as a share of its larger
 /// side: the outline's stroke straddles the shape's edge, and on a
@@ -922,7 +917,7 @@ mod tests {
             modifiers: egui::Modifiers::NONE,
         };
         let mut window = ShapesWindow::new();
-        let mut run = |window: &mut ShapesWindow, events: Vec<egui::Event>| -> usize {
+        let run = |window: &mut ShapesWindow, events: Vec<egui::Event>| -> usize {
             let input = egui::RawInput {
                 events,
                 ..Default::default()
