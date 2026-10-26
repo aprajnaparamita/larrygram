@@ -77,6 +77,12 @@ colors:
   page.background: '#ffffff'
   page.border: '#b8b8b8'
   page.shadow: '#d0d0d0'
+  canvas.grid.minor: '#dcdcdc'
+  canvas.grid.major: '#c4c4c4'        # every inch
+  canvas.selection: '#1f5bc4'         # the accent: selection, handle edges, marquee
+  canvas.handle.fill: '#ffffff'
+  canvas.snap_guide: '#c4314b'
+  splitter.hover: '#1f5bc4'           # the accent line on a pane border under the pointer
   ruler.background: '#f5f5f5'
   ruler.ticks: '#5f5f5f'
   # Status bar and page tabs (surface)

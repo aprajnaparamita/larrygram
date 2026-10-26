@@ -96,11 +96,9 @@ const MAX_TICKS: i64 = 4096;
 /// reads `canvas.background`, `page.background`, `page.border`,
 /// `page.shadow`, `ruler.background` and `ruler.ticks`; the ruler labels
 /// use the tick colour. The grid and the tool overlay (task P7-19) read
-/// the closest existing tokens until the base theme gains canvas
-/// tokens of their own (the task's open issue): `chrome.separator` and
-/// `page.border` for the grid, `accent` for the selection, the marquee
-/// and the handle edges, `page.background` for the handle fill and
-/// `icon.red` for the snap guides.
+/// `canvas.grid.minor`, `canvas.grid.major`, `canvas.selection` (the
+/// selection, the marquee and the handle edges), `canvas.handle.fill`
+/// and `canvas.snap_guide`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CanvasColors {
     /// The area around the page (`canvas.background`).
@@ -115,16 +113,16 @@ pub struct CanvasColors {
     pub ruler_background: Color32,
     /// The ruler ticks and labels (`ruler.ticks`).
     pub ruler_ticks: Color32,
-    /// The minor grid lines (`chrome.separator`).
+    /// The minor grid lines (`canvas.grid.minor`).
     pub grid_minor: Color32,
-    /// The major grid lines, every inch (`page.border`).
+    /// The major grid lines, every inch (`canvas.grid.major`).
     pub grid_major: Color32,
     /// The selection outline, handle edges, marquee edge and connector
-    /// preview (`accent`).
+    /// preview (`canvas.selection`).
     pub selection: Color32,
-    /// The handle fill (`page.background`).
+    /// The handle fill (`canvas.handle.fill`).
     pub handle_fill: Color32,
-    /// The snap guides (`icon.red`).
+    /// The snap guides (`canvas.snap_guide`).
     pub snap_guide: Color32,
     /// The marquee fill: the selection colour at a low alpha.
     pub marquee_fill: Color32,
@@ -143,12 +141,13 @@ impl CanvasColors {
             page_shadow: crate::theme::color(theme, "page.shadow"),
             ruler_background: crate::theme::color(theme, "ruler.background"),
             ruler_ticks: crate::theme::color(theme, "ruler.ticks"),
-            grid_minor: crate::theme::color(theme, "chrome.separator"),
-            grid_major: crate::theme::color(theme, "page.border"),
-            selection: crate::theme::color(theme, "accent"),
-            handle_fill: crate::theme::color(theme, "page.background"),
-            snap_guide: crate::theme::color(theme, "icon.red"),
-            marquee_fill: crate::theme::color(theme, "accent").gamma_multiply(MARQUEE_ALPHA),
+            grid_minor: crate::theme::color(theme, "canvas.grid.minor"),
+            grid_major: crate::theme::color(theme, "canvas.grid.major"),
+            selection: crate::theme::color(theme, "canvas.selection"),
+            handle_fill: crate::theme::color(theme, "canvas.handle.fill"),
+            snap_guide: crate::theme::color(theme, "canvas.snap_guide"),
+            marquee_fill: crate::theme::color(theme, "canvas.selection")
+                .gamma_multiply(MARQUEE_ALPHA),
         }
     }
 
@@ -1910,6 +1909,11 @@ mod tests {
             ("page.shadow", "#040506"),
             ("ruler.background", "#070809"),
             ("ruler.ticks", "#0a0b0c"),
+            ("canvas.grid.minor", "#0d0e0f"),
+            ("canvas.grid.major", "#101010"),
+            ("canvas.selection", "#131415"),
+            ("canvas.handle.fill", "#161718"),
+            ("canvas.snap_guide", "#191a1b"),
         ] {
             colors.insert(token.to_owned(), value.to_owned());
         }
@@ -1934,6 +1938,11 @@ mod tests {
         assert_eq!(colors.page_shadow, Color32::from_rgb(0x04, 0x05, 0x06));
         assert_eq!(colors.ruler_background, Color32::from_rgb(0x07, 0x08, 0x09));
         assert_eq!(colors.ruler_ticks, Color32::from_rgb(0x0a, 0x0b, 0x0c));
+        assert_eq!(colors.grid_minor, Color32::from_rgb(0x0d, 0x0e, 0x0f));
+        assert_eq!(colors.grid_major, Color32::from_rgb(0x10, 0x10, 0x10));
+        assert_eq!(colors.selection, Color32::from_rgb(0x13, 0x14, 0x15));
+        assert_eq!(colors.handle_fill, Color32::from_rgb(0x16, 0x17, 0x18));
+        assert_eq!(colors.snap_guide, Color32::from_rgb(0x19, 0x1a, 0x1b));
     }
 
     #[test]

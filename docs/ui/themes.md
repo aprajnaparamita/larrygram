@@ -50,7 +50,8 @@ contextual_tab_sets: {set: colour family}   # Panel Modern
 | `accent` | `hyperlink_color` and the text cursor |
 | `icon.orange`, `icon.red` | `warn_fg_color`, `error_fg_color` |
 | `radius.control`, `radius.popup` | every widget state's corners; window and menu corners |
-| `canvas.background`, `page.*`, `ruler.*` | read by the canvas (`crates/ui/src/canvas.rs`) |
+| `canvas.*`, `page.*`, `ruler.*` | read by the canvas (`crates/ui/src/canvas.rs`): the off-page area, the page, the rulers, the grid, the selection and handles, the snap guides |
+| `splitter.hover` | the line on a pane border under the pointer (`crates/ui/src/splitter.rs`) |
 | everything else | read by the widget that draws it (`theme::color_at`, `theme::metric_at`) |
 
 `theme::raise_controls` (`button.raised.fill`, `control.border`) and
