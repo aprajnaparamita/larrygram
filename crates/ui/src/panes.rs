@@ -984,11 +984,18 @@ fn edit_field(ui: &mut Ui, app: &mut AppCtx, title: &str, entry: &Entry) -> Vec<
         state.text = entry.row.value.clone();
     }
     let mut text = state.text.clone();
-    let response = ui.add(
-        egui::TextEdit::singleline(&mut text)
-            .desired_width(ui.available_width().clamp(40.0, FIELD_WIDTH))
-            .hint_text(entry.row.label.as_str()),
-    );
+    // The field's `control.border` edge and field fill (task P7-19,
+    // the P7-18 design pass's `raise_controls`).
+    let response = ui
+        .scope(|ui| {
+            crate::theme::raise_controls(ui);
+            ui.add(
+                egui::TextEdit::singleline(&mut text)
+                    .desired_width(ui.available_width().clamp(40.0, FIELD_WIDTH))
+                    .hint_text(entry.row.label.as_str()),
+            )
+        })
+        .inner;
     state.text = text;
     if response.changed() {
         state.editing = true;

@@ -337,6 +337,30 @@ pub struct Settings {
     /// tab id).
     #[serde(default)]
     pub last_core_tab: Option<String>,
+    /// The docked panes' sizes and collapse state, by pane key (task
+    /// P7-19: the splitter widths survive a restart). The UI owns the
+    /// keys and the units (egui points); a missing pane uses its
+    /// default.
+    #[serde(default)]
+    pub pane_sizes: BTreeMap<String, PaneSize>,
+}
+
+/// One docked pane's remembered size (task P7-19).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct PaneSize {
+    /// The width (or height, for a stacked pane) in UI points.
+    pub size: f32,
+    /// Whether the pane is collapsed; it reopens at `size`.
+    #[serde(default)]
+    pub collapsed: bool,
+}
+
+impl PaneSize {
+    /// An open pane of `size` points.
+    pub fn new(size: f32, collapsed: bool) -> Self {
+        Self { size, collapsed }
+    }
 }
 
 /// The serde default of [`Settings::ui_layout`] and
@@ -359,6 +383,7 @@ impl Default for Settings {
             panel_classic_toolbars: BTreeMap::new(),
             command_bar_collapsed: false,
             last_core_tab: None,
+            pane_sizes: BTreeMap::new(),
         }
     }
 }
@@ -686,6 +711,24 @@ mod tests {
         assert_eq!(settings.last_core_tab, None);
         assert_eq!(settings.units, DisplayUnits::Inches);
         assert!(settings.recent_files.is_empty());
+    }
+
+    #[test]
+    fn pane_sizes_round_trip_and_default_to_empty() {
+        assert!(Settings::default().pane_sizes.is_empty());
+        let mut settings = Settings::default();
+        settings
+            .pane_sizes
+            .insert("shapes".to_owned(), PaneSize::new(240.0, true));
+        let text = serde_json::to_string(&settings).expect("serialize");
+        let back: Settings = serde_json::from_str(&text).expect("deserialize");
+        assert_eq!(
+            back.pane_sizes.get("shapes"),
+            Some(&PaneSize::new(240.0, true))
+        );
+        // A pane entry without the collapse flag is open.
+        let entry: PaneSize = serde_json::from_str(r#"{"size":200.0}"#).expect("entry");
+        assert_eq!(entry, PaneSize::new(200.0, false));
     }
 
     #[test]
