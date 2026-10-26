@@ -123,6 +123,13 @@ pub trait FilePicker {
 }
 
 /// The native file picker (rfd, ADR 0030).
+///
+/// The rfd dialog construction and its `pick_file`/`save_file` calls
+/// are the one seam no test drives: an OS dialog cannot open headless
+/// (the P7-12 coverage finding). The request-to-dialog mapping is
+/// pure and tested through [`open_dialog`] and [`save_dialog`], and
+/// the picker flows run against the fakes above; only the two rfd
+/// calls themselves stay uncovered by design.
 pub struct NativeFilePicker;
 
 #[cfg(not(target_arch = "wasm32"))]

@@ -1005,6 +1005,8 @@ fn inherit_geometry(document: &mut Document, master_shapes: &BTreeMap<u32, u32>)
             .filter(|section| section.name.as_str() == "Geometry")
             .cloned()
             .collect();
+        // Belt and braces (P8-12 minor 1): the same index resolved
+        // above, so this lookup cannot miss.
         if let Some(instance) = document.shapes.get_mut(index as usize) {
             instance.sheet.sections.extend(sections);
         }
@@ -4554,5 +4556,27 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn stale_indexes_in_the_geometry_join_are_belt_and_braces() {
+        // P8-12 minor 1: the arena indexes come from the walk itself,
+        // so the lookups cannot miss in an import; a hand-built
+        // document with dangling indexes exercises the guards.
+        let mut document = document_with_master();
+        document.add_shape(Shape::new(ShapeId { index: 0 }, 1));
+        document.shapes[0].master = Some(MasterId { index: 9 });
+        let mut join = BTreeMap::new();
+        join.insert(9u32, 1u32); // a dangling instance index
+        join.insert(0u32, 1u32); // an instance whose master is stale
+        inherit_geometry(&mut document, &join);
+        assert!(
+            document.shapes[0].sheet.sections.is_empty(),
+            "nothing resolves, nothing copies"
+        );
+        // A dangling child id and a stale master id in the search.
+        document.masters[0].shapes.push(ShapeId { index: 7 });
+        assert!(master_shape_with_geometry(&document, MasterId { index: 0 }, 1).is_none());
+        assert!(master_shape_with_geometry(&document, MasterId { index: 9 }, 1).is_none());
     }
 }
