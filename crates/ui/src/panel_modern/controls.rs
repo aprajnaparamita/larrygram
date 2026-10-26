@@ -334,6 +334,21 @@ fn combo(
     let response = put(ui, placed.rect, enabled(&action), widget, item, "combo");
     let response = response.accessible_name(label.as_str());
     finish(response.clone(), &action, &tooltip_text(&label, item), out);
+    if let Some(kind) = item
+        .command
+        .as_ref()
+        .map(|id| id.as_str())
+        .and_then(crate::pickers::picker_for)
+    {
+        if let Some(inner) = Popup::menu(&response).show(|ui| {
+            if crate::pickers::show(ui, kind, larrygram_commands::Source::CommandBar, out) {
+                ui.close();
+            }
+        }) {
+            let _ = inner;
+        }
+        return Ok(());
+    }
     if let Some(inner) = Popup::menu(&response)
         .show(|ui| -> Result<(), UiError> { show_options(ui, item, draw, resolve, out, depth + 1) })
     {
@@ -429,6 +444,21 @@ fn split(
     let response = response
         .accessible_name(DROPDOWN_TIP)
         .on_hover_text(DROPDOWN_TIP);
+    if let Some(kind) = item
+        .command
+        .as_ref()
+        .map(|id| id.as_str())
+        .and_then(crate::pickers::picker_for)
+    {
+        if let Some(inner) = Popup::menu(&response).show(|ui| {
+            if crate::pickers::show(ui, kind, larrygram_commands::Source::CommandBar, out) {
+                ui.close();
+            }
+        }) {
+            let _ = inner;
+        }
+        return Ok(());
+    }
     if let Some(inner) = Popup::menu(&response).show(|ui| -> Result<(), UiError> {
         let inherited = inherited_resolve(item, resolve);
         show_menu(ui, &item.items, draw, &inherited, out, depth + 1)
@@ -471,6 +501,21 @@ fn dropdown(
         response
     };
     finish(response.clone(), &action, &tooltip_text(&label, item), out);
+    if let Some(kind) = item
+        .command
+        .as_ref()
+        .map(|id| id.as_str())
+        .and_then(crate::pickers::picker_for)
+    {
+        if let Some(inner) = Popup::menu(&response).show(|ui| {
+            if crate::pickers::show(ui, kind, larrygram_commands::Source::CommandBar, out) {
+                ui.close();
+            }
+        }) {
+            let _ = inner;
+        }
+        return Ok(());
+    }
     if let Some(inner) = Popup::menu(&response).show(|ui| -> Result<(), UiError> {
         if item.kind == ItemKind::Gallery {
             show_gallery(ui, item, draw, resolve, out, depth + 1)?;

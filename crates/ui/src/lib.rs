@@ -23,6 +23,7 @@ pub mod lists;
 pub mod panel_classic;
 pub mod panel_modern;
 pub mod panes;
+pub mod pickers;
 pub mod settings;
 pub mod shapes_window;
 pub mod shell;

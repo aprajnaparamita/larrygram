@@ -622,8 +622,33 @@ fn draw_popup(
                     .find_map(|bar| find_in_menus(&bar.menus, &open))
             });
         if let Some(item) = items {
-            let rows = rows::rows(&item.items, input, state, Source::Ui, false, 0);
-            clicked = draw_popup_levels(ui, &rows, state.popup_rect.left_bottom(), state);
+            // A formatting picker hosts the popup (task P7-21): the
+            // colour swatches, the line lists and the font lists draw
+            // instead of the plain rows.
+            let picker = item
+                .command
+                .as_ref()
+                .map(|id| id.as_str())
+                .and_then(crate::pickers::picker_for);
+            if let Some(kind) = picker {
+                let mut chosen = false;
+                let area =
+                    egui::Area::new(egui::Id::unique(("panel_classic_picker", item.id.as_str())))
+                        .order(egui::Order::Foreground)
+                        .fixed_pos(state.popup_rect.left_bottom())
+                        .show(ui.ctx(), |ui| {
+                            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                                chosen = crate::pickers::show(ui, kind, Source::Ui, intents);
+                            });
+                        });
+                state.popup_level_rects = vec![area.response.rect];
+                if chosen {
+                    state.close_popup();
+                }
+            } else {
+                let rows = rows::rows(&item.items, input, state, Source::Ui, false, 0);
+                clicked = draw_popup_levels(ui, &rows, state.popup_rect.left_bottom(), state);
+            }
             // `split_recent`: the pick becomes the main button.
             if let Some((row_id, _)) = &clicked
                 && item.kind == ItemKind::SplitRecent

@@ -28,6 +28,7 @@ mod layouts;
 mod menus;
 mod modern;
 mod palette;
+mod pickers;
 mod placement;
 mod popups;
 mod review;

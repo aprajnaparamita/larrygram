@@ -808,6 +808,27 @@ fn every_toolbar_item_behaves() {
                 if matches!(expect, Expect::Disabled { .. }) {
                     continue;
                 }
+                // A picker hosts the popup (task P7-21): its own rows
+                // draw, not the item's rows (the pickers' behaviour is
+                // `tests/phase7/pickers.rs`).
+                if let Some(kind) = expect::picker_of(item) {
+                    let opener = match item.kind {
+                        ItemKind::Split | ItemKind::SplitRecent => format!("{label} menu"),
+                        _ => label.clone(),
+                    };
+                    rig.take_intents();
+                    rig.click(Role::Button, &opener);
+                    let first = larrygram_ui::pickers::first_row(kind);
+                    let drawn = rig.named_nodes();
+                    assert!(
+                        drawn.iter().any(|node| node.name == first),
+                        "the {:?} picker draws {first:?}",
+                        opener
+                    );
+                    rig.close_all();
+                    popups += 1;
+                    continue;
+                }
                 let level = expect::classic_level(&item.items, &registry, rig.app());
                 if level.is_empty() {
                     continue;
