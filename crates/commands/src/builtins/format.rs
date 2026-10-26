@@ -122,6 +122,14 @@ pub(crate) const TABLE: CommandTable = &[
         can_format,
         run_strikethrough,
     ),
+    // The Panel Classic Format Text toolbar's strikethrough id (task
+    // P7-21): the same toggle under the id its data links.
+    (
+        "text.strike.through",
+        "Strikethrough",
+        can_format,
+        run_strikethrough,
+    ),
     ("text.font.color", "Font Color", can_format, run_font_color),
     (
         "format.text_color.use_default",
@@ -627,18 +635,40 @@ fn ensure_rows(
         let Some(created) = entity.sheet.sections.last_mut() else {
             return Err(CommandError::failed("the text section could not be added"));
         };
-        created.rows.push(Row::new());
+        let mut row = Row::new();
+        // A text run marker names its row by `IX` (ADR 0019 decision
+        // 5), so the created row carries the `IX` the markers use.
+        row.ix = Some(0);
+        created.rows.push(row);
         return Ok(vec![RowTarget {
             position: Some(0),
-            ix: None,
+            ix: Some(0),
         }]);
     };
-    block.rows.push(Row::new());
+    let ix = next_row_ix(block);
+    let mut row = Row::new();
+    row.ix = Some(ix);
+    block.rows.push(row);
     let last = block.rows.len().saturating_sub(1);
     Ok(vec![RowTarget {
         position: Some(last),
-        ix: None,
+        ix: Some(ix),
     }])
+}
+
+/// The `IX` of the next row of a section: 0 when no row claims it, else
+/// one past the largest `IX` (a text run marker names rows by `IX`).
+fn next_row_ix(block: &Section) -> i32 {
+    let mut taken = false;
+    let mut largest = -1;
+    for row in &block.rows {
+        match row.ix {
+            Some(0) => taken = true,
+            Some(ix) => largest = largest.max(ix),
+            None => {}
+        }
+    }
+    if taken { largest.saturating_add(1) } else { 0 }
 }
 
 // ---------------------------------------------------------------------------
