@@ -509,6 +509,7 @@ pub fn check_chain(
             Expect::Toggle { command } => {
                 open_chain(rig, chain, role, by, opener);
                 rig.take_intents();
+                rig.hover_nth(role, &entry.label, nth);
                 rig.click_nth(role, &entry.label, nth);
                 let intents = rig.take_intents();
                 match command {

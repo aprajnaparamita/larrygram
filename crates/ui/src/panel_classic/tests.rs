@@ -188,9 +188,10 @@ fn registry(ids: &[&'static str]) -> Registry {
                 CommandStatus::Implemented,
             ),
         };
-        registry
-            .register(Box::new(command))
-            .expect("the command registers");
+        // `replace`, not `register`: the id may already have a real
+        // handler (task P7-21), and the rig latches its always-enabled
+        // stand-in over it.
+        registry.replace(Box::new(command));
     }
     registry
 }
@@ -1770,4 +1771,30 @@ fn each_committed_menu_renders_one_widget_per_visible_item() {
             menu.label
         );
     }
+}
+
+/// The popup hit bounds cover every drawn level (task P7-21: the Text
+/// Color popup is taller than the old 240-point guess, and a click on
+/// its last row was read as an outside click).
+#[test]
+fn the_popup_hit_bounds_cover_a_tall_popup() {
+    let mut panel = PanelClassic::new();
+    panel.popup_rect = Rect::from_min_size(Pos2::new(10.0, 20.0), Vec2::new(80.0, 22.0));
+    let fallback = panel.popup_hit_rect();
+    assert!(
+        fallback.contains(panel.popup_rect.left_bottom()),
+        "before the levels draw the guess anchors at the button"
+    );
+    let level = Rect::from_min_size(Pos2::new(10.0, 42.0), Vec2::new(180.0, 260.0));
+    panel.popup_level_rects = vec![level];
+    let bounds = panel.popup_hit_rect();
+    assert!(
+        bounds.contains(Pos2::new(20.0, 290.0)),
+        "the last row of a tall popup is inside the hit bounds"
+    );
+    panel.close_popup();
+    assert!(
+        panel.popup_level_rects.is_empty(),
+        "closing clears the bounds"
+    );
 }
