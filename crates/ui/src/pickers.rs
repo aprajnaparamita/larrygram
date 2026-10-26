@@ -355,11 +355,13 @@ fn font_size(ui: &mut Ui, nav: &mut Nav, source: Source, out: &mut Vec<Intent>) 
     let mut typed = None;
     ui.horizontal(|ui| {
         ui.label("Size:");
-        let edit = ui.add(
-            egui::TextEdit::singleline(&mut buffer)
-                .desired_width(56.0)
-                .hint_text("12"),
-        );
+        let edit = ui
+            .add(
+                egui::TextEdit::singleline(&mut buffer)
+                    .desired_width(56.0)
+                    .hint_text("12"),
+            )
+            .accessible_name("Size");
         if edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
             typed = buffer.trim().parse::<f64>().ok();
         }
