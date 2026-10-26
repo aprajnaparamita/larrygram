@@ -28,6 +28,7 @@ pub mod shapes_window;
 pub mod shell;
 pub mod shortcuts;
 pub mod snap;
+pub mod splitter;
 pub mod tab_bar;
 pub mod text_edit;
 pub mod theme;

@@ -159,8 +159,10 @@ fn one_rotate_drag_turns_the_shape() {
     let (app, id) = app_with_one_shape();
     let mut rig = CanvasRig::new(app);
     rig.click(screen(3.0, 3.0));
-    // The rotate handle sits 0.25 in above the top edge.
-    rig.drag(screen(3.0, 3.75), screen(3.5, 3.5));
+    // The rotate handle sits `ROTATE_OFFSET_PX` screen pixels above
+    // the top edge (task P7-19; it was a fixed 0.25 in).
+    let offset = larrygram_ui::handles::ROTATE_OFFSET_PX / (96.0 * crate::ZOOM);
+    rig.drag(screen(3.0, 3.5 + offset), screen(3.5, 3.5));
     let angle = shape_number(&rig.app.borrow(), id, "Angle");
     assert!(angle.abs() > 0.1, "{angle}");
 }
