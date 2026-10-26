@@ -75,6 +75,10 @@ pub fn import(bytes: &[u8], limits: &Limits) -> Result<Import, Error> {
     // A scaled drawing stores its lengths in the units it is scaled
     // in; the model keeps physical inches (P8-15 goal 4).
     crate::scale::scale_document(&mut document, limits, &mut warnings);
+    // Last: the shapes no page or master tree references go where
+    // Visio puts them, out of the model (the wide-corpus blank-page
+    // check, P8-14).
+    shape::drop_unreferenced(&mut document, &mut warnings);
     Ok(Import { document, warnings })
 }
 

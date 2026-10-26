@@ -255,16 +255,12 @@ fn read_only_save_error(path: &Path, kind: DocumentKind) -> CommandError {
 
 /// One import warning as a status line (ADR 0071: every degradation
 /// surfaces, never silently).
+///
+/// The kind is spelled by its own [`std::fmt::Display`] in
+/// `larrygram-vsd-binary`, so a new variant cannot fall back to a
+/// `Debug` spelling here (P8-11 F8).
 fn import_warning_line(warning: &binary::ImportWarning) -> String {
-    let what = match &warning.kind {
-        binary::WarningKind::SkippedRecord { name } => format!("skipped record {name}"),
-        binary::WarningKind::Dropped { what } => format!("dropped {what}"),
-        binary::WarningKind::UnresolvedReference { what } => format!("unresolved {what}"),
-        binary::WarningKind::BadValue { what } => format!("unparsable {what}, using a default"),
-        binary::WarningKind::Unsupported { what } => format!("unsupported {what}"),
-        other => format!("{other:?}"),
-    };
-    format!("{}: {what}", warning.context)
+    format!("{}: {}", warning.context, warning.kind)
 }
 
 // ---------------------------------------------------------------------------
@@ -959,6 +955,9 @@ pub fn kind_text(kind: DocumentKind) -> &'static str {
         DocumentKind::Drawing => "drawing",
         DocumentKind::Stencil => "stencil",
         DocumentKind::Template => "template",
+        // `DocumentKind` is `#[non_exhaustive]`, so this arm is
+        // required but unreachable: every variant it has is named
+        // (P8-12 major 4).
         _ => "unknown",
     }
 }
@@ -999,6 +998,9 @@ pub fn warning_line(doc: &Document, warning: &larrygram_model::CellWarning) -> S
         larrygram_model::WarningKind::UnresolvedTheme => {
             format!("the theme cannot supply it, using {used}")
         }
+        // `WarningKind` is `#[non_exhaustive]`, so this arm is
+        // required but unreachable: every variant it has is named
+        // (P8-12 major 4).
         _ => format!("value unavailable, using {used}"),
     };
     format!(
@@ -1031,6 +1033,9 @@ pub fn value_text(value: &CellValue) -> String {
         CellValue::Color(color) => format!("#{:02X}{:02X}{:02X}", color.r, color.g, color.b),
         CellValue::List(text) => text.clone(),
         CellValue::Error(text) => text.clone(),
+        // `CellValue` is `#[non_exhaustive]`, so this arm is required
+        // but unreachable: every variant it has is named (P8-12 major
+        // 4).
         _ => String::new(),
     }
 }
@@ -1634,6 +1639,72 @@ mod tests {
             vec![path.clone()],
             "one entry, not two"
         );
+        std::fs::remove_dir_all(&dir).expect("clean up");
+    }
+
+    // -----------------------------------------------------------------------
+    // The failure arms of the open and save paths (P8-12 major 3)
+    // -----------------------------------------------------------------------
+
+    /// A corrupt binary file through `file.open` is one error line
+    /// that names the file, never a crash.
+    #[test]
+    fn a_corrupt_binary_file_fails_the_open_with_one_error_line() {
+        let dir = scratch_dir();
+        let path = dir.join("broken.vsd");
+        std::fs::write(&path, b"not a compound file").expect("write");
+        let mut ctx = AppCtx::new(crate::Settings::default());
+        let error = run_open(&mut ctx, &open_invocation(&path)).expect_err("fails");
+        let message = error.to_string();
+        assert!(message.contains("cannot read input"), "{message}");
+        assert!(message.contains("broken.vsd"), "{message}");
+        std::fs::remove_dir_all(&dir).expect("clean up");
+    }
+
+    /// A corrupt package through `file.open` is one error line.
+    #[test]
+    fn a_corrupt_package_fails_the_open_with_one_error_line() {
+        let dir = scratch_dir();
+        let path = dir.join("broken.vsdx");
+        std::fs::write(&path, b"not a package").expect("write");
+        let mut ctx = AppCtx::new(crate::Settings::default());
+        let error = run_open(&mut ctx, &open_invocation(&path)).expect_err("fails");
+        let message = error.to_string();
+        assert!(message.contains("cannot read input"), "{message}");
+        assert!(message.contains("broken.vsdx"), "{message}");
+        std::fs::remove_dir_all(&dir).expect("clean up");
+    }
+
+    /// A missing input file is one error line.
+    #[test]
+    fn a_missing_input_file_fails_the_open_with_one_error_line() {
+        let mut ctx = AppCtx::new(crate::Settings::default());
+        let path = Path::new("/no/such/larrygram-file.vsdx");
+        let error = run_open(&mut ctx, &open_invocation(path)).expect_err("fails");
+        let message = error.to_string();
+        assert!(message.contains("cannot read input"), "{message}");
+        assert!(message.contains("larrygram-file.vsdx"), "{message}");
+    }
+
+    /// A supplied file that fails to import (the picker's and the wasm
+    /// upload's bytes seam) is one error line.
+    #[test]
+    fn a_supplied_file_that_fails_to_import_is_one_error_line() {
+        let mut ctx = AppCtx::new(crate::Settings::default());
+        let error =
+            read_input_document(&mut ctx, b"\0\0", Path::new("picked.vsd")).expect_err("fails");
+        let message = error.to_string();
+        assert!(message.contains("cannot read input"), "{message}");
+        assert!(message.contains("picked.vsd"), "{message}");
+    }
+
+    /// A write into a target that cannot be written is one error line.
+    #[test]
+    fn a_write_into_an_unwritable_target_is_one_error_line() {
+        let dir = scratch_dir();
+        let error = write_file(&dir, b"bytes").expect_err("a directory is not a file");
+        let message = error.to_string();
+        assert!(message.contains("cannot write output"), "{message}");
         std::fs::remove_dir_all(&dir).expect("clean up");
     }
 }

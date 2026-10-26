@@ -85,7 +85,7 @@ use std::collections::BTreeMap;
 use larrygram_geom::Unit;
 use larrygram_model::{
     Cell, CellName, CellValue, Document, DocumentKind, Master, MasterId, Page, PageId, Property,
-    ShapeId,
+    Row, Section, SectionName, ShapeId,
 };
 
 use crate::chunks::{Chunk, FormatVersion, Record};
@@ -121,6 +121,8 @@ const NAME2: Record = Record(0x33);
 const NAME_LIST: Record = Record(0x2c);
 /// The version 11 name list header.
 const NAME_LIST2: Record = Record(0x32);
+/// One layer row of a page sheet.
+const LAYER: Record = Record(0xa8);
 /// The map from element ids to name ids.
 const NAME_IDX: Record = Record(0xc9);
 /// The other name-id map spelling.
@@ -129,12 +131,6 @@ const NAME_IDX_123: Record = Record(0x34);
 const SHAPE_LIST: Record = Record(0x65);
 /// One shape id of a shape list.
 const SHAPE_ID: Record = Record(0x83);
-/// The list of a sheet's property records.
-const PROP_LIST: Record = Record(0x68);
-/// The connect list (entries are not yet readable; see the module docs).
-const CONNECT_LIST: Record = Record(0x72);
-/// The document properties record.
-const DOC_PROPS: Record = Record(0xbc);
 
 /// The value of a page field that names no page: the page record's own
 /// background id is `0xFFFFFFFF` for a plain page.
@@ -171,7 +167,7 @@ pub fn collect_with(
 ) -> Result<(), Error> {
     let names = name_strings(chunks, version);
     let indexes = name_indexes(chunks);
-    let mut walk = Walk::default();
+    let mut walk = Walk::new(version);
     for chunk in chunks {
         walk.record(chunk, warnings);
     }
@@ -264,13 +260,15 @@ struct Container {
     shapes: Vec<ShapeId>,
     /// The page sheet's direct cells.
     cells: Vec<Cell>,
+    /// The page sheet's `Layer` rows, in stream order (P8-14).
+    layers: Vec<Row>,
 }
 
 /// The state of one [`collect_with`] walk.
 ///
 /// Pages and masters never nest, so one container is open at a time;
 /// the shape records nest by level and are tracked by their levels.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct Walk {
     /// The levels of the open shape records, innermost last.
     shapes: Vec<u16>,
@@ -280,6 +278,21 @@ struct Walk {
     done: Vec<Container>,
     /// The shape record count so far: the arena id of the next shape.
     shape_ordinal: u32,
+    /// The stream's format version (the string payload layouts).
+    version: FormatVersion,
+}
+
+impl Walk {
+    /// A walk over one stream version.
+    fn new(version: FormatVersion) -> Self {
+        Walk {
+            shapes: Vec::new(),
+            current: None,
+            done: Vec::new(),
+            shape_ordinal: 0,
+            version,
+        }
+    }
 }
 
 impl Walk {
@@ -305,22 +318,11 @@ impl Walk {
                 self.open_shape(chunk);
             }
             PAGE_PROPS => self.page_props(chunk, warnings),
-            CONNECT_LIST => warn(
-                warnings,
-                self.context(),
-                WarningKind::SkippedRecord {
-                    name: "connect list",
-                },
-            ),
-            DOC_PROPS if self.current.is_none() => warn(
-                warnings,
-                "document",
-                WarningKind::Dropped {
-                    what: "document properties record",
-                },
-            ),
+            LAYER => self.layer(chunk, warnings),
+            // These are structure of the name, shape and page groups;
+            // the records that carry content report themselves.
             NAME_LIST | NAME_LIST2 | NAME | NAME2 | NAME_IDX | NAME_IDX_123 | SHAPE_LIST
-            | SHAPE_ID | PROP_LIST | PAGES | STENCILS | PAGE_SHEET => {}
+            | SHAPE_ID | PAGES | STENCILS | PAGE_SHEET => {}
             _ => self.skip_other(chunk, warnings),
         }
     }
@@ -347,6 +349,7 @@ impl Walk {
             background,
             shapes: Vec::new(),
             cells: Vec::new(),
+            layers: Vec::new(),
         });
     }
 
@@ -386,19 +389,67 @@ impl Walk {
         }
     }
 
+    /// Maps one layer record onto the open page's `Layer` row (P8-14).
+    ///
+    /// A layer under a master's stencil page has no model slot (the
+    /// same rule as [`Walk::page_props`]) and warns `Dropped`.
+    fn layer(&mut self, chunk: &Chunk<'_>, warnings: &mut Vec<ImportWarning>) {
+        let context = self.context();
+        match self.current.as_mut() {
+            Some(container) if !container.page => warn(
+                warnings,
+                context,
+                WarningKind::Dropped {
+                    what: "master page sheet",
+                },
+            ),
+            Some(container) => {
+                let mut row = read_layer(chunk.data, self.version, warnings, &context);
+                row.ix = Some(i32::try_from(container.layers.len()).unwrap_or(i32::MAX));
+                container.layers.push(row);
+            }
+            None => warn(
+                warnings,
+                context,
+                WarningKind::Dropped {
+                    what: "document layer list",
+                },
+            ),
+        }
+    }
+
     /// Warns for a record this module does not consume inside a page or
     /// master (the module docs have the rule).
+    ///
+    /// A record kind the importer drops warns `Dropped` with what it
+    /// carries (this covers the document-scope rows too: document
+    /// custom properties and the like); a kind no module consumes warns
+    /// `SkippedRecord` with its format name. A kind a module maps stays
+    /// silent (P8-11 F1: nothing is dropped silently).
     fn skip_other(&mut self, chunk: &Chunk<'_>, warnings: &mut Vec<ImportWarning>) {
-        if self.current.is_none() || !self.shapes.is_empty() {
+        if !self.shapes.is_empty() {
+            // Inside a shape record group: `crate::shape` reports it.
             return;
         }
-        warn(
-            warnings,
-            self.context(),
-            WarningKind::SkippedRecord {
-                name: chunk.record.name(),
-            },
-        );
+        if let Some(what) = chunk.record.dropped_what() {
+            warn(warnings, self.context(), WarningKind::Dropped { what });
+            return;
+        }
+        if self.current.is_none() {
+            // Document scope carries the stream structure the chunk
+            // layer reads; the drop policy above covers the document
+            // rows that hold content.
+            return;
+        }
+        if !chunk.record.is_mapped() {
+            warn(
+                warnings,
+                self.context(),
+                WarningKind::SkippedRecord {
+                    name: chunk.record.name(),
+                },
+            );
+        }
     }
 
     /// Where the walk is, for a warning context.
@@ -460,6 +511,11 @@ impl Walk {
                 }
                 page.shapes = container.shapes.clone();
                 page.sheet.cells = container.cells.clone();
+                if !container.layers.is_empty() {
+                    let mut section = Section::new(SectionName::from_static("Layer"));
+                    section.rows = container.layers.clone();
+                    page.sheet.sections.push(section);
+                }
                 pages.push((page, container.background));
             } else {
                 has_stencil_pages = true;
@@ -814,6 +870,107 @@ fn cell_unit(tag: u8) -> Option<Unit> {
         | 233
         | 251 => Unit::Unitsless,
         _ => return None,
+    })
+}
+
+/// Reads one layer record into its `Layer` row (P8-11 F1: the layers
+/// and layer membership of ADR 0070).
+///
+/// The fixed part is the reference's `readLayer` layout: a colour index
+/// at offset 8 (the `Color` cell, `255` = none), `Visible` at 14 and
+/// `Print` at 15. The names live in the trailing cell blocks: index 0
+/// is `Name`, index 10 is `NameUniv` (both confirmed against a Visio
+/// twin's `Layers` rows). A field that does not parse warns
+/// [`WarningKind::BadValue`] and its cell stays unset.
+fn read_layer(
+    data: &[u8],
+    version: FormatVersion,
+    warnings: &mut Vec<ImportWarning>,
+    context: &str,
+) -> Row {
+    let mut row = Row::new();
+    match (data.get(8), data.get(14), data.get(15)) {
+        (Some(colour), Some(visible), Some(printable)) => {
+            for (name, value) in [
+                ("Color", *colour),
+                ("Visible", *visible),
+                ("Print", *printable),
+            ] {
+                let mut cell = Cell::new(CellName::from_static(name));
+                cell.value = Some(CellValue::Number(f64::from(value)));
+                cell.unit = Unit::Unitsless;
+                row.cells.push(cell);
+            }
+        }
+        _ => warnings.push(bad_value(context, "layer record")),
+    }
+    for (index, name) in [(0u8, "Name"), (10, "NameUniv")] {
+        if let Some(text) = cell_block_string(data, LAYER_BLOCKS, version, index) {
+            let mut cell = Cell::new(CellName::from_static(name));
+            cell.value = Some(CellValue::Str(text));
+            cell.unit = Unit::Unitsless;
+            row.cells.push(cell);
+        }
+    }
+    row
+}
+
+/// The first byte of a layer record's trailing cell blocks: the fixed
+/// part the reference reads is 16 bytes, and the record keeps 17 more
+/// before the blocks (the corpus's layer records).
+const LAYER_BLOCKS: usize = 33;
+
+/// The string value of one trailing cell block of a record payload.
+///
+/// The trailing region of a row record is a sequence of cell blocks: a
+/// `u32` length (the whole block, itself included), a `u8` block type,
+/// a `u8` cell index and the value. The walk starts at `start` and
+/// stops at a zero length or at the payload end. The value form this
+/// reads is the string one: `0x60`, a character count, that many
+/// characters (two bytes per character in version 11, one in version
+/// 6), and `0xfe`.
+///
+/// Returns `None` when no such block exists or a length does not fit
+/// the payload: never a panic (P8-11 F1, the layer names and
+/// [`crate::shape`]'s layer membership).
+pub(crate) fn cell_block_string(
+    data: &[u8],
+    start: usize,
+    version: FormatVersion,
+    index: u8,
+) -> Option<String> {
+    let width = match version {
+        FormatVersion::V11 => 2usize,
+        FormatVersion::V6 => 1usize,
+    };
+    let mut pos = start;
+    loop {
+        let header = data.get(pos..pos.checked_add(6)?)?;
+        let length =
+            usize::try_from(u32::from_le_bytes(header.get(0..4)?.try_into().ok()?)).ok()?;
+        if length <= 6 {
+            // A zero length ends the region; a shorter one is malformed.
+            return None;
+        }
+        let block = data.get(pos..pos.checked_add(length)?)?;
+        if block.get(4) == Some(&2) && block.get(5) == Some(&index) {
+            return block_string(block.get(6..)?, width);
+        }
+        pos = pos.checked_add(length)?;
+    }
+}
+
+/// The string value of one cell block's content bytes.
+fn block_string(content: &[u8], width: usize) -> Option<String> {
+    if content.first().copied()? != 0x60 {
+        return None;
+    }
+    let count = usize::from(*content.get(1)?);
+    let end = 2usize.checked_add(count.checked_mul(width)?)?;
+    let chars = content.get(2..end)?;
+    Some(match width {
+        2 => decode_utf16(chars),
+        _ => chars.iter().map(|byte| char::from(*byte)).collect(),
     })
 }
 
@@ -1600,7 +1757,7 @@ mod tests {
     }
 
     #[test]
-    fn connect_lists_are_skipped_with_a_warning() {
+    fn connect_lists_are_dropped_with_a_warning() {
         let mut chunks = vec![
             chunk(0x15, 2, u32::MAX, page_record(u32::MAX)),
             chunk(0x72, 3, 0, Vec::new()),
@@ -1609,8 +1766,8 @@ mod tests {
         let (_, warnings) = run(&chunks);
         assert_eq!(
             kinds(&warnings),
-            vec![WarningKind::SkippedRecord {
-                name: "connect list"
+            vec![WarningKind::Dropped {
+                what: "connect list"
             }]
         );
     }
@@ -1620,8 +1777,8 @@ mod tests {
         let (_, warnings) = run(&[chunk(0x72, 2, 0, Vec::new())]);
         assert_eq!(
             kinds(&warnings),
-            vec![WarningKind::SkippedRecord {
-                name: "connect list"
+            vec![WarningKind::Dropped {
+                what: "connect list"
             }]
         );
     }
@@ -1638,7 +1795,7 @@ mod tests {
     }
 
     #[test]
-    fn the_document_properties_record_inside_a_container_is_skipped() {
+    fn the_document_properties_record_inside_a_container_is_dropped_too() {
         let mut chunks = vec![
             chunk(0x15, 2, u32::MAX, page_record(u32::MAX)),
             chunk(0xbc, 3, 0, Vec::new()),
@@ -1647,7 +1804,9 @@ mod tests {
         let (_, warnings) = run(&chunks);
         assert_eq!(
             kinds(&warnings),
-            vec![WarningKind::SkippedRecord { name: "DOC_PROPS" }]
+            vec![WarningKind::Dropped {
+                what: "document properties record"
+            }]
         );
     }
 
@@ -1871,6 +2030,246 @@ mod tests {
             vec![WarningKind::BadValue {
                 what: "page properties"
             }]
+        );
+    }
+
+    /// A cell block carrying one string value: `0x60`, the character
+    /// count, the characters, a NUL and `0xfe` (the layer rows' form).
+    fn string_block(text: &str, index: u8, wide: bool) -> Vec<u8> {
+        let chars: Vec<u8> = if wide {
+            text.encode_utf16().flat_map(u16::to_le_bytes).collect()
+        } else {
+            text.as_bytes().to_vec()
+        };
+        let mut content = vec![0x60, u8::try_from(text.chars().count()).unwrap_or(u8::MAX)];
+        content.extend(chars);
+        content.extend(if wide { vec![0, 0] } else { vec![0] });
+        content.push(0xfe);
+        let mut block = (u32::try_from(content.len() + 6).unwrap_or(u32::MAX))
+            .to_le_bytes()
+            .to_vec();
+        block.push(2);
+        block.push(index);
+        block.extend(content);
+        block
+    }
+
+    /// A layer record payload: the fixed part (the colour index, one
+    /// skipped byte, `Visible`, `Print`) and the name blocks.
+    fn layer_record(name: &str, colour: u8, visible: u8, print: u8, wide: bool) -> Vec<u8> {
+        let mut data = vec![0u8; 33];
+        data[8] = colour;
+        data[14] = visible;
+        data[15] = print;
+        data.extend(string_block(name, 0, wide));
+        data.extend(string_block(name, 10, wide));
+        data.extend(0u32.to_le_bytes());
+        data
+    }
+
+    /// The value of one row cell by name.
+    fn row_value<'a>(row: &'a Row, name: &str) -> Option<&'a CellValue> {
+        row.cells
+            .iter()
+            .find(|cell| cell.name.as_str() == name)
+            .and_then(|cell| cell.value.as_ref())
+    }
+
+    #[test]
+    fn layer_rows_map_the_twin_spelling() {
+        // The cells match a Visio twin's `Layers` rows one for one
+        // (P8-11 F1: layers and layer membership are mapped).
+        let mut chunks = vec![
+            chunk(0x15, 2, u32::MAX, page_record(u32::MAX)),
+            chunk(0xa8, 3, 0, layer_record("Spaces", 255, 1, 1, true)),
+            chunk(0xa8, 3, 0, layer_record("Hidden", 12, 0, 0, true)),
+        ];
+        chunks.extend(page_name());
+        let (document, warnings) = run(&chunks);
+        assert!(warnings.is_empty(), "{warnings:?}");
+        let page = &document.pages[0];
+        let layers = document.page_layers(page.id).expect("layers");
+        assert_eq!(layers.len(), 2);
+        assert_eq!(layers[0].ix, 0);
+        assert_eq!(layers[0].name, "Spaces");
+        assert!(layers[0].visible);
+        assert_eq!(layers[1].name, "Hidden");
+        assert!(!layers[1].visible);
+        let section = page
+            .sheet
+            .sections
+            .iter()
+            .find(|section| section.name.as_str() == "Layer")
+            .expect("Layer section");
+        let row = &section.rows[0];
+        assert_eq!(row.ix, Some(0));
+        assert_eq!(
+            row_value(row, "Name"),
+            Some(&CellValue::Str("Spaces".to_owned()))
+        );
+        assert_eq!(
+            row_value(row, "NameUniv"),
+            Some(&CellValue::Str("Spaces".to_owned()))
+        );
+        assert_eq!(row_value(row, "Color"), Some(&CellValue::Number(255.0)));
+        assert_eq!(row_value(row, "Visible"), Some(&CellValue::Number(1.0)));
+        assert_eq!(row_value(row, "Print"), Some(&CellValue::Number(1.0)));
+    }
+
+    #[test]
+    fn a_version_6_layer_name_decodes_as_single_bytes() {
+        let mut chunks = vec![
+            chunk(0x15, 2, u32::MAX, page_record(u32::MAX)),
+            chunk(0xa8, 3, 0, layer_record("Spaces", 255, 1, 1, false)),
+        ];
+        chunks.extend(page_name());
+        let mut document = Document::new();
+        let mut warnings = Vec::new();
+        collect_with(&chunks, FormatVersion::V6, &mut document, &mut warnings).expect("collects");
+        assert!(warnings.is_empty(), "{warnings:?}");
+        let layers = document.page_layers(document.pages[0].id).expect("layers");
+        assert_eq!(layers[0].name, "Spaces");
+    }
+
+    #[test]
+    fn a_layer_record_with_no_name_block_keeps_an_empty_name() {
+        let mut data = vec![0u8; 33];
+        data[8] = 255;
+        data[14] = 1;
+        data[15] = 1;
+        data.extend(0u32.to_le_bytes());
+        let mut chunks = vec![
+            chunk(0x15, 2, u32::MAX, page_record(u32::MAX)),
+            chunk(0xa8, 3, 0, data),
+        ];
+        chunks.extend(page_name());
+        let (document, warnings) = run(&chunks);
+        assert!(warnings.is_empty(), "{warnings:?}");
+        let layers = document.page_layers(document.pages[0].id).expect("layers");
+        assert_eq!(layers[0].name, "");
+    }
+
+    #[test]
+    fn a_short_layer_record_warns() {
+        let mut chunks = vec![
+            chunk(0x15, 2, u32::MAX, page_record(u32::MAX)),
+            chunk(0xa8, 3, 0, vec![0; 10]),
+        ];
+        chunks.extend(page_name());
+        let (document, warnings) = run(&chunks);
+        assert_eq!(
+            kinds(&warnings),
+            vec![WarningKind::BadValue {
+                what: "layer record"
+            }]
+        );
+        assert_eq!(
+            document
+                .page_layers(document.pages[0].id)
+                .expect("layers")
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn a_layer_record_under_a_master_is_dropped_with_a_warning() {
+        let mut chunks = vec![
+            chunk(0x1e, 2, 7, page_record(u32::MAX)),
+            chunk(0xa8, 3, 0, layer_record("Hidden", 255, 1, 1, true)),
+        ];
+        chunks.extend(master_name());
+        let (document, warnings) = run(&chunks);
+        assert_eq!(document.masters.len(), 1);
+        assert_eq!(
+            kinds(&warnings),
+            vec![WarningKind::Dropped {
+                what: "master page sheet"
+            }]
+        );
+    }
+
+    #[test]
+    fn user_cell_rows_at_page_scope_warn() {
+        // P8-11 F1: the `PROP_LIST` arm swallowed the row families of
+        // ADR 0070 silently. Nothing is silent now.
+        let mut chunks = vec![
+            chunk(0x15, 2, u32::MAX, page_record(u32::MAX)),
+            chunk(0x68, 3, 0, Vec::new()),
+            chunk(0xb4, 4, 1, Vec::new()),
+            chunk(0x6d, 3, 0, Vec::new()),
+            chunk(0xb6, 4, 1, Vec::new()),
+        ];
+        chunks.extend(page_name());
+        let (_, warnings) = run(&chunks);
+        assert_eq!(
+            kinds(&warnings),
+            vec![
+                WarningKind::Dropped {
+                    what: "user-defined cells"
+                },
+                WarningKind::Dropped {
+                    what: "user-defined cells"
+                },
+                WarningKind::Dropped {
+                    what: "shape data rows"
+                },
+                WarningKind::Dropped {
+                    what: "shape data rows"
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn a_layer_record_outside_any_container_is_dropped_with_a_warning() {
+        let chunks = vec![chunk(0xa8, 2, 0, layer_record("Orphan", 255, 1, 1, true))];
+        let (document, warnings) = run(&chunks);
+        assert!(document.pages.is_empty());
+        assert_eq!(
+            kinds(&warnings),
+            vec![WarningKind::Dropped {
+                what: "document layer list"
+            }]
+        );
+    }
+
+    #[test]
+    fn cell_block_strings_survive_hostile_payloads() {
+        // A zero length, a length of a block that does not fit the
+        // payload, a value that is not a string and a string cut short
+        // all end the scan as `None`, never a panic (P8-12).
+        assert_eq!(cell_block_string(&[], 0, FormatVersion::V11, 0), None);
+        assert_eq!(
+            cell_block_string(&[0, 0, 0, 0], 0, FormatVersion::V11, 0),
+            None
+        );
+        assert_eq!(
+            cell_block_string(&[1, 0, 0, 0], 0, FormatVersion::V11, 0),
+            None
+        );
+        assert_eq!(
+            cell_block_string(&[5, 0, 0, 0, 2, 0], 0, FormatVersion::V11, 0),
+            None
+        );
+        assert_eq!(
+            cell_block_string(&[200, 0, 0, 0, 2, 0], 0, FormatVersion::V11, 0),
+            None
+        );
+        assert_eq!(
+            cell_block_string(&[8, 0, 0, 0, 2, 0, 1, 2], 0, FormatVersion::V11, 0),
+            None
+        );
+        assert_eq!(
+            cell_block_string(&[9, 0, 0, 0, 2, 0, 0x60, 5, 0], 0, FormatVersion::V11, 0),
+            None
+        );
+        // A block of another index is skipped and the walk continues.
+        let mut data = string_block("skip", 3, true);
+        data.extend(string_block("keep", 0, true));
+        assert_eq!(
+            cell_block_string(&data, 0, FormatVersion::V11, 0),
+            Some("keep".to_owned())
         );
     }
 }
