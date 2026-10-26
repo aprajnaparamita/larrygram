@@ -433,7 +433,7 @@ fn every_basic_set_command_runs() {
         .with("height", ArgValue::Number(792.0));
     run(&mut ctx, "view.zoom.fit", rect.clone()).expect("view.zoom.fit");
     run(&mut ctx, "view.fit.in.window", rect).expect("view.fit.in.window");
-    run(&mut ctx, "view.zoom.page.width", number("width", 612.0)).expect("view.zoom.page.width");
+    run(&mut ctx, "view.zoom.page.width", number("width", 816.0)).expect("view.zoom.page.width");
     for id in [
         "view.toggle_grid",
         "view.rulers",

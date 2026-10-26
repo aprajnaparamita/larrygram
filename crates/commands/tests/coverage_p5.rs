@@ -153,8 +153,8 @@ fn zoom_fit_ignores_unusable_page_sheet_numbers() {
         &registry,
         "view.zoom.fit",
         Args::new()
-            .with("width", ArgValue::Number(612.0))
-            .with("height", ArgValue::Number(792.0)),
+            .with("width", ArgValue::Number(816.0))
+            .with("height", ArgValue::Number(1056.0)),
     )
     .expect("fit");
     assert_eq!(outcome.message.as_deref(), Some("Zoom 100%"));
@@ -365,7 +365,7 @@ fn zoom_fit_names_a_missing_or_stale_active_page() {
     let (mut ctx, registry, _page) = fixture();
     let args = || {
         Args::new()
-            .with("width", ArgValue::Number(612.0))
+            .with("width", ArgValue::Number(816.0))
             .with("height", ArgValue::Number(792.0))
     };
     ctx.active_document_mut().expect("session").active_page = None;
