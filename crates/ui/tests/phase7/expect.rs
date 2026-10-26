@@ -119,6 +119,15 @@ pub fn args_of(expect: &Expect) -> Args {
 /// its children `in_toolbars_menu`).
 pub const TOOLBARS_MENU: &str = "Toolbars";
 
+/// The picker that hosts one control's popup (task P7-21), if any:
+/// those popups draw picker rows, not the item's own rows.
+pub fn picker_of(item: &Item) -> Option<larrygram_ui::pickers::PickerKind> {
+    item.command
+        .as_ref()
+        .map(|id| id.as_str())
+        .and_then(larrygram_ui::pickers::picker_for)
+}
+
 /// The rows of the View > Toolbars submenu: each flips one toolbar's
 /// visibility and dispatches its command when it resolves.
 pub fn classic_toolbars_level(items: &[Item], registry: &Registry, app: &AppCtx) -> Vec<Entry> {
