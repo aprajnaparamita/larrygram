@@ -28,6 +28,10 @@ pub const ZOOM_MIN: f64 = 0.05;
 /// The highest zoom (4000%) the view commands and the canvas allow.
 pub const ZOOM_MAX: f64 = 40.0;
 
+/// Canvas points per page inch at zoom 1, the scale the canvas draws
+/// at (ADR 0025: 96 pixels per inch). The fit commands divide by it.
+const POINTS_PER_INCH: f64 = 96.0;
+
 // The page size of a sheet with no positive `PageWidth` or
 // `PageHeight`: the renderer's own fallback.
 use larrygram_render::FALLBACK_PAGE_SIZE;
@@ -216,7 +220,7 @@ pub(super) fn run_zoom_page_width(
         .find(|page| page.id == page_id)
         .ok_or_else(|| CommandError::failed("no active page"))?;
     let (page_width, _) = page_size(page);
-    let fit = (width / (page_width * 72.0)).clamp(ZOOM_MIN, ZOOM_MAX);
+    let fit = (width / (page_width * POINTS_PER_INCH)).clamp(ZOOM_MIN, ZOOM_MAX);
     session.view.zoom = fit;
     Ok(outcome(format!("Zoom {:.0}%", fit * 100.0), Vec::new()))
 }
@@ -243,8 +247,9 @@ pub(super) fn run_zoom_fit(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome
         .find(|page| page.id == page_id)
         .ok_or_else(|| CommandError::failed("no active page"))?;
     let (page_width, page_height) = page_size(page);
-    let fit = ((width / (page_width * 72.0)).min(height / (page_height * 72.0)))
-        .clamp(ZOOM_MIN, ZOOM_MAX);
+    let fit = ((width / (page_width * POINTS_PER_INCH))
+        .min(height / (page_height * POINTS_PER_INCH)))
+    .clamp(ZOOM_MIN, ZOOM_MAX);
     session.view.zoom = fit;
     Ok(outcome(format!("Zoom {:.0}%", fit * 100.0), Vec::new()))
 }
@@ -854,28 +859,28 @@ mod tests {
     #[test]
     fn the_fit_rectangle_mixes_arguments_and_the_viewport() {
         let mut ctx = one_page_ctx();
-        ctx.active_document_mut().expect("session").view.viewport = Some((612.0, 792.0));
+        ctx.active_document_mut().expect("session").view.viewport = Some((816.0, 1056.0));
         // Only the height is given: the measured width fills in.
-        let args = crate::Args::new().with("height", crate::ArgValue::Number(792.0));
+        let args = crate::Args::new().with("height", crate::ArgValue::Number(1056.0));
         let outcome =
             run_zoom_fit(&mut ctx, &Invocation::new(args, crate::Source::Test)).expect("height");
         assert_eq!(outcome.message.as_deref(), Some("Zoom 100%"));
         // Only the width is given: the measured height fills in.
-        let args = crate::Args::new().with("width", crate::ArgValue::Number(612.0));
+        let args = crate::Args::new().with("width", crate::ArgValue::Number(816.0));
         run_zoom_fit(&mut ctx, &Invocation::new(args, crate::Source::Test)).expect("width");
         // An integer rectangle counts.
         let args = crate::Args::new()
-            .with("width", crate::ArgValue::Integer(612))
-            .with("height", crate::ArgValue::Integer(792));
+            .with("width", crate::ArgValue::Integer(816))
+            .with("height", crate::ArgValue::Integer(1056));
         run_zoom_fit(&mut ctx, &Invocation::new(args, crate::Source::Test)).expect("integers");
 
         // Without a measured viewport each half asks in turn.
         let mut ctx = one_page_ctx();
-        let args = crate::Args::new().with("height", crate::ArgValue::Number(792.0));
+        let args = crate::Args::new().with("height", crate::ArgValue::Number(1056.0));
         let error = run_zoom_fit(&mut ctx, &Invocation::new(args, crate::Source::Test))
             .expect_err("width missing");
         assert!(matches!(error, CommandError::NeedsInput(_)), "{error:?}");
-        let args = crate::Args::new().with("width", crate::ArgValue::Number(612.0));
+        let args = crate::Args::new().with("width", crate::ArgValue::Number(816.0));
         let error = run_zoom_fit(&mut ctx, &Invocation::new(args, crate::Source::Test))
             .expect_err("height missing");
         assert!(matches!(error, CommandError::NeedsInput(_)), "{error:?}");
@@ -939,8 +944,8 @@ mod tests {
     #[test]
     fn the_fit_commands_fall_back_to_the_measured_viewport() {
         let mut ctx = one_page_ctx();
-        ctx.active_document_mut().expect("session").view.viewport = Some((612.0, 792.0));
-        // The fallback page is 8.5 x 11 in: 612/612 and 792/792.
+        ctx.active_document_mut().expect("session").view.viewport = Some((816.0, 1056.0));
+        // The fallback page is 8.5 x 11 in at 96 points per inch: 816/816 and 1056/1056.
         let outcome = run_zoom_fit(&mut ctx, &Invocation::empty(crate::Source::Test)).expect("fit");
         assert_eq!(outcome.message.as_deref(), Some("Zoom 100%"));
         let outcome =
@@ -948,7 +953,7 @@ mod tests {
         assert_eq!(outcome.message.as_deref(), Some("Zoom 100%"));
 
         // One argument plus the measured viewport fills in the other.
-        let args = crate::Args::new().with("width", crate::ArgValue::Number(306.0));
+        let args = crate::Args::new().with("width", crate::ArgValue::Number(408.0));
         let outcome = run_zoom_page_width(&mut ctx, &Invocation::new(args, crate::Source::Test))
             .expect("half");
         assert_eq!(outcome.message.as_deref(), Some("Zoom 50%"));

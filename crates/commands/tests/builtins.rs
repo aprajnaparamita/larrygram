@@ -747,31 +747,31 @@ fn zoom_commands_clamp_and_fit() {
     run(&mut ctx, "view.zoom.out", Args::new()).expect("out");
     assert_eq!(ctx.active_document().expect("session").view.zoom, 0.05);
 
-    // Fit: page 1 is 8.5 x 11 in = 612 x 792 pt; an 612 x 792 canvas
+    // Fit: page 1 is 8.5 x 11 in = 816 x 1056 pt at 96 points per inch; an 816 x 1056 canvas
     // fits at 100%.
     run(
         &mut ctx,
         "view.zoom.fit",
         Args::new()
-            .with("width", ArgValue::Number(612.0))
-            .with("height", ArgValue::Number(792.0)),
+            .with("width", ArgValue::Number(816.0))
+            .with("height", ArgValue::Number(1056.0)),
     )
     .expect("fit");
     let zoom = ctx.active_document().expect("session").view.zoom;
     assert!((zoom - 1.0).abs() < 1e-9, "{zoom}");
 
-    // Page 2 is 11 x 8.5 in; the canvas limits by height: 612/792.
+    // Page 2 is 11 x 8.5 in; the canvas limits by height: 816/1056.
     run(&mut ctx, "page.next", Args::new()).expect("next");
     run(
         &mut ctx,
         "view.zoom.fit",
         Args::new()
-            .with("width", ArgValue::Number(612.0))
-            .with("height", ArgValue::Number(792.0)),
+            .with("width", ArgValue::Number(816.0))
+            .with("height", ArgValue::Number(1056.0)),
     )
     .expect("fit");
     let zoom = ctx.active_document().expect("session").view.zoom;
-    assert!((zoom - 612.0 / 792.0).abs() < 1e-9, "{zoom}");
+    assert!((zoom - 816.0 / 1056.0).abs() < 1e-9, "{zoom}");
 
     // A non-positive size is InvalidArgs.
     let error = run(
@@ -801,7 +801,7 @@ fn zoom_commands_clamp_and_fit() {
     )
     .expect("fit");
     let zoom = ctx.active_document().expect("session").view.zoom;
-    assert!((zoom - 408.0 / (8.5 * 72.0)).abs() < 1e-9, "{zoom}");
+    assert!((zoom - 408.0 / (8.5 * 96.0)).abs() < 1e-9, "{zoom}");
 }
 
 #[test]
@@ -1239,7 +1239,7 @@ fn zoom_fit_falls_back_to_letter_for_a_page_without_sheet_cells() {
             .with("height", ArgValue::Number(528.0)),
     )
     .expect("fit");
-    assert_eq!(outcome.message.as_deref(), Some("Zoom 67%"));
+    assert_eq!(outcome.message.as_deref(), Some("Zoom 50%"));
     let zoom = ctx.active_document().expect("session").view.zoom;
-    assert!((zoom - 408.0 / (8.5 * 72.0)).abs() < 1e-9, "{zoom}");
+    assert!((zoom - 408.0 / (8.5 * 96.0)).abs() < 1e-9, "{zoom}");
 }
