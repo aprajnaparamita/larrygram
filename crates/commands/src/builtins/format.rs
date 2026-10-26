@@ -659,16 +659,13 @@ fn ensure_rows(
 /// The `IX` of the next row of a section: 0 when no row claims it, else
 /// one past the largest `IX` (a text run marker names rows by `IX`).
 fn next_row_ix(block: &Section) -> i32 {
-    let mut taken = false;
     let mut largest = -1;
     for row in &block.rows {
-        match row.ix {
-            Some(0) => taken = true,
-            Some(ix) => largest = largest.max(ix),
-            None => {}
+        if let Some(ix) = row.ix {
+            largest = largest.max(ix);
         }
     }
-    if taken { largest.saturating_add(1) } else { 0 }
+    largest.saturating_add(1).max(0)
 }
 
 // ---------------------------------------------------------------------------
@@ -1051,18 +1048,14 @@ fn step_font_size(ctx: &mut AppCtx, grow: bool) -> Result<Outcome, CommandError>
 /// The default text size of a shape that carries none (points).
 const DEFAULT_SIZE_PT: f64 = 12.0;
 
-/// The next size above `points` on the ladder (capped at
-/// [`MAX_SIZE_PT`]; a size past the cap never shrinks).
+/// The next size above `points` on the ladder. A size at or past the
+/// top of the ladder never grows.
 fn next_size_up(points: f64) -> f64 {
-    if points >= MAX_SIZE_PT {
-        return points;
-    }
-    for step in SIZE_STEPS_PT {
-        if step > points {
-            return step;
-        }
-    }
-    (points * 1.1).min(MAX_SIZE_PT)
+    SIZE_STEPS_PT
+        .iter()
+        .copied()
+        .find(|step| *step > points)
+        .unwrap_or(points)
 }
 
 /// The next size below `points` on the ladder (floored at
@@ -1483,14 +1476,16 @@ fn arrow_index(inv: &Invocation, names: &[&str]) -> Result<Option<f64>, CommandE
 fn run_format_painter(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError> {
     let force_apply = inv.args.flag("apply").unwrap_or(false);
     let force_copy = inv.args.flag("copy").unwrap_or(false);
-    if ctx.format_painter.is_some() && !force_copy {
-        let Some(source) = ctx.format_painter.take() else {
-            return Err(CommandError::failed("no format is recorded"));
-        };
-        let crate::app::PaintSource {
-            session,
-            shape: source,
-        } = source;
+    let recorded = if force_copy {
+        None
+    } else {
+        ctx.format_painter.take()
+    };
+    if let Some(crate::app::PaintSource {
+        session,
+        shape: source,
+    }) = recorded
+    {
         let (target_session, targets, warnings) = selection_targets(ctx)?;
         if session != target_session {
             return Err(CommandError::failed(
@@ -2212,5 +2207,218 @@ mod tests {
             color_name(larrygram_model::Color::new(0x1f, 0x5b, 0xc4)),
             "#1F5BC4"
         );
+    }
+    #[test]
+    fn a_gone_shape_is_an_error_on_apply_and_on_revert() {
+        // One edit per write branch: a direct removal, a row removal
+        // and a row write.
+        for kind in 0..3 {
+            let (mut ctx, id, target) = session();
+            let ops = match kind {
+                0 => vec![remove(target, Place::Direct, "FillForegnd")],
+                1 => vec![remove(target, Place::Character, "Font")],
+                _ => vec![character(target, "Font", text_write("Selawik"))],
+            };
+            let mut edit = {
+                let doc = document_mut(&mut ctx, id).expect("document");
+                FormatEdit::new(doc, id, "gone", ops).expect("edit")
+            };
+            edit.apply(&mut ctx).expect("apply on the live shape");
+            {
+                let doc = document_mut(&mut ctx, id).expect("document");
+                // The arena entry goes away (the documented invariant
+                // says it cannot; the write path reports it anyway,
+                // never a panic).
+                doc.shapes.clear();
+            }
+            assert!(
+                edit.apply(&mut ctx).is_err(),
+                "apply reports the gone shape"
+            );
+            assert!(
+                edit.revert(&mut ctx).is_err(),
+                "revert reports the gone shape"
+            );
+        }
+    }
+
+    #[test]
+    fn use_default_removes_the_row_cell_too() {
+        let (mut ctx, _session, shape) = session();
+        call(
+            &mut ctx,
+            "text.font.color",
+            Args::new().with("value", ArgValue::Text("#123456".to_owned())),
+        )
+        .expect("color");
+        let outcome =
+            run_font_color_default(&mut ctx, &Invocation::empty(Source::Test)).expect("reset");
+        assert!(outcome.edit.is_some(), "the reset is undoable");
+        let doc = &ctx.active_document().expect("document").document;
+        assert!(
+            row_cell_of(doc, shape, "Character", "Color").is_none(),
+            "the row's Color entry is gone"
+        );
+    }
+
+    #[test]
+    fn row_targets_name_the_row_to_create() {
+        let mut sheet = Sheet::new();
+        let mut block = Section::new(SectionName::from_static("Character"));
+        let mut deleted = Row::new();
+        deleted.ix = Some(0);
+        deleted
+            .preserved
+            .attributes
+            .push(larrygram_model::XmlAttribute {
+                name: larrygram_model::QName::local("Del"),
+                value: "1".to_owned(),
+            });
+        block.rows.push(deleted);
+        sheet.sections.push(block);
+        let targets = row_targets(&sheet, "Character");
+        assert_eq!(targets.len(), 1, "only the created row is written");
+        assert_eq!(targets[0].position, Some(0));
+        assert_eq!(targets[0].ix, None);
+    }
+
+    #[test]
+    fn ensure_rows_fills_an_empty_section_and_picks_the_next_ix() {
+        // A section whose only row is deleted takes the next free IX.
+        let (mut ctx, id, target) = session();
+        {
+            let doc = document_mut(&mut ctx, id).expect("document");
+            let entry = doc.shape_mut(target).expect("shape");
+            let mut block = Section::new(SectionName::from_static("Character"));
+            let mut deleted = Row::new();
+            deleted.ix = Some(0);
+            deleted
+                .preserved
+                .attributes
+                .push(larrygram_model::XmlAttribute {
+                    name: larrygram_model::QName::local("Del"),
+                    value: "1".to_owned(),
+                });
+            block.rows.push(deleted);
+            entry.sheet.sections.push(block);
+        }
+        {
+            let doc = document_mut(&mut ctx, id).expect("document");
+            let targets = ensure_rows(doc, target, "Character").expect("rows");
+            assert_eq!(targets.len(), 1);
+            assert_eq!(targets[0].ix, Some(1), "IX 0 is taken by the deleted row");
+        }
+        // An empty section takes IX 0.
+        let (mut ctx, id, target) = session();
+        {
+            let doc = document_mut(&mut ctx, id).expect("document");
+            let entry = doc.shape_mut(target).expect("shape");
+            entry
+                .sheet
+                .sections
+                .push(Section::new(SectionName::from_static("Paragraph")));
+        }
+        let doc = document_mut(&mut ctx, id).expect("document");
+        let targets = ensure_rows(doc, target, "Paragraph").expect("rows");
+        assert_eq!(targets[0].ix, Some(0));
+    }
+
+    #[test]
+    fn a_stale_selection_disables_the_format_commands() {
+        let (mut ctx, _session, _shape) = session();
+        ctx.selection.shapes = vec![ShapeId { index: 99 }];
+        let disabled = can_format(&ctx);
+        assert_eq!(
+            disabled.reason.as_deref(),
+            Some("the selected shapes are stale")
+        );
+    }
+
+    #[test]
+    fn the_text_argument_spellings_all_parse() {
+        let (mut ctx, _session, shape) = session();
+        // A flag spells its value as text.
+        call(
+            &mut ctx,
+            "text.font",
+            Args::new().with("font", ArgValue::Flag(true)),
+        )
+        .expect("flag");
+        {
+            let doc = &ctx.active_document().expect("document").document;
+            let cell = row_cell_of(doc, shape, "Character", "Font").expect("Font");
+            assert_eq!(cell.value, Some(CellValue::Str("true".to_owned())));
+        }
+        // Numbers, integers and text all parse for a size.
+        for args in [
+            Args::new().with("size", ArgValue::Integer(12)),
+            Args::new().with("size", ArgValue::Text("14".to_owned())),
+        ] {
+            run_font_size(&mut ctx, &Invocation::new(args, Source::Test)).expect("size");
+        }
+        let doc = &ctx.active_document().expect("document").document;
+        let cell = row_cell_of(doc, shape, "Character", "Size").expect("Size");
+        assert_eq!(cell.value, Some(CellValue::Number(14.0 / 72.0)));
+    }
+
+    #[test]
+    fn a_number_argument_rejects_bad_spellings() {
+        let (mut ctx, _session, _shape) = session();
+        for (args, want) in [
+            (
+                Args::new().with("size", ArgValue::Text("big".to_owned())),
+                "must be a number",
+            ),
+            (
+                Args::new().with("size", ArgValue::Text("nan".to_owned())),
+                "must be finite",
+            ),
+            (
+                Args::new().with("size", ArgValue::Number(f64::NAN)),
+                "must be finite",
+            ),
+        ] {
+            let error = run_font_size(&mut ctx, &Invocation::new(args, Source::Test))
+                .expect_err("bad size");
+            assert!(error.to_string().contains(want), "{error}");
+        }
+    }
+
+    #[test]
+    fn a_pattern_without_an_argument_asks_for_one() {
+        let (mut ctx, _session, _shape) = session();
+        let error =
+            run_line_pattern(&mut ctx, &Invocation::empty(Source::Test)).expect_err("no pattern");
+        assert!(error.to_string().contains("line pattern"), "{error}");
+    }
+
+    #[test]
+    fn an_arrowhead_out_of_range_is_an_argument_error() {
+        let (mut ctx, _session, _shape) = session();
+        let error = run_line_ends(
+            &mut ctx,
+            &Invocation::new(
+                Args::new().with("value", ArgValue::Number(99.0)),
+                Source::Test,
+            ),
+        )
+        .expect_err("range");
+        assert!(error.to_string().contains("arrowhead"), "{error}");
+    }
+
+    #[test]
+    fn the_format_painter_can_re_copy_on_command() {
+        let (mut ctx, _session, _shape) = session();
+        call(&mut ctx, "tools.format_painter", Args::new()).expect("copy");
+        let args = Args::new().with("copy", ArgValue::Flag(true));
+        call(&mut ctx, "tools.format_painter", args).expect("copy again");
+        assert!(ctx.format_painter.is_some(), "the copy is recorded");
+    }
+
+    #[test]
+    #[should_panic(expected = "unknown test id")]
+    fn the_test_helper_names_an_unknown_id() {
+        let (mut ctx, _session, _shape) = session();
+        let _ = call(&mut ctx, "nope", Args::new());
     }
 }

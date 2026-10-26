@@ -1,7 +1,7 @@
 //! The Page Setup dialog (task P7-21): page size, orientation and
 //! measurement units over P7-20's `tools.options.page.setup` command.
 //!
-//! The dialog answers [`UiRequest::ShowPageSetup`]
+//! The dialog answers `UiRequest::ShowPageSetup`
 //! (larrygram_commands): with no arguments the command requests it,
 //! and the dialog re-dispatches the same command with `width` and
 //! `height` (inches), `orientation` (`portrait` / `landscape`) and
