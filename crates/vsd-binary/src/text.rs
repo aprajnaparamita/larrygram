@@ -3969,12 +3969,15 @@ mod tests {
     fn rows_of(record: Record, payload: &[u8]) -> (Vec<(String, Vec<Cell>)>, Vec<ImportWarning>) {
         let chunks = [shape_chunk(1), text_chunk(record, 0, payload)];
         let (document, warnings) = run_default(&chunks, 1);
+        let empty = Vec::new();
+        let sections = document
+            .shape(ShapeId { index: 0 })
+            .map(|shape| &shape.sheet.sections)
+            .unwrap_or(&empty);
         let mut rows = Vec::new();
-        if let Some(shape) = document.shape(ShapeId { index: 0 }) {
-            for section in &shape.sheet.sections {
-                for row in &section.rows {
-                    rows.push((section.name.as_str().to_owned(), row.cells.clone()));
-                }
+        for section in sections {
+            for row in &section.rows {
+                rows.push((section.name.as_str().to_owned(), row.cells.clone()));
             }
         }
         (rows, warnings)
@@ -4028,15 +4031,15 @@ mod tests {
                             .iter()
                             .find(|candidate| candidate.name == cell.name)
                             .and_then(|candidate| candidate.value.as_ref());
-                        match (cell.value.as_ref(), other) {
-                            (Some(CellValue::Str(text)), Some(_)) if text.is_empty() => {}
-                            (mine, other) => assert_eq!(
-                                mine,
-                                other,
-                                "quiet difference: {record:?} cut {cut} {}",
-                                cell.name.as_str()
-                            ),
-                        }
+                        let quiet_same = match (cell.value.as_ref(), other) {
+                            (Some(CellValue::Str(text)), Some(_)) if text.is_empty() => true,
+                            (mine, other) => mine == other,
+                        };
+                        assert!(
+                            quiet_same,
+                            "quiet difference: {record:?} cut {cut} {}",
+                            cell.name.as_str()
+                        );
                     }
                 }
             }

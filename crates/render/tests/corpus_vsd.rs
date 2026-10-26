@@ -67,7 +67,11 @@ const NO_GOLDEN_NUMBERS: &[NoGoldenNumbers] = &[(
         (11.692_913_385_826_772, 8.267_716_535_433_07),
         (11.692_913_385_826_772, 8.267_716_535_433_07),
     ],
-    188,
+    // 187 since P8-14: the file carries one shape record no page
+    // references (the "Gesture Format" helper the wide-corpus
+    // blank-page check found). Visio drops it in conversion and the
+    // import drops it now too; it drew nothing.
+    187,
 )];
 
 /// The largest per-channel difference, of 255 (ADR 0027).

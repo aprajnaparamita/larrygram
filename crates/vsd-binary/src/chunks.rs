@@ -2607,4 +2607,60 @@ mod tests {
         }
         Ok(())
     }
+
+    #[test]
+    fn every_dropped_kind_names_what_it_carries() {
+        // P8-11 F1: the policy table classifies the kinds, so no row
+        // family is silent. Every arm of `dropped_what` runs here.
+        let cases: &[(Record, &str)] = &[
+            (FOREIGN_DATA, "foreign data"),
+            (OLE_LIST, "OLE object list"),
+            (OLE_DATA, "OLE data"),
+            (FOREIGN_DATA_TYPE, "foreign data type"),
+            (HYPER_LNK_LIST, "hyperlink list"),
+            (HYPERLINK, "hyperlink"),
+            (EVENT, "event"),
+            (ACT_ID_LIST, "action id list"),
+            (ACT_ID, "action id"),
+            (ANNOTATION, "annotation"),
+            (REVIEWER, "reviewer"),
+            (SMART_TAG_LIST, "smart tag list"),
+            (SMART_TAG_DEF, "smart tag definition"),
+            (FONT_LIST, "font list"),
+            (FONT_IX, "font"),
+            (FONTFACE, "font face"),
+            (FONTFACES, "font face list"),
+            (CONNECT_LIST, "connect list"),
+            (DOC_PROPS, "document properties record"),
+            (PROP_LIST, "user-defined cells"),
+            (USER_DEFINED_CELLS, "user-defined cells"),
+            (CUST_PROPS_LIST, "shape data rows"),
+            (CUSTOM_PROPS, "shape data rows"),
+            (C_PNTS_LIST, "connection points"),
+            (CONNECTION_POINTS, "connection points"),
+            (CONNECTION_POINTS_ANOTHER_TYPE, "connection points"),
+            (CTRL_LIST, "controls"),
+            (CONTROL, "controls"),
+            (CONTROL_ANOTHER_TYPE, "controls"),
+            (SCRATCH_LIST, "scratch rows"),
+            (SCRATCH, "scratch rows"),
+            (PROTECTION, "protection settings"),
+            (MISC, "shape misc settings"),
+            (STYLE_PROPS, "style sheet properties"),
+            (GROUP, "group settings"),
+            (LAYOUT, "shape layout settings"),
+            (IMAGE, "image settings"),
+        ];
+        for (record, what) in cases {
+            assert_eq!(record.dropped_what(), Some(*what), "{record:?}");
+            assert!(!record.is_mapped(), "{record:?} is dropped, not mapped");
+        }
+        // A mapped kind is silent; a kind outside both warns by
+        // default, with its format name.
+        assert_eq!(LAYER.dropped_what(), None);
+        assert!(LAYER.is_mapped());
+        assert_eq!(Record(0x23).dropped_what(), None);
+        assert!(!Record(0x23).is_mapped());
+        assert_eq!(Record(0x23).name(), "unknown record");
+    }
 }
