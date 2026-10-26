@@ -3754,9 +3754,11 @@ mod tests {
     /// The values were validated against that reader during P8-04 and are
     /// pinned here: a live cross-reader test needs a dev-dependency on
     /// `larrygram-vsdx`, which fails `cargo xtask layers` (both crates are
-    /// L2). See the task Result.
+    /// L2). See the task Result. The live cross-reader comparison is the
+    /// twin runner in `crates/render/tests/corpus_vsd.rs` (P8-15, P8-21);
+    /// this test pins the spelling it recorded (P8-11 F7).
     #[test]
-    fn the_mapped_fields_match_the_vsdx_reader() {
+    fn the_mapped_fields_match_the_pinned_vsdx_spelling() {
         let mut document = Document::new();
         document.masters.push(Master::new(MasterId { index: 0 }, 7));
         let mut warnings = Vec::new();
