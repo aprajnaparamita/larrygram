@@ -9,16 +9,16 @@
 //! is free, so egui's fades (a disabled widget, a shadow, an
 //! animation) still match the token they fade.
 //!
-//! Left out: shapes clipped to the canvas (the drawing's own colours
-//! belong to the document; the grid and selection colours of
-//! `canvas.rs` wait for their tokens, an Open issue of task P7-18) and
-//! textured meshes (the icon and brand textures carry their own
-//! pixels; the icon tints are tokens by construction, `icons/mod.rs`).
+//! The canvas is checked too: its page, grid, rulers and tool overlay
+//! read the `canvas.*`, `page.*` and `ruler.*` tokens, and the drawing
+//! itself is a raster texture. Left out: textured meshes (the drawing,
+//! icon and brand textures carry their own pixels; the icon tints are
+//! tokens by construction, `icons/mod.rs`).
 
 use std::collections::BTreeMap;
 
+use egui::Color32;
 use egui::epaint::{ColorMode, Shape};
-use egui::{Color32, Rect};
 use larrygram_ui_spec::LayoutKind;
 
 use crate::review::click_at;
@@ -172,12 +172,8 @@ fn strangers(rig: &mut ShellRig, tokens: &[Color32]) -> BTreeMap<String, usize> 
     for _ in 0..3 {
         rig.run();
     }
-    let canvas = rig.shell.borrow().canvas_rect().unwrap_or(Rect::NOTHING);
     let mut out = BTreeMap::new();
     for clipped in &rig.harness().output().shapes {
-        if canvas.is_positive() && canvas.contains_rect(clipped.clip_rect) {
-            continue;
-        }
         let mut colors = Vec::new();
         shape_colors(&clipped.shape, &mut colors);
         for color in colors {

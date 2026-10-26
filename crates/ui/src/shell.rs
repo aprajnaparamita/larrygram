@@ -936,7 +936,7 @@ impl Shell {
     /// everything drawn this frame, and a finished change is written to
     /// the settings (task P7-19).
     fn end_splitters(&mut self, ui: &Ui) {
-        let accent = theme::color_at(ui.ctx(), "accent");
+        let accent = theme::color_at(ui.ctx(), "splitter.hover");
         for splitter in &self.splitters {
             splitter.interact(ui, accent);
         }
