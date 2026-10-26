@@ -115,6 +115,66 @@ pub(crate) const TABLE: CommandTable = &[
         has_selection,
         run_send_to_back,
     ),
+    // The value-dispatching forms the Panel Modern galleries link
+    // (task P7-21): one `value` argument names the operation.
+    ("arrange.align.box", "Align", has_selection, run_align_box),
+    (
+        "arrange.align.center",
+        "Align Center",
+        has_selection,
+        run_align_center_x,
+    ),
+    ("arrange.position", "Position", has_selection, run_position),
+    // The Panel Classic Action toolbar's Distribute Shapes menu.
+    (
+        "arrange.distribute_shapes.distribute_horizontal_spacing",
+        "Distribute Horizontal Spacing",
+        has_selection,
+        run_distribute_horizontal,
+    ),
+    (
+        "arrange.distribute_shapes.distribute_vertical_spacing",
+        "Distribute Vertical Spacing",
+        has_selection,
+        run_distribute_vertical,
+    ),
+    (
+        "arrange.distribute_shapes.distribute_center",
+        "Distribute Center",
+        has_selection,
+        run_distribute_center,
+    ),
+    (
+        "arrange.distribute_shapes.distribute_middle",
+        "Distribute Middle",
+        has_selection,
+        run_distribute_middle,
+    ),
+    // Rotate and flip (task P7-21, the Position > Rotate Shapes menu).
+    (
+        "arrange.rotate90.clockwise",
+        "Rotate Right 90°",
+        has_selection,
+        run_rotate_clockwise,
+    ),
+    (
+        "arrange.object.rotate90",
+        "Rotate Left 90°",
+        has_selection,
+        run_rotate_counterclockwise,
+    ),
+    (
+        "arrange.flip_horizontal",
+        "Flip Horizontal",
+        has_selection,
+        run_flip_horizontal,
+    ),
+    (
+        "arrange.flip_vertical",
+        "Flip Vertical",
+        has_selection,
+        run_flip_vertical,
+    ),
 ];
 
 /// Which edge or centre an align run uses.
@@ -1089,9 +1149,267 @@ fn select(ctx: &mut AppCtx, session: SessionId, page: PageId, shapes: &[ShapeId]
     ctx.selection.entered = None;
 }
 
+// ---------------------------------------------------------------------------
+// Rotate, flip and the value-dispatching arrange forms (task P7-21)
+// ---------------------------------------------------------------------------
+
+/// `arrange.rotate90.clockwise` ("Rotate Right 90°"): a quarter turn
+/// clockwise. Visio's `Angle` cell is counter-clockwise positive, so a
+/// clockwise turn subtracts the quarter (the black-box check against
+/// Visio's own Rotate Shapes is on the check list).
+fn run_rotate_clockwise(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandError> {
+    rotate(ctx, -std::f64::consts::FRAC_PI_2, "Rotate right 90°")
+}
+
+/// `arrange.object.rotate90` ("Rotate Left 90°"): a quarter turn the
+/// other way.
+fn run_rotate_counterclockwise(
+    ctx: &mut AppCtx,
+    _inv: &Invocation,
+) -> Result<Outcome, CommandError> {
+    rotate(ctx, std::f64::consts::FRAC_PI_2, "Rotate left 90°")
+}
+
+/// Adds `delta` radians to every selected shape's `Angle` (one undo
+/// step). The angle is read through the inheritance lookup and written
+/// as a local literal cell (ADR 0038).
+fn rotate(ctx: &mut AppCtx, delta: f64, label: &str) -> Result<Outcome, CommandError> {
+    let (session, targets, mut warnings) = selection_targets(ctx)?;
+    let mut edit = CompositeEdit::new(count_label("Rotate", targets.len()));
+    {
+        let doc = document_mut(ctx, session)?;
+        for id in &targets {
+            let mut reader = CellReader::new(doc);
+            let angle = reader
+                .number(SheetRef::Shape(*id), &CellName::new("Angle"))
+                .unwrap_or(0.0);
+            let recorded = reader.take_warnings();
+            warnings.extend(recorded.iter().map(|warning| warning_line(doc, warning)));
+            let fresh = angle + delta;
+            let step = CellEdit::new(
+                doc,
+                session,
+                "Rotate shape",
+                SheetRef::Shape(*id),
+                "Angle",
+                CellWrite::new(number_literal(fresh), CellValue::Number(fresh)),
+            )?;
+            edit.push(Box::new(step));
+        }
+    }
+    edit.apply(ctx)?;
+    // The glued connectors follow the rotated shape (the same quiet
+    // re-route the moves do, task P7-21): the post state is what a
+    // re-route on undo or redo recomputes (ADR 0045 rule 3).
+    reroute_quietly(ctx);
+    Ok(edit_outcome(label, warnings, Box::new(edit)))
+}
+
+/// `arrange.flip_horizontal`: toggles the `FlipX` cell.
+fn run_flip_horizontal(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandError> {
+    flip(ctx, "FlipX", "Flip horizontal")
+}
+
+/// `arrange.flip_vertical`: toggles the `FlipY` cell.
+fn run_flip_vertical(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandError> {
+    flip(ctx, "FlipY", "Flip vertical")
+}
+
+/// Toggles one flip cell of every selected shape (one undo step). The
+/// renderer reads the cell's mirror when it draws; until it does, the
+/// cell is written and the shape draws unmirrored (the P7-21 Result,
+/// Open issues).
+fn flip(ctx: &mut AppCtx, cell: &'static str, label: &str) -> Result<Outcome, CommandError> {
+    let (session, targets, warnings) = selection_targets(ctx)?;
+    let fresh = {
+        let doc = ctx
+            .documents
+            .iter()
+            .find(|slot| slot.id == session)
+            .map(|slot| &slot.document)
+            .ok_or_else(|| CommandError::failed("the document session is gone"))?;
+        let on = targets.first().is_some_and(|id| {
+            CellReader::new(doc)
+                .boolean(SheetRef::Shape(*id), &CellName::new(cell))
+                .unwrap_or(false)
+        });
+        !on
+    };
+    let mut edit = CompositeEdit::new(count_label(label, targets.len()));
+    {
+        let doc = document_mut(ctx, session)?;
+        for id in &targets {
+            let step = CellEdit::new(
+                doc,
+                session,
+                label,
+                SheetRef::Shape(*id),
+                cell,
+                super::format::bool_write(fresh),
+            )?;
+            edit.push(Box::new(step));
+        }
+    }
+    edit.apply(ctx)?;
+    // A glued connector derives its end through the shape's transform,
+    // flips included: re-route like the moves do (task P7-21), so the
+    // post state is what a re-route on undo or redo recomputes.
+    reroute_quietly(ctx);
+    Ok(edit_outcome(label, warnings, Box::new(edit)))
+}
+
+/// `arrange.align.box`: the Align gallery's `value` argument names the
+/// alignment (`left`, `center`, `right`, `top`, `middle`, `bottom`).
+fn run_align_box(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError> {
+    let value = need_value_text(inv, "alignment")?;
+    let key = normalise(&value);
+    let choice = match key.as_str() {
+        "left" | "alignleft" => Align::Left,
+        "center" | "centre" | "centerx" | "aligncenter" | "aligncentre" => Align::CenterX,
+        "right" | "alignright" => Align::Right,
+        "top" | "aligntop" => Align::Top,
+        "middle" | "alignmiddle" => Align::Middle,
+        "bottom" | "alignbottom" => Align::Bottom,
+        _ => {
+            return Err(CommandError::invalid_args(format!(
+                "unknown alignment {value:?}"
+            )));
+        }
+    };
+    align(ctx, choice)
+}
+
+/// `arrange.position`: the Position gallery's `value` argument names
+/// the operation. A `distribute...` name spaces the selection
+/// (`horizontal`, `vertical`, `center`, `middle`, `h spacing`,
+/// `v spacing`); anything else is an alignment (the same names as
+/// `arrange.align.box`).
+fn run_position(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError> {
+    let value = need_value_text(inv, "position")?;
+    let key = normalise(&value);
+    let spaced = if let Some(rest) = key.strip_prefix("distribute") {
+        Some(normalise(rest))
+    } else {
+        match key.as_str() {
+            "hspacing" | "horizontalspacing" => Some(String::from("horizontal")),
+            "vspacing" | "verticalspacing" => Some(String::from("vertical")),
+            "centerspacing" => Some(String::from("center")),
+            "middlespacing" => Some(String::from("middle")),
+            _ => None,
+        }
+    };
+    if let Some(kind) = spaced {
+        return match kind.as_str() {
+            "horizontal" | "h" | "horizontalspacing" | "hspacing" | "hs" => {
+                distribute(ctx, Axis::Horizontal)
+            }
+            "vertical" | "v" | "verticalspacing" | "vspacing" | "vs" => {
+                distribute(ctx, Axis::Vertical)
+            }
+            "center" | "centre" | "centers" => distribute_centres(ctx, Axis::Horizontal),
+            "middle" | "middles" => distribute_centres(ctx, Axis::Vertical),
+            _ => Err(CommandError::invalid_args(format!(
+                "unknown position {value:?}"
+            ))),
+        };
+    }
+    run_align_box(ctx, inv)
+}
+
+/// `arrange.distribute_shapes.distribute_center`: equal spacing of the
+/// shapes' horizontal centres.
+fn run_distribute_center(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandError> {
+    distribute_centres(ctx, Axis::Horizontal)
+}
+
+/// `arrange.distribute_shapes.distribute_middle`: equal spacing of the
+/// shapes' vertical centres.
+fn run_distribute_middle(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandError> {
+    distribute_centres(ctx, Axis::Vertical)
+}
+
+/// Spaces the shapes' centres equally along `axis`, leaving the first
+/// and last centre in place ("Distribute Center" / "Distribute
+/// Middle"; the gap variant is [`distribute`]).
+fn distribute_centres(ctx: &mut AppCtx, axis: Axis) -> Result<Outcome, CommandError> {
+    let (session, mut targets, warnings) = targets(ctx)?;
+    let label = match axis {
+        Axis::Horizontal => "Distribute center",
+        Axis::Vertical => "Distribute middle",
+    };
+    let mut edit = CompositeEdit::new(format!("{label} ({} shapes)", targets.len()));
+    if targets.len() > 1 {
+        match axis {
+            Axis::Horizontal => targets.sort_by(|a, b| {
+                centre_x(a.rect)
+                    .partial_cmp(&centre_x(b.rect))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            }),
+            Axis::Vertical => targets.sort_by(|a, b| {
+                centre_y(a.rect)
+                    .partial_cmp(&centre_y(b.rect))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            }),
+        }
+        let centre = |target: &Target| match axis {
+            Axis::Horizontal => centre_x(target.rect),
+            Axis::Vertical => centre_y(target.rect),
+        };
+        let first = targets.first().map(centre).unwrap_or(0.0);
+        let last = targets.last().map(centre).unwrap_or(0.0);
+        let gaps = u32::try_from(targets.len().saturating_sub(1)).unwrap_or(u32::MAX);
+        let step = (last - first) / f64::from(gaps);
+        {
+            let doc = document_mut(ctx, session)?;
+            for (index, target) in targets.iter().enumerate() {
+                let wanted = first + step * index as f64;
+                let (dx, dy) = match axis {
+                    Axis::Horizontal => (wanted - centre_x(target.rect), 0.0),
+                    Axis::Vertical => (0.0, wanted - centre_y(target.rect)),
+                };
+                if let Some(step) =
+                    move_cell_edit(doc, session, "Distribute shape", target, dx, dy)?
+                {
+                    edit.push(step);
+                }
+            }
+        }
+    }
+    edit.apply(ctx)?;
+    reroute_quietly(ctx);
+    Ok(edit_outcome(label, warnings, Box::new(edit)))
+}
+
+/// The `value` argument as text, or the programmatic contract's
+/// [`CommandError::NeedsInput`] for it.
+fn need_value_text(inv: &Invocation, prompt: &str) -> Result<String, CommandError> {
+    match inv.args.get("value") {
+        Some(crate::ArgValue::Text(text)) => Ok(text.clone()),
+        Some(crate::ArgValue::Number(value)) => Ok(number_literal(*value)),
+        Some(crate::ArgValue::Integer(value)) => Ok(value.to_string()),
+        Some(_) => Err(CommandError::invalid_args("value must be text")),
+        None => Err(CommandError::NeedsInput(crate::NeededInput::Text {
+            prompt: prompt.to_owned(),
+            default: None,
+        })),
+    }
+}
+
+/// The comparable form of a `value` spelling: lower case, no spaces,
+/// underscores or hyphens.
+fn normalise(value: &str) -> String {
+    value
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .filter(|c| c.is_alphanumeric())
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Source;
     use crate::app::{AppCtx, DocumentSession, Settings};
     use larrygram_model::{Cell, CellValue, Preserved};
 
@@ -1314,5 +1632,187 @@ mod tests {
             regroup_exact(doc, PageId { index: 9 }, id, &snapshot).expect("regroup"),
             id
         );
+    }
+    /// A second shape at `(x, y)`, added to the context's page.
+    fn second_shape(ctx: &mut AppCtx, session: SessionId, x: f64, y: f64) -> ShapeId {
+        let doc = super::super::edit::document_mut(ctx, session).expect("document");
+        let mut shape = larrygram_model::Shape::new(ShapeId { index: 9 }, 9);
+        for (name, value) in [
+            ("PinX", x),
+            ("PinY", y),
+            ("Width", 1.0),
+            ("Height", 1.0),
+            ("LocPinX", 0.5),
+            ("LocPinY", 0.5),
+        ] {
+            shape.sheet.cells.push(shape_cell(name, value));
+        }
+        doc.insert_shape(PageId { index: 0 }, shape, None)
+            .expect("second shape")
+    }
+
+    fn number_cell(doc: &Document, shape: ShapeId, name: &str) -> Option<f64> {
+        let mut reader = CellReader::new(doc);
+        reader
+            .number(SheetRef::Shape(shape), &CellName::new(name))
+            .ok()
+    }
+
+    #[test]
+    fn rotate_writes_the_angle_and_undo_restores_it() {
+        let (mut ctx, session, _page, id) = context();
+        ctx.selection.shapes = vec![id];
+        let outcome =
+            run_rotate_clockwise(&mut ctx, &Invocation::empty(Source::Test)).expect("rotate");
+        let mut edit = outcome.edit.expect("edit");
+        {
+            let doc = ctx.active_document().expect("session").document.clone();
+            let angle = number_cell(&doc, id, "Angle").expect("Angle");
+            assert_eq!(angle, -std::f64::consts::FRAC_PI_2);
+        }
+        edit.revert(&mut ctx).expect("undo");
+        let doc = ctx.active_document().expect("session").document.clone();
+        assert_eq!(
+            number_cell(&doc, id, "Angle"),
+            Some(0.0),
+            "the angle is back"
+        );
+        edit.apply(&mut ctx).expect("redo");
+        let doc = ctx.active_document().expect("session").document.clone();
+        assert_eq!(
+            number_cell(&doc, id, "Angle"),
+            Some(-std::f64::consts::FRAC_PI_2)
+        );
+        let _ = session;
+    }
+
+    #[test]
+    fn rotate_left_is_the_other_quarter_turn() {
+        let (mut ctx, _session, _page, id) = context();
+        ctx.selection.shapes = vec![id];
+        run_rotate_counterclockwise(&mut ctx, &Invocation::empty(Source::Test)).expect("rotate");
+        let doc = ctx.active_document().expect("session").document.clone();
+        assert_eq!(
+            number_cell(&doc, id, "Angle"),
+            Some(std::f64::consts::FRAC_PI_2)
+        );
+    }
+
+    #[test]
+    fn flip_toggles_its_flip_cell() {
+        let (mut ctx, _session, _page, id) = context();
+        ctx.selection.shapes = vec![id];
+        run_flip_horizontal(&mut ctx, &Invocation::empty(Source::Test)).expect("flip");
+        {
+            let doc = ctx.active_document().expect("session").document.clone();
+            let mut reader = CellReader::new(&doc);
+            assert_eq!(
+                reader.boolean(SheetRef::Shape(id), &CellName::new("FlipX")),
+                Ok(true)
+            );
+        }
+        run_flip_horizontal(&mut ctx, &Invocation::empty(Source::Test)).expect("flip back");
+        let doc = ctx.active_document().expect("session").document.clone();
+        let mut reader = CellReader::new(&doc);
+        assert_eq!(
+            reader.boolean(SheetRef::Shape(id), &CellName::new("FlipX")),
+            Ok(false)
+        );
+    }
+
+    #[test]
+    fn align_box_dispatches_its_value_and_rejects_an_unknown_one() {
+        let (mut ctx, session, _page, id) = context();
+        let other = second_shape(&mut ctx, session, 3.0, 0.0);
+        ctx.selection.shapes = vec![id, other];
+        let invoke = |value: &str| {
+            Invocation::new(
+                crate::Args::new().with("value", crate::ArgValue::Text(value.to_owned())),
+                Source::Test,
+            )
+        };
+        run_align_box(&mut ctx, &invoke("Align Left")).expect("left");
+        let doc = ctx.active_document().expect("session").document.clone();
+        assert_eq!(
+            number_cell(&doc, other, "PinX"),
+            Some(0.0),
+            "both shapes share the left edge (the first shape's pin)"
+        );
+        let error = run_align_box(&mut ctx, &invoke("diagonal")).expect_err("unknown");
+        assert!(error.to_string().contains("unknown alignment"), "{error}");
+        let error = run_align_box(&mut ctx, &Invocation::empty(Source::Test)).expect_err("missing");
+        assert!(error.to_string().contains("alignment"), "{error}");
+    }
+
+    #[test]
+    fn position_dispatches_distribute_and_align_names() {
+        let (mut ctx, session, _page, id) = context();
+        let other = second_shape(&mut ctx, session, 4.0, 0.0);
+        ctx.selection.shapes = vec![id, other];
+        let invoke = |value: &str| {
+            Invocation::new(
+                crate::Args::new().with("value", crate::ArgValue::Text(value.to_owned())),
+                Source::Test,
+            )
+        };
+        run_position(&mut ctx, &invoke("Distribute Horizontal Spacing")).expect("spread");
+        {
+            let doc = ctx.active_document().expect("session").document.clone();
+            assert_eq!(number_cell(&doc, other, "PinX"), Some(4.0), "ends stay");
+        }
+        run_position(&mut ctx, &invoke("distribute-h-spacing")).expect("spread again");
+        run_position(&mut ctx, &invoke("middle")).expect("align middle");
+        let error = run_position(&mut ctx, &invoke("twirl")).expect_err("unknown");
+        assert!(error.to_string().contains("unknown"), "{error}");
+    }
+
+    #[test]
+    fn distribute_center_spaces_the_centres_equally() {
+        let (mut ctx, session, _page, id) = context();
+        let middle = second_shape(&mut ctx, session, 2.0, 0.0);
+        let end = second_shape(&mut ctx, session, 3.0, 0.0);
+        ctx.selection.shapes = vec![id, middle, end];
+        // Spread them unevenly first: centres at 0, 2 and 3 inches.
+        run_distribute_center(&mut ctx, &Invocation::empty(Source::Test)).expect("center");
+        let doc = ctx.active_document().expect("session").document.clone();
+        let centres: Vec<f64> = [id, middle, end]
+            .iter()
+            .map(|shape| number_cell(&doc, *shape, "PinX").expect("PinX"))
+            .collect();
+        assert_eq!(centres, vec![0.0, 1.5, 3.0], "equal centre spacing");
+    }
+
+    #[test]
+    fn distribute_middle_spaces_the_vertical_centres() {
+        let (mut ctx, session, _page, id) = context();
+        let middle = second_shape(&mut ctx, session, 0.0, 2.0);
+        let end = second_shape(&mut ctx, session, 0.0, 3.0);
+        ctx.selection.shapes = vec![id, middle, end];
+        run_distribute_middle(&mut ctx, &Invocation::empty(Source::Test)).expect("middle");
+        let doc = ctx.active_document().expect("session").document.clone();
+        let centres: Vec<f64> = [id, middle, end]
+            .iter()
+            .map(|shape| number_cell(&doc, *shape, "PinY").expect("PinY"))
+            .collect();
+        assert_eq!(centres, vec![0.0, 1.5, 3.0]);
+    }
+
+    #[test]
+    fn the_new_arrange_ids_run_and_undo_on_the_seed() {
+        let (mut ctx, _session, _page, id) = context();
+        ctx.selection.shapes = vec![id];
+        for run in [
+            run_rotate_clockwise as fn(&mut AppCtx, &Invocation) -> Result<Outcome, CommandError>,
+            run_rotate_counterclockwise,
+            run_flip_horizontal,
+            run_flip_vertical,
+            run_distribute_center,
+            run_distribute_middle,
+        ] {
+            let outcome = run(&mut ctx, &Invocation::empty(Source::Test)).expect("run");
+            let mut edit = outcome.edit.expect("edit");
+            edit.revert(&mut ctx).expect("undo");
+            edit.apply(&mut ctx).expect("redo");
+        }
     }
 }
