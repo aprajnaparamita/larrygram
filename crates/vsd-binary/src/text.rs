@@ -822,6 +822,12 @@ fn parse_para(
 
 /// Reads the trailing blocks of a paragraph record: the bullet string
 /// lives in the block of type 2 index 8.
+///
+/// A block that is cut short ends the scan and warns
+/// [`WarningKind::BadValue`]: the bullet string then falls back to its
+/// empty default, and that degradation is never silent (P8-12 major
+/// 2). The region's own ends — a zero length and a payload that stops
+/// between blocks — are clean.
 fn parse_para_blocks(
     bytes: &[u8],
     options: &TextOptions,
@@ -829,9 +835,11 @@ fn parse_para_blocks(
 ) -> Option<String> {
     let mut cursor = Cursor::new(bytes);
     let mut bullet = None;
+    let mut truncated = false;
     loop {
         let start = cursor.pos;
         let Some(length) = cursor.u32() else {
+            truncated = !cursor.rest().is_empty();
             break;
         };
         if length == 0 {
@@ -839,16 +847,20 @@ fn parse_para_blocks(
         }
         let length = usize::try_from(length).unwrap_or(usize::MAX);
         let Some(block_type) = cursor.u8() else {
+            truncated = true;
             break;
         };
         let Some(block_index) = cursor.u8() else {
+            truncated = true;
             break;
         };
         if block_type == 2 && block_index == 8 {
             if cursor.skip(1).is_none() {
+                truncated = true;
                 break;
             }
             let Some(count) = cursor.u8() else {
+                truncated = true;
                 break;
             };
             let count = match options.version {
@@ -861,13 +873,27 @@ fn parse_para_blocks(
                     note_lossy(&decoded, "bullet string", warnings);
                     bullet = Some(decoded.text);
                 }
-                None => break,
+                None => {
+                    truncated = true;
+                    break;
+                }
             }
         }
         match start.checked_add(length) {
             Some(next) if cursor.bytes.get(next..).is_some() => cursor.pos = next,
-            _ => break,
+            _ => {
+                truncated = true;
+                break;
+            }
         }
+    }
+    if truncated {
+        warnings.push(ImportWarning {
+            context: "shape text / paragraph run".to_owned(),
+            kind: WarningKind::BadValue {
+                what: "bullet string block",
+            },
+        });
     }
     bullet
 }
@@ -3920,5 +3946,81 @@ mod tests {
                 kind: WarningKind::Dropped { what: "shape text" },
             }]
         );
+    }
+
+    // ---- hostile input sweeps (P8-12 major 2) ---------------------
+
+    /// Every row of one text record payload, with its section name.
+    fn rows_of(record: Record, payload: &[u8]) -> (Vec<(String, Vec<Cell>)>, Vec<ImportWarning>) {
+        let chunks = [shape_chunk(1), text_chunk(record, 0, payload)];
+        let (document, warnings) = run_default(&chunks, 1);
+        let mut rows = Vec::new();
+        if let Some(shape) = document.shape(ShapeId { index: 0 }) {
+            for section in &shape.sheet.sections {
+                for row in &section.rows {
+                    rows.push((section.name.as_str().to_owned(), row.cells.clone()));
+                }
+            }
+        }
+        (rows, warnings)
+    }
+
+    #[test]
+    fn text_rows_survive_a_truncation_at_every_offset() {
+        // P8-12 major 2: the sweeps cut at record and framing
+        // boundaries, where the record-level checks fire first. A
+        // record whose declared length is plausible and whose payload
+        // ends mid-field lands in the per-cell reads of `parse_char`,
+        // `parse_para`, the tab rows and the field blocks. Every
+        // truncation must map or warn, never panic, and never invent a
+        // value: the rows never grow past the full run's, and a quiet
+        // run (one whose warnings are the full run's) may only lose a
+        // value to its empty default.
+        let payloads: [(Record, Vec<u8>); 5] = [
+            (
+                CHAR_IX,
+                char_payload(4, 0, [1, 2, 3, 0], 0, 0, 0, 10000, 0.25, 0),
+            ),
+            (
+                PARA_IX,
+                para_payload_v11(4, [0.1; 6], 1, 0, 0, 0.25, 0.5, 0, Some("x")),
+            ),
+            (TABS_DATA_1, tabs_payload(4, &[(1.0, 2), (2.0, 3)])),
+            (TEXT_FIELD, field_numeric_payload(1.5, CELL_TYPE_INCHES, 6, false)),
+            (TEXT_FIELD, field_string_payload(7)),
+        ];
+        for (record, payload) in payloads {
+            let (full, full_warnings) = rows_of(record, &payload);
+            for cut in 0..=payload.len() {
+                let (rows, warnings) = rows_of(record, &payload[..cut]);
+                assert!(rows.len() <= full.len(), "{record:?} cut {cut}");
+                if warnings != full_warnings {
+                    // The degradation is visible: the run warns
+                    // something the full payload does not, and the
+                    // cells it maps may carry the warned default.
+                    continue;
+                }
+                // A quiet run may only *lose* a value to its empty
+                // default (a record that ends at a region boundary
+                // carries no trailing value); it may never invent one.
+                for ((name, cells), (full_name, full_cells)) in rows.iter().zip(&full) {
+                    assert_eq!(name, full_name, "{record:?} cut {cut}");
+                    for cell in cells {
+                        let other = full_cells
+                            .iter()
+                            .find(|candidate| candidate.name == cell.name)
+                            .and_then(|candidate| candidate.value.as_ref());
+                        match (cell.value.as_ref(), other) {
+                            (Some(CellValue::Str(text)), Some(_)) if text.is_empty() => {}
+                            (mine, other) => assert_eq!(
+                                mine, other,
+                                "quiet difference: {record:?} cut {cut} {}",
+                                cell.name.as_str()
+                            ),
+                        }
+                    }
+                }
+            }
+        }
     }
 }

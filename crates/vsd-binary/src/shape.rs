@@ -4382,4 +4382,177 @@ mod tests {
         assert_eq!(page.shapes, Vec::new());
         assert_eq!(kinds(&warnings).len(), 2);
     }
+
+    // ---- hostile input sweeps (P8-12 major 1) ---------------------
+
+    /// The rows of one geometry row payload run alone (with its curve
+    /// record, when the row references one).
+    fn geometry_rows_of(
+        record: u16,
+        payload: &[u8],
+        curve: Option<Vec<u8>>,
+    ) -> (Vec<Row>, Vec<ImportWarning>) {
+        let mut rows = vec![chunk(record, 3, 1, payload.to_vec())];
+        if let Some(curve) = curve {
+            rows.push(chunk(0xd1, 0, 9, curve));
+        }
+        let mut warnings = Vec::new();
+        let mut chunks = vec![chunk(
+            0x48,
+            1,
+            1,
+            shape_record(u32::MAX, u32::MAX, u32::MAX, u32::MAX, u32::MAX),
+        )];
+        chunks.push(chunk(0x6c, 2, 0, geom_list(&[1])));
+        chunks.extend(rows);
+        let mut document = Document::new();
+        collect(&chunks, &mut document, &mut warnings).expect("collect");
+        let rows = document
+            .shapes
+            .first()
+            .and_then(|shape| shape.sheet.sections.first())
+            .map(|section| section.rows.clone())
+            .unwrap_or_default();
+        (rows, warnings)
+    }
+
+    #[test]
+    fn curve_rows_survive_a_truncation_at_every_offset() {
+        // P8-12 major 1: the sweeps cut at record and framing
+        // boundaries, where the record-level checks fire first. A
+        // record whose length is plausible and whose payload ends
+        // mid-field lands in the per-field reads (`nurbs_row_text`,
+        // `polyline_row_text`, `inline_nurbs`, `inline_polyline`) and
+        // in the curve-data reader of the pre-pass. Every truncation
+        // must map or warn, never panic, and never invent a value.
+        let referenced = join(&[
+            tagged(1.0, 65),
+            tagged(2.0, 65),
+            double(0.5),
+            double(1.0),
+            double(0.0),
+            double(1.0),
+            vec![0],
+            vec![0x8a],
+            vec![0, 0, 0],
+            word(9),
+        ]);
+        let inline_static = join(&[
+            tagged(1.0, 65),
+            tagged(2.0, 65),
+            double(0.5),
+            double(1.0),
+            double(0.0),
+            double(1.0),
+            vec![0],
+            vec![0],
+            vec![0; 9],
+            word(0),     // block length
+            vec![0],     // separator
+            vec![6],     // the E cell
+            vec![0x8a],  // static format
+            double(1.0), // last knot
+            3u16.to_le_bytes().to_vec(),
+            vec![0, 1], // xType, yType
+            word(1),    // repetitions
+            double(0.25),
+            double(0.5),
+            double(0.0),
+            double(2.0),
+        ]);
+        let polyline_inline = join(&[
+            tagged(1.0, 65),
+            tagged(2.0, 65),
+            vec![0],
+            vec![0],
+            vec![0; 9],
+            word(0),
+            vec![0],
+            vec![6],
+            vec![0x8a],
+            3u16.to_le_bytes().to_vec(),
+            vec![0, 1],
+            word(1),
+            double(0.25),
+            double(0.5),
+        ]);
+        let cases: [(u16, Vec<u8>); 3] = [
+            (0xc3, referenced.clone()),
+            (0xc3, inline_static),
+            (0xc1, polyline_inline),
+        ];
+        for (record, payload) in cases {
+            let curve = (record == 0xc3 && payload == referenced).then(|| {
+                nurbs_data(1.0, 3, 0, 1, &[(0.25, 0.5, 0.0, 1.0)])
+            });
+            let (full, full_warnings) = geometry_rows_of(record, &payload, curve.clone());
+            for cut in 0..=payload.len() {
+                let (rows, warnings) = geometry_rows_of(record, &payload[..cut], curve.clone());
+                assert!(rows.len() <= full.len(), "0x{record:02x} cut {cut}");
+                if warnings != full_warnings {
+                    continue;
+                }
+                // A quiet run may only lose a value to its empty
+                // default; it may never invent one. The `E` cell is
+                // the one exception: its curve text loses points under
+                // the point-count cap of
+                // `a_lie_about_the_point_count_is_capped_by_the_payload`
+                // (pinned behaviour), so it is compared by presence
+                // only here.
+                for (row, full_row) in rows.iter().zip(&full) {
+                    for cell in &row.cells {
+                        if cell.name.as_str() == "E" {
+                            continue;
+                        }
+                        let other = full_row
+                            .cells
+                            .iter()
+                            .find(|candidate| candidate.name == cell.name)
+                            .and_then(|candidate| candidate.value.as_ref());
+                        match (cell.value.as_ref(), other) {
+                            (Some(CellValue::Str(text)), Some(_)) if text.is_empty() => {}
+                            (mine, other) => assert_eq!(
+                                mine, other,
+                                "quiet difference: 0x{record:02x} cut {cut} {}",
+                                cell.name.as_str()
+                            ),
+                        }
+                    }
+                }
+            }
+        }
+        // The curve-data record of the pre-pass, truncated at every
+        // offset: the row keeps its cells and drops the E text, or
+        // warns.
+        let curve_payload = nurbs_data(1.0, 3, 0, 1, &[(0.25, 0.5, 0.0, 1.0)]);
+        let (full, full_warnings) = geometry_rows_of(0xc3, &referenced, Some(curve_payload.clone()));
+        for cut in 0..=curve_payload.len() {
+            let (rows, warnings) =
+                geometry_rows_of(0xc3, &referenced, Some(curve_payload[..cut].to_vec()));
+            assert!(rows.len() <= full.len(), "curve cut {cut}");
+            if warnings != full_warnings {
+                continue;
+            }
+            for (row, full_row) in rows.iter().zip(&full) {
+                for cell in &row.cells {
+                    if cell.name.as_str() == "E" {
+                        continue;
+                    }
+                    let other = full_row
+                        .cells
+                        .iter()
+                        .find(|candidate| candidate.name == cell.name)
+                        .and_then(|candidate| candidate.value.as_ref());
+                    match (cell.value.as_ref(), other) {
+                        (Some(CellValue::Str(text)), Some(_)) if text.is_empty() => {}
+                        (mine, other) => assert_eq!(
+                            mine, other,
+                            "quiet difference: curve cut {cut} {}",
+                            cell.name.as_str()
+                        ),
+                    }
+                }
+            }
+        }
+    }
 }
