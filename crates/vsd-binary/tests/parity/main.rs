@@ -132,10 +132,6 @@ fn parity_reports_over_the_corpus() {
         let (import, note) =
             match larrygram_vsd_binary::import(&bytes, &larrygram_vsd_binary::Limits::DEFAULT) {
                 Ok(import) => (Some(import), None),
-                Err(larrygram_vsd_binary::Error::NotImplemented) => (
-                    None,
-                    Some("our import is still the P8-01 stub (P8-07 assembles it)".to_owned()),
-                ),
                 Err(err) => (None, Some(format!("our import failed: {err}"))),
             };
         reports.push(report_for(

@@ -255,16 +255,12 @@ fn read_only_save_error(path: &Path, kind: DocumentKind) -> CommandError {
 
 /// One import warning as a status line (ADR 0071: every degradation
 /// surfaces, never silently).
+///
+/// The kind is spelled by its own [`std::fmt::Display`] in
+/// `larrygram-vsd-binary`, so a new variant cannot fall back to a
+/// `Debug` spelling here (P8-11 F8).
 fn import_warning_line(warning: &binary::ImportWarning) -> String {
-    let what = match &warning.kind {
-        binary::WarningKind::SkippedRecord { name } => format!("skipped record {name}"),
-        binary::WarningKind::Dropped { what } => format!("dropped {what}"),
-        binary::WarningKind::UnresolvedReference { what } => format!("unresolved {what}"),
-        binary::WarningKind::BadValue { what } => format!("unparsable {what}, using a default"),
-        binary::WarningKind::Unsupported { what } => format!("unsupported {what}"),
-        other => format!("{other:?}"),
-    };
-    format!("{}: {what}", warning.context)
+    format!("{}: {}", warning.context, warning.kind)
 }
 
 // ---------------------------------------------------------------------------
@@ -959,6 +955,9 @@ pub fn kind_text(kind: DocumentKind) -> &'static str {
         DocumentKind::Drawing => "drawing",
         DocumentKind::Stencil => "stencil",
         DocumentKind::Template => "template",
+        // `DocumentKind` is `#[non_exhaustive]`, so this arm is
+        // required but unreachable: every variant it has is named
+        // (P8-12 major 4).
         _ => "unknown",
     }
 }
@@ -999,6 +998,9 @@ pub fn warning_line(doc: &Document, warning: &larrygram_model::CellWarning) -> S
         larrygram_model::WarningKind::UnresolvedTheme => {
             format!("the theme cannot supply it, using {used}")
         }
+        // `WarningKind` is `#[non_exhaustive]`, so this arm is
+        // required but unreachable: every variant it has is named
+        // (P8-12 major 4).
         _ => format!("value unavailable, using {used}"),
     };
     format!(
@@ -1031,6 +1033,9 @@ pub fn value_text(value: &CellValue) -> String {
         CellValue::Color(color) => format!("#{:02X}{:02X}{:02X}", color.r, color.g, color.b),
         CellValue::List(text) => text.clone(),
         CellValue::Error(text) => text.clone(),
+        // `CellValue` is `#[non_exhaustive]`, so this arm is required
+        // but unreachable: every variant it has is named (P8-12 major
+        // 4).
         _ => String::new(),
     }
 }
