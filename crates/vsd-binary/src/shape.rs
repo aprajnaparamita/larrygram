@@ -32,6 +32,7 @@
 //! | geometry flags (`0x89`) | the section's `NoFill`, `NoLine`, `NoShow` |
 //! | geometry rows (`0x8a`, `0x8b`, `0x8c`, `0x8d`, `0x8f`, `0x90`, `0xa5`, `0xa6`, `0xc1`, `0xc3`) | `Geometry` rows with their `X`, `Y`, `A`..`D` and `E` cells |
 //! | curve data (`0xd1`) | the `NURBS(...)` and `POLYLINE(...)` data a row references |
+//! | layer membership (`0xa7`) | the `LayerMember` cell (the page's `Layer` rows are [`crate::pages`]'s) |
 //!
 //! The line, fill and text style references of a shape record stay Visio
 //! ids, and the master reference resolves to the master with the same
@@ -72,16 +73,18 @@
 //! unset (ADR 0070). `FlipX` and `FlipY` are booleans (ADR 0070).
 //!
 //! **Degrading, never crashing.** A record this module does not consume
-//! is skipped: the dropped list of ADR 0070 (foreign data, OLE,
-//! hyperlinks, events and macros, annotations, reviewers, smart tags,
-//! the font list) warns `Dropped`, a record kind outside the format's
-//! id table warns `SkippedRecord`, and the records other domain modules
-//! map (line, fill, text, character, paragraph, layers, ...) stay
-//! silent here. Warnings fire only inside shape record groups; a page
-//! or container record is another module's to report. A truncated or
-//! nonsensical payload sets the cells that did parse and warns
-//! `BadValue` for the rest; every count read from a payload is capped by
-//! what the payload can hold.
+//! is never dropped silently (P8-11 F1): the kinds the importer drops
+//! (ADR 0070's list plus the row families it defers — shape data,
+//! user-defined cells, custom properties, connection points, controls,
+//! and the sheet rows no module maps) warn `Dropped` with what they
+//! carry, a record kind no module consumes warns `SkippedRecord` with
+//! its format name, and a kind a module maps (line, fill, text,
+//! character, paragraph, ...) stays silent here. The two tables live
+//! beside the id table in [`crate::chunks`]. Warnings fire only inside
+//! shape record groups; a page or container record is another module's
+//! to report. A truncated or nonsensical payload sets the cells that
+//! did parse and warns `BadValue` for the rest; every count read from a
+//! payload is capped by what the payload can hold.
 //!
 //! # Versions
 //!
@@ -99,7 +102,7 @@
 //! MPL-2.0; AGENTS.md section 5). Only derived facts (record ids, field
 //! order, unit semantics) are implemented here, in our own code.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use larrygram_geom::Unit;
 use larrygram_model::{
@@ -181,134 +184,15 @@ const FILL_AND_SHADOW: Record = Record(0x86);
 /// A text-block record: the margins and alignment, on a style or on a
 /// shape.
 const TEXT_BLOCK: Record = Record(0x87);
+/// The layer membership of a shape (the `LayerMember` cell).
+const LAYER_MEMBERSHIP: Record = Record(0xa7);
 
-// The records ADR 0070 drops with a warning. Every other record kind
-// this module does not consume belongs to another domain module (line,
-// fill, text, styles, pages, ...) or to the container, and is skipped
-// silently here.
-
-/// The dropped record kinds of ADR 0070, with what they carry.
-const DROPPED: &[(Record, &str)] = &[
-    (Record(0x0c), "foreign data"),
-    (Record(0x0d), "OLE object list"),
-    (Record(0x1f), "OLE data"),
-    (Record(0x98), "foreign data type"),
-    (Record(0x73), "hyperlink list"),
-    (Record(0xc4), "hyperlink"),
-    (Record(0x84), "event"),
-    (Record(0x6e), "action id list"),
-    (Record(0xa9), "action id"),
-    (Record(0xc6), "annotation"),
-    (Record(0xc5), "reviewer"),
-    (Record(0x76), "smart tag list"),
-    (Record(0xc7), "smart tag definition"),
-    (Record(0x18), "font list"),
-    (Record(0x19), "font"),
-    (Record(0xd7), "font face"),
-    (Record(0xd8), "font face list"),
-];
-
-/// The record kinds of the binary format (the id table derived from the
-/// libvisio reference, `VSDDocumentStructure.h`). A record kind outside
-/// this table is skipped with a `SkippedRecord` warning.
-const KNOWN: &[Record] = &[
-    Record(0x0c),
-    Record(0x0d),
-    Record(0x0e),
-    Record(0x14),
-    Record(0x15),
-    Record(0x16),
-    Record(0x18),
-    Record(0x19),
-    Record(0x1a),
-    Record(0x1d),
-    Record(0x1e),
-    Record(0x1f),
-    Record(0x27),
-    Record(0x2c),
-    Record(0x2d),
-    Record(0x32),
-    Record(0x33),
-    Record(0x34),
-    Record(0x46),
-    Record(0x47),
-    Record(0x48),
-    Record(0x4a),
-    Record(0x4d),
-    Record(0x4e),
-    Record(0x64),
-    Record(0x65),
-    Record(0x66),
-    Record(0x68),
-    Record(0x69),
-    Record(0x6a),
-    Record(0x6b),
-    Record(0x6c),
-    Record(0x6d),
-    Record(0x6e),
-    Record(0x6f),
-    Record(0x70),
-    Record(0x71),
-    Record(0x72),
-    Record(0x73),
-    Record(0x76),
-    Record(0x83),
-    Record(0x84),
-    Record(0x85),
-    Record(0x86),
-    Record(0x87),
-    Record(0x88),
-    Record(0x89),
-    Record(0x8a),
-    Record(0x8b),
-    Record(0x8c),
-    Record(0x8d),
-    Record(0x8f),
-    Record(0x90),
-    Record(0x92),
-    Record(0x93),
-    Record(0x94),
-    Record(0x95),
-    Record(0x96),
-    Record(0x97),
-    Record(0x98),
-    Record(0x99),
-    Record(0x9b),
-    Record(0x9c),
-    Record(0x9d),
-    Record(0x9e),
-    Record(0xa0),
-    Record(0xa1),
-    Record(0xa2),
-    Record(0xa4),
-    Record(0xa5),
-    Record(0xa6),
-    Record(0xa7),
-    Record(0xa8),
-    Record(0xa9),
-    Record(0xaa),
-    Record(0xb4),
-    Record(0xb5),
-    Record(0xb6),
-    Record(0xb7),
-    Record(0xba),
-    Record(0xbc),
-    Record(0xbd),
-    Record(0xbe),
-    Record(0xbf),
-    Record(0xc0),
-    Record(0xc1),
-    Record(0xc3),
-    Record(0xc4),
-    Record(0xc5),
-    Record(0xc6),
-    Record(0xc7),
-    Record(0xc8),
-    Record(0xc9),
-    Record(0xd1),
-    Record(0xd7),
-    Record(0xd8),
-];
+// The drop policy lives beside the id table in [`crate::chunks`]:
+// `Record::dropped_what` names every record kind the importer drops
+// with a `Dropped` warning (ADR 0070's list plus the rows it defers),
+// `Record::is_mapped` names the kinds a module consumes. A record kind
+// outside both warns `SkippedRecord` by default (P8-11 F1: an
+// unmapped kind is never silent).
 
 /// Maps every shape, transform and geometry record in `chunks` into
 /// `document`.
@@ -352,7 +236,7 @@ pub fn collect_with(
 ) -> Result<(), Error> {
     let names = name_table(chunks, version);
     let curves = curve_table(chunks);
-    let mut walker = Walker::new(limits);
+    let mut walker = Walker::new(limits, version);
     for chunk in chunks {
         walker.record(chunk, &names, &curves, &document.masters, warnings)?;
     }
@@ -684,6 +568,8 @@ impl Open {
 
 /// The state of one [`collect_with`] walk.
 struct Walker<'a> {
+    /// The stream's format version (the name payload layouts).
+    version: FormatVersion,
     /// The caps applied to the walk.
     limits: &'a Limits,
     /// The open shapes, innermost last.
@@ -746,9 +632,10 @@ impl ShapeList {
 
 impl<'a> Walker<'a> {
     /// A walker with no shapes yet.
-    fn new(limits: &'a Limits) -> Self {
+    fn new(limits: &'a Limits, version: FormatVersion) -> Self {
         Walker {
             limits,
+            version,
             stack: Vec::new(),
             finished: BTreeMap::new(),
             next_index: 0,
@@ -853,6 +740,20 @@ impl<'a> Walker<'a> {
                         LINE => style::map_line(chunk.data, sheet, &context, warnings),
                         FILL_AND_SHADOW => style::map_fill(chunk.data, sheet, &context, warnings),
                         _ => style::map_text_block(chunk.data, sheet, &context, warnings),
+                    }
+                }
+            }
+            LAYER_MEMBERSHIP => {
+                if let Some(open) = self.stack.last_mut() {
+                    let context = format!("shape {}", open.shape.visio_id);
+                    match crate::pages::cell_block_string(chunk.data, 6, self.version, 0) {
+                        Some(membership) => {
+                            let mut cell = Cell::new(CellName::from_static("LayerMember"));
+                            cell.value = Some(CellValue::Str(membership));
+                            cell.unit = Unit::Unitsless;
+                            open.shape.sheet.cells.push(cell);
+                        }
+                        None => warnings.push(bad_value(context, "layer membership")),
                     }
                 }
             }
@@ -1022,21 +923,26 @@ impl<'a> Walker<'a> {
     /// Warns for a record this module does not consume, inside a shape
     /// record group (a page or container record is another module's to
     /// report).
+    ///
+    /// A record kind the importer drops warns `Dropped` with what it
+    /// carries; a kind no module consumes warns `SkippedRecord` with
+    /// its format name. A kind a module maps stays silent here (P8-11
+    /// F1: nothing is dropped silently any more).
     fn skip_other(&mut self, record: Record, warnings: &mut Vec<ImportWarning>) {
         if self.stack.is_empty() {
             return;
         }
         let context = self.context();
-        if let Some((_, what)) = DROPPED.iter().find(|(kind, _)| *kind == record) {
+        if let Some(what) = record.dropped_what() {
             warnings.push(ImportWarning {
                 context,
                 kind: WarningKind::Dropped { what },
             });
-        } else if !KNOWN.contains(&record) {
+        } else if !record.is_mapped() {
             warnings.push(ImportWarning {
                 context,
                 kind: WarningKind::SkippedRecord {
-                    name: "unknown record",
+                    name: record.name(),
                 },
             });
         }
@@ -1098,6 +1004,8 @@ fn inherit_geometry(document: &mut Document, master_shapes: &BTreeMap<u32, u32>)
             .filter(|section| section.name.as_str() == "Geometry")
             .cloned()
             .collect();
+        // Belt and braces (P8-12 minor 1): the same index resolved
+        // above, so this lookup cannot miss.
         if let Some(instance) = document.shapes.get_mut(index as usize) {
             instance.sheet.sections.extend(sections);
         }
@@ -1123,6 +1031,89 @@ fn master_shape_with_geometry(
         pending.extend(shape.children.iter().copied());
     }
     None
+}
+
+/// Drops the shapes no page or master tree references, and renumbers
+/// the arena (the wide-corpus blank-page check, P8-14).
+///
+/// A `.vsd` can carry a shape record outside every page and master —
+/// one helper record the file keeps but no page references. Visio
+/// drops it in conversion; the import dropped it into nothing but the
+/// document's shape list, where it inflated every count. A shape that
+/// no page or master reaches is therefore removed with one
+/// [`WarningKind::Dropped`] warning each, and the arena is renumbered
+/// so the kept shapes stay in stream order with contiguous ids: their
+/// parent, child, page and master references follow.
+pub(crate) fn drop_unreferenced(document: &mut Document, warnings: &mut Vec<ImportWarning>) {
+    let total = document.shapes.len();
+    let mut keep: BTreeSet<usize> = BTreeSet::new();
+    let mut pending: Vec<usize> = document
+        .pages
+        .iter()
+        .flat_map(|page| page.shapes.iter())
+        .chain(
+            document
+                .masters
+                .iter()
+                .flat_map(|master| master.shapes.iter()),
+        )
+        .map(|id| usize::try_from(id.index).unwrap_or(usize::MAX))
+        .collect();
+    while let Some(index) = pending.pop() {
+        let Some(shape) = document.shapes.get(index) else {
+            // A dangling root or child id (belt and braces: the arena
+            // indexes come from this document).
+            continue;
+        };
+        if !keep.insert(index) {
+            // A shape reached twice (a diamond in the child lists).
+            continue;
+        }
+        pending.extend(
+            shape
+                .children
+                .iter()
+                .map(|id| usize::try_from(id.index).unwrap_or(usize::MAX)),
+        );
+    }
+    let mut map: Vec<Option<u32>> = vec![None; total];
+    let mut kept: Vec<Shape> = Vec::new();
+    for (old, shape) in std::mem::take(&mut document.shapes).into_iter().enumerate() {
+        if keep.contains(&old) {
+            if let Some(slot) = map.get_mut(old) {
+                *slot = u32::try_from(kept.len()).ok();
+            }
+            kept.push(shape);
+        } else {
+            warnings.push(ImportWarning {
+                context: format!("shape {}", shape.visio_id),
+                kind: WarningKind::Dropped {
+                    what: "unreferenced shape record",
+                },
+            });
+        }
+    }
+    let new_id = |old: ShapeId| {
+        usize::try_from(old.index)
+            .ok()
+            .and_then(|index| map.get(index).copied())
+            .flatten()
+            .map(|index| ShapeId { index })
+    };
+    for (index, shape) in kept.iter_mut().enumerate() {
+        shape.id = ShapeId {
+            index: u32::try_from(index).unwrap_or(u32::MAX),
+        };
+        shape.parent = shape.parent.and_then(new_id);
+        shape.children = shape.children.iter().copied().filter_map(new_id).collect();
+    }
+    for page in &mut document.pages {
+        page.shapes = page.shapes.iter().copied().filter_map(new_id).collect();
+    }
+    for master in &mut document.masters {
+        master.shapes = master.shapes.iter().copied().filter_map(new_id).collect();
+    }
+    document.shapes = kept;
 }
 
 /// Re-links the shapes whose records name a parent (P8-15 goal 3).
@@ -3132,24 +3123,24 @@ mod tests {
     #[test]
     fn a_truncated_name_index_is_read_up_to_the_cut() {
         let entries = name_index(&[(1, 1), (2, 2)]);
-        let mut walker = Walker::new(&Limits::DEFAULT);
+        let mut walker = Walker::new(&Limits::DEFAULT, FormatVersion::V11);
         walker.read_name_index(&[], 1);
         assert!(walker.name_index.is_empty());
         for cut in 0..entries.len() {
-            let mut walker = Walker::new(&Limits::DEFAULT);
+            let mut walker = Walker::new(&Limits::DEFAULT, FormatVersion::V11);
             walker.read_name_index(entries.get(..cut).unwrap_or(&[]), 1);
         }
-        let mut walker = Walker::new(&Limits::DEFAULT);
+        let mut walker = Walker::new(&Limits::DEFAULT, FormatVersion::V11);
         walker.read_name_index(&entries, 1);
         assert_eq!(walker.name_index, [vec![(1, 1), (2, 2)]]);
     }
 
     #[test]
     fn a_name_index_123_reads_pairs_until_the_payload_ends() {
-        let mut walker = Walker::new(&Limits::DEFAULT);
+        let mut walker = Walker::new(&Limits::DEFAULT, FormatVersion::V11);
         walker.read_name_index_123(&join(&[word(1), word(2), word(3), word(4), word(5)]), 1);
         assert_eq!(walker.name_index, [vec![(2, 1), (4, 3)]]);
-        let mut walker = Walker::new(&Limits::DEFAULT);
+        let mut walker = Walker::new(&Limits::DEFAULT, FormatVersion::V11);
         walker.read_name_index_123(&join(&[word(1), word(2), word(3)]), 1);
         assert_eq!(walker.name_index, [vec![(2, 1)]]);
     }
@@ -3754,9 +3745,11 @@ mod tests {
     /// The values were validated against that reader during P8-04 and are
     /// pinned here: a live cross-reader test needs a dev-dependency on
     /// `larrygram-vsdx`, which fails `cargo xtask layers` (both crates are
-    /// L2). See the task Result.
+    /// L2). See the task Result. The live cross-reader comparison is the
+    /// twin runner in `crates/render/tests/corpus_vsd.rs` (P8-15, P8-21);
+    /// this test pins the spelling it recorded (P8-11 F7).
     #[test]
-    fn the_mapped_fields_match_the_vsdx_reader() {
+    fn the_mapped_fields_match_the_pinned_vsdx_spelling() {
         let mut document = Document::new();
         document.masters.push(Master::new(MasterId { index: 0 }, 7));
         let mut warnings = Vec::new();
@@ -4133,5 +4126,495 @@ mod tests {
         let kept = without_repeated_points(rows);
         assert_eq!(kept.len(), 5, "no row repeats a point the drawing does not");
         assert!(without_repeated_points(Vec::new()).is_empty());
+    }
+
+    /// A cell block carrying one string value: `0x60`, the character
+    /// count, the characters, a NUL and `0xfe`.
+    fn string_block(text: &str, index: u8, wide: bool) -> Vec<u8> {
+        let chars: Vec<u8> = if wide {
+            text.encode_utf16().flat_map(u16::to_le_bytes).collect()
+        } else {
+            text.as_bytes().to_vec()
+        };
+        let mut content = vec![0x60, u8::try_from(text.chars().count()).unwrap_or(u8::MAX)];
+        content.extend(chars);
+        content.extend(if wide { vec![0, 0] } else { vec![0] });
+        content.push(0xfe);
+        let mut block = (u32::try_from(content.len() + 6).unwrap_or(u32::MAX))
+            .to_le_bytes()
+            .to_vec();
+        block.push(2);
+        block.push(index);
+        block.extend(content);
+        block
+    }
+
+    /// A layer-membership payload: the six bytes before the blocks and
+    /// the membership string block.
+    fn layer_membership(text: &str, wide: bool) -> Vec<u8> {
+        let mut data = vec![0u8; 6];
+        data.extend(string_block(text, 0, wide));
+        data.extend(0u32.to_le_bytes());
+        data
+    }
+
+    /// The text of one cell by name.
+    fn text_of(cells: &[Cell], name: &str) -> Option<String> {
+        cells
+            .iter()
+            .find(|cell| cell.name.as_str() == name)
+            .and_then(|cell| match cell.value.as_ref() {
+                Some(CellValue::Str(text)) => Some(text.clone()),
+                _ => None,
+            })
+    }
+
+    // -- layers and the deferred rows (P8-11 F1) -----------------------
+
+    #[test]
+    fn layer_membership_maps_the_layer_member_cell() {
+        let chunks = vec![
+            chunk(
+                0x48,
+                1,
+                1,
+                shape_record(u32::MAX, u32::MAX, u32::MAX, u32::MAX, u32::MAX),
+            ),
+            chunk(0xa7, 2, 0, layer_membership("1;4", true)),
+        ];
+        let mut document = Document::new();
+        let mut warnings = Vec::new();
+        collect(&chunks, &mut document, &mut warnings).expect("collect");
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(
+            text_of(&document.shapes[0].sheet.cells, "LayerMember"),
+            Some("1;4".to_owned())
+        );
+        // A non-text cell reads as no text.
+        let mut colour = Cell::new(CellName::from_static("Color"));
+        colour.value = Some(CellValue::Number(255.0));
+        assert_eq!(text_of(&[colour], "Color"), None);
+    }
+
+    #[test]
+    fn a_version_6_layer_membership_decodes_as_single_bytes() {
+        let chunks = vec![
+            chunk(
+                0x48,
+                1,
+                1,
+                shape_record(u32::MAX, u32::MAX, u32::MAX, u32::MAX, u32::MAX),
+            ),
+            chunk(0xa7, 2, 0, layer_membership("0", false)),
+        ];
+        let mut document = Document::new();
+        let mut warnings = Vec::new();
+        collect_with(
+            &chunks,
+            FormatVersion::V6,
+            &Limits::DEFAULT,
+            &mut document,
+            &mut warnings,
+        )
+        .expect("collect");
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(
+            text_of(&document.shapes[0].sheet.cells, "LayerMember"),
+            Some("0".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_layer_membership_without_its_string_warns() {
+        let chunks = vec![
+            chunk(
+                0x48,
+                1,
+                1,
+                shape_record(u32::MAX, u32::MAX, u32::MAX, u32::MAX, u32::MAX),
+            ),
+            chunk(0xa7, 2, 0, vec![0; 6]),
+        ];
+        let mut document = Document::new();
+        let mut warnings = Vec::new();
+        collect(&chunks, &mut document, &mut warnings).expect("collect");
+        assert_eq!(
+            kinds(&warnings),
+            vec![WarningKind::BadValue {
+                what: "layer membership"
+            }]
+        );
+    }
+
+    #[test]
+    fn the_deferred_row_families_warn_inside_a_shape() {
+        // P8-11 F1: shape data, user cells, custom properties,
+        // connection points and controls were dropped silently.
+        let chunks = vec![
+            chunk(
+                0x48,
+                1,
+                1,
+                shape_record(u32::MAX, u32::MAX, u32::MAX, u32::MAX, u32::MAX),
+            ),
+            chunk(0xb4, 2, 0, Vec::new()),
+            chunk(0xb6, 2, 0, Vec::new()),
+            chunk(0x99, 2, 0, Vec::new()),
+            chunk(0xaa, 2, 0, Vec::new()),
+        ];
+        let mut document = Document::new();
+        let mut warnings = Vec::new();
+        collect(&chunks, &mut document, &mut warnings).expect("collect");
+        assert_eq!(
+            kinds(&warnings),
+            vec![
+                WarningKind::Dropped {
+                    what: "user-defined cells"
+                },
+                WarningKind::Dropped {
+                    what: "shape data rows"
+                },
+                WarningKind::Dropped {
+                    what: "connection points"
+                },
+                WarningKind::Dropped { what: "controls" },
+            ]
+        );
+    }
+
+    #[test]
+    fn an_unmapped_record_kind_warns_with_its_format_name() {
+        // P8-11 F1: a kind of the id table that no module consumes
+        // warns by default, and a kind outside the table keeps saying
+        // "unknown record".
+        let chunks = vec![
+            chunk(
+                0x48,
+                1,
+                1,
+                shape_record(u32::MAX, u32::MAX, u32::MAX, u32::MAX, u32::MAX),
+            ),
+            chunk(0xb7, 2, 0, Vec::new()),
+            chunk(0x23, 2, 0, Vec::new()),
+        ];
+        let mut document = Document::new();
+        let mut warnings = Vec::new();
+        collect(&chunks, &mut document, &mut warnings).expect("collect");
+        assert_eq!(
+            kinds(&warnings),
+            vec![
+                WarningKind::SkippedRecord { name: "RULER_GRID" },
+                WarningKind::SkippedRecord {
+                    name: "unknown record"
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn records_another_module_maps_stay_silent_in_the_shape_walk() {
+        let chunks = vec![
+            chunk(
+                0x48,
+                1,
+                1,
+                shape_record(u32::MAX, u32::MAX, u32::MAX, u32::MAX, u32::MAX),
+            ),
+            chunk(0x0e, 2, 0, Vec::new()),
+            chunk(0x94, 2, 0, Vec::new()),
+        ];
+        let mut document = Document::new();
+        let mut warnings = Vec::new();
+        collect(&chunks, &mut document, &mut warnings).expect("collect");
+        assert!(warnings.is_empty(), "{warnings:?}");
+    }
+
+    #[test]
+    fn a_row_point_that_is_not_a_number_never_repeats() {
+        // The value reader of `same_draw_point` reads `None` for a
+        // point cell that is not a number, so the row compares as no
+        // point and keeps its place (P8-12: the arm is defensive).
+        let mut row = Row::new();
+        row.row_type = Some("LineTo".to_owned());
+        let mut x = Cell::new(CellName::from_static("X"));
+        x.value = Some(CellValue::Str("x".to_owned()));
+        row.cells.push(x);
+        let kept = without_repeated_points(vec![(1, row.clone()), (2, row)]);
+        assert_eq!(kept.len(), 2);
+    }
+
+    // -- the unreferenced shapes (P8-14) -------------------------------
+
+    /// A document with one page holding `root` and `child` as a group,
+    /// and an orphan group of two shapes no page references.
+    fn document_with_an_orphan_tree() -> Document {
+        use larrygram_model::{Page, PageId};
+        let mut document = Document::new();
+        let root = document.add_shape(Shape::new(ShapeId { index: 0 }, 1));
+        let child = document.add_shape(Shape::new(ShapeId { index: 0 }, 2));
+        let orphan = document.add_shape(Shape::new(ShapeId { index: 0 }, 3));
+        let orphan_child = document.add_shape(Shape::new(ShapeId { index: 0 }, 4));
+        document.shapes[0].children.push(child);
+        document.shapes[1].parent = Some(root);
+        document.shapes[2].children.push(orphan_child);
+        document.shapes[3].parent = Some(orphan);
+        let mut page = Page::new(PageId { index: 0 }, 1);
+        page.shapes.push(root);
+        document.pages.push(page);
+        document
+    }
+
+    #[test]
+    fn unreferenced_shapes_are_dropped_and_the_arena_renumbers() {
+        let mut document = document_with_an_orphan_tree();
+        let mut warnings = Vec::new();
+        drop_unreferenced(&mut document, &mut warnings);
+        assert_eq!(document.shapes.len(), 2);
+        assert_eq!(document.shapes[0].visio_id, 1);
+        assert_eq!(document.shapes[1].visio_id, 2);
+        assert_eq!(document.pages[0].shapes, vec![ShapeId { index: 0 }]);
+        assert_eq!(document.shapes[0].children, vec![ShapeId { index: 1 }]);
+        assert_eq!(document.shapes[1].parent, Some(ShapeId { index: 0 }));
+        assert_eq!(document.shapes[0].id, ShapeId { index: 0 });
+        assert_eq!(document.shapes[1].id, ShapeId { index: 1 });
+        assert_eq!(
+            kinds(&warnings),
+            vec![
+                WarningKind::Dropped {
+                    what: "unreferenced shape record"
+                },
+                WarningKind::Dropped {
+                    what: "unreferenced shape record"
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn a_dangling_root_id_and_a_diamond_walk_once() {
+        // The two `continue`s of the reachability walk (P8-12 minor 1):
+        // an id past the arena, and a child two parents claim.
+        let mut document = document_with_an_orphan_tree();
+        let diamond = document.add_shape(Shape::new(ShapeId { index: 0 }, 5));
+        // Both parents are reachable, so the walk reaches `diamond`
+        // twice and stops at the second visit.
+        document.shapes[0].children.push(diamond);
+        document.shapes[1].children.push(diamond);
+        document.pages[0].shapes.push(ShapeId { index: 42 });
+        let mut warnings = Vec::new();
+        drop_unreferenced(&mut document, &mut warnings);
+        assert_eq!(document.shapes.len(), 3);
+        assert_eq!(
+            kinds(&warnings),
+            vec![
+                WarningKind::Dropped {
+                    what: "unreferenced shape record"
+                },
+                WarningKind::Dropped {
+                    what: "unreferenced shape record"
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn a_master_tree_counts_as_referenced() {
+        use larrygram_model::{Master, MasterId, Page, PageId};
+        let mut document = document_with_an_orphan_tree();
+        let master_shape = document.add_shape(Shape::new(ShapeId { index: 0 }, 9));
+        let mut master = Master::new(MasterId { index: 0 }, 7);
+        master.shapes.push(master_shape);
+        document.masters.push(master);
+        let mut warnings = Vec::new();
+        drop_unreferenced(&mut document, &mut warnings);
+        assert_eq!(document.shapes.len(), 3);
+        assert_eq!(document.masters[0].shapes, vec![ShapeId { index: 2 }]);
+        let page = Page::new(PageId { index: 0 }, 1);
+        assert_eq!(page.shapes, Vec::new());
+        assert_eq!(kinds(&warnings).len(), 2);
+    }
+
+    // ---- hostile input sweeps (P8-12 major 1) ---------------------
+
+    /// The rows of one geometry row payload run alone (with its curve
+    /// record, when the row references one).
+    fn geometry_rows_of(
+        record: u16,
+        payload: &[u8],
+        curve: Option<Vec<u8>>,
+    ) -> (Vec<Row>, Vec<ImportWarning>) {
+        let mut rows = vec![chunk(record, 3, 1, payload.to_vec())];
+        if let Some(curve) = curve {
+            rows.push(chunk(0xd1, 0, 9, curve));
+        }
+        let mut warnings = Vec::new();
+        let mut chunks = vec![chunk(
+            0x48,
+            1,
+            1,
+            shape_record(u32::MAX, u32::MAX, u32::MAX, u32::MAX, u32::MAX),
+        )];
+        chunks.push(chunk(0x6c, 2, 0, geom_list(&[1])));
+        chunks.extend(rows);
+        let mut document = Document::new();
+        collect(&chunks, &mut document, &mut warnings).expect("collect");
+        let rows = document
+            .shapes
+            .first()
+            .and_then(|shape| shape.sheet.sections.first())
+            .map(|section| section.rows.clone())
+            .unwrap_or_default();
+        (rows, warnings)
+    }
+
+    #[test]
+    fn curve_rows_survive_a_truncation_at_every_offset() {
+        // P8-12 major 1: the sweeps cut at record and framing
+        // boundaries, where the record-level checks fire first. A
+        // record whose length is plausible and whose payload ends
+        // mid-field lands in the per-field reads (`nurbs_row_text`,
+        // `polyline_row_text`, `inline_nurbs`, `inline_polyline`) and
+        // in the curve-data reader of the pre-pass. Every truncation
+        // must map or warn, never panic, and never invent a value.
+        let referenced = join(&[
+            tagged(1.0, 65),
+            tagged(2.0, 65),
+            double(0.5),
+            double(1.0),
+            double(0.0),
+            double(1.0),
+            vec![0],
+            vec![0x8a],
+            vec![0, 0, 0],
+            word(9),
+        ]);
+        let inline_static = join(&[
+            tagged(1.0, 65),
+            tagged(2.0, 65),
+            double(0.5),
+            double(1.0),
+            double(0.0),
+            double(1.0),
+            vec![0],
+            vec![0],
+            vec![0; 9],
+            word(0),     // block length
+            vec![0],     // separator
+            vec![6],     // the E cell
+            vec![0x8a],  // static format
+            double(1.0), // last knot
+            3u16.to_le_bytes().to_vec(),
+            vec![0, 1], // xType, yType
+            word(1),    // repetitions
+            double(0.25),
+            double(0.5),
+            double(0.0),
+            double(2.0),
+        ]);
+        let polyline_inline = join(&[
+            tagged(1.0, 65),
+            tagged(2.0, 65),
+            vec![0],
+            vec![0],
+            vec![0; 9],
+            word(0),
+            vec![0],
+            vec![6],
+            vec![0x8a],
+            3u16.to_le_bytes().to_vec(),
+            vec![0, 1],
+            word(1),
+            double(0.25),
+            double(0.5),
+        ]);
+        let cases: [(u16, Vec<u8>); 3] = [
+            (0xc3, referenced.clone()),
+            (0xc3, inline_static),
+            (0xc1, polyline_inline),
+        ];
+        for (record, payload) in cases {
+            let curve = (record == 0xc3 && payload == referenced)
+                .then(|| nurbs_data(1.0, 3, 0, 1, &[(0.25, 0.5, 0.0, 1.0)]));
+            let (full, full_warnings) = geometry_rows_of(record, &payload, curve.clone());
+            for cut in 0..=payload.len() {
+                let (rows, warnings) = geometry_rows_of(record, &payload[..cut], curve.clone());
+                assert!(rows.len() <= full.len(), "0x{record:02x} cut {cut}");
+                if warnings != full_warnings {
+                    continue;
+                }
+                // A quiet run may only lose a value to its empty
+                // default; it may never invent one. The `E` cell is
+                // the one exception: its curve text loses points under
+                // the point-count cap of
+                // `a_lie_about_the_point_count_is_capped_by_the_payload`
+                // (pinned behaviour), so it is compared by presence
+                // only here.
+                for (row, full_row) in rows.iter().zip(&full) {
+                    for cell in &row.cells {
+                        if cell.name.as_str() == "E" {
+                            continue;
+                        }
+                        let other = full_row
+                            .cells
+                            .iter()
+                            .find(|candidate| candidate.name == cell.name)
+                            .and_then(|candidate| candidate.value.as_ref());
+                        let what = cell.name.as_str();
+                        let quiet_same = cell.value.as_ref() == other;
+                        assert!(
+                            quiet_same,
+                            "quiet difference: 0x{record:02x} cut {cut} {what}"
+                        );
+                    }
+                }
+            }
+        }
+        // The curve-data record of the pre-pass, truncated at every
+        // offset: the row keeps its cells and drops the E text, or
+        // warns.
+        let curve_payload = nurbs_data(1.0, 3, 0, 1, &[(0.25, 0.5, 0.0, 1.0)]);
+        let (full, _) = geometry_rows_of(0xc3, &referenced, Some(curve_payload.clone()));
+        for cut in 0..=curve_payload.len() {
+            let (rows, _) =
+                geometry_rows_of(0xc3, &referenced, Some(curve_payload[..cut].to_vec()));
+            assert!(rows.len() <= full.len(), "curve cut {cut}");
+            for (row, full_row) in rows.iter().zip(&full) {
+                for cell in &row.cells {
+                    if cell.name.as_str() == "E" {
+                        continue;
+                    }
+                    let other = full_row
+                        .cells
+                        .iter()
+                        .find(|candidate| candidate.name == cell.name)
+                        .and_then(|candidate| candidate.value.as_ref());
+                    let what = cell.name.as_str();
+                    let quiet_same = cell.value.as_ref() == other;
+                    assert!(quiet_same, "quiet difference: curve cut {cut} {what}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn stale_indexes_in_the_geometry_join_are_belt_and_braces() {
+        // P8-12 minor 1: the arena indexes come from the walk itself,
+        // so the lookups cannot miss in an import; a hand-built
+        // document with dangling indexes exercises the guards.
+        let mut document = document_with_master();
+        document.add_shape(Shape::new(ShapeId { index: 0 }, 1));
+        document.shapes[0].master = Some(MasterId { index: 9 });
+        let mut join = BTreeMap::new();
+        join.insert(9u32, 1u32); // a dangling instance index
+        join.insert(0u32, 1u32); // an instance whose master is stale
+        inherit_geometry(&mut document, &join);
+        assert!(
+            document.shapes[0].sheet.sections.is_empty(),
+            "nothing resolves, nothing copies"
+        );
+        // A dangling child id and a stale master id in the search.
+        document.masters[0].shapes.push(ShapeId { index: 7 });
+        assert!(master_shape_with_geometry(&document, MasterId { index: 0 }, 1).is_none());
+        assert!(master_shape_with_geometry(&document, MasterId { index: 9 }, 1).is_none());
     }
 }

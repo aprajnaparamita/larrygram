@@ -35,9 +35,6 @@ pub enum Error {
     },
     /// A [`larrygram_model`] operation failed while mapping.
     Model(larrygram_model::Error),
-    /// The operation is not implemented yet (an interface stub of task
-    /// P8-01; the Phase 8 tasks replace every stub).
-    NotImplemented,
 }
 
 impl fmt::Display for Error {
@@ -52,7 +49,6 @@ impl fmt::Display for Error {
                 write!(f, "limit `{limit}` exceeded: {value} > {max}")
             }
             Error::Model(e) => write!(f, "model error: {e}"),
-            Error::NotImplemented => write!(f, "not implemented yet"),
         }
     }
 }
@@ -99,7 +95,6 @@ mod tests {
             .to_string(),
             "model error: unknown page id 3"
         );
-        assert_eq!(Error::NotImplemented.to_string(), "not implemented yet");
     }
 
     #[test]

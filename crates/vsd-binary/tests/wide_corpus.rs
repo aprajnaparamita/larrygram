@@ -479,7 +479,8 @@ fn error_kind(error: &Error) -> &'static str {
         Error::Invalid(_) => "Invalid",
         Error::LimitExceeded { .. } => "LimitExceeded",
         Error::Model(_) => "Model",
-        Error::NotImplemented => "NotImplemented",
+        // `Error` is `#[non_exhaustive]`, so this arm is required but
+        // unreachable: every variant above names it (P8-12 major 4).
         _ => "Other",
     }
 }
@@ -492,6 +493,8 @@ fn warning_kind(warning: &ImportWarning) -> (&'static str, &'static str) {
         WarningKind::UnresolvedReference { what } => ("unresolved_reference", what),
         WarningKind::BadValue { what } => ("bad_value", what),
         WarningKind::Unsupported { what } => ("unsupported", what),
+        // Required by `#[non_exhaustive]`, unreachable today (P8-12
+        // major 4).
         _ => ("other", ""),
     }
 }
@@ -1166,7 +1169,6 @@ mod tests {
             error_kind(&Error::NotAVisioFile("x".to_owned())),
             "NotAVisioFile"
         );
-        assert_eq!(error_kind(&Error::NotImplemented), "NotImplemented");
         let warning = ImportWarning {
             context: "page 1".to_owned(),
             kind: WarningKind::SkippedRecord { name: "OLE data" },

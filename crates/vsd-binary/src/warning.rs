@@ -44,6 +44,20 @@ pub enum WarningKind {
     },
 }
 
+impl fmt::Display for WarningKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            WarningKind::SkippedRecord { name } => write!(f, "skipped record {name}"),
+            WarningKind::Dropped { what } => write!(f, "dropped {what}"),
+            WarningKind::UnresolvedReference { what } => write!(f, "unresolved {what}"),
+            WarningKind::BadValue { what } => {
+                write!(f, "unparsable {what}, using a default")
+            }
+            WarningKind::Unsupported { what } => write!(f, "unsupported {what}"),
+        }
+    }
+}
+
 /// One non-fatal problem found while importing (ADR 0071).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportWarning {
@@ -56,7 +70,7 @@ pub struct ImportWarning {
 
 impl fmt::Display for ImportWarning {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}: {:?}", self.context, self.kind)
+        write!(f, "{}: {}", self.context, self.kind)
     }
 }
 
@@ -67,27 +81,43 @@ mod tests {
     #[test]
     fn every_kind_can_be_recorded() {
         let kinds = [
-            WarningKind::SkippedRecord { name: "OLE data" },
-            WarningKind::Dropped {
-                what: "embedded OLE object",
-            },
-            WarningKind::UnresolvedReference { what: "master 7" },
-            WarningKind::BadValue {
-                what: "fill colour",
-            },
-            WarningKind::Unsupported {
-                what: "version 5 chunk format",
-            },
+            (
+                WarningKind::SkippedRecord { name: "OLE data" },
+                "skipped record OLE data",
+            ),
+            (
+                WarningKind::Dropped {
+                    what: "embedded OLE object",
+                },
+                "dropped embedded OLE object",
+            ),
+            (
+                WarningKind::UnresolvedReference { what: "master 7" },
+                "unresolved master 7",
+            ),
+            (
+                WarningKind::BadValue {
+                    what: "fill colour",
+                },
+                "unparsable fill colour, using a default",
+            ),
+            (
+                WarningKind::Unsupported {
+                    what: "version 5 chunk format",
+                },
+                "unsupported version 5 chunk format",
+            ),
         ];
-        for kind in kinds {
+        for (kind, spelled) in kinds {
             let warning = ImportWarning {
                 context: "page 1 / shape 2".to_owned(),
                 kind: kind.clone(),
             };
             assert_eq!(warning.kind, kind);
+            assert_eq!(kind.to_string(), spelled, "Display spells the kind");
             assert_eq!(
                 warning.to_string(),
-                format!("page 1 / shape 2: {kind:?}"),
+                format!("page 1 / shape 2: {spelled}"),
                 "Display names the context and the kind"
             );
         }

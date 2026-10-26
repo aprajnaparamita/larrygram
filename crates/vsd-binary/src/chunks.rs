@@ -433,6 +433,126 @@ pub const FONTFACE: Record = Record(0xd7);
 /// The font-face list.
 pub const FONTFACES: Record = Record(0xd8);
 
+// The policy tables beside the id table: what the importer drops with
+// a warning, and what a module maps. A record kind outside both warns
+// by default (P8-11 F1).
+impl Record {
+    /// What a record of this kind carries when the importer drops it
+    /// with a warning.
+    ///
+    /// The list is ADR 0070's dropped-with-a-warning set (foreign data,
+    /// OLE, hyperlinks, events, annotations, smart tags, the font list)
+    /// plus the row families ADR 0070 defers since P8-14 (shape data,
+    /// user-defined cells, custom properties, connection points,
+    /// controls, and the sheet rows no module maps). Every kind on this
+    /// list warns `Dropped`; nothing here is dropped silently (P8-11
+    /// F1).
+    pub fn dropped_what(self) -> Option<&'static str> {
+        match self {
+            FOREIGN_DATA => Some("foreign data"),
+            OLE_LIST => Some("OLE object list"),
+            OLE_DATA => Some("OLE data"),
+            FOREIGN_DATA_TYPE => Some("foreign data type"),
+            HYPER_LNK_LIST => Some("hyperlink list"),
+            HYPERLINK => Some("hyperlink"),
+            EVENT => Some("event"),
+            ACT_ID_LIST => Some("action id list"),
+            ACT_ID => Some("action id"),
+            ANNOTATION => Some("annotation"),
+            REVIEWER => Some("reviewer"),
+            SMART_TAG_LIST => Some("smart tag list"),
+            SMART_TAG_DEF => Some("smart tag definition"),
+            FONT_LIST => Some("font list"),
+            FONT_IX => Some("font"),
+            FONTFACE => Some("font face"),
+            FONTFACES => Some("font face list"),
+            CONNECT_LIST => Some("connect list"),
+            DOC_PROPS => Some("document properties record"),
+            PROP_LIST | USER_DEFINED_CELLS => Some("user-defined cells"),
+            CUST_PROPS_LIST | CUSTOM_PROPS => Some("shape data rows"),
+            C_PNTS_LIST | CONNECTION_POINTS | CONNECTION_POINTS_ANOTHER_TYPE => {
+                Some("connection points")
+            }
+            CTRL_LIST | CONTROL | CONTROL_ANOTHER_TYPE => Some("controls"),
+            SCRATCH_LIST | SCRATCH => Some("scratch rows"),
+            PROTECTION => Some("protection settings"),
+            MISC => Some("shape misc settings"),
+            STYLE_PROPS => Some("style sheet properties"),
+            GROUP => Some("group settings"),
+            LAYOUT => Some("shape layout settings"),
+            IMAGE => Some("image settings"),
+            _ => None,
+        }
+    }
+
+    /// Whether some module maps this record kind, or it is the
+    /// structure of a group one maps.
+    ///
+    /// A record kind that is neither mapped nor on
+    /// [`Record::dropped_what`] warns by default (P8-11 F1): the shape
+    /// and page walks used to skip every kind of the id table silently,
+    /// which hid whole unmapped row families.
+    pub fn is_mapped(self) -> bool {
+        matches!(
+            self,
+            TEXT | PAGE
+                | COLORS
+                | STYLES
+                | STENCILS
+                | STENCIL_PAGE
+                | PAGES
+                | NAME_LIST
+                | NAME
+                | NAME_LIST2
+                | NAME2
+                | NAMEIDX123
+                | NAMEIDX
+                | PAGE_SHEET
+                | SHAPE_GROUP
+                | SHAPE_SHAPE
+                | STYLE_SHEET
+                | SHAPE_GUIDE
+                | SHAPE_FOREIGN
+                | SHAPE_LIST
+                | FIELD_LIST
+                | CHAR_LIST
+                | PARA_LIST
+                | TABS_DATA_LIST
+                | GEOM_LIST
+                | LAYER_LIST
+                | LAYER
+                | SHAPE_ID
+                | LINE
+                | FILL_AND_SHADOW
+                | TEXT_BLOCK
+                | TABS_DATA_1
+                | TABS_DATA_2
+                | TABS_DATA_3
+                | TABS_DATA_4
+                | GEOMETRY
+                | MOVE_TO
+                | LINE_TO
+                | ARC_TO
+                | INFINITE_LINE
+                | ELLIPSE
+                | ELLIPTICAL_ARC_TO
+                | SPLINE_START
+                | SPLINE_KNOT
+                | POLYLINE_TO
+                | NURBS_TO
+                | PAGE_PROPS
+                | CHAR_IX
+                | PARA_IX
+                | XFORM_DATA
+                | TEXT_XFORM
+                | XFORM_1D
+                | TEXT_FIELD
+                | LAYER_MEMBERSHIP
+                | SHAPE_DATA
+        )
+    }
+}
+
 /// One chunk record of the `VisioDocument` stream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Chunk<'a> {
@@ -2486,5 +2606,61 @@ mod tests {
             assert!(!chunks.is_empty(), "{path:?} yields no chunks");
         }
         Ok(())
+    }
+
+    #[test]
+    fn every_dropped_kind_names_what_it_carries() {
+        // P8-11 F1: the policy table classifies the kinds, so no row
+        // family is silent. Every arm of `dropped_what` runs here.
+        let cases: &[(Record, &str)] = &[
+            (FOREIGN_DATA, "foreign data"),
+            (OLE_LIST, "OLE object list"),
+            (OLE_DATA, "OLE data"),
+            (FOREIGN_DATA_TYPE, "foreign data type"),
+            (HYPER_LNK_LIST, "hyperlink list"),
+            (HYPERLINK, "hyperlink"),
+            (EVENT, "event"),
+            (ACT_ID_LIST, "action id list"),
+            (ACT_ID, "action id"),
+            (ANNOTATION, "annotation"),
+            (REVIEWER, "reviewer"),
+            (SMART_TAG_LIST, "smart tag list"),
+            (SMART_TAG_DEF, "smart tag definition"),
+            (FONT_LIST, "font list"),
+            (FONT_IX, "font"),
+            (FONTFACE, "font face"),
+            (FONTFACES, "font face list"),
+            (CONNECT_LIST, "connect list"),
+            (DOC_PROPS, "document properties record"),
+            (PROP_LIST, "user-defined cells"),
+            (USER_DEFINED_CELLS, "user-defined cells"),
+            (CUST_PROPS_LIST, "shape data rows"),
+            (CUSTOM_PROPS, "shape data rows"),
+            (C_PNTS_LIST, "connection points"),
+            (CONNECTION_POINTS, "connection points"),
+            (CONNECTION_POINTS_ANOTHER_TYPE, "connection points"),
+            (CTRL_LIST, "controls"),
+            (CONTROL, "controls"),
+            (CONTROL_ANOTHER_TYPE, "controls"),
+            (SCRATCH_LIST, "scratch rows"),
+            (SCRATCH, "scratch rows"),
+            (PROTECTION, "protection settings"),
+            (MISC, "shape misc settings"),
+            (STYLE_PROPS, "style sheet properties"),
+            (GROUP, "group settings"),
+            (LAYOUT, "shape layout settings"),
+            (IMAGE, "image settings"),
+        ];
+        for (record, what) in cases {
+            assert_eq!(record.dropped_what(), Some(*what), "{record:?}");
+            assert!(!record.is_mapped(), "{record:?} is dropped, not mapped");
+        }
+        // A mapped kind is silent; a kind outside both warns by
+        // default, with its format name.
+        assert_eq!(LAYER.dropped_what(), None);
+        assert!(LAYER.is_mapped());
+        assert_eq!(Record(0x23).dropped_what(), None);
+        assert!(!Record(0x23).is_mapped());
+        assert_eq!(Record(0x23).name(), "unknown record");
     }
 }
