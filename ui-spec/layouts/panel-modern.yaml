@@ -539,6 +539,7 @@ tabs:
         - id: tab.home.shape_styles.line.weight.line_weights
           kind: list
           list: line_weights
+          command: format.set.line.weight
       - id: tab.home.shape_styles.line.dashes
         kind: submenu
         label: Dashes
@@ -547,6 +548,7 @@ tabs:
         - id: tab.home.shape_styles.line.dashes.line_patterns
           kind: list
           list: line_patterns
+          command: format.set.line.pattern
       - id: tab.home.shape_styles.line.arrows
         kind: submenu
         label: Arrows
@@ -555,6 +557,7 @@ tabs:
         - id: tab.home.shape_styles.line.arrows.line_ends
           kind: list
           list: line_ends
+          command: format.set.line.ends
         - id: tab.home.shape_styles.line.arrows.options
           kind: button
           label: Arrows Options...
