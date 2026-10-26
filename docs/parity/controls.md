@@ -12,10 +12,17 @@ A row listed in `ui-spec/out-of-scope.txt` stays `out-of-scope` even when a comm
 
 | id | type | label | path | status |
 |----|------|-------|------|--------|
+| AlignCenter | toggleButton | AlignCenter | tab/TabHome/GroupParagraph | implemented |
+| AlignGallery | gallery | AlignGallery | tab/TabHome/GroupArrange | implemented |
+| AlignJustify | toggleButton | AlignJustify | tab/TabHome/GroupParagraph | implemented |
+| AlignLeft | toggleButton | AlignLeft | tab/TabHome/GroupParagraph | implemented |
+| AlignRight | toggleButton | AlignRight | tab/TabHome/GroupParagraph | implemented |
 | BackgroundPageInsert | button | BackgroundPageInsert | tab/TabInsert/GroupInsertPages | implemented |
 | BackgroundsGallery | gallery | BackgroundsGallery | tab/TabDesignVisio/GroupBackgrounds | implemented |
 | BlankPageInsertMenu | splitButton | BlankPageInsertMenu | tab/TabInsert/GroupInsertPages | implemented |
 | BlankPageInsertVisio | button | BlankPageInsertVisio | tab/TabInsert/GroupInsertPages | implemented |
+| Bold | toggleButton | Bold | tab/TabHome/GroupFont | implemented |
+| Bullets | toggleButton | Bullets | tab/TabHome/GroupParagraph | implemented |
 | ConnectorTool | toggleButton | ConnectorTool | tab/TabHome/GroupTools | implemented |
 | ConnectorsGallery | menu | ConnectorsGallery | tab/TabDesignVisio/GroupLayoutRouting | implemented |
 | Copy | button | Copy | tab/TabIconEditor/GroupIconEditClipboard | implemented |
@@ -25,7 +32,18 @@ A row listed in `ui-spec/out-of-scope.txt` stays `out-of-scope` even when a comm
 | FileNewDefault | button | FileNewDefault | qat | implemented |
 | FileOpenUsingBackstage | button | FileOpenUsingBackstage | qat | implemented |
 | FileSave | button | FileSave | qat | implemented |
+| FillColorGallery | gallery | FillColorGallery | tab/TabHome/GroupShapeStyles | implemented |
+| Font | comboBox | Font | tab/TabHome/GroupFont | implemented |
+| FontColorGallery | gallery | FontColorGallery | tab/TabHome/GroupFont | implemented |
+| FontSize | comboBox | FontSize | tab/TabHome/GroupFont | implemented |
+| FontSizeDecrease | button | FontSizeDecrease | tab/TabHome/GroupFont | implemented |
+| FontSizeIncrease | button | FontSizeIncrease | tab/TabHome/GroupFont | implemented |
+| FormatPainter | control | FormatPainter | tab/TabHome/GroupClipboard | implemented |
+| Italic | toggleButton | Italic | tab/TabHome/GroupFont | implemented |
+| LineColorGallery | gallery | LineColorGallery | tab/TabPictureToolsFormat/GroupPictureStylesVisio | implemented |
+| LinePatternGallery | gallery | LinePatternGallery | tab/TabPictureToolsFormat/GroupPictureStylesVisio | implemented |
 | LineTool | toggleButton | LineTool | tab/TabDeveloper/GroupShapeDesign | implemented |
+| LineWeightGallery | gallery | LineWeightGallery | tab/TabPictureToolsFormat/GroupPictureStylesVisio | implemented |
 | ObjectBringForward | button | ObjectBringForward | tab/TabPictureToolsFormat/GroupPictureToolArrange | implemented |
 | ObjectBringToFront | button | ObjectBringToFront | tab/TabPictureToolsFormat/GroupPictureToolArrange | implemented |
 | ObjectBringToFrontMenu | splitButton | ObjectBringToFrontMenu | tab/TabPictureToolsFormat/GroupPictureToolArrange | implemented |
@@ -41,24 +59,26 @@ A row listed in `ui-spec/out-of-scope.txt` stays `out-of-scope` even when a comm
 | PasteDuplicate | button | PasteDuplicate | tab/TabHome/GroupClipboard | implemented |
 | PasteMenu | splitButton | PasteMenu | tab/TabHome/GroupClipboard | implemented |
 | PointerTool | toggleButton | PointerTool | tab/TabInkToolsPens/GroupInkTools | implemented |
+| PositionMenu | gallery | PositionMenu | tab/TabHome/GroupArrange | implemented |
 | RectangleTool | toggleButton | RectangleTool | tab/TabDeveloper/GroupShapeDesign | implemented |
+| RedoOrRepeat | button | RedoOrRepeat | qat | implemented |
 | SelectAll | button | SelectAll | tab/TabIconEditor/GroupIconEditSelect | implemented |
 | ShowGrid | checkBox | ShowGrid | tab/TabView/GroupViewShowHide | implemented |
 | ShowGuides | checkBox | ShowGuides | tab/TabView/GroupViewShowHide | implemented |
 | ShowPageBreaks | checkBox | ShowPageBreaks | tab/TabView/GroupViewShowHide | implemented |
 | ShowRulerVisio | checkBox | ShowRulerVisio | tab/TabView/GroupViewShowHide | implemented |
+| Strikethrough | toggleButton | Strikethrough | tab/TabHome/GroupFont | implemented |
+| TextAlignBottom | toggleButton | TextAlignBottom | tab/TabHome/GroupParagraph | implemented |
+| TextAlignMiddle | toggleButton | TextAlignMiddle | tab/TabHome/GroupParagraph | implemented |
+| TextAlignTop | toggleButton | TextAlignTop | tab/TabHome/GroupParagraph | implemented |
 | TextTool | toggleButton | TextTool | tab/TabHome/GroupTools | implemented |
+| Underline | toggleButton | Underline | tab/TabHome/GroupFont | implemented |
 | Undo | gallery | Undo | qat | implemented |
 | ZoomDialog | button | ZoomDialog | tab/TabView/GroupZoom | implemented |
 | ZoomFitToWindowVisio | button | ZoomFitToWindowVisio | tab/TabView/GroupZoom | implemented |
 | ZoomPageWidthVisio | button | ZoomPageWidthVisio | tab/TabView/GroupZoom | implemented |
 | AccessibilityChecker | button | AccessibilityChecker | tab/TabReviewWord/GroupAccessibility | stub |
 | AddOnsMenu | menu | AddOnsMenu | tab/TabView/GroupMacros | stub |
-| AlignCenter | toggleButton | AlignCenter | tab/TabHome/GroupParagraph | stub |
-| AlignGallery | gallery | AlignGallery | tab/TabHome/GroupArrange | stub |
-| AlignJustify | toggleButton | AlignJustify | tab/TabHome/GroupParagraph | stub |
-| AlignLeft | toggleButton | AlignLeft | tab/TabHome/GroupParagraph | stub |
-| AlignRight | toggleButton | AlignRight | tab/TabHome/GroupParagraph | stub |
 | AllowPersonallyIdentifiableInformation | control | AllowPersonallyIdentifiableInformation | backstage/TabInfo | stub |
 | AllowThemes | toggleButton | AllowThemes | tab/TabHome/GroupShapeStyles | stub |
 | AppGuardTrustPromotion | button | AppGuardTrustPromotion | backstage/TabSave | stub |
@@ -74,9 +94,7 @@ A row listed in `ui-spec/out-of-scope.txt` stays `out-of-scope` even when a comm
 | AutomaticResizeNone | toggleButton | AutomaticResizeNone | tab/TabFormat/GroupContainerSize | stub |
 | BackgroundColor | gallery | BackgroundColor | tab/TabDesignVisio/GroupBackgrounds | stub |
 | BevelShapeGallery | gallery | BevelShapeGallery | tab/TabHome/GroupShapeStyles | stub |
-| Bold | toggleButton | Bold | tab/TabHome/GroupFont | stub |
 | BordersAndTitlesGallery | gallery | BordersAndTitlesGallery | tab/TabDesignVisio/GroupBackgrounds | stub |
-| Bullets | toggleButton | Bullets | tab/TabHome/GroupParagraph | stub |
 | ButtonCategoryCloudServices | category | ButtonCategoryCloudServices | backstage/TabRecent | stub |
 | ButtonCategoryLocalServices | category | ButtonCategoryLocalServices | backstage/TabRecent | stub |
 | ButtonCategoryRecentDocuments | category | ButtonCategoryRecentDocuments | backstage/TabRecent | stub |
@@ -204,7 +222,6 @@ A row listed in `ui-spec/out-of-scope.txt` stays `out-of-scope` even when a comm
 | FileSendAsAttachment | button | FileSendAsAttachment | qat | stub |
 | FileTypes | category | FileTypes | backstage/TabPublish | stub |
 | FileVersionHistory | group | FileVersionHistory | backstage/TabInfo | stub |
-| FillColorGallery | gallery | FillColorGallery | tab/TabHome/GroupShapeStyles | stub |
 | FillDialog | button | FillDialog | tab/TabHome/GroupShapeStyles | stub |
 | FindDialog | button | FindDialog | tab/TabHome/GroupEditing | stub |
 | FindMenu | menu | FindMenu | tab/TabHome/GroupEditing | stub |
@@ -212,13 +229,7 @@ A row listed in `ui-spec/out-of-scope.txt` stays `out-of-scope` even when a comm
 | FitToContents | button | FitToContents | tab/TabFormat/GroupContainerSize | stub |
 | FixItHub | group | FixItHub | backstage/TabRecent | stub |
 | FlyoutAnchorInsertPictures | menu | FlyoutAnchorInsertPictures | tab/TabInsert/GroupInsertIllustrations | stub |
-| Font | comboBox | Font | tab/TabHome/GroupFont | stub |
-| FontColorGallery | gallery | FontColorGallery | tab/TabHome/GroupFont | stub |
 | FontDialogVisio | buttonDialogBoxLauncher | FontDialogVisio | tab/TabHome/GroupFont | stub |
-| FontSize | comboBox | FontSize | tab/TabHome/GroupFont | stub |
-| FontSizeDecrease | button | FontSizeDecrease | tab/TabHome/GroupFont | stub |
-| FontSizeIncrease | button | FontSizeIncrease | tab/TabHome/GroupFont | stub |
-| FormatPainter | control | FormatPainter | tab/TabHome/GroupClipboard | stub |
 | FreeformTool | toggleButton | FreeformTool | tab/TabDeveloper/GroupShapeDesign | stub |
 | GlowsMoreOptions | button | GlowsMoreOptions | tab/TabHome/GroupShapeStyles | stub |
 | GroupARMPreview | group | GroupARMPreview | backstage/TabInfo | stub |
@@ -415,7 +426,6 @@ A row listed in `ui-spec/out-of-scope.txt` stays `out-of-scope` even when a comm
 | InsertM365Picture | button | InsertM365Picture | tab/TabInsert/GroupInsertIllustrations | stub |
 | Insights | button | Insights | tab/TabReviewWord/GroupInsights | stub |
 | IssuesWindow | checkBox | IssuesWindow | tab/TabProcess/GroupDiagramValidation | stub |
-| Italic | toggleButton | Italic | tab/TabHome/GroupFont | stub |
 | LanguageCommands | menu | LanguageCommands | tab/TabReviewWord/GroupLanguage | stub |
 | LanguagePreferences | button | LanguagePreferences | tab/TabReviewWord/GroupLanguage | stub |
 | LassoSelectVisio | toggleButton | LassoSelectVisio | tab/TabDrawInk/GroupWrite | stub |
@@ -429,12 +439,9 @@ A row listed in `ui-spec/out-of-scope.txt` stays `out-of-scope` even when a comm
 | LegacyMode | toggleButton | LegacyMode | tab/TabView/GroupDocumentViewsVisio | stub |
 | LegendInsertGallery | gallery | LegendInsertGallery | tab/TabData/GroupDisplayData | stub |
 | LineArrowsGallery | gallery | LineArrowsGallery | tab/TabPictureToolsFormat/GroupPictureStylesVisio | stub |
-| LineColorGallery | gallery | LineColorGallery | tab/TabPictureToolsFormat/GroupPictureStylesVisio | stub |
 | LineDialog | button | LineDialog | tab/TabPictureToolsFormat/GroupPictureStylesVisio | stub |
-| LinePatternGallery | gallery | LinePatternGallery | tab/TabPictureToolsFormat/GroupPictureStylesVisio | stub |
 | LineStylesDialog | button | LineStylesDialog | tab/TabPictureToolsFormat/GroupPictureStylesVisio | stub |
 | LineThickness | gallery | LineThickness | tab/TabInkToolsPens/GroupInkPens | stub |
-| LineWeightGallery | gallery | LineWeightGallery | tab/TabPictureToolsFormat/GroupPictureStylesVisio | stub |
 | LoadingCloudServicesGroup | group | LoadingCloudServicesGroup | backstage/TabSave | stub |
 | LoadingServicesGroup | group | LoadingServicesGroup | backstage/TabSave | stub |
 | LocalSave | category | LocalSave | backstage/TabSave | stub |
@@ -522,7 +529,6 @@ A row listed in `ui-spec/out-of-scope.txt` stays `out-of-scope` even when a comm
 | PinnableGroupCloudGettingStartedOpenMRUPlacesOrNavSlab | group | PinnableGroupCloudGettingStartedOpenMRUPlacesOrNavSlab | backstage/TabRecent | stub |
 | PlaceTabHome | tab | PlaceTabHome | backstage/PlaceTabHome | stub |
 | PointerModeOptions | gallery | PointerModeOptions | qat | stub |
-| PositionMenu | gallery | PositionMenu | tab/TabHome/GroupArrange | stub |
 | PrepareVisioDiagramForExportToFlow | button | PrepareVisioDiagramForExportToFlow | tab/TabProcess/GroupFlow | stub |
 | PrintShapeSheet | button | PrintShapeSheet | tab/TabDeveloper/GroupSdkTools | stub |
 | PublishGroup | taskFormGroup | PublishGroup | backstage/TabPublish | stub |
@@ -530,7 +536,6 @@ A row listed in `ui-spec/out-of-scope.txt` stays `out-of-scope` even when a comm
 | QuickConnectorTool | toggleButton | QuickConnectorTool | tab/TabInsert/GroupDiagramParts | stub |
 | RecorderResume | button | RecorderResume | tab/TabDeveloper/GroupCode | stub |
 | RecorderStopVisio | button | RecorderStopVisio | tab/TabDeveloper/GroupCode | stub |
-| RedoOrRepeat | button | RedoOrRepeat | qat | stub |
 | ReflectionGallery | gallery | ReflectionGallery | tab/TabHome/GroupShapeStyles | stub |
 | ReflectionsMoreOptions | button | ReflectionsMoreOptions | tab/TabHome/GroupShapeStyles | stub |
 | RefreshDiagram | button | RefreshDiagram | tab/TabDVDesign/GroupRefreshUpdate | stub |
@@ -614,7 +619,6 @@ A row listed in `ui-spec/out-of-scope.txt` stays `out-of-scope` even when a comm
 | StencilExplorer | toggleButton | StencilExplorer | tab/TabStencil/GroupStencilView | stub |
 | StopIgnoringRule | button | StopIgnoringRule | tab/TabProcess/GroupDiagramValidation | stub |
 | StopIgnoringThisIssue | button | StopIgnoringThisIssue | tab/TabProcess/GroupDiagramValidation | stub |
-| Strikethrough | toggleButton | Strikethrough | tab/TabHome/GroupFont | stub |
 | StyleExplorer | checkBox | StyleExplorer | tab/TabShapeSheetDesign/GroupShapeSheetView | stub |
 | SubprocessBrowseToOtherDocument | button | SubprocessBrowseToOtherDocument | tab/TabProcess/GroupSubProcess | stub |
 | SubprocessCreateFromSelection | button | SubprocessCreateFromSelection | tab/TabProcess/GroupSubProcess | stub |
@@ -650,9 +654,6 @@ A row listed in `ui-spec/out-of-scope.txt` stays `out-of-scope` even when a comm
 | TabStencil | tab | TabStencil | tab/TabStencil | stub |
 | TabView | tab | TabView | tab/TabView | stub |
 | TaskPanesMenuVisio | menu | TaskPanesMenuVisio | tab/TabView/GroupViewShowHide | stub |
-| TextAlignBottom | toggleButton | TextAlignBottom | tab/TabHome/GroupParagraph | stub |
-| TextAlignMiddle | toggleButton | TextAlignMiddle | tab/TabHome/GroupParagraph | stub |
-| TextAlignTop | toggleButton | TextAlignTop | tab/TabHome/GroupParagraph | stub |
 | TextAllCaps | toggleButton | TextAllCaps | tab/TabHome/GroupFont | stub |
 | TextBlockTool | toggleButton | TextBlockTool | tab/TabHome/GroupTools | stub |
 | TextBoxInsertHorizontal | toggleButton | TextBoxInsertHorizontal | tab/TabInsert/GroupTextBoxText | stub |
@@ -681,7 +682,6 @@ A row listed in `ui-spec/out-of-scope.txt` stays `out-of-scope` even when a comm
 | TraceForward | button | TraceForward | tab/TabShapeSheetDesign/GroupShapeSheetFormulaTracing | stub |
 | TracePrecedentCells | toggleButton | TracePrecedentCells | tab/TabShapeSheetDesign/GroupShapeSheetFormulaTracing | stub |
 | Translate | button | Translate | tab/TabReviewWord/GroupLanguage | stub |
-| Underline | toggleButton | Underline | tab/TabHome/GroupFont | stub |
 | UpdateChannel | button | UpdateChannel | backstage/TabHelp | stub |
 | UpdateIcon | button | UpdateIcon | tab/TabStencil/GroupStencilMasterShape | stub |
 | UpgradeDocument | button | UpgradeDocument | backstage/TabInfo | stub |
@@ -736,6 +736,8 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | app.office.center.options | Options | implemented |
 | app.quit | Exit | implemented |
 | arrange.align.bottom | Bottom | implemented |
+| arrange.align.box | Align | implemented |
+| arrange.align.center | Align Center | implemented |
 | arrange.align.center_x | Align Center | implemented |
 | arrange.align.left | Align Left | implemented |
 | arrange.align.middle | Middle | implemented |
@@ -745,7 +747,16 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | arrange.bring_to_front | Bring to Front | implemented |
 | arrange.distribute.horizontal | Distribute Horizontally | implemented |
 | arrange.distribute.vertical | Distribute Vertically | implemented |
+| arrange.distribute_shapes.distribute_center | Distribute Center | implemented |
+| arrange.distribute_shapes.distribute_horizontal_spacing | Distribute Horizontal Spacing | implemented |
+| arrange.distribute_shapes.distribute_middle | Distribute Middle | implemented |
+| arrange.distribute_shapes.distribute_vertical_spacing | Distribute Vertical Spacing | implemented |
+| arrange.flip_horizontal | Flip Horizontal | implemented |
+| arrange.flip_vertical | Flip Vertical | implemented |
 | arrange.group | Group | implemented |
+| arrange.object.rotate90 | Rotate90 | implemented |
+| arrange.position | Position | implemented |
+| arrange.rotate90.clockwise | Clockwise | implemented |
 | arrange.send_backward | Send Backward | implemented |
 | arrange.send_to_back | Send to Back | implemented |
 | arrange.ungroup | Ungroup | implemented |
@@ -767,6 +778,7 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | edit.paste.duplicate | Paste Duplicate | implemented |
 | edit.paste.in.place | Paste in Place | implemented |
 | edit.redo | Redo | implemented |
+| edit.redo.or.repeat | Redo Or Repeat | implemented |
 | edit.select | Select | implemented |
 | edit.select_all | Select All | implemented |
 | edit.undo | Undo | implemented |
@@ -782,7 +794,32 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | file.render | Render | implemented |
 | file.save | Save | implemented |
 | file.save_as | Save As | implemented |
+| format.fill_color.no_fill | No Fill | implemented |
+| format.fill_color.use_default | Use Default | implemented |
+| format.line_color.no_line | No Line | implemented |
+| format.line_color.use_default | Use Default | implemented |
+| format.line_ends.no_line_ends | No Line Ends | implemented |
+| format.line_pattern.no_line | No Line | implemented |
+| format.set.fill.color | Fill Color | implemented |
+| format.set.line.color | Line Color | implemented |
+| format.set.line.ends | Ends | implemented |
+| format.set.line.pattern | Line Pattern | implemented |
+| format.set.line.weight | Line Weight | implemented |
 | format.set.page.orientation | Page Orientation | implemented |
+| format.text.align_bottom | Bottom-Align Text | implemented |
+| format.text.align_center | Center Text | implemented |
+| format.text.align_justify | Justify Text | implemented |
+| format.text.align_left | Align Text Left | implemented |
+| format.text.align_middle | Center Text Vertically | implemented |
+| format.text.align_right | Align Text Right | implemented |
+| format.text.align_top | Top-Align Text | implemented |
+| format.text.bold | Bold | implemented |
+| format.text.decrease_size | Decrease Font Size | implemented |
+| format.text.increase_size | Increase Font Size | implemented |
+| format.text.italic | Italic | implemented |
+| format.text.underline | Underline | implemented |
+| format.text_color.use_default | Use Default | implemented |
+| format.transparency.no_transparency | No Transparency | implemented |
 | help.about | About Larrygram | implemented |
 | help.welcome | Welcome | implemented |
 | help.welcome.next_start | Welcome wizard on next start | implemented |
@@ -816,19 +853,30 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | shape.set.pin | Position | implemented |
 | shape.set.text | Shape Text | implemented |
 | shape.set.width | Width | implemented |
+| shape.transparency | Transparency | implemented |
+| shape.transparency.dlg | Dlg | implemented |
 | text.begin | Edit Text | implemented |
+| text.bullets | Bullets | implemented |
 | text.cancel | Cancel Text | implemented |
 | text.commit | Commit Text | implemented |
+| text.font | Font | implemented |
+| text.font.color | Font Color | implemented |
+| text.font.size | Font Size | implemented |
+| text.font.size.decrease | Font Size Decrease | implemented |
+| text.font.size.increase | Font Size Increase | implemented |
+| text.strike.through | Through | implemented |
 | tools.backgrounds | Backgrounds | implemented |
 | tools.blank.page.insert | Blank Page Insert | implemented |
 | tools.blank.page.insert.visio | Blank Page Insert Visio | implemented |
 | tools.connector | Connector Tool | implemented |
 | tools.ellipse | Ellipse | implemented |
+| tools.format_painter | Format Painter | implemented |
 | tools.options.go.to.drawing | Drawing | implemented |
 | tools.options.new.page | Page | implemented |
 | tools.options.page.setup | Setup | implemented |
 | tools.pointer | Pointer Tool | implemented |
 | tools.rectangle | Rectangle | implemented |
+| tools.strikethrough | Strikethrough | implemented |
 | tools.text | Text Tool | implemented |
 | view.custom | Custom | implemented |
 | view.fit.in.window | Window | implemented |
@@ -872,8 +920,6 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | app.office.feedback.icon | Office Feedback Icon | stub |
 | app.restore | Restore | stub |
 | app.trust.center.dlg | Dlg | stub |
-| arrange.align.box | Align | stub |
-| arrange.align.center | Align Center | stub |
 | arrange.align_objects | Align Shapes | stub |
 | arrange.auto.align | Align | stub |
 | arrange.auto.align.and.space | Space | stub |
@@ -893,12 +939,6 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | arrange.distribute.right | Right | stub |
 | arrange.distribute.top | Top | stub |
 | arrange.distribute.v.space | Space | stub |
-| arrange.distribute_shapes.distribute_center | Distribute Center | stub |
-| arrange.distribute_shapes.distribute_horizontal_spacing | Distribute Horizontal Spacing | stub |
-| arrange.distribute_shapes.distribute_middle | Distribute Middle | stub |
-| arrange.distribute_shapes.distribute_vertical_spacing | Distribute Vertical Spacing | stub |
-| arrange.flip_horizontal | Flip Horizontal | stub |
-| arrange.flip_vertical | Flip Vertical | stub |
 | arrange.group.office.insider.about | Group Office Insider About | stub |
 | arrange.group.office.insider.channel | Group Office Insider Channel | stub |
 | arrange.group.office.insider.help | Group Office Insider Help | stub |
@@ -922,15 +962,12 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | arrange.object.info.dlg | Dlg | stub |
 | arrange.object.remove.from.group | Group | stub |
 | arrange.object.reverse | Reverse | stub |
-| arrange.object.rotate90 | Rotate90 | stub |
 | arrange.object.swap.ends | Ends | stub |
 | arrange.object.union | Shapes Object Union | stub |
 | arrange.offset.dlg | Dlg | stub |
-| arrange.position | Position | stub |
 | arrange.relayout.shapes | Shapes | stub |
 | arrange.reorder.list | List | stub |
 | arrange.rotate.object | Object Rotate | stub |
-| arrange.rotate90.clockwise | Clockwise | stub |
 | arrange.rotate_left | Rotate Left | stub |
 | arrange.rotate_right | Rotate Right | stub |
 | arrange.size.and.position.window | Size And Position Window | stub |
@@ -1070,7 +1107,6 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | edit.recalc.object.wh | Wh | stub |
 | edit.reconvert | Reconvert | stub |
 | edit.redo.multiple | Multiple | stub |
-| edit.redo.or.repeat | Redo Or Repeat | stub |
 | edit.reinstate.validation.issue | Issue | stub |
 | edit.remove.data.graphic.from.sel | Sel | stub |
 | edit.remove.from.all.containers | Containers | stub |
@@ -1207,16 +1243,10 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | format.define.styles | Styles | stub |
 | format.double.click | Click | stub |
 | format.fill | Fill | stub |
-| format.fill_color.no_fill | No Fill | stub |
-| format.fill_color.use_default | Use Default | stub |
 | format.increase.indent | Indent Increase Word | stub |
 | format.increase.para.spacing | Spacing | stub |
 | format.ink.dlg | Dlg | stub |
 | format.line | Line | stub |
-| format.line_color.no_line | No Line | stub |
-| format.line_color.use_default | Use Default | stub |
-| format.line_ends.no_line_ends | No Line Ends | stub |
-| format.line_pattern.no_line | No Line | stub |
 | format.paragraph | Paragraph | stub |
 | format.picture.autobalance | Autobalance | stub |
 | format.picture.compression.dlg | Dlg | stub |
@@ -1232,17 +1262,12 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | format.set.dyn.conn.reroute.never | Never | stub |
 | format.set.dyn.conn.reroute.on.crossover | Crossover | stub |
 | format.set.dyn.conn.routing.style | Style | stub |
-| format.set.fill.color | Fill Color | stub |
 | format.set.fill.pattern | Pattern | stub |
 | format.set.fill.shadow | Shadow | stub |
 | format.set.header.footer | Footer | stub |
 | format.set.index.in.stencil | Stencil | stub |
 | format.set.language.dlg | Set Language | stub |
-| format.set.line.color | Line Color | stub |
 | format.set.line.corner.style | Style | stub |
-| format.set.line.ends | Ends | stub |
-| format.set.line.pattern | Line Pattern | stub |
-| format.set.line.weight | Line Weight | stub |
 | format.set.page.plow | Plow | stub |
 | format.set.page.size | Size | stub |
 | format.set.theme.behavior | Behavior | stub |
@@ -1253,24 +1278,10 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | format.style.explorer | Style Explorer | stub |
 | format.tabs | Tabs | stub |
 | format.text | Text | stub |
-| format.text.align_bottom | Bottom-Align Text | stub |
-| format.text.align_center | Center Text | stub |
-| format.text.align_justify | Justify Text | stub |
-| format.text.align_left | Align Text Left | stub |
-| format.text.align_middle | Center Text Vertically | stub |
-| format.text.align_right | Align Text Right | stub |
-| format.text.align_top | Top-Align Text | stub |
 | format.text.all_caps | Text All Caps | stub |
-| format.text.bold | Bold | stub |
-| format.text.decrease_size | Decrease Font Size | stub |
-| format.text.increase_size | Increase Font Size | stub |
-| format.text.italic | Italic | stub |
 | format.text.small_caps | Text Small Caps | stub |
 | format.text.subscript | Subscript | stub |
-| format.text.underline | Underline | stub |
-| format.text_color.use_default | Use Default | stub |
 | format.theme | Theme... | stub |
-| format.transparency.no_transparency | No Transparency | stub |
 | help.contents | Help | stub |
 | help.mode | Mode | stub |
 | help.research.look.up | Up | stub |
@@ -1483,11 +1494,8 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | shape.stencil.reset_stencil | Reset Stencil | stub |
 | shape.studio.add.on | On | stub |
 | shape.styles | Styles | stub |
-| shape.transparency | Transparency | stub |
-| shape.transparency.dlg | Dlg | stub |
 | shape.update_icon_image | Update Icon Image | stub |
 | shape.vert | Vert | stub |
-| text.bullets | Bullets | stub |
 | text.direction.left.to.right | Direction Left To Right | stub |
 | text.direction.right.to.left | Direction Right To Left | stub |
 | text.direction.vertical | Direction Vertical | stub |
@@ -1495,18 +1503,12 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | text.double.u.line | Line | stub |
 | text.edit.ruler | Ruler | stub |
 | text.edit.state | State | stub |
-| text.font | Font | stub |
-| text.font.color | Font Color | stub |
-| text.font.size | Font Size | stub |
-| text.font.size.decrease | Font Size Decrease | stub |
-| text.font.size.increase | Font Size Increase | stub |
 | text.h.align.distribute | Distribute | stub |
 | text.horizontal_in_vertical | Horizontal in Vertical... | stub |
 | text.initial.caps | Initial Caps | stub |
 | text.normal.case | Normal Case | stub |
 | text.rotate90 | Rotate90 Degrees | stub |
 | text.size | Size | stub |
-| text.strike.through | Through | stub |
 | text.style | Style | stub |
 | text.super.script | Script | stub |
 | text.u.line | Line | stub |
@@ -1561,7 +1563,6 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | tools.find.dialog | Find Dialog | stub |
 | tools.finger.painting.mode | Finger Painting Mode | stub |
 | tools.flyout.anchor.insert.pictures | Flyout Anchor Insert Pictures | stub |
-| tools.format_painter | Format Painter | stub |
 | tools.formula_tracing.trace_dependents | Trace Dependents | stub |
 | tools.formula_tracing.trace_precedents | Trace Precedents | stub |
 | tools.formula_tracing.window | Formula Tracing Window | stub |
@@ -1708,7 +1709,6 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | tools.stencil.explorer | Stencil Explorer | stub |
 | tools.stop.ignoring.this.issue | Stop Ignoring This Issue | stub |
 | tools.stop.ignoring.validation.rule | Stop Ignoring Rule | stub |
-| tools.strikethrough | Strikethrough | stub |
 | tools.subprocess.browse.to.other.document | Subprocess Browse To Other Document | stub |
 | tools.subprocess.create.from.selection | Subprocess Create From Selection | stub |
 | tools.subprocess.create.new | Subprocess Create New | stub |
