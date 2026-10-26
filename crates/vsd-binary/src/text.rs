@@ -272,30 +272,74 @@ pub fn collect_with(
             });
             continue;
         };
-        // The owner exists by construction; the loop over the one
-        // lookup avoids an untaken `else` branch (and a panic path).
-        #[allow(for_loops_over_fallibles)]
-        for (_, shape) in shapes.get_mut(owner) {
-            shape.read(chunk, options, warnings, &mut text_bytes)?;
-        }
+        read_into(&mut shapes, owner, chunk, options, warnings, &mut text_bytes)?;
     }
 
-    for (id, shape) in &shapes {
-        #[allow(for_loops_over_fallibles)]
-        for target in document.shape_mut(*id) {
-            shape.flush(target, &fonts, &names, options, warnings, &mut text_bytes)?;
+    for entry in &shapes {
+        flush_shape(document, entry, &fonts, &names, options, warnings, &mut text_bytes)?;
+    }
+    Ok(())
+}
+
+/// Reads one text record into the accumulator of its owning shape.
+///
+/// The owner index comes from the accumulator itself, so a miss is
+/// defensive; a record whose owner is gone drops its text with a
+/// `Dropped` warning, never silently (P8-11 F5).
+fn read_into(
+    shapes: &mut [(ShapeId, ShapeText)],
+    owner: usize,
+    chunk: &Chunk<'_>,
+    options: &TextOptions,
+    warnings: &mut Vec<ImportWarning>,
+    text_bytes: &mut u64,
+) -> Result<(), Error> {
+    match shapes.get_mut(owner) {
+        Some((_, shape)) => shape.read(chunk, options, warnings, text_bytes),
+        None => {
+            warnings.push(ImportWarning {
+                context: "shape text".to_owned(),
+                kind: WarningKind::Dropped { what: "shape text" },
+            });
+            Ok(())
         }
-        // The model's write-back convention (ADR 0019): the shape's
-        // `Text` element lives in its preserved content and
-        // [`larrygram_model::Shape::text`] is its typed copy. Rebuild the
-        // element from the typed text so the writer emits it (task
-        // P8-10: without it a `.vsd` import saves without its text).
-        let content = document.shape(*id).and_then(|shape| shape.text.clone());
-        if let Some(content) = content {
-            document
-                .set_shape_text(*id, content)
-                .map_err(Error::Model)?;
-        }
+    }
+}
+
+/// Flushes one shape's text into the model and rebuilds its `Text`
+/// element.
+///
+/// The shape id comes from the same walk that built the document, so a
+/// missing shape is defensive; a text run whose shape is gone is
+/// dropped with a warning, never silently (P8-11 F5).
+///
+/// The model's write-back convention (ADR 0019): the shape's `Text`
+/// element lives in its preserved content and
+/// [`larrygram_model::Shape::text`] is its typed copy. Rebuild the
+/// element from the typed text so the writer emits it (task P8-10:
+/// without it a `.vsd` import saves without its text).
+fn flush_shape(
+    document: &mut Document,
+    entry: &(ShapeId, ShapeText),
+    fonts: &HashMap<u32, String>,
+    names: &HashMap<u32, String>,
+    options: &TextOptions,
+    warnings: &mut Vec<ImportWarning>,
+    text_bytes: &mut u64,
+) -> Result<(), Error> {
+    let (id, shape) = entry;
+    match document.shape_mut(*id) {
+        Some(target) => shape.flush(target, fonts, names, options, warnings, text_bytes)?,
+        None => warnings.push(ImportWarning {
+            context: format!("shape #{} text", id.index),
+            kind: WarningKind::Dropped { what: "shape text" },
+        }),
+    }
+    let content = document.shape(*id).and_then(|shape| shape.text.clone());
+    if let Some(content) = content {
+        document
+            .set_shape_text(*id, content)
+            .map_err(Error::Model)?;
     }
     Ok(())
 }
@@ -1326,7 +1370,20 @@ fn field_display(
             cell_type,
             format,
         } => match numeric_display(*value, *cell_type, *format) {
-            Some(text) => text,
+            Some(text) => {
+                // The binary records carry the value and the format
+                // number but not the display text, so this text is our
+                // own spelling of the format, not Visio's (P8-11 F4).
+                // It is visible per field: the degradation must never
+                // be silent (ADR 0070).
+                warnings.push(ImportWarning {
+                    context: "shape text / field".to_owned(),
+                    kind: WarningKind::Unsupported {
+                        what: "field display text (our own spelling of the format)",
+                    },
+                });
+                text
+            }
             None => {
                 warnings.push(ImportWarning {
                     context: "shape text / field".to_owned(),
@@ -3021,15 +3078,18 @@ mod tests {
         );
     }
 
-    // ---- the vsdx reader comparison (hand-built) ----
+    // ---- the pinned vsdx reader comparison (hand-built) ----
 
     // These fixtures mirror the cases of `crates/vsdx/src/read/text.rs`
     // (`mixed_content_maps_in_document_order` and
     // `a_field_keeps_its_cached_display_text`): the same logical text
-    // maps to the same parts through both readers.
+    // maps to the same parts through both readers. The spelling is the
+    // one that reader produced when P8-05 recorded it; the live
+    // cross-reader comparison is the twin runner in
+    // `crates/render/tests/corpus_vsd.rs` (P8-11 F7).
 
     #[test]
-    fn parts_match_the_vsdx_reader_mapping() {
+    fn parts_match_the_pinned_vsdx_mapping() {
         let mut bytes = text_payload(&utf16("Hello world"));
         bytes.extend_from_slice(&utf16("\u{fffc}"));
         let fields = list_payload(&[10]);
@@ -3072,7 +3132,7 @@ mod tests {
     }
 
     #[test]
-    fn run_boundaries_match_the_vsdx_reader_mapping() {
+    fn run_boundaries_match_the_pinned_vsdx_mapping() {
         let bytes = text_payload(&utf16("Hello world"));
         let chars = [
             char_payload(6, 0, [0, 0, 0, 0], 0, 0, 0, 10000, 0.1, 0),
@@ -3268,7 +3328,67 @@ mod tests {
         let mut names = HashMap::new();
         names.insert(1u32, "unused".to_owned());
         assert_eq!(field_display(&field, &names, &mut warnings), "4/19/1982");
-        assert!(warnings.is_empty());
+        // The date text is our own spelling of the format (P8-11 F4):
+        // the degradation is visible, never silent.
+        assert_eq!(
+            warnings,
+            vec![ImportWarning {
+                context: "shape text / field".to_owned(),
+                kind: WarningKind::Unsupported {
+                    what: "field display text (our own spelling of the format)",
+                },
+            }]
+        );
+    }
+
+    #[test]
+    fn a_fabricated_field_display_text_warns() {
+        // Every date, time and number display the records do not carry
+        // is spelled by our own pattern (P8-11 F4).
+        let field = Field::Numeric {
+            value: 1.5,
+            cell_type: CELL_TYPE_INCHES,
+            format: 6,
+        };
+        let mut warnings = Vec::new();
+        assert_eq!(field_display(&field, &HashMap::new(), &mut warnings), "1.50");
+        assert_eq!(
+            warnings,
+            vec![ImportWarning {
+                context: "shape text / field".to_owned(),
+                kind: WarningKind::Unsupported {
+                    what: "field display text (our own spelling of the format)",
+                },
+            }]
+        );
+    }
+
+    #[test]
+    fn a_date_field_out_of_range_prints_the_placeholder_and_warns() {
+        // A hostile value outside the serial range, and a date whose
+        // month or weekday falls outside the name tables (P8-12 minor
+        // 2): the display is empty and the degradation warns.
+        let field = Field::Numeric {
+            value: 1.0e13,
+            cell_type: CELL_TYPE_DATE,
+            format: 21,
+        };
+        let mut warnings = Vec::new();
+        assert_eq!(field_display(&field, &HashMap::new(), &mut warnings), "");
+        assert!(warnings.iter().any(|warning| warning.kind
+            == WarningKind::Unsupported {
+                what: "field format"
+            }));
+        let out_of_range = DateTime {
+            year: 2000,
+            month: 13,
+            day: 1,
+            hour: 0,
+            minute: 0,
+            second: 0,
+            weekday: 7,
+        };
+        assert_eq!(date_display(&out_of_range, 21), None);
     }
 
     #[test]
@@ -3746,5 +3866,59 @@ mod tests {
         let error =
             collect_with(&chunks, &mut document, &mut warnings, &options).expect_err("fails");
         assert!(error.to_string().contains("max_text_bytes"), "{error}");
+    }
+
+    #[test]
+    fn a_text_record_whose_owner_is_gone_drops_its_text_with_a_warning() {
+        // The owner index comes from the accumulator itself (P8-11 F5:
+        // the lookup miss must warn, never drop text silently).
+        let bytes = text_payload(&utf16("x"));
+        let chunk = text_chunk(TEXT, 0, &bytes);
+        let mut warnings = Vec::new();
+        let mut text_bytes = 0u64;
+        read_into(
+            &mut [],
+            0,
+            &chunk,
+            &TextOptions::default(),
+            &mut warnings,
+            &mut text_bytes,
+        )
+        .expect("a missing owner is not fatal");
+        assert_eq!(
+            warnings,
+            vec![ImportWarning {
+                context: "shape text".to_owned(),
+                kind: WarningKind::Dropped { what: "shape text" },
+            }]
+        );
+    }
+
+    #[test]
+    fn a_text_run_whose_shape_is_gone_drops_its_text_with_a_warning() {
+        let entry = (
+            ShapeId { index: 7 },
+            ShapeText::new(0),
+        );
+        let mut document = Document::new();
+        let mut warnings = Vec::new();
+        let mut text_bytes = 0u64;
+        flush_shape(
+            &mut document,
+            &entry,
+            &HashMap::new(),
+            &HashMap::new(),
+            &TextOptions::default(),
+            &mut warnings,
+            &mut text_bytes,
+        )
+        .expect("a missing shape is not fatal");
+        assert_eq!(
+            warnings,
+            vec![ImportWarning {
+                context: "shape #7 text".to_owned(),
+                kind: WarningKind::Dropped { what: "shape text" },
+            }]
+        );
     }
 }
