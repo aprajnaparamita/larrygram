@@ -2222,6 +2222,19 @@ mod tests {
     }
 
     #[test]
+    fn a_layer_record_outside_any_container_is_dropped_with_a_warning() {
+        let chunks = vec![chunk(0xa8, 2, 0, layer_record("Orphan", 255, 1, 1, true))];
+        let (document, warnings) = run(&chunks);
+        assert!(document.pages.is_empty());
+        assert_eq!(
+            kinds(&warnings),
+            vec![WarningKind::Dropped {
+                what: "document layer list"
+            }]
+        );
+    }
+
+    #[test]
     fn cell_block_strings_survive_hostile_payloads() {
         // A zero length, a length of a block that does not fit the
         // payload, a value that is not a string and a string cut short
@@ -2233,6 +2246,10 @@ mod tests {
         );
         assert_eq!(
             cell_block_string(&[1, 0, 0, 0], 0, FormatVersion::V11, 0),
+            None
+        );
+        assert_eq!(
+            cell_block_string(&[5, 0, 0, 0, 2, 0], 0, FormatVersion::V11, 0),
             None
         );
         assert_eq!(

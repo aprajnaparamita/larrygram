@@ -102,7 +102,7 @@
 //! MPL-2.0; AGENTS.md section 5). Only derived facts (record ids, field
 //! order, unit semantics) are implemented here, in our own code.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use larrygram_geom::Unit;
 use larrygram_model::{
@@ -1046,7 +1046,7 @@ fn master_shape_with_geometry(
 /// parent, child, page and master references follow.
 pub(crate) fn drop_unreferenced(document: &mut Document, warnings: &mut Vec<ImportWarning>) {
     let total = document.shapes.len();
-    let mut keep = vec![false; total];
+    let mut keep: BTreeSet<usize> = BTreeSet::new();
     let mut pending: Vec<usize> = document
         .pages
         .iter()
@@ -1060,25 +1060,26 @@ pub(crate) fn drop_unreferenced(document: &mut Document, warnings: &mut Vec<Impo
         .map(|id| usize::try_from(id.index).unwrap_or(usize::MAX))
         .collect();
     while let Some(index) = pending.pop() {
-        if keep.get(index).copied().unwrap_or(true) {
+        let Some(shape) = document.shapes.get(index) else {
+            // A dangling root or child id (belt and braces: the arena
+            // indexes come from this document).
+            continue;
+        };
+        if !keep.insert(index) {
+            // A shape reached twice (a diamond in the child lists).
             continue;
         }
-        if let Some(slot) = keep.get_mut(index) {
-            *slot = true;
-        }
-        if let Some(shape) = document.shapes.get(index) {
-            pending.extend(
-                shape
-                    .children
-                    .iter()
-                    .map(|id| usize::try_from(id.index).unwrap_or(usize::MAX)),
-            );
-        }
+        pending.extend(
+            shape
+                .children
+                .iter()
+                .map(|id| usize::try_from(id.index).unwrap_or(usize::MAX)),
+        );
     }
     let mut map: Vec<Option<u32>> = vec![None; total];
     let mut kept: Vec<Shape> = Vec::new();
     for (old, shape) in std::mem::take(&mut document.shapes).into_iter().enumerate() {
-        if keep.get(old).copied().unwrap_or(false) {
+        if keep.contains(&old) {
             if let Some(slot) = map.get_mut(old) {
                 *slot = u32::try_from(kept.len()).ok();
             }
@@ -4189,6 +4190,10 @@ mod tests {
             text_of(&document.shapes[0].sheet.cells, "LayerMember"),
             Some("1;4".to_owned())
         );
+        // A non-text cell reads as no text.
+        let mut colour = Cell::new(CellName::from_static("Color"));
+        colour.value = Some(CellValue::Number(255.0));
+        assert_eq!(text_of(&[colour], "Color"), None);
     }
 
     #[test]
@@ -4372,6 +4377,33 @@ mod tests {
     }
 
     #[test]
+    fn a_dangling_root_id_and_a_diamond_walk_once() {
+        // The two `continue`s of the reachability walk (P8-12 minor 1):
+        // an id past the arena, and a child two parents claim.
+        let mut document = document_with_an_orphan_tree();
+        let diamond = document.add_shape(Shape::new(ShapeId { index: 0 }, 5));
+        // Both parents are reachable, so the walk reaches `diamond`
+        // twice and stops at the second visit.
+        document.shapes[0].children.push(diamond);
+        document.shapes[1].children.push(diamond);
+        document.pages[0].shapes.push(ShapeId { index: 42 });
+        let mut warnings = Vec::new();
+        drop_unreferenced(&mut document, &mut warnings);
+        assert_eq!(document.shapes.len(), 3);
+        assert_eq!(
+            kinds(&warnings),
+            vec![
+                WarningKind::Dropped {
+                    what: "unreferenced shape record"
+                },
+                WarningKind::Dropped {
+                    what: "unreferenced shape record"
+                },
+            ]
+        );
+    }
+
+    #[test]
     fn a_master_tree_counts_as_referenced() {
         use larrygram_model::{Master, MasterId, Page, PageId};
         let mut document = document_with_an_orphan_tree();
@@ -4513,15 +4545,15 @@ mod tests {
                             .iter()
                             .find(|candidate| candidate.name == cell.name)
                             .and_then(|candidate| candidate.value.as_ref());
-                        match (cell.value.as_ref(), other) {
-                            (Some(CellValue::Str(text)), Some(_)) if text.is_empty() => {}
-                            (mine, other) => assert_eq!(
-                                mine,
-                                other,
-                                "quiet difference: 0x{record:02x} cut {cut} {}",
-                                cell.name.as_str()
-                            ),
-                        }
+                        let quiet_same = match (cell.value.as_ref(), other) {
+                            (Some(CellValue::Str(text)), Some(_)) if text.is_empty() => true,
+                            (mine, other) => mine == other,
+                        };
+                        assert!(
+                            quiet_same,
+                            "quiet difference: 0x{record:02x} cut {cut} {}",
+                            cell.name.as_str()
+                        );
                     }
                 }
             }
@@ -4549,15 +4581,15 @@ mod tests {
                         .iter()
                         .find(|candidate| candidate.name == cell.name)
                         .and_then(|candidate| candidate.value.as_ref());
-                    match (cell.value.as_ref(), other) {
-                        (Some(CellValue::Str(text)), Some(_)) if text.is_empty() => {}
-                        (mine, other) => assert_eq!(
-                            mine,
-                            other,
-                            "quiet difference: curve cut {cut} {}",
-                            cell.name.as_str()
-                        ),
-                    }
+                    let quiet_same = match (cell.value.as_ref(), other) {
+                        (Some(CellValue::Str(text)), Some(_)) if text.is_empty() => true,
+                        (mine, other) => mine == other,
+                    };
+                    assert!(
+                        quiet_same,
+                        "quiet difference: curve cut {cut} {}",
+                        cell.name.as_str()
+                    );
                 }
             }
         }
