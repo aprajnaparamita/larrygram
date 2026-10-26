@@ -272,11 +272,26 @@ pub fn collect_with(
             });
             continue;
         };
-        read_into(&mut shapes, owner, chunk, options, warnings, &mut text_bytes)?;
+        read_into(
+            &mut shapes,
+            owner,
+            chunk,
+            options,
+            warnings,
+            &mut text_bytes,
+        )?;
     }
 
     for entry in &shapes {
-        flush_shape(document, entry, &fonts, &names, options, warnings, &mut text_bytes)?;
+        flush_shape(
+            document,
+            entry,
+            &fonts,
+            &names,
+            options,
+            warnings,
+            &mut text_bytes,
+        )?;
     }
     Ok(())
 }
@@ -3377,7 +3392,10 @@ mod tests {
             format: 6,
         };
         let mut warnings = Vec::new();
-        assert_eq!(field_display(&field, &HashMap::new(), &mut warnings), "1.50");
+        assert_eq!(
+            field_display(&field, &HashMap::new(), &mut warnings),
+            "1.50"
+        );
         assert_eq!(
             warnings,
             vec![ImportWarning {
@@ -3922,10 +3940,7 @@ mod tests {
 
     #[test]
     fn a_text_run_whose_shape_is_gone_drops_its_text_with_a_warning() {
-        let entry = (
-            ShapeId { index: 7 },
-            ShapeText::new(0),
-        );
+        let entry = (ShapeId { index: 7 }, ShapeText::new(0));
         let mut document = Document::new();
         let mut warnings = Vec::new();
         let mut text_bytes = 0u64;
@@ -3986,7 +4001,10 @@ mod tests {
                 para_payload_v11(4, [0.1; 6], 1, 0, 0, 0.25, 0.5, 0, Some("x")),
             ),
             (TABS_DATA_1, tabs_payload(4, &[(1.0, 2), (2.0, 3)])),
-            (TEXT_FIELD, field_numeric_payload(1.5, CELL_TYPE_INCHES, 6, false)),
+            (
+                TEXT_FIELD,
+                field_numeric_payload(1.5, CELL_TYPE_INCHES, 6, false),
+            ),
             (TEXT_FIELD, field_string_payload(7)),
         ];
         for (record, payload) in payloads {
@@ -4013,7 +4031,8 @@ mod tests {
                         match (cell.value.as_ref(), other) {
                             (Some(CellValue::Str(text)), Some(_)) if text.is_empty() => {}
                             (mine, other) => assert_eq!(
-                                mine, other,
+                                mine,
+                                other,
                                 "quiet difference: {record:?} cut {cut} {}",
                                 cell.name.as_str()
                             ),

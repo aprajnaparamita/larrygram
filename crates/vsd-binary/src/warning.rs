@@ -81,7 +81,10 @@ mod tests {
     #[test]
     fn every_kind_can_be_recorded() {
         let kinds = [
-            (WarningKind::SkippedRecord { name: "OLE data" }, "skipped record OLE data"),
+            (
+                WarningKind::SkippedRecord { name: "OLE data" },
+                "skipped record OLE data",
+            ),
             (
                 WarningKind::Dropped {
                     what: "embedded OLE object",
