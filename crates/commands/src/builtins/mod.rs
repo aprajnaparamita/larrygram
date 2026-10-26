@@ -17,6 +17,7 @@ mod connector;
 mod data;
 mod edit;
 mod file;
+mod format;
 mod insert;
 mod page;
 mod shape;
@@ -59,6 +60,7 @@ pub(crate) const STUB_TABLES: &[CommandTable] = &[
     connector::TABLE,
     data::TABLE,
     edit::TABLE,
+    format::TABLE,
     insert::TABLE,
     page::TABLE,
     shape::TABLE,
@@ -155,6 +157,9 @@ const BUILTINS: &[(&str, &str, EnabledFn, RunFn)] = &[
     ("file.exit", "Exit", always, file::run_quit),
     ("edit.undo", "Undo", can_undo, view::run_undo),
     ("edit.redo", "Redo", can_redo, view::run_redo),
+    // Panel Modern's Quick Access Redo dispatches the repeat form
+    // (task P7-21 master note): the same handler as `edit.redo`.
+    ("edit.redo.or.repeat", "Repeat", can_redo, view::run_redo),
     ("view.zoom.in", "Zoom In", has_document, view::run_zoom_in),
     (
         "view.zoom.out",
