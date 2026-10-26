@@ -20,6 +20,7 @@ pub mod file_view;
 pub mod handles;
 pub mod icons;
 pub mod lists;
+pub mod page_setup;
 pub mod panel_classic;
 pub mod panel_modern;
 pub mod panes;
