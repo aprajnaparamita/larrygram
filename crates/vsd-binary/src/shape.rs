@@ -4329,6 +4329,20 @@ mod tests {
         assert!(warnings.is_empty(), "{warnings:?}");
     }
 
+    #[test]
+    fn a_row_point_that_is_not_a_number_never_repeats() {
+        // The value reader of `same_draw_point` reads `None` for a
+        // point cell that is not a number, so the row compares as no
+        // point and keeps its place (P8-12: the arm is defensive).
+        let mut row = Row::new();
+        row.row_type = Some("LineTo".to_owned());
+        let mut x = Cell::new(CellName::from_static("X"));
+        x.value = Some(CellValue::Str("x".to_owned()));
+        row.cells.push(x);
+        let kept = without_repeated_points(vec![(1, row.clone()), (2, row)]);
+        assert_eq!(kept.len(), 2);
+    }
+
     // -- the unreferenced shapes (P8-14) -------------------------------
 
     /// A document with one page holding `root` and `child` as a group,
@@ -4545,14 +4559,11 @@ mod tests {
                             .iter()
                             .find(|candidate| candidate.name == cell.name)
                             .and_then(|candidate| candidate.value.as_ref());
-                        let quiet_same = match (cell.value.as_ref(), other) {
-                            (Some(CellValue::Str(text)), Some(_)) if text.is_empty() => true,
-                            (mine, other) => mine == other,
-                        };
+                        let what = cell.name.as_str();
+                        let quiet_same = cell.value.as_ref() == other;
                         assert!(
                             quiet_same,
-                            "quiet difference: 0x{record:02x} cut {cut} {}",
-                            cell.name.as_str()
+                            "quiet difference: 0x{record:02x} cut {cut} {what}"
                         );
                     }
                 }
@@ -4562,15 +4573,11 @@ mod tests {
         // offset: the row keeps its cells and drops the E text, or
         // warns.
         let curve_payload = nurbs_data(1.0, 3, 0, 1, &[(0.25, 0.5, 0.0, 1.0)]);
-        let (full, full_warnings) =
-            geometry_rows_of(0xc3, &referenced, Some(curve_payload.clone()));
+        let (full, _) = geometry_rows_of(0xc3, &referenced, Some(curve_payload.clone()));
         for cut in 0..=curve_payload.len() {
-            let (rows, warnings) =
+            let (rows, _) =
                 geometry_rows_of(0xc3, &referenced, Some(curve_payload[..cut].to_vec()));
             assert!(rows.len() <= full.len(), "curve cut {cut}");
-            if warnings != full_warnings {
-                continue;
-            }
             for (row, full_row) in rows.iter().zip(&full) {
                 for cell in &row.cells {
                     if cell.name.as_str() == "E" {
@@ -4581,15 +4588,9 @@ mod tests {
                         .iter()
                         .find(|candidate| candidate.name == cell.name)
                         .and_then(|candidate| candidate.value.as_ref());
-                    let quiet_same = match (cell.value.as_ref(), other) {
-                        (Some(CellValue::Str(text)), Some(_)) if text.is_empty() => true,
-                        (mine, other) => mine == other,
-                    };
-                    assert!(
-                        quiet_same,
-                        "quiet difference: curve cut {cut} {}",
-                        cell.name.as_str()
-                    );
+                    let what = cell.name.as_str();
+                    let quiet_same = cell.value.as_ref() == other;
+                    assert!(quiet_same, "quiet difference: curve cut {cut} {what}");
                 }
             }
         }

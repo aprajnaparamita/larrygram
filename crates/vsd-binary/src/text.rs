@@ -4031,15 +4031,12 @@ mod tests {
                             .iter()
                             .find(|candidate| candidate.name == cell.name)
                             .and_then(|candidate| candidate.value.as_ref());
+                        let what = cell.name.as_str();
                         let quiet_same = match (cell.value.as_ref(), other) {
                             (Some(CellValue::Str(text)), Some(_)) if text.is_empty() => true,
                             (mine, other) => mine == other,
                         };
-                        assert!(
-                            quiet_same,
-                            "quiet difference: {record:?} cut {cut} {}",
-                            cell.name.as_str()
-                        );
+                        assert!(quiet_same, "quiet difference: {record:?} cut {cut} {what}");
                     }
                 }
             }
