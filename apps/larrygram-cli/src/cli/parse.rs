@@ -331,6 +331,26 @@ mod tests {
         }
     }
 
+    #[test]
+    fn an_unknown_option_names_the_argument() {
+        // The `Value` arm of `unknown_option` is defensive: every
+        // parse loop matches positionals first, so a bare positional
+        // where an option is expected never reaches the helper
+        // (P8-12 minor 6). It still names what it rejects.
+        assert_eq!(
+            unknown_option(&Arg::Value(OsString::from("extra"))).message,
+            "unknown option: extra"
+        );
+        assert_eq!(
+            unknown_option(&Arg::Short('z')).message,
+            "unknown option: -z"
+        );
+        assert_eq!(
+            unknown_option(&Arg::Long("nope")).message,
+            "unknown option: --nope"
+        );
+    }
+
     fn as_inspect(command: Command) -> Inspect {
         match command {
             Command::Inspect(i) => i,
