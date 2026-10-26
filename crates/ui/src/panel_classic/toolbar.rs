@@ -748,6 +748,7 @@ fn draw_popup_levels(
             pos = rect.right_top();
         }
     }
+    state.popup_level_rects = rects.clone();
     super::update_chain_hover(
         ui,
         &levels,
