@@ -1,0 +1,2186 @@
+//! `format.*`, `text.*` and `tools.format_painter` commands (task
+//! P7-21): the formatting half of the basic set.
+//!
+//! Every command writes the ShapeSheet cells the renderer reads
+//! (`crates/render/src/build.rs`), over **every selected shape**:
+//!
+//! - **Character** rows (one per text run; row 0 is created when the
+//!   shape has none): `Font` (family name), `Size` (inches),
+//!   `Style` (bit 1 bold, 2 italic, 4 underline), `Strikethru`,
+//!   `Color`;
+//! - **Paragraph** rows: `HorzAlign` (0 left, 1 centre, 2 right,
+//!   3 justify) and `Bullet` (0 off, 1 the first bullet style);
+//! - the sheet cell `VerticalAlign` (0 top, 1 middle, 2 bottom);
+//! - **Fill**: `FillForegnd`, `FillPattern` (0 none, 1 solid),
+//!   `FillForegndTrans` (fraction 0 to 1);
+//! - **Line**: `LineColor`, `LineWeight` (inches), `LinePattern`
+//!   (0 none), `BeginArrow` and `EndArrow` (style index, 0 none).
+//!
+//! A write lands on the sheet's own cells (a local row is created for a
+//! shape that inherits its rows from a master: the row's other cells
+//! keep resolving through the master rung, ADR 0019). A "use default"
+//! write removes the local entry again, so the cell resolves back
+//! through the inheritance chain — the model spells `Inh` as "no
+//! entry" (ADR 0038).
+//!
+//! # Argument contract
+//!
+//! The colour, font, size, weight, pattern and arrow commands take
+//! their choice as `value` (what the layout lists dispatch, P7-14) or
+//! under their own name (`color`, `font`, `size`, `weight`, `pattern`,
+//! `transparency`, `begin`, `end`); the first argument present wins:
+//!
+//! - `text.font` — `value`/`font`: the family name;
+//! - `text.font.size`, `text.font.size.increase`, `.decrease` and the
+//!   `format.text.increase_size` / `format.text.decrease_size` aliases
+//!   — `value`/`size`: the size in **points** (the picker's unit; the
+//!   cell stores inches, `Size` in the renderer's table);
+//! - `format.text.bold`, `format.text.italic`, `format.text.underline`
+//!   and `tools.strikethrough` — no arguments: each toggles;
+//! - `text.font.color`, `format.set.fill.color`,
+//!   `format.set.line.color` — `value`/`color`: `#RGB`, `#RRGGBB` or a
+//!   colour name (`black`, `white`, `red`, `green`, `blue`, `yellow`,
+//!   `orange`, `purple`, `gray`, `brown`, `pink`);
+//! - `format.text_color.use_default`, `format.fill_color.use_default`,
+//!   `format.line_color.use_default` — no arguments: the cell goes back
+//!   to its inherited value;
+//! - `format.text.align_left|center|right|justify`,
+//!   `format.text.align_top|middle|bottom` — no arguments;
+//! - `text.bullets` — no arguments: bullets on (style 1) or off;
+//! - `format.fill_color.no_fill`, `format.line_color.no_line` and
+//!   `format.line_pattern.no_line` — no arguments;
+//! - `shape.transparency` (and its dialog form
+//!   `shape.transparency.dlg`) — `value`/`transparency`: percent (0 to
+//!   100); `format.transparency.no_transparency` sets 0;
+//! - `format.set.line.weight` — `value`/`weight`: the weight in
+//!   **points**;
+//! - `format.set.line.pattern` — `value`/`pattern`: the pattern index
+//!   (1 is solid) or `none`;
+//! - `format.set.line.ends` — `value`/`begin`/`end`: the arrowhead
+//!   index (0 none) or `none`; `value` alone sets both ends and
+//!   `format.line_ends.no_line_ends` clears both;
+//! - `tools.format_painter` — no arguments: copy the format of the
+//!   selection's anchor shape (or, with a copy already recorded, apply
+//!   it to the selection); `apply` (a flag) forces the apply form.
+//!
+//! Every run is one undoable edit ([`FormatEdit`], ADR 0040) and
+//! writes the cells of every selected shape in one step.
+
+use larrygram_model::{
+    CellName, CellReader, CellValue, CellWrite, Document, Row, RowTarget, Section, SectionName,
+    ShapeId, Sheet, SheetRef,
+};
+use larrygram_shapesheet::CellAddress;
+
+use crate::app::{AppCtx, SessionId};
+use crate::error::CommandError;
+use crate::undo::Edit;
+use crate::{Invocation, Outcome};
+
+use super::edit::{document_mut, number_literal, selection_targets};
+use super::{CommandTable, edit_outcome, model_error, outcome};
+
+/// The implemented formatting commands (task P7-21).
+pub(crate) const TABLE: CommandTable = &[
+    ("text.font", "Font", can_format, run_font),
+    ("text.font.size", "Font Size", can_format, run_font_size),
+    (
+        "text.font.size.increase",
+        "Increase Font Size",
+        can_format,
+        run_font_grow,
+    ),
+    (
+        "text.font.size.decrease",
+        "Decrease Font Size",
+        can_format,
+        run_font_shrink,
+    ),
+    (
+        "format.text.increase_size",
+        "Increase Font Size",
+        can_format,
+        run_font_grow,
+    ),
+    (
+        "format.text.decrease_size",
+        "Decrease Font Size",
+        can_format,
+        run_font_shrink,
+    ),
+    ("format.text.bold", "Bold", can_format, run_bold),
+    ("format.text.italic", "Italic", can_format, run_italic),
+    (
+        "format.text.underline",
+        "Underline",
+        can_format,
+        run_underline,
+    ),
+    (
+        "tools.strikethrough",
+        "Strikethrough",
+        can_format,
+        run_strikethrough,
+    ),
+    ("text.font.color", "Font Color", can_format, run_font_color),
+    (
+        "format.text_color.use_default",
+        "Use Default Font Color",
+        can_format,
+        run_font_color_default,
+    ),
+    (
+        "format.text.align_left",
+        "Align Text Left",
+        can_format,
+        run_align_left,
+    ),
+    (
+        "format.text.align_center",
+        "Center Text",
+        can_format,
+        run_align_center,
+    ),
+    (
+        "format.text.align_right",
+        "Align Text Right",
+        can_format,
+        run_align_right,
+    ),
+    (
+        "format.text.align_justify",
+        "Justify Text",
+        can_format,
+        run_align_justify,
+    ),
+    (
+        "format.text.align_top",
+        "Align Text Top",
+        can_format,
+        run_align_top,
+    ),
+    (
+        "format.text.align_middle",
+        "Align Text Middle",
+        can_format,
+        run_align_middle,
+    ),
+    (
+        "format.text.align_bottom",
+        "Align Text Bottom",
+        can_format,
+        run_align_bottom,
+    ),
+    ("text.bullets", "Bullets", can_format, run_bullets),
+    (
+        "format.set.fill.color",
+        "Fill Color",
+        can_format,
+        run_fill_color,
+    ),
+    (
+        "format.fill_color.no_fill",
+        "No Fill",
+        can_format,
+        run_fill_no_fill,
+    ),
+    (
+        "format.fill_color.use_default",
+        "Use Default Fill Color",
+        can_format,
+        run_fill_default,
+    ),
+    (
+        "shape.transparency",
+        "Transparency",
+        can_format,
+        run_transparency,
+    ),
+    (
+        "shape.transparency.dlg",
+        "Transparency",
+        can_format,
+        run_transparency,
+    ),
+    (
+        "format.transparency.no_transparency",
+        "No Transparency",
+        can_format,
+        run_no_transparency,
+    ),
+    (
+        "format.set.line.color",
+        "Line Color",
+        can_format,
+        run_line_color,
+    ),
+    (
+        "format.line_color.use_default",
+        "Use Default Line Color",
+        can_format,
+        run_line_default,
+    ),
+    (
+        "format.line_color.no_line",
+        "No Line",
+        can_format,
+        run_line_no_line,
+    ),
+    (
+        "format.set.line.weight",
+        "Line Weight",
+        can_format,
+        run_line_weight,
+    ),
+    (
+        "format.set.line.pattern",
+        "Line Pattern",
+        can_format,
+        run_line_pattern,
+    ),
+    (
+        "format.line_pattern.no_line",
+        "No Line",
+        can_format,
+        run_line_no_line,
+    ),
+    (
+        "format.set.line.ends",
+        "Line Ends",
+        can_format,
+        run_line_ends,
+    ),
+    (
+        "format.line_ends.no_line_ends",
+        "No Line Ends",
+        can_format,
+        run_line_no_ends,
+    ),
+    (
+        "tools.format_painter",
+        "Format Painter",
+        can_paint,
+        run_format_painter,
+    ),
+];
+
+/// The text-size ladder, in points (grow and shrink step along it).
+const SIZE_STEPS_PT: [f64; 18] = [
+    8.0, 9.0, 10.0, 11.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0, 36.0, 48.0, 60.0,
+    72.0, 96.0,
+];
+
+/// The largest font size the grow step reaches (points).
+const MAX_SIZE_PT: f64 = 96.0;
+
+/// The smallest font size the shrink step reaches (points).
+const MIN_SIZE_PT: f64 = 1.0;
+
+/// The points in one inch (the `Size` and `LineWeight` cells store
+/// inches; the pickers show points).
+const POINTS_PER_INCH: f64 = 72.0;
+
+/// Where one format cell lives.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Place {
+    /// A direct cell of the sheet.
+    Direct,
+    /// A cell of every `Character` row (row 0 when the shape has none).
+    Character,
+    /// A cell of every `Paragraph` row (row 0 when the shape has none).
+    Paragraph,
+}
+
+/// One formatting write on one shape: the place, the cell and the value
+/// (`None` removes the local entry, so the cell inherits again).
+#[derive(Debug, Clone)]
+pub(crate) struct Op {
+    /// The shape to write.
+    pub shape: ShapeId,
+    /// Where the cell lives.
+    pub place: Place,
+    /// The cell name (`Font`, `FillForegnd`, ...).
+    pub cell: &'static str,
+    /// The value to write, or `None` to restore inheritance.
+    pub write: Option<CellWrite>,
+}
+
+/// One write of a direct sheet cell.
+pub(crate) fn direct(shape: ShapeId, cell: &'static str, write: CellWrite) -> Op {
+    Op {
+        shape,
+        place: Place::Direct,
+        cell,
+        write: Some(write),
+    }
+}
+
+/// One write of a cell of every `Character` row.
+pub(crate) fn character(shape: ShapeId, cell: &'static str, write: CellWrite) -> Op {
+    Op {
+        shape,
+        place: Place::Character,
+        cell,
+        write: Some(write),
+    }
+}
+
+/// One write of a cell of every `Paragraph` row.
+pub(crate) fn paragraph(shape: ShapeId, cell: &'static str, write: CellWrite) -> Op {
+    Op {
+        shape,
+        place: Place::Paragraph,
+        cell,
+        write: Some(write),
+    }
+}
+
+/// One removal of a local cell entry (`use default`).
+pub(crate) fn remove(shape: ShapeId, place: Place, cell: &'static str) -> Op {
+    Op {
+        shape,
+        place,
+        cell,
+        write: None,
+    }
+}
+
+/// The literal write of a number cell (the one spelling rule, ADR 0038).
+pub(crate) fn num(value: f64) -> CellWrite {
+    CellWrite::new(number_literal(value), CellValue::Number(value))
+}
+
+/// The literal write of a text cell (a quoted string formula).
+pub(crate) fn text_write(text: &str) -> CellWrite {
+    let escaped = text.replace('"', "\"\"");
+    CellWrite::new(format!("\"{escaped}\""), CellValue::Str(text.to_owned()))
+}
+
+/// The literal write of a boolean cell.
+pub(crate) fn bool_write(flag: bool) -> CellWrite {
+    let formula = if flag { "TRUE" } else { "FALSE" };
+    CellWrite::new(formula, CellValue::Bool(flag))
+}
+
+/// The literal write of a colour cell (`RGB(r,g,b)`, the spelling the
+/// formula engine writes back unchanged).
+pub(crate) fn color_write(color: larrygram_model::Color) -> CellWrite {
+    CellWrite::new(
+        format!("RGB({},{},{})", color.r, color.g, color.b),
+        CellValue::Color(color),
+    )
+}
+
+// ---------------------------------------------------------------------------
+// The undoable step
+// ---------------------------------------------------------------------------
+
+/// One undoable formatting step (ADR 0040): the writes of one command
+/// over the selection, and the exact prior sheets they overwrite.
+///
+/// `apply` writes every op (a missing `Character` or `Paragraph` row is
+/// created first, so a shape that inherits its text style gets local
+/// rows with just the written cells; the other cells keep resolving
+/// through the master rung). `revert` restores the captured sheets
+/// wholesale, so `revert(apply(x)) == x` holds exactly — including a
+/// write that created a row or removed an entry.
+#[derive(Debug)]
+pub(crate) struct FormatEdit {
+    session: SessionId,
+    label: String,
+    ops: Vec<Op>,
+    /// The touched shapes' sheets before the first write.
+    before: Vec<(ShapeId, Sheet)>,
+    /// The cells the writes touch (the recalc pass's dirty set). A
+    /// removal is not dirty: it restores inheritance and recomputing it
+    /// would materialise the inherited formula back onto the sheet.
+    dirty: Vec<CellAddress>,
+}
+
+impl FormatEdit {
+    /// Stages the writes, capturing the sheets they will touch.
+    pub(crate) fn new(
+        doc: &Document,
+        session: SessionId,
+        label: impl Into<String>,
+        ops: Vec<Op>,
+    ) -> Result<Self, CommandError> {
+        let mut before: Vec<(ShapeId, Sheet)> = Vec::new();
+        let mut dirty = Vec::new();
+        for op in &ops {
+            let Some(entry) = doc.shape(op.shape) else {
+                return Err(CommandError::failed(format!(
+                    "unknown shape id {}",
+                    op.shape.index
+                )));
+            };
+            if !before.iter().any(|(id, _)| *id == op.shape) {
+                before.push((op.shape, entry.sheet.clone()));
+            }
+            if op.write.is_none() {
+                continue;
+            }
+            let sheet = SheetRef::Shape(op.shape);
+            match op.place {
+                Place::Direct => dirty.push(CellAddress::new(sheet, CellName::new(op.cell))),
+                Place::Character | Place::Paragraph => {
+                    for target in row_targets(&entry.sheet, section_name(op.place)) {
+                        dirty.push(CellAddress::in_row(
+                            sheet,
+                            SectionName::from_static(section_name(op.place)),
+                            target,
+                            CellName::new(op.cell),
+                        ));
+                    }
+                }
+            }
+        }
+        Ok(Self {
+            session,
+            label: label.into(),
+            ops,
+            before,
+            dirty,
+        })
+    }
+
+    /// Writes every op (apply and redo).
+    fn write(&self, ctx: &mut AppCtx) -> Result<(), CommandError> {
+        for op in &self.ops {
+            let sheet = SheetRef::Shape(op.shape);
+            match (op.place, &op.write) {
+                (Place::Direct, Some(write)) => {
+                    let doc = document_mut(ctx, self.session)?;
+                    doc.write_cell(sheet, &CellName::new(op.cell), write)
+                        .map_err(model_error)?;
+                }
+                (Place::Direct, None) => {
+                    let doc = document_mut(ctx, self.session)?;
+                    let Some(entity) = doc.shape_mut(op.shape) else {
+                        return Err(CommandError::failed(format!(
+                            "unknown shape id {}",
+                            op.shape.index
+                        )));
+                    };
+                    entity
+                        .sheet
+                        .cells
+                        .retain(|cell| cell.name.as_str() != op.cell);
+                }
+                (Place::Character | Place::Paragraph, Some(write)) => {
+                    let section = section_name(op.place);
+                    let doc = document_mut(ctx, self.session)?;
+                    let rows = ensure_rows(doc, op.shape, section)?;
+                    for target in rows {
+                        doc.write_row_cell(
+                            sheet,
+                            &SectionName::from_static(section),
+                            target,
+                            &CellName::new(op.cell),
+                            write,
+                        )
+                        .map_err(model_error)?;
+                    }
+                }
+                (Place::Character | Place::Paragraph, None) => {
+                    let section = section_name(op.place);
+                    let doc = document_mut(ctx, self.session)?;
+                    let Some(entity) = doc.shape_mut(op.shape) else {
+                        return Err(CommandError::failed(format!(
+                            "unknown shape id {}",
+                            op.shape.index
+                        )));
+                    };
+                    if let Some(block) = entity
+                        .sheet
+                        .sections
+                        .iter_mut()
+                        .find(|entry| entry.name.as_str() == section)
+                    {
+                        for row in block.rows.iter_mut() {
+                            row.cells.retain(|cell| cell.name.as_str() != op.cell);
+                        }
+                    }
+                }
+            }
+        }
+        ctx.touch_session(self.session);
+        Ok(())
+    }
+}
+
+impl Edit for FormatEdit {
+    fn label(&self) -> &str {
+        &self.label
+    }
+
+    fn dirty_cells(&self) -> &[CellAddress] {
+        &self.dirty
+    }
+
+    fn apply(&mut self, ctx: &mut AppCtx) -> Result<(), CommandError> {
+        self.write(ctx)
+    }
+
+    fn revert(&mut self, ctx: &mut AppCtx) -> Result<(), CommandError> {
+        for (shape, sheet) in &self.before {
+            let doc = document_mut(ctx, self.session)?;
+            let Some(entity) = doc.shape_mut(*shape) else {
+                return Err(CommandError::failed(format!(
+                    "unknown shape id {}",
+                    shape.index
+                )));
+            };
+            entity.sheet = sheet.clone();
+        }
+        ctx.touch_session(self.session);
+        Ok(())
+    }
+}
+
+/// The section name of one row place.
+fn section_name(place: Place) -> &'static str {
+    match place {
+        Place::Character | Place::Direct => "Character",
+        Place::Paragraph => "Paragraph",
+    }
+}
+
+/// The rows one row write lands on: every live row of the section, or
+/// the one row the caller will create when the section has none.
+fn row_targets(sheet: &Sheet, section: &str) -> Vec<RowTarget> {
+    let Some(block) = sheet
+        .sections
+        .iter()
+        .find(|entry| entry.name.as_str() == section)
+    else {
+        return vec![RowTarget {
+            position: Some(0),
+            ix: None,
+        }];
+    };
+    let targets: Vec<RowTarget> = block
+        .rows
+        .iter()
+        .enumerate()
+        .filter(|(_, row)| !row.is_deleted())
+        .map(|(position, row)| RowTarget {
+            position: Some(position),
+            ix: row.ix,
+        })
+        .collect();
+    if targets.is_empty() {
+        vec![RowTarget {
+            position: Some(0),
+            ix: None,
+        }]
+    } else {
+        targets
+    }
+}
+
+/// The rows one row write lands on, creating the section and its first
+/// row when the shape has none (a shape that inherits its text rows
+/// from a master gets a local row with just the written cells).
+fn ensure_rows(
+    doc: &mut Document,
+    shape: ShapeId,
+    section: &'static str,
+) -> Result<Vec<RowTarget>, CommandError> {
+    let Some(entity) = doc.shape_mut(shape) else {
+        return Err(CommandError::failed(format!(
+            "unknown shape id {}",
+            shape.index
+        )));
+    };
+    let live = entity
+        .sheet
+        .sections
+        .iter()
+        .find(|entry| entry.name.as_str() == section)
+        .map(|block| {
+            block
+                .rows
+                .iter()
+                .enumerate()
+                .filter(|(_, row)| !row.is_deleted())
+                .map(|(position, row)| RowTarget {
+                    position: Some(position),
+                    ix: row.ix,
+                })
+                .collect::<Vec<RowTarget>>()
+        })
+        .unwrap_or_default();
+    if !live.is_empty() {
+        return Ok(live);
+    }
+    let Some(block) = entity
+        .sheet
+        .sections
+        .iter_mut()
+        .find(|entry| entry.name.as_str() == section)
+    else {
+        entity
+            .sheet
+            .sections
+            .push(Section::new(SectionName::from_static(section)));
+        let Some(created) = entity.sheet.sections.last_mut() else {
+            return Err(CommandError::failed("the text section could not be added"));
+        };
+        created.rows.push(Row::new());
+        return Ok(vec![RowTarget {
+            position: Some(0),
+            ix: None,
+        }]);
+    };
+    block.rows.push(Row::new());
+    let last = block.rows.len().saturating_sub(1);
+    Ok(vec![RowTarget {
+        position: Some(last),
+        ix: None,
+    }])
+}
+
+// ---------------------------------------------------------------------------
+// Reads (the toggles and the format painter)
+// ---------------------------------------------------------------------------
+
+/// The effective number of one row cell (row 0), or `None` when the
+/// shape has no such value.
+fn read_row_number(doc: &Document, shape: ShapeId, section: &str, cell: &str) -> Option<f64> {
+    let mut reader = CellReader::new(doc);
+    reader
+        .row_number(
+            SheetRef::Shape(shape),
+            section,
+            RowTarget {
+                position: Some(0),
+                ix: None,
+            },
+            &CellName::new(cell),
+        )
+        .ok()
+}
+
+/// The effective number of one direct sheet cell.
+fn read_number(doc: &Document, shape: ShapeId, cell: &str) -> Option<f64> {
+    let mut reader = CellReader::new(doc);
+    reader
+        .number(SheetRef::Shape(shape), &CellName::new(cell))
+        .ok()
+}
+
+/// The effective boolean of one row cell (row 0).
+fn read_row_boolean(doc: &Document, shape: ShapeId, section: &str, cell: &str) -> Option<bool> {
+    let mut reader = CellReader::new(doc);
+    reader
+        .row_boolean(
+            SheetRef::Shape(shape),
+            section,
+            RowTarget {
+                position: Some(0),
+                ix: None,
+            },
+            &CellName::new(cell),
+        )
+        .ok()
+}
+
+/// The effective text of one row cell (row 0).
+fn read_row_text(doc: &Document, shape: ShapeId, section: &str, cell: &str) -> Option<String> {
+    let mut reader = CellReader::new(doc);
+    reader
+        .row_text(
+            SheetRef::Shape(shape),
+            section,
+            RowTarget {
+                position: Some(0),
+                ix: None,
+            },
+            &CellName::new(cell),
+        )
+        .ok()
+}
+
+/// The effective colour of one row cell (row 0).
+fn read_row_color(
+    doc: &Document,
+    shape: ShapeId,
+    section: &str,
+    cell: &str,
+) -> Option<larrygram_model::Color> {
+    let mut reader = CellReader::new(doc);
+    reader
+        .row_color(
+            SheetRef::Shape(shape),
+            section,
+            RowTarget {
+                position: Some(0),
+                ix: None,
+            },
+            &CellName::new(cell),
+        )
+        .ok()
+}
+
+/// The effective colour of one direct sheet cell.
+fn read_color(doc: &Document, shape: ShapeId, cell: &str) -> Option<larrygram_model::Color> {
+    let mut reader = CellReader::new(doc);
+    reader
+        .color(SheetRef::Shape(shape), &CellName::new(cell))
+        .ok()
+}
+
+// ---------------------------------------------------------------------------
+// Shared run helpers
+// ---------------------------------------------------------------------------
+
+/// Enabled when a document is open and at least one selected shape is
+/// still on a page.
+fn can_format(ctx: &AppCtx) -> crate::Enabled {
+    if ctx.active_document().is_none() {
+        return crate::Enabled::no("no open document");
+    }
+    if ctx.selection.is_empty() {
+        return crate::Enabled::no("no selection");
+    }
+    let live = ctx.active_document().is_some_and(|session| {
+        ctx.selection
+            .shapes
+            .iter()
+            .any(|id| session.document.page_of(*id).is_some())
+    });
+    if live {
+        crate::Enabled::yes()
+    } else {
+        crate::Enabled::no("the selected shapes are stale")
+    }
+}
+
+/// `tools.format_painter` is enabled with a selection: it copies from
+/// the selection, or applies a recorded copy to it.
+fn can_paint(ctx: &AppCtx) -> crate::Enabled {
+    if ctx.format_painter.is_some() {
+        return can_format(ctx);
+    }
+    can_format(ctx)
+}
+
+/// Builds the writes for every selected shape and runs them as one
+/// edit. `build` sees the document and the live targets (a toggle
+/// reads the first target once and writes the same value everywhere).
+fn format_run(
+    ctx: &mut AppCtx,
+    label: impl Into<String>,
+    build: impl FnOnce(&Document, &[ShapeId]) -> Result<Vec<Op>, CommandError>,
+) -> Result<Outcome, CommandError> {
+    let verb = label.into();
+    let (session, targets, warnings) = selection_targets(ctx)?;
+    let ops = {
+        let doc = ctx
+            .documents
+            .iter()
+            .find(|slot| slot.id == session)
+            .map(|slot| &slot.document)
+            .ok_or_else(|| CommandError::failed("the document session is gone"))?;
+        build(doc, &targets)?
+    };
+    let message = count_message(&verb, targets.len());
+    let mut edit = {
+        let doc = document_mut(ctx, session)?;
+        FormatEdit::new(doc, session, message.clone(), ops)?
+    };
+    edit.apply(ctx)?;
+    Ok(edit_outcome(message, warnings, Box::new(edit)))
+}
+
+/// "Bold" / "Bold 3 shapes": the status message and undo label.
+fn count_message(verb: &str, count: usize) -> String {
+    if count == 1 {
+        verb.to_owned()
+    } else {
+        format!("{verb} ({count} shapes)")
+    }
+}
+
+/// One required text argument, tried under each name.
+fn need_text(inv: &Invocation, names: &[&str], prompt: &str) -> Result<String, CommandError> {
+    match arg_text(inv, names) {
+        Some(text) => Ok(text),
+        None => Err(CommandError::NeedsInput(crate::NeededInput::Text {
+            prompt: prompt.to_owned(),
+            default: None,
+        })),
+    }
+}
+
+/// The first argument present under any of `names`, spelled as text.
+fn arg_text(inv: &Invocation, names: &[&str]) -> Option<String> {
+    for name in names {
+        match inv.args.get(name) {
+            Some(crate::ArgValue::Text(text)) => return Some(text.clone()),
+            Some(crate::ArgValue::Number(value)) => return Some(number_literal(*value)),
+            Some(crate::ArgValue::Integer(value)) => return Some(value.to_string()),
+            Some(crate::ArgValue::Flag(flag)) => return Some(flag.to_string()),
+            Some(_) | None => {}
+        }
+    }
+    None
+}
+
+/// The first numeric argument present under any of `names`. A text
+/// argument must parse as a finite number.
+fn arg_number(inv: &Invocation, names: &[&str]) -> Result<Option<f64>, CommandError> {
+    for name in names {
+        match inv.args.get(name) {
+            Some(crate::ArgValue::Number(value)) if value.is_finite() => {
+                return Ok(Some(*value));
+            }
+            Some(crate::ArgValue::Number(_)) => {
+                return Err(CommandError::invalid_args(format!("{name} must be finite")));
+            }
+            Some(crate::ArgValue::Integer(value)) => return Ok(Some(*value as f64)),
+            Some(crate::ArgValue::Text(text)) => {
+                return match text.trim().parse::<f64>() {
+                    Ok(value) if value.is_finite() => Ok(Some(value)),
+                    Ok(_) => Err(CommandError::invalid_args(format!("{name} must be finite"))),
+                    Err(_) => Err(CommandError::invalid_args(format!(
+                        "{name} must be a number"
+                    ))),
+                };
+            }
+            Some(_) | None => {}
+        }
+    }
+    Ok(None)
+}
+
+/// A required number argument under any of `names` (the programmatic
+/// contract of `text.font.size` and friends).
+fn need_number(inv: &Invocation, names: &[&str], prompt: &str) -> Result<f64, CommandError> {
+    match arg_number(inv, names)? {
+        Some(value) => Ok(value),
+        None => Err(CommandError::NeedsInput(crate::NeededInput::Number {
+            prompt: prompt.to_owned(),
+            default: None,
+        })),
+    }
+}
+
+/// The colour the arguments name (`value`/`color`): a hex literal or a
+/// colour name.
+fn need_color(inv: &Invocation, names: &[&str]) -> Result<larrygram_model::Color, CommandError> {
+    let text = need_text(inv, names, "color")?;
+    parse_color(&text).ok_or_else(|| {
+        CommandError::invalid_args(format!(
+            "unknown color {text:?}; use #RGB, #RRGGBB or a color name"
+        ))
+    })
+}
+
+/// The colour of a `#RGB`, `#RRGGBB` or name spelling.
+pub(crate) fn parse_color(text: &str) -> Option<larrygram_model::Color> {
+    let trimmed = text.trim();
+    if let Some(hex) = trimmed.strip_prefix('#') {
+        return parse_hex_color(hex);
+    }
+    let key = trimmed.to_ascii_lowercase().replace([' ', '-', '_'], "");
+    let (r, g, b) = match key.as_str() {
+        "black" => (0x00, 0x00, 0x00),
+        "white" => (0xFF, 0xFF, 0xFF),
+        "red" => (0xFF, 0x00, 0x00),
+        "green" => (0x00, 0x80, 0x00),
+        "blue" => (0x00, 0x00, 0xFF),
+        "yellow" => (0xFF, 0xFF, 0x00),
+        "orange" => (0xFF, 0xA5, 0x00),
+        "purple" => (0x80, 0x00, 0x80),
+        "gray" | "grey" => (0x80, 0x80, 0x80),
+        "brown" => (0x8B, 0x45, 0x13),
+        "pink" => (0xFF, 0xC0, 0xCB),
+        _ => return None,
+    };
+    Some(larrygram_model::Color::new(r, g, b))
+}
+
+/// The colour of a hex literal without the `#` (`RGB` or `RRGGBB`).
+fn parse_hex_color(hex: &str) -> Option<larrygram_model::Color> {
+    let nibble =
+        |at: usize| -> Option<u8> { u8::from_str_radix(hex.get(at..at.checked_add(1)?)?, 16).ok() };
+    let byte =
+        |at: usize| -> Option<u8> { u8::from_str_radix(hex.get(at..at.checked_add(2)?)?, 16).ok() };
+    match hex.len() {
+        3 => Some(larrygram_model::Color::new(
+            nibble(0)? * 17,
+            nibble(1)? * 17,
+            nibble(2)? * 17,
+        )),
+        6 => Some(larrygram_model::Color::new(byte(0)?, byte(2)?, byte(4)?)),
+        _ => None,
+    }
+}
+
+/// The display spelling of a colour (`#RRGGBB`), used by the pickers'
+/// accessible names and the tests.
+pub(crate) fn color_name(color: larrygram_model::Color) -> String {
+    format!("#{:02X}{:02X}{:02X}", color.r, color.g, color.b)
+}
+
+/// Points to the inches the `Size` and `LineWeight` cells store.
+fn points_to_inches(points: f64) -> f64 {
+    points / POINTS_PER_INCH
+}
+
+/// The inches of a `Size` or `LineWeight` cell to display points.
+fn inches_to_points(inches: f64) -> f64 {
+    inches * POINTS_PER_INCH
+}
+
+// ---------------------------------------------------------------------------
+// Text commands
+// ---------------------------------------------------------------------------
+
+/// `text.font`: the family of every text run.
+fn run_font(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError> {
+    let family = need_text(inv, &["font", "value"], "font family")?;
+    if family.trim().is_empty() {
+        return Err(CommandError::invalid_args("font family must not be empty"));
+    }
+    format_run(ctx, "Set font", |_, targets| {
+        Ok(targets
+            .iter()
+            .map(|shape| character(*shape, "Font", text_write(&family)))
+            .collect())
+    })
+}
+
+/// `text.font.size`: the size of every text run, in points.
+fn run_font_size(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError> {
+    let points = need_number(inv, &["size", "value"], "font size (points)")?;
+    let inches = check_size(points)?;
+    format_run(ctx, "Set font size", |_, targets| {
+        Ok(targets
+            .iter()
+            .map(|shape| character(*shape, "Size", num(inches)))
+            .collect())
+    })
+}
+
+/// The inches of a font size in points, or the error for a size the
+/// renderer cannot use.
+fn check_size(points: f64) -> Result<f64, CommandError> {
+    if !points.is_finite() || points <= 0.0 || points > MAX_SIZE_PT * 4.0 {
+        return Err(CommandError::invalid_args(
+            "font size must be a positive number of points",
+        ));
+    }
+    Ok(points_to_inches(points))
+}
+
+/// `text.font.size.increase` / `format.text.increase_size`: the next
+/// size up the ladder.
+fn run_font_grow(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandError> {
+    step_font_size(ctx, true)
+}
+
+/// `text.font.size.decrease` / `format.text.decrease_size`: the next
+/// size down the ladder.
+fn run_font_shrink(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandError> {
+    step_font_size(ctx, false)
+}
+
+/// Moves every run's size one step up or down the ladder. The step is
+/// taken from the first target's current size (a uniform result over a
+/// mixed selection).
+fn step_font_size(ctx: &mut AppCtx, grow: bool) -> Result<Outcome, CommandError> {
+    let (session, targets, _warnings) = selection_targets(ctx)?;
+    let doc = ctx
+        .documents
+        .iter()
+        .find(|slot| slot.id == session)
+        .map(|slot| &slot.document)
+        .ok_or_else(|| CommandError::failed("the document session is gone"))?;
+    let current = targets
+        .first()
+        .and_then(|shape| read_row_number(doc, *shape, "Character", "Size"))
+        .map_or(DEFAULT_SIZE_PT, inches_to_points);
+    let fresh = if grow {
+        next_size_up(current)
+    } else {
+        next_size_down(current)
+    };
+    let inches = points_to_inches(fresh);
+    let verb = if grow { "Grow font" } else { "Shrink font" };
+    format_run(ctx, verb, |_, targets| {
+        Ok(targets
+            .iter()
+            .map(|shape| character(*shape, "Size", num(inches)))
+            .collect())
+    })
+}
+
+/// The default text size of a shape that carries none (points).
+const DEFAULT_SIZE_PT: f64 = 12.0;
+
+/// The next size above `points` on the ladder (capped at
+/// [`MAX_SIZE_PT`]; a size past the cap never shrinks).
+fn next_size_up(points: f64) -> f64 {
+    if points >= MAX_SIZE_PT {
+        return points;
+    }
+    for step in SIZE_STEPS_PT {
+        if step > points {
+            return step;
+        }
+    }
+    (points * 1.1).min(MAX_SIZE_PT)
+}
+
+/// The next size below `points` on the ladder (floored at
+/// [`MIN_SIZE_PT`]; a size at the floor never grows).
+fn next_size_down(points: f64) -> f64 {
+    if points <= MIN_SIZE_PT {
+        return points;
+    }
+    for step in SIZE_STEPS_PT.iter().rev() {
+        if *step < points {
+            return *step;
+        }
+    }
+    (points * 0.9).max(MIN_SIZE_PT)
+}
+
+/// `format.text.bold`: toggles `Style` bit 1 on every run.
+fn run_bold(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandError> {
+    toggle_style(ctx, 1, "Bold")
+}
+
+/// `format.text.italic`: toggles `Style` bit 2.
+fn run_italic(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandError> {
+    toggle_style(ctx, 2, "Italic")
+}
+
+/// `format.text.underline`: toggles `Style` bit 4.
+fn run_underline(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandError> {
+    toggle_style(ctx, 4, "Underline")
+}
+
+/// Flips one `Style` bit of every run (the flip is taken from the first
+/// target).
+fn toggle_style(ctx: &mut AppCtx, bit: i64, label: &str) -> Result<Outcome, CommandError> {
+    let (session, targets, _warnings) = selection_targets(ctx)?;
+    let doc = ctx
+        .documents
+        .iter()
+        .find(|slot| slot.id == session)
+        .map(|slot| &slot.document)
+        .ok_or_else(|| CommandError::failed("the document session is gone"))?;
+    let style = targets
+        .first()
+        .and_then(|shape| read_row_number(doc, *shape, "Character", "Style"))
+        .unwrap_or(0.0)
+        .round();
+    let fresh = if (style as i64) & bit != 0 {
+        style - bit as f64
+    } else {
+        style + bit as f64
+    };
+    format_run(ctx, label, |_, targets| {
+        Ok(targets
+            .iter()
+            .map(|shape| character(*shape, "Style", num(fresh)))
+            .collect())
+    })
+}
+
+/// `tools.strikethrough`: toggles the `Strikethru` cell of every run.
+fn run_strikethrough(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandError> {
+    let (session, targets, _warnings) = selection_targets(ctx)?;
+    let doc = ctx
+        .documents
+        .iter()
+        .find(|slot| slot.id == session)
+        .map(|slot| &slot.document)
+        .ok_or_else(|| CommandError::failed("the document session is gone"))?;
+    let on = targets
+        .first()
+        .and_then(|shape| read_row_boolean(doc, *shape, "Character", "Strikethru"))
+        .unwrap_or(false);
+    format_run(ctx, "Strikethrough", |_, targets| {
+        Ok(targets
+            .iter()
+            .map(|shape| character(*shape, "Strikethru", bool_write(!on)))
+            .collect())
+    })
+}
+
+/// `text.font.color`: the colour of every run.
+fn run_font_color(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError> {
+    let color = need_color(inv, &["color", "value"])?;
+    format_run(
+        ctx,
+        format!("Set font color {}", color_name(color)),
+        |_, targets| {
+            Ok(targets
+                .iter()
+                .map(|shape| character(*shape, "Color", color_write(color)))
+                .collect())
+        },
+    )
+}
+
+/// `format.text_color.use_default`: every run inherits its colour
+/// again.
+fn run_font_color_default(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandError> {
+    format_run(ctx, "Use default font color", |_, targets| {
+        Ok(targets
+            .iter()
+            .map(|shape| remove(*shape, Place::Character, "Color"))
+            .collect())
+    })
+}
+
+/// `format.text.align_left`: `HorzAlign` 0.
+fn run_align_left(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandError> {
+    set_horz_align(ctx, 0.0, "Align text left")
+}
+
+/// `format.text.align_center`: `HorzAlign` 1.
+fn run_align_center(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandError> {
+    set_horz_align(ctx, 1.0, "Center text")
+}
+
+/// `format.text.align_right`: `HorzAlign` 2.
+fn run_align_right(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandError> {
+    set_horz_align(ctx, 2.0, "Align text right")
+}
+
+/// `format.text.align_justify`: `HorzAlign` 3.
+fn run_align_justify(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandError> {
+    set_horz_align(ctx, 3.0, "Justify text")
+}
+
+/// Writes `HorzAlign` on every paragraph of the selection.
+fn set_horz_align(ctx: &mut AppCtx, value: f64, label: &str) -> Result<Outcome, CommandError> {
+    format_run(ctx, label, |_, targets| {
+        Ok(targets
+            .iter()
+            .map(|shape| paragraph(*shape, "HorzAlign", num(value)))
+            .collect())
+    })
+}
+
+/// `format.text.align_top`: `VerticalAlign` 0.
+fn run_align_top(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandError> {
+    set_vert_align(ctx, 0.0, "Align text top")
+}
+
+/// `format.text.align_middle`: `VerticalAlign` 1.
+fn run_align_middle(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandError> {
+    set_vert_align(ctx, 1.0, "Align text middle")
+}
+
+/// `format.text.align_bottom`: `VerticalAlign` 2.
+fn run_align_bottom(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandError> {
+    set_vert_align(ctx, 2.0, "Align text bottom")
+}
+
+/// Writes `VerticalAlign` on every selected shape.
+fn set_vert_align(ctx: &mut AppCtx, value: f64, label: &str) -> Result<Outcome, CommandError> {
+    format_run(ctx, label, |_, targets| {
+        Ok(targets
+            .iter()
+            .map(|shape| direct(*shape, "VerticalAlign", num(value)))
+            .collect())
+    })
+}
+
+/// `text.bullets`: turns the bullet of every paragraph on (style 1) or
+/// off.
+fn run_bullets(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandError> {
+    let (session, targets, _warnings) = selection_targets(ctx)?;
+    let doc = ctx
+        .documents
+        .iter()
+        .find(|slot| slot.id == session)
+        .map(|slot| &slot.document)
+        .ok_or_else(|| CommandError::failed("the document session is gone"))?;
+    let on = targets
+        .first()
+        .and_then(|shape| read_row_number(doc, *shape, "Paragraph", "Bullet"))
+        .is_some_and(|value| value.round() >= 0.5);
+    let fresh = if on { 0.0 } else { 1.0 };
+    format_run(ctx, "Bullets", |_, targets| {
+        Ok(targets
+            .iter()
+            .map(|shape| paragraph(*shape, "Bullet", num(fresh)))
+            .collect())
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Fill and line commands
+// ---------------------------------------------------------------------------
+
+/// `format.set.fill.color`: a solid fill of `color`.
+fn run_fill_color(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError> {
+    let color = need_color(inv, &["color", "value"])?;
+    format_run(
+        ctx,
+        format!("Set fill color {}", color_name(color)),
+        |_, targets| {
+            let mut ops = Vec::new();
+            for shape in targets {
+                ops.push(direct(*shape, "FillForegnd", color_write(color)));
+                ops.push(direct(*shape, "FillPattern", num(1.0)));
+            }
+            Ok(ops)
+        },
+    )
+}
+
+/// `format.fill_color.no_fill`: `FillPattern` 0.
+fn run_fill_no_fill(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandError> {
+    format_run(ctx, "No fill", |_, targets| {
+        Ok(targets
+            .iter()
+            .map(|shape| direct(*shape, "FillPattern", num(0.0)))
+            .collect())
+    })
+}
+
+/// `format.fill_color.use_default`: the fill cells inherit again.
+fn run_fill_default(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandError> {
+    format_run(ctx, "Use default fill", |_, targets| {
+        let mut ops = Vec::new();
+        for shape in targets {
+            ops.push(remove(*shape, Place::Direct, "FillForegnd"));
+            ops.push(remove(*shape, Place::Direct, "FillPattern"));
+        }
+        Ok(ops)
+    })
+}
+
+/// `shape.transparency` (and `shape.transparency.dlg`): the fill
+/// transparency, in percent.
+fn run_transparency(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError> {
+    let percent = need_number(inv, &["transparency", "value"], "transparency (percent)")?;
+    if !(0.0..=100.0).contains(&percent) {
+        return Err(CommandError::invalid_args(
+            "transparency must be between 0 and 100 percent",
+        ));
+    }
+    let fraction = percent / 100.0;
+    format_run(ctx, "Set transparency", |_, targets| {
+        Ok(targets
+            .iter()
+            .map(|shape| direct(*shape, "FillForegndTrans", num(fraction)))
+            .collect())
+    })
+}
+
+/// `format.transparency.no_transparency`: `FillForegndTrans` 0.
+fn run_no_transparency(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandError> {
+    format_run(ctx, "No transparency", |_, targets| {
+        Ok(targets
+            .iter()
+            .map(|shape| direct(*shape, "FillForegndTrans", num(0.0)))
+            .collect())
+    })
+}
+
+/// `format.set.line.color`: the stroke colour.
+fn run_line_color(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError> {
+    let color = need_color(inv, &["color", "value"])?;
+    format_run(
+        ctx,
+        format!("Set line color {}", color_name(color)),
+        |_, targets| {
+            Ok(targets
+                .iter()
+                .map(|shape| direct(*shape, "LineColor", color_write(color)))
+                .collect())
+        },
+    )
+}
+
+/// `format.line_color.use_default`: the stroke colour inherits again.
+fn run_line_default(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandError> {
+    format_run(ctx, "Use default line color", |_, targets| {
+        Ok(targets
+            .iter()
+            .map(|shape| remove(*shape, Place::Direct, "LineColor"))
+            .collect())
+    })
+}
+
+/// `format.line_color.no_line` / `format.line_pattern.no_line`:
+/// `LinePattern` 0.
+fn run_line_no_line(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandError> {
+    format_run(ctx, "No line", |_, targets| {
+        Ok(targets
+            .iter()
+            .map(|shape| direct(*shape, "LinePattern", num(0.0)))
+            .collect())
+    })
+}
+
+/// `format.set.line.weight`: the stroke weight, in points.
+fn run_line_weight(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError> {
+    let points = need_number(inv, &["weight", "value"], "line weight (points)")?;
+    if !points.is_finite() || !(0.0..=100.0).contains(&points) {
+        return Err(CommandError::invalid_args(
+            "line weight must be between 0 and 100 points",
+        ));
+    }
+    let inches = points_to_inches(points);
+    format_run(ctx, "Set line weight", |_, targets| {
+        Ok(targets
+            .iter()
+            .map(|shape| direct(*shape, "LineWeight", num(inches)))
+            .collect())
+    })
+}
+
+/// `format.set.line.pattern`: the stroke pattern index (1 is solid).
+fn run_line_pattern(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError> {
+    let index = pattern_index(inv)?;
+    format_run(ctx, "Set line pattern", |_, targets| {
+        Ok(targets
+            .iter()
+            .map(|shape| direct(*shape, "LinePattern", num(index)))
+            .collect())
+    })
+}
+
+/// The pattern index of the `value`/`pattern` argument: a number or the
+/// name `none` (0) / `solid` (1).
+fn pattern_index(inv: &Invocation) -> Result<f64, CommandError> {
+    if let Some(text) = arg_text(inv, &["pattern", "value"]) {
+        let key = text.trim().to_ascii_lowercase();
+        return match key.as_str() {
+            "none" | "no line" | "noline" => Ok(0.0),
+            "solid" => Ok(1.0),
+            _ => match key.parse::<f64>() {
+                Ok(value) if value.is_finite() && (0.0..=24.0).contains(&value) => Ok(value),
+                Ok(_) => Err(CommandError::invalid_args(
+                    "line pattern must be between 0 and 24",
+                )),
+                Err(_) => Err(CommandError::invalid_args(
+                    "line pattern must be a number, \"none\" or \"solid\"",
+                )),
+            },
+        };
+    }
+    Err(CommandError::NeedsInput(crate::NeededInput::Text {
+        prompt: "line pattern".to_owned(),
+        default: None,
+    }))
+}
+
+/// `format.set.line.ends`: the arrowheads. `begin` and `end` set one
+/// end each; `value` alone sets both.
+fn run_line_ends(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError> {
+    let both = arrow_index(inv, &["value"])?;
+    let begin = arrow_index(inv, &["begin"])?;
+    let end = arrow_index(inv, &["end"])?;
+    let (begin, end) = match (both, begin, end) {
+        (Some(value), None, None) => (Some(value), Some(value)),
+        (_, begin, end) => (begin, end),
+    };
+    let (begin, end) = match (begin, end) {
+        (None, None) => {
+            return Err(CommandError::NeedsInput(crate::NeededInput::Text {
+                prompt: "arrowhead".to_owned(),
+                default: None,
+            }));
+        }
+        (begin, end) => (begin, end),
+    };
+    format_run(ctx, "Set line ends", move |_, targets| {
+        let mut ops = Vec::new();
+        for shape in targets {
+            if let Some(value) = begin {
+                ops.push(direct(*shape, "BeginArrow", num(value)));
+            }
+            if let Some(value) = end {
+                ops.push(direct(*shape, "EndArrow", num(value)));
+            }
+        }
+        Ok(ops)
+    })
+}
+
+/// `format.line_ends.no_line_ends`: both arrowheads off.
+fn run_line_no_ends(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandError> {
+    format_run(ctx, "No line ends", |_, targets| {
+        let mut ops = Vec::new();
+        for shape in targets {
+            ops.push(direct(*shape, "BeginArrow", num(0.0)));
+            ops.push(direct(*shape, "EndArrow", num(0.0)));
+        }
+        Ok(ops)
+    })
+}
+
+/// The arrowhead index of the `value`/`begin`/`end` argument: a number
+/// or the name `none` (0).
+fn arrow_index(inv: &Invocation, names: &[&str]) -> Result<Option<f64>, CommandError> {
+    if let Some(text) = arg_text(inv, names) {
+        let key = text.trim().to_ascii_lowercase();
+        return match key.as_str() {
+            "none" | "no line ends" | "nolineends" => Ok(Some(0.0)),
+            _ => match key.parse::<f64>() {
+                Ok(value) if value.is_finite() && (0.0..=24.0).contains(&value) => Ok(Some(value)),
+                Ok(_) => Err(CommandError::invalid_args(
+                    "arrowhead must be between 0 and 24",
+                )),
+                Err(_) => Err(CommandError::invalid_args(
+                    "arrowhead must be a number or \"none\"",
+                )),
+            },
+        };
+    }
+    Ok(None)
+}
+
+// ---------------------------------------------------------------------------
+// Format painter
+// ---------------------------------------------------------------------------
+
+/// `tools.format_painter`: with no recorded copy (or a `copy` flag) it
+/// copies the anchor shape's format; with one (or an `apply` flag) it
+/// applies the recorded format to the selection and clears.
+fn run_format_painter(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError> {
+    let force_apply = inv.args.flag("apply").unwrap_or(false);
+    let force_copy = inv.args.flag("copy").unwrap_or(false);
+    if ctx.format_painter.is_some() && !force_copy {
+        let Some(source) = ctx.format_painter.take() else {
+            return Err(CommandError::failed("no format is recorded"));
+        };
+        let crate::app::PaintSource {
+            session,
+            shape: source,
+        } = source;
+        let (target_session, targets, warnings) = selection_targets(ctx)?;
+        if session != target_session {
+            return Err(CommandError::failed(
+                "the recorded format belongs to another document",
+            ));
+        }
+        let ops = {
+            let doc = ctx
+                .documents
+                .iter()
+                .find(|slot| slot.id == session)
+                .map(|slot| &slot.document)
+                .ok_or_else(|| CommandError::failed("the document session is gone"))?;
+            let template = capture_format(doc, source)?;
+            let mut ops = Vec::new();
+            for shape in &targets {
+                ops.extend(retarget(&template, *shape));
+            }
+            ops
+        };
+        let message = count_message("Apply format", targets.len());
+        let mut edit = {
+            let doc = document_mut(ctx, session)?;
+            FormatEdit::new(doc, session, message.clone(), ops)?
+        };
+        edit.apply(ctx)?;
+        return Ok(edit_outcome(message, warnings, Box::new(edit)));
+    }
+    if force_apply {
+        return Err(CommandError::failed("no format is recorded"));
+    }
+    let (session, targets, _warnings) = selection_targets(ctx)?;
+    let Some(source) = targets.first().copied() else {
+        return Err(CommandError::failed("no selected shape to copy"));
+    };
+    ctx.format_painter = Some(crate::app::PaintSource {
+        session,
+        shape: source,
+    });
+    Ok(outcome(
+        "Format copied; run Format Painter again to apply it",
+        Vec::new(),
+    ))
+}
+
+/// The cells one format copy carries: the place, the cell and the
+/// effective value of the source shape.
+type Template = Vec<(Place, &'static str, CellWrite)>;
+
+/// Reads the standard format cells of `shape` (Character, Paragraph,
+/// fill and line).
+fn capture_format(doc: &Document, shape: ShapeId) -> Result<Template, CommandError> {
+    if doc.shape(shape).is_none() {
+        return Err(CommandError::failed("the format painter's source is gone"));
+    }
+    let mut out: Template = Vec::new();
+    if let Some(family) = read_row_text(doc, shape, "Character", "Font") {
+        out.push((Place::Character, "Font", text_write(&family)));
+    }
+    if let Some(size) = read_row_number(doc, shape, "Character", "Size") {
+        out.push((Place::Character, "Size", num(size)));
+    }
+    if let Some(style) = read_row_number(doc, shape, "Character", "Style") {
+        out.push((Place::Character, "Style", num(style)));
+    }
+    let strike = read_row_boolean(doc, shape, "Character", "Strikethru").unwrap_or(false);
+    out.push((Place::Character, "Strikethru", bool_write(strike)));
+    if let Some(color) = read_row_color(doc, shape, "Character", "Color") {
+        out.push((Place::Character, "Color", color_write(color)));
+    }
+    if let Some(align) = read_row_number(doc, shape, "Paragraph", "HorzAlign") {
+        out.push((Place::Paragraph, "HorzAlign", num(align)));
+    }
+    if let Some(bullet) = read_row_number(doc, shape, "Paragraph", "Bullet") {
+        out.push((Place::Paragraph, "Bullet", num(bullet)));
+    }
+    if let Some(align) = read_number(doc, shape, "VerticalAlign") {
+        out.push((Place::Direct, "VerticalAlign", num(align)));
+    }
+    if let Some(pattern) = read_number(doc, shape, "FillPattern") {
+        out.push((Place::Direct, "FillPattern", num(pattern)));
+    }
+    if let Some(color) = read_color(doc, shape, "FillForegnd") {
+        out.push((Place::Direct, "FillForegnd", color_write(color)));
+    }
+    if let Some(trans) = read_number(doc, shape, "FillForegndTrans") {
+        out.push((Place::Direct, "FillForegndTrans", num(trans)));
+    }
+    if let Some(color) = read_color(doc, shape, "LineColor") {
+        out.push((Place::Direct, "LineColor", color_write(color)));
+    }
+    if let Some(weight) = read_number(doc, shape, "LineWeight") {
+        out.push((Place::Direct, "LineWeight", num(weight)));
+    }
+    if let Some(pattern) = read_number(doc, shape, "LinePattern") {
+        out.push((Place::Direct, "LinePattern", num(pattern)));
+    }
+    if let Some(arrow) = read_number(doc, shape, "BeginArrow") {
+        out.push((Place::Direct, "BeginArrow", num(arrow)));
+    }
+    if let Some(arrow) = read_number(doc, shape, "EndArrow") {
+        out.push((Place::Direct, "EndArrow", num(arrow)));
+    }
+    Ok(out)
+}
+
+/// The template's writes aimed at `shape`.
+fn retarget(template: &Template, shape: ShapeId) -> Vec<Op> {
+    template
+        .iter()
+        .map(|(place, cell, write)| Op {
+            shape,
+            place: *place,
+            cell,
+            write: Some(write.clone()),
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::{DocumentSession, Settings};
+    use crate::{ArgValue, Args, Source};
+    use larrygram_model::{Cell, PageId, Preserved, Shape};
+
+    /// A document with one page and one shape, and the selected id.
+    fn session() -> (AppCtx, SessionId, ShapeId) {
+        let mut doc = Document::new();
+        let page = doc.add_page("Page-1").expect("page");
+        let mut shape = Shape::new(ShapeId { index: 0 }, 1);
+        shape.sheet.cells.push(Cell {
+            name: CellName::new("PinX"),
+            formula: Some("1".to_owned()),
+            value: Some(CellValue::Number(1.0)),
+            unit: larrygram_geom::Unit::Inches,
+            preserved: Preserved::new(),
+        });
+        let shape = doc.insert_shape(page, shape, None).expect("shape");
+        let mut ctx = AppCtx::new(Settings::default());
+        let index = ctx.open_document(DocumentSession::new(doc, None));
+        let session = ctx.documents.get(index).expect("session").id;
+        ctx.selection.shapes = vec![shape];
+        ctx.selection.anchor = Some(shape);
+        (ctx, session, shape)
+    }
+
+    fn call(ctx: &mut AppCtx, id: &str, args: Args) -> Result<Outcome, CommandError> {
+        let inv = Invocation::new(args, Source::Test);
+        match id {
+            "text.font" => run_font(ctx, &inv),
+            "text.font.size" => run_font_size(ctx, &inv),
+            "format.text.bold" => run_bold(ctx, &inv),
+            "tools.strikethrough" => run_strikethrough(ctx, &inv),
+            "text.font.color" => run_font_color(ctx, &inv),
+            "format.text.align_left" => run_align_left(ctx, &inv),
+            "format.text.align_top" => run_align_top(ctx, &inv),
+            "text.bullets" => run_bullets(ctx, &inv),
+            "format.set.fill.color" => run_fill_color(ctx, &inv),
+            "format.fill_color.no_fill" => run_fill_no_fill(ctx, &inv),
+            "shape.transparency" => run_transparency(ctx, &inv),
+            "format.set.line.color" => run_line_color(ctx, &inv),
+            "format.set.line.weight" => run_line_weight(ctx, &inv),
+            "format.set.line.pattern" => run_line_pattern(ctx, &inv),
+            "format.set.line.ends" => run_line_ends(ctx, &inv),
+            "format.line_ends.no_line_ends" => run_line_no_ends(ctx, &inv),
+            "tools.format_painter" => run_format_painter(ctx, &inv),
+            other => panic!("unknown test id {other}"),
+        }
+    }
+
+    fn cell_of(doc: &Document, shape: ShapeId, name: &str) -> Option<Cell> {
+        doc.shape(shape)
+            .and_then(|entry| entry.sheet.cells.iter().find(|c| c.name.as_str() == name))
+            .cloned()
+    }
+
+    fn row_cell_of(doc: &Document, shape: ShapeId, section: &str, name: &str) -> Option<Cell> {
+        doc.shape(shape)
+            .and_then(|entry| {
+                entry
+                    .sheet
+                    .sections
+                    .iter()
+                    .find(|s| s.name.as_str() == section)
+            })
+            .and_then(|block| block.rows.first())
+            .and_then(|row| row.cells.iter().find(|c| c.name.as_str() == name))
+            .cloned()
+    }
+
+    #[test]
+    fn font_family_writes_the_character_row() {
+        let (mut ctx, _session, shape) = session();
+        call(
+            &mut ctx,
+            "text.font",
+            Args::new().with("value", ArgValue::Text("Selawik".to_owned())),
+        )
+        .expect("font");
+        let session = ctx.active_document().expect("document");
+        let cell = row_cell_of(&session.document, shape, "Character", "Font").expect("Font");
+        assert_eq!(cell.value, Some(CellValue::Str("Selawik".to_owned())));
+        assert_eq!(cell.formula.as_deref(), Some("\"Selawik\""));
+    }
+
+    #[test]
+    fn font_size_is_stored_in_inches() {
+        let (mut ctx, _session, shape) = session();
+        call(
+            &mut ctx,
+            "text.font.size",
+            Args::new().with("size", ArgValue::Number(12.0)),
+        )
+        .expect("size");
+        let doc = &ctx.active_document().expect("document").document;
+        let cell = row_cell_of(doc, shape, "Character", "Size").expect("Size");
+        assert_eq!(cell.value, Some(CellValue::Number(1.0 / 6.0)));
+    }
+
+    #[test]
+    fn font_size_rejects_a_bad_size() {
+        let (mut ctx, _session, _shape) = session();
+        let error = call(
+            &mut ctx,
+            "text.font.size",
+            Args::new().with("size", ArgValue::Number(-1.0)),
+        )
+        .expect_err("negative");
+        assert!(error.to_string().contains("font size"), "{error}");
+        let error = call(&mut ctx, "text.font.size", Args::new()).expect_err("missing");
+        assert!(error.to_string().contains("font size"), "{error}");
+    }
+
+    #[test]
+    fn bold_toggles_the_style_bit() {
+        let (mut ctx, _session, shape) = session();
+        call(&mut ctx, "format.text.bold", Args::new()).expect("bold");
+        {
+            let doc = &ctx.active_document().expect("document").document;
+            let cell = row_cell_of(doc, shape, "Character", "Style").expect("Style");
+            assert_eq!(cell.value, Some(CellValue::Number(1.0)));
+        }
+        call(&mut ctx, "format.text.bold", Args::new()).expect("bold off");
+        let doc = &ctx.active_document().expect("document").document;
+        let cell = row_cell_of(doc, shape, "Character", "Style").expect("Style");
+        assert_eq!(cell.value, Some(CellValue::Number(0.0)));
+    }
+
+    #[test]
+    fn strikethrough_toggles_its_boolean_cell() {
+        let (mut ctx, _session, shape) = session();
+        call(&mut ctx, "tools.strikethrough", Args::new()).expect("strike");
+        {
+            let doc = &ctx.active_document().expect("document").document;
+            let cell = row_cell_of(doc, shape, "Character", "Strikethru").expect("Strikethru");
+            assert_eq!(cell.value, Some(CellValue::Bool(true)));
+        }
+        call(&mut ctx, "tools.strikethrough", Args::new()).expect("strike off");
+        let doc = &ctx.active_document().expect("document").document;
+        let cell = row_cell_of(doc, shape, "Character", "Strikethru").expect("Strikethru");
+        assert_eq!(cell.value, Some(CellValue::Bool(false)));
+    }
+
+    #[test]
+    fn colors_parse_hex_and_names_and_reject_other_text() {
+        assert_eq!(
+            parse_color("#1f5bc4"),
+            Some(larrygram_model::Color::new(0x1f, 0x5b, 0xc4))
+        );
+        assert_eq!(
+            parse_color("#F0C"),
+            Some(larrygram_model::Color::new(0xFF, 0x00, 0xCC))
+        );
+        assert_eq!(
+            parse_color("Blue"),
+            Some(larrygram_model::Color::new(0x00, 0x00, 0xFF))
+        );
+        assert_eq!(parse_color("#12345"), None);
+        assert_eq!(parse_color("#xyzxyz"), None);
+        assert_eq!(parse_color("chartreuse-ish"), None);
+    }
+
+    #[test]
+    fn font_color_writes_a_rgb_formula() {
+        let (mut ctx, _session, shape) = session();
+        call(
+            &mut ctx,
+            "text.font.color",
+            Args::new().with("value", ArgValue::Text("#1F5BC4".to_owned())),
+        )
+        .expect("color");
+        let doc = &ctx.active_document().expect("document").document;
+        let cell = row_cell_of(doc, shape, "Character", "Color").expect("Color");
+        assert_eq!(
+            cell.value,
+            Some(CellValue::Color(larrygram_model::Color::new(
+                0x1f, 0x5b, 0xc4
+            )))
+        );
+        assert_eq!(cell.formula.as_deref(), Some("RGB(31,91,196)"));
+    }
+
+    #[test]
+    fn font_color_rejects_an_unknown_color() {
+        let (mut ctx, _session, _shape) = session();
+        let error = call(
+            &mut ctx,
+            "text.font.color",
+            Args::new().with("value", ArgValue::Text("nope".to_owned())),
+        )
+        .expect_err("bad color");
+        assert!(error.to_string().contains("unknown color"), "{error}");
+    }
+
+    #[test]
+    fn alignment_writes_paragraph_and_text_block_cells() {
+        let (mut ctx, _session, shape) = session();
+        call(&mut ctx, "format.text.align_left", Args::new()).expect("left");
+        call(&mut ctx, "format.text.align_top", Args::new()).expect("top");
+        let doc = &ctx.active_document().expect("document").document;
+        let horz = row_cell_of(doc, shape, "Paragraph", "HorzAlign").expect("HorzAlign");
+        assert_eq!(horz.value, Some(CellValue::Number(0.0)));
+        let vert = cell_of(doc, shape, "VerticalAlign").expect("VerticalAlign");
+        assert_eq!(vert.value, Some(CellValue::Number(0.0)));
+    }
+
+    #[test]
+    fn bullets_toggle_the_paragraph_bullet() {
+        let (mut ctx, _session, shape) = session();
+        call(&mut ctx, "text.bullets", Args::new()).expect("on");
+        {
+            let doc = &ctx.active_document().expect("document").document;
+            let cell = row_cell_of(doc, shape, "Paragraph", "Bullet").expect("Bullet");
+            assert_eq!(cell.value, Some(CellValue::Number(1.0)));
+        }
+        call(&mut ctx, "text.bullets", Args::new()).expect("off");
+        let doc = &ctx.active_document().expect("document").document;
+        let cell = row_cell_of(doc, shape, "Paragraph", "Bullet").expect("Bullet");
+        assert_eq!(cell.value, Some(CellValue::Number(0.0)));
+    }
+
+    #[test]
+    fn fill_and_line_cells_land_on_the_sheet() {
+        let (mut ctx, _session, shape) = session();
+        call(
+            &mut ctx,
+            "format.set.fill.color",
+            Args::new().with("color", ArgValue::Text("red".to_owned())),
+        )
+        .expect("fill");
+        call(
+            &mut ctx,
+            "shape.transparency",
+            Args::new().with("transparency", ArgValue::Number(50.0)),
+        )
+        .expect("transparency");
+        call(
+            &mut ctx,
+            "format.set.line.weight",
+            Args::new().with("weight", ArgValue::Number(2.0)),
+        )
+        .expect("weight");
+        call(
+            &mut ctx,
+            "format.set.line.pattern",
+            Args::new().with("value", ArgValue::Integer(3)),
+        )
+        .expect("pattern");
+        call(
+            &mut ctx,
+            "format.set.line.ends",
+            Args::new().with("value", ArgValue::Text("none".to_owned())),
+        )
+        .expect("ends");
+        let doc = &ctx.active_document().expect("document").document;
+        assert_eq!(
+            cell_of(doc, shape, "FillForegnd").and_then(|c| c.value),
+            Some(CellValue::Color(larrygram_model::Color::new(255, 0, 0)))
+        );
+        assert_eq!(
+            cell_of(doc, shape, "FillPattern").and_then(|c| c.value),
+            Some(CellValue::Number(1.0))
+        );
+        assert_eq!(
+            cell_of(doc, shape, "FillForegndTrans").and_then(|c| c.value),
+            Some(CellValue::Number(0.5))
+        );
+        assert_eq!(
+            cell_of(doc, shape, "LineWeight").and_then(|c| c.value),
+            Some(CellValue::Number(2.0 / 72.0))
+        );
+        assert_eq!(
+            cell_of(doc, shape, "LinePattern").and_then(|c| c.value),
+            Some(CellValue::Number(3.0))
+        );
+        assert_eq!(
+            cell_of(doc, shape, "BeginArrow").and_then(|c| c.value),
+            Some(CellValue::Number(0.0))
+        );
+    }
+
+    #[test]
+    fn no_fill_and_no_line_write_their_pattern_cells() {
+        let (mut ctx, _session, shape) = session();
+        call(&mut ctx, "format.fill_color.no_fill", Args::new()).expect("no fill");
+        call(&mut ctx, "format.line_ends.no_line_ends", Args::new()).expect("no ends");
+        let doc = &ctx.active_document().expect("document").document;
+        assert_eq!(
+            cell_of(doc, shape, "FillPattern").and_then(|c| c.value),
+            Some(CellValue::Number(0.0))
+        );
+        assert_eq!(
+            cell_of(doc, shape, "EndArrow").and_then(|c| c.value),
+            Some(CellValue::Number(0.0))
+        );
+    }
+
+    #[test]
+    fn transparency_checks_its_range_and_its_form() {
+        let (mut ctx, _session, _shape) = session();
+        let error = call(
+            &mut ctx,
+            "shape.transparency",
+            Args::new().with("value", ArgValue::Number(120.0)),
+        )
+        .expect_err("range");
+        assert!(error.to_string().contains("transparency"), "{error}");
+        let error = call(&mut ctx, "shape.transparency", Args::new()).expect_err("missing");
+        assert!(error.to_string().contains("transparency"), "{error}");
+    }
+
+    #[test]
+    fn pattern_and_arrow_arguments_validate() {
+        let (mut ctx, _session, _shape) = session();
+        let error = call(
+            &mut ctx,
+            "format.set.line.pattern",
+            Args::new().with("value", ArgValue::Text("squiggle".to_owned())),
+        )
+        .expect_err("bad pattern");
+        assert!(error.to_string().contains("line pattern"), "{error}");
+        let error = call(
+            &mut ctx,
+            "format.set.line.pattern",
+            Args::new().with("value", ArgValue::Number(99.0)),
+        )
+        .expect_err("pattern range");
+        assert!(error.to_string().contains("line pattern"), "{error}");
+        let error = call(
+            &mut ctx,
+            "format.set.line.ends",
+            Args::new().with("begin", ArgValue::Text("squiggle".to_owned())),
+        )
+        .expect_err("bad arrow");
+        assert!(error.to_string().contains("arrowhead"), "{error}");
+        let error = call(&mut ctx, "format.set.line.ends", Args::new()).expect_err("no arrow");
+        assert!(error.to_string().contains("arrowhead"), "{error}");
+    }
+
+    #[test]
+    fn line_weight_checks_its_range() {
+        let (mut ctx, _session, _shape) = session();
+        let error = call(
+            &mut ctx,
+            "format.set.line.weight",
+            Args::new().with("weight", ArgValue::Number(-1.0)),
+        )
+        .expect_err("range");
+        assert!(error.to_string().contains("line weight"), "{error}");
+    }
+
+    #[test]
+    fn use_default_removes_the_local_entry() {
+        let (mut ctx, _session, shape) = session();
+        call(
+            &mut ctx,
+            "format.set.fill.color",
+            Args::new().with("color", ArgValue::Text("red".to_owned())),
+        )
+        .expect("fill");
+        let outcome = run_fill_default(&mut ctx, &Invocation::empty(Source::Test)).expect("reset");
+        assert!(outcome.edit.is_some(), "the reset is undoable");
+        let doc = &ctx.active_document().expect("document").document;
+        assert!(cell_of(doc, shape, "FillForegnd").is_none(), "entry gone");
+    }
+
+    #[test]
+    fn font_family_requires_a_name() {
+        let (mut ctx, _session, _shape) = session();
+        let error = call(
+            &mut ctx,
+            "text.font",
+            Args::new().with("value", ArgValue::Text("  ".to_owned())),
+        )
+        .expect_err("empty");
+        assert!(error.to_string().contains("font family"), "{error}");
+        let error = call(&mut ctx, "text.font", Args::new()).expect_err("missing");
+        assert!(error.to_string().contains("font family"), "{error}");
+    }
+
+    #[test]
+    fn size_steps_walk_the_ladder_and_stay_inside_its_bounds() {
+        assert_eq!(next_size_up(12.0), 14.0);
+        assert_eq!(next_size_down(12.0), 11.0);
+        assert_eq!(next_size_up(1000.0), 1000.0, "past the cap it stays");
+        assert_eq!(next_size_down(1.5), 1.5 * 0.9);
+        assert_eq!(next_size_down(0.5), 0.5, "at the floor it stays");
+        assert_eq!(next_size_up(90.0), 96.0);
+        assert_eq!(next_size_up(96.0), 96.0);
+    }
+
+    #[test]
+    fn grow_and_shrink_write_the_stepped_size() {
+        let (mut ctx, _session, shape) = session();
+        run_font_size(
+            &mut ctx,
+            &Invocation::new(
+                Args::new().with("size", ArgValue::Number(12.0)),
+                Source::Test,
+            ),
+        )
+        .expect("size 12");
+        run_font_grow(&mut ctx, &Invocation::empty(Source::Test)).expect("grow");
+        {
+            let doc = &ctx.active_document().expect("document").document;
+            let cell = row_cell_of(doc, shape, "Character", "Size").expect("Size");
+            assert_eq!(cell.value, Some(CellValue::Number(14.0 / 72.0)));
+        }
+        run_font_shrink(&mut ctx, &Invocation::empty(Source::Test)).expect("shrink");
+        let doc = &ctx.active_document().expect("document").document;
+        let cell = row_cell_of(doc, shape, "Character", "Size").expect("Size");
+        assert_eq!(cell.value, Some(CellValue::Number(12.0 / 72.0)));
+    }
+
+    #[test]
+    fn the_format_painter_copies_then_applies_and_clears() {
+        let (mut ctx, _session, shape) = session();
+        call(
+            &mut ctx,
+            "format.set.fill.color",
+            Args::new().with("color", ArgValue::Text("red".to_owned())),
+        )
+        .expect("fill on source");
+        call(&mut ctx, "tools.format_painter", Args::new()).expect("copy");
+        assert!(ctx.format_painter.is_some(), "the copy is recorded");
+
+        // A second shape to paint onto.
+        let session = ctx.active_document().expect("document").id;
+        let other = {
+            let doc = document_mut(&mut ctx, session).expect("document");
+            let mut fresh = Shape::new(ShapeId { index: 9 }, 2);
+            fresh.sheet.cells.push(Cell {
+                name: CellName::new("PinX"),
+                formula: Some("3".to_owned()),
+                value: Some(CellValue::Number(3.0)),
+                unit: larrygram_geom::Unit::Inches,
+                preserved: Preserved::new(),
+            });
+            doc.insert_shape(PageId { index: 0 }, fresh, None)
+                .expect("second shape")
+        };
+        ctx.selection.shapes = vec![other];
+        call(&mut ctx, "tools.format_painter", Args::new()).expect("apply");
+        assert!(ctx.format_painter.is_none(), "the painter clears");
+        let doc = &ctx.active_document().expect("document").document;
+        assert_eq!(
+            cell_of(doc, other, "FillForegnd").and_then(|c| c.value),
+            Some(CellValue::Color(larrygram_model::Color::new(255, 0, 0))),
+            "the format reached the second shape"
+        );
+        assert_eq!(
+            cell_of(doc, shape, "FillForegnd").and_then(|c| c.value),
+            Some(CellValue::Color(larrygram_model::Color::new(255, 0, 0)))
+        );
+    }
+
+    #[test]
+    fn the_format_painter_needs_a_recorded_copy_to_apply() {
+        let (mut ctx, _session, _shape) = session();
+        let error = call(
+            &mut ctx,
+            "tools.format_painter",
+            Args::new().with("apply", ArgValue::Flag(true)),
+        )
+        .expect_err("nothing recorded");
+        assert!(error.to_string().contains("no format"), "{error}");
+    }
+
+    #[test]
+    fn the_format_painter_reports_a_gone_source() {
+        let (mut ctx, _session, _shape) = session();
+        ctx.format_painter = Some(crate::app::PaintSource {
+            session: ctx.active_document().expect("document").id,
+            shape: ShapeId { index: 77 },
+        });
+        let error = call(&mut ctx, "tools.format_painter", Args::new()).expect_err("gone");
+        assert!(error.to_string().contains("source is gone"), "{error}");
+    }
+
+    #[test]
+    fn the_format_painter_refuses_another_document() {
+        let (mut ctx, _session, _shape) = session();
+        // A second document, closed again: its session id no longer
+        // names a session, which the painter refuses as "another
+        // document" when the selection moved there.
+        let mut other = Document::new();
+        other.add_page("Page-2").expect("page");
+        let index = ctx.open_document(DocumentSession::new(other, None));
+        let stale = ctx.documents.get(index).expect("session").id;
+        ctx.close_document(index);
+        ctx.format_painter = Some(crate::app::PaintSource {
+            session: stale,
+            shape: ShapeId { index: 0 },
+        });
+        let error = call(&mut ctx, "tools.format_painter", Args::new()).expect_err("other doc");
+        assert!(error.to_string().contains("another document"), "{error}");
+    }
+
+    #[test]
+    fn a_stale_target_is_an_error() {
+        let (mut ctx, _session, _shape) = session();
+        ctx.selection.shapes = vec![ShapeId { index: 99 }];
+        let error = call(&mut ctx, "format.text.bold", Args::new()).expect_err("stale");
+        assert!(error.to_string().contains("no selected shape"), "{error}");
+    }
+
+    #[test]
+    fn enabled_predicates_name_their_reasons() {
+        let ctx = AppCtx::new(Settings::default());
+        assert_eq!(
+            can_format(&ctx).reason.as_deref(),
+            Some("no open document"),
+            "reason"
+        );
+        let (mut ctx, _session, _shape) = session();
+        assert!(can_format(&ctx).is_enabled());
+        assert!(can_paint(&ctx).is_enabled());
+        ctx.selection.shapes.clear();
+        assert_eq!(can_format(&ctx).reason.as_deref(), Some("no selection"));
+    }
+
+    #[test]
+    fn a_format_edit_applies_and_reverts() {
+        let (mut ctx, session, shape) = session();
+        let mut edit = {
+            let doc = document_mut(&mut ctx, session).expect("document");
+            FormatEdit::new(
+                doc,
+                session,
+                "No fill",
+                vec![direct(shape, "FillPattern", num(0.0))],
+            )
+            .expect("edit")
+        };
+        assert_eq!(edit.label(), "No fill");
+        assert!(!edit.dirty_cells().is_empty(), "the write dirties its cell");
+        edit.apply(&mut ctx).expect("apply");
+        {
+            let doc = &ctx.active_document().expect("document").document;
+            assert!(cell_of(doc, shape, "FillPattern").is_some());
+        }
+        edit.revert(&mut ctx).expect("revert");
+        let doc = &ctx.active_document().expect("document").document;
+        assert!(
+            cell_of(doc, shape, "FillPattern").is_none(),
+            "the sheet is back"
+        );
+    }
+
+    #[test]
+    fn ensure_rows_creates_a_section_row_when_the_shape_has_none() {
+        let (mut ctx, session, shape) = session();
+        {
+            let doc = document_mut(&mut ctx, session).expect("document");
+            let targets = ensure_rows(doc, shape, "Character").expect("rows");
+            assert_eq!(targets.len(), 1);
+            assert_eq!(targets.first().map(|t| t.position), Some(Some(0)));
+        }
+        {
+            let doc = document_mut(&mut ctx, session).expect("document");
+            let targets = ensure_rows(doc, shape, "Character").expect("rows again");
+            assert_eq!(targets.len(), 1, "no second row");
+        }
+        let error = ensure_rows(
+            document_mut(&mut ctx, session).expect("document"),
+            ShapeId { index: 99 },
+            "Character",
+        )
+        .expect_err("stale");
+        assert!(error.to_string().contains("unknown shape"), "{error}");
+    }
+
+    #[test]
+    fn a_format_edit_reports_an_unknown_shape() {
+        let (mut ctx, session, _shape) = session();
+        let doc = document_mut(&mut ctx, session).expect("document");
+        let ops = vec![direct(ShapeId { index: 42 }, "FillPattern", num(0.0))];
+        let error = FormatEdit::new(doc, session, "No fill", ops).expect_err("stale");
+        assert!(error.to_string().contains("unknown shape"), "{error}");
+    }
+
+    #[test]
+    fn row_targets_cover_every_live_row() {
+        let mut sheet = Sheet::new();
+        let mut block = Section::new(SectionName::from_static("Character"));
+        block.rows.push(Row::new());
+        block.rows.push(Row::new());
+        sheet.sections.push(block);
+        let targets = row_targets(&sheet, "Character");
+        assert_eq!(targets.len(), 2);
+        let fresh = row_targets(&Sheet::new(), "Character");
+        assert_eq!(fresh.len(), 1);
+    }
+
+    #[test]
+    fn color_name_spells_upper_hex() {
+        assert_eq!(
+            color_name(larrygram_model::Color::new(0x1f, 0x5b, 0xc4)),
+            "#1F5BC4"
+        );
+    }
+}
