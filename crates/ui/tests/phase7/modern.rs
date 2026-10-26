@@ -536,6 +536,12 @@ fn every_modern_dropdown_gallery_and_combo_opens_and_dispatches() {
                 ItemKind::Split | ItemKind::SplitRecent => entry.nodes[1].clone(),
                 _ => entry.nodes[0].clone(),
             };
+            // A picker hosts the popup (task P7-21): its own rows
+            // draw, not the item's rows.
+            if let Some(kind) = expect::picker_of(item) {
+                check_picker_popup(&mut rig, &opener, kind);
+                continue;
+            }
             check_popup(&mut rig, &entries, &opener);
         }
     }
@@ -545,6 +551,27 @@ fn every_modern_dropdown_gallery_and_combo_opens_and_dispatches() {
 /// Checks one open popup: its rows must be the expected entries in
 /// order (among the popup's own nodes), and every enabled entry must
 /// dispatch its command. Submenu entries open their children.
+/// A picker-hosted popup draws the picker's first row and closes
+/// again (task P7-21; the pickers' own behaviour lives in
+/// `tests/phase7/pickers.rs`).
+fn check_picker_popup(
+    rig: &mut ModernRig,
+    opener: &Named,
+    kind: larrygram_ui::pickers::PickerKind,
+) {
+    let drawn = popup_nodes(rig, |rig| {
+        rig.click_node(opener);
+    });
+    let first = larrygram_ui::pickers::first_row(kind);
+    assert!(
+        drawn.iter().any(|node| node.name == first),
+        "the {:?} picker draws {first:?} in {:?}",
+        opener.name,
+        drawn.iter().map(|n| n.name.clone()).collect::<Vec<_>>()
+    );
+    rig.close_popups();
+}
+
 fn check_popup(rig: &mut ModernRig, entries: &[Entry], opener: &Named) {
     let drawn = popup_nodes(rig, |rig| {
         rig.click_node(opener);

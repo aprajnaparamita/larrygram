@@ -232,6 +232,10 @@ pub struct Shell {
     options_open: bool,
     /// Whether the About window is open.
     about_open: bool,
+    /// The Page Setup dialog (task P7-21): `Some` while it is open.
+    /// Its body is `page_setup::show`; it re-dispatches
+    /// `tools.options.page.setup` with its arguments.
+    page_setup: Option<crate::page_setup::State>,
     /// The welcome wizard (ADR 0066): `Some` while it is open.
     wizard: Option<wizard::State>,
     /// The first launch has not shown the wizard yet (ADR 0066).
@@ -300,6 +304,7 @@ impl Shell {
             status: String::new(),
             options_open: false,
             about_open: false,
+            page_setup: None,
             wizard: None,
             welcome_pending,
             confirm_close: None,
@@ -1848,6 +1853,38 @@ impl Shell {
                 self.note_error(error.to_string());
             }
         }
+        // The Page Setup dialog (task P7-21): its body re-dispatches
+        // `tools.options.page.setup` with width, height, orientation
+        // and units.
+        let page_setup_outcome = if let Some(state) = &mut self.page_setup {
+            let mut open = true;
+            let mut outcome = crate::page_setup::Outcome::None;
+            egui::Window::new("Page Setup")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                .open(&mut open)
+                .show(ui.ctx(), |ui| {
+                    outcome = crate::page_setup::show(ui, state);
+                });
+            if open {
+                Some(outcome)
+            } else {
+                Some(crate::page_setup::Outcome::Cancel)
+            }
+        } else {
+            None
+        };
+        match page_setup_outcome {
+            Some(crate::page_setup::Outcome::Apply(args)) => {
+                self.page_setup = None;
+                if let Ok(command) = CommandId::parse("tools.options.page.setup") {
+                    intents.push(Intent::new(command, Invocation::new(args, Source::Ui)));
+                }
+            }
+            Some(crate::page_setup::Outcome::Cancel) => self.page_setup = None,
+            Some(crate::page_setup::Outcome::None) | None => {}
+        }
         if self.about_open {
             let mut open = true;
             let mut outcome = about::Outcome::Open;
@@ -2106,6 +2143,11 @@ impl Shell {
             Some(UiRequest::ShowAbout) => self.about_open = true,
             Some(UiRequest::ShowWelcome) => self.wizard = Some(wizard::State::new()),
             Some(UiRequest::ShowOptions) => self.options_open = true,
+            // The one Page Setup seam (task P7-21): the dialog answers
+            // the command's no-argument request.
+            Some(UiRequest::ShowPageSetup) => {
+                self.page_setup = Some(crate::page_setup::State::from_app(&self.app));
+            }
             Some(UiRequest::ConfirmClose { name }) => self.confirm_close = Some(name.clone()),
             Some(UiRequest::Quit) => self.quit_requested = true,
             _ => {}

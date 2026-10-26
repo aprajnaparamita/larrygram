@@ -187,6 +187,27 @@ impl Registry {
         }
     }
 
+    /// Registers or replaces a command.
+    ///
+    /// Unlike [`Registry::register`] this is not a build-time
+    /// consistency check: it exists for the test rigs that latch one
+    /// command id onto an always-enabled stand-in (task P7-21: an id
+    /// that gained a real handler replaces the stand-in's predecessor
+    /// instead of tripping [`RegistryError::Duplicate`]).
+    pub fn replace(&mut self, command: Box<dyn Command>) {
+        use std::collections::btree_map::Entry;
+
+        let id = command.meta().id;
+        match self.commands.entry(id) {
+            Entry::Occupied(mut entry) => {
+                entry.insert(command);
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(command);
+            }
+        }
+    }
+
     /// Builds a registry of stubs from `ui-spec/commands.yaml` (ADR 0006).
     ///
     /// One [`StubCommand`] per entry, in file order. A duplicated id in
@@ -401,6 +422,11 @@ mod tests {
             registry.status(&CommandId::parse("file.save").unwrap()),
             CommandStatus::Implemented
         );
+
+        // `replace` swaps any command for another (the test rigs'
+        // latching seam, task P7-21).
+        registry.replace(RealCommand::new("file.save", false));
+        assert_eq!(registry.len(), 1);
 
         // Two real commands with one id are a build bug.
         let dup = registry.register(RealCommand::new("file.save", true));

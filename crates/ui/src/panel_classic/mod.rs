@@ -333,6 +333,10 @@ pub struct PanelClassic {
     open_popup: Option<String>,
     /// The anchor rect of the open popup.
     popup_rect: Rect,
+    /// The drawn rects of the open popup's levels (the hit bounds of
+    /// [`Self::popup_hit_rect`], task P7-21: a tall popup's last row
+    /// sits outside any fixed-size guess).
+    popup_level_rects: Vec<Rect>,
     /// The open context menu id.
     context: Option<String>,
     /// Where the open context menu draws.
@@ -382,6 +386,7 @@ impl Default for PanelClassic {
             combo_applied: BTreeMap::new(),
             open_popup: None,
             popup_rect: Rect::NOTHING,
+            popup_level_rects: Vec::new(),
             context: None,
             context_pos: Pos2::ZERO,
             context_chain: Vec::new(),
@@ -607,6 +612,7 @@ impl PanelClassic {
         self.popup_chain.clear();
         self.popup_hover = None;
         self.popup_left = None;
+        self.popup_level_rects.clear();
     }
 
     /// The context-menu hover rules (the menu bars' [`Self::update_hover`]
@@ -660,6 +666,7 @@ impl PanelClassic {
         self.hover_timer = None;
         self.menu_left = None;
         self.open_popup = None;
+        self.popup_level_rects.clear();
     }
 
     // --- menus -----------------------------------------------------
@@ -1183,12 +1190,17 @@ impl PanelClassic {
         }
     }
 
-    /// The toolbar popup's hit bounds: the drawn popup sits at
-    /// [`PanelClassic::popup_rect`]'s bottom left (see
-    /// `toolbar::draw_popup`), and a click inside these bounds is not
-    /// an outside click.
+    /// The toolbar popup's hit bounds: the union of the drawn levels
+    /// (`toolbar::draw_popup`), so a click on any row of a tall popup
+    /// is not an outside click (task P7-21). Before the levels draw —
+    /// the first frame after the opener click — the bounds are the
+    /// old fixed guess at [`PanelClassic::popup_rect`]'s bottom left.
     fn popup_hit_rect(&self) -> Rect {
-        Rect::from_min_size(self.popup_rect.left_bottom(), Vec2::new(220.0, 240.0))
+        let mut rects = self.popup_level_rects.iter().copied();
+        let Some(first) = rects.next() else {
+            return Rect::from_min_size(self.popup_rect.left_bottom(), Vec2::new(220.0, 240.0));
+        };
+        rects.fold(first, |bounds, rect| bounds.union(rect))
     }
 
     /// A click outside every open menu and title closes all.

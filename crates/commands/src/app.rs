@@ -206,6 +206,18 @@ impl Selection {
     }
 }
 
+/// Where the Format Painter copied its format from (task P7-21,
+/// `tools.format_painter`): the session and shape the copy was taken
+/// from. The apply form re-reads the source and writes the selection,
+/// so the state is just this pair.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PaintSource {
+    /// The document the copy was taken from.
+    pub session: SessionId,
+    /// The shape whose format was copied.
+    pub shape: larrygram_model::ShapeId,
+}
+
 /// The identity of one [`DocumentSession`] (P4-15).
 ///
 /// The key is assigned once per session and never reused within the
@@ -461,6 +473,10 @@ pub struct AppCtx {
     /// window-state flag the shell reads each frame: the command sets
     /// it, the shell draws the window accordingly.
     pub full_screen: bool,
+    /// The Format Painter's recorded source (task P7-21): `Some` while
+    /// a copied format waits to be applied. The state is the copy's
+    /// origin, never the format itself (the apply form re-reads it).
+    pub format_painter: Option<PaintSource>,
     /// The undo-recording gate (ADR 0040 rule 2): set while an
     /// [`Edit`]'s `apply`/`revert` runs. While it is set,
     /// [`AppCtx::push_edit`] drops the edit and warns instead of
@@ -484,6 +500,7 @@ impl AppCtx {
             clipboard: Clipboard::new(),
             active_tool: ActiveTool::Pointer,
             full_screen: false,
+            format_painter: None,
             undo_suspended: false,
         }
     }
