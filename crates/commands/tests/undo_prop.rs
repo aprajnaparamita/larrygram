@@ -1087,6 +1087,10 @@ const CASES: &[Case] = &[
         run: run_selected,
     },
     Case {
+        id: "text.strike.through",
+        run: run_selected,
+    },
+    Case {
         id: "text.font.color",
         run: run_format_color,
     },
