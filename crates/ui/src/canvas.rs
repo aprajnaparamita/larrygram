@@ -89,16 +89,18 @@ const MIN_RASTER_SCALE: f64 = 0.01;
 /// section 6: bound input-derived work). Denser views draw no grid.
 const MAX_TICKS: i64 = 4096;
 
-const GRID_MINOR: Color32 = Color32::from_rgb(190, 190, 190);
-const GRID_MAJOR: Color32 = Color32::from_rgb(160, 160, 160);
-
 /// The canvas colours read from the active theme (`docs/ui/themes.md`).
 ///
 /// The defaults preserve the pre-theme look when no theme was applied
 /// yet: a grey backdrop, a white page, and a light ruler. The canvas
 /// reads `canvas.background`, `page.background`, `page.border`,
 /// `page.shadow`, `ruler.background` and `ruler.ticks`; the ruler labels
-/// use the tick colour.
+/// use the tick colour. The grid and the tool overlay (task P7-19) read
+/// the closest existing tokens until the base theme gains canvas
+/// tokens of their own (the task's open issue): `chrome.separator` and
+/// `page.border` for the grid, `accent` for the selection, the marquee
+/// and the handle edges, `page.background` for the handle fill and
+/// `icon.red` for the snap guides.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CanvasColors {
     /// The area around the page (`canvas.background`).
@@ -113,7 +115,23 @@ pub struct CanvasColors {
     pub ruler_background: Color32,
     /// The ruler ticks and labels (`ruler.ticks`).
     pub ruler_ticks: Color32,
+    /// The minor grid lines (`chrome.separator`).
+    pub grid_minor: Color32,
+    /// The major grid lines, every inch (`page.border`).
+    pub grid_major: Color32,
+    /// The selection outline, handle edges, marquee edge and connector
+    /// preview (`accent`).
+    pub selection: Color32,
+    /// The handle fill (`page.background`).
+    pub handle_fill: Color32,
+    /// The snap guides (`icon.red`).
+    pub snap_guide: Color32,
+    /// The marquee fill: the selection colour at a low alpha.
+    pub marquee_fill: Color32,
 }
+
+/// The alpha of the marquee fill over the selection colour.
+const MARQUEE_ALPHA: f32 = 24.0 / 255.0;
 
 impl CanvasColors {
     /// Reads the canvas tokens from `theme`, falling back per token.
@@ -125,6 +143,12 @@ impl CanvasColors {
             page_shadow: crate::theme::color(theme, "page.shadow"),
             ruler_background: crate::theme::color(theme, "ruler.background"),
             ruler_ticks: crate::theme::color(theme, "ruler.ticks"),
+            grid_minor: crate::theme::color(theme, "chrome.separator"),
+            grid_major: crate::theme::color(theme, "page.border"),
+            selection: crate::theme::color(theme, "accent"),
+            handle_fill: crate::theme::color(theme, "page.background"),
+            snap_guide: crate::theme::color(theme, "icon.red"),
+            marquee_fill: crate::theme::color(theme, "accent").gamma_multiply(MARQUEE_ALPHA),
         }
     }
 
@@ -144,6 +168,12 @@ impl Default for CanvasColors {
             page_shadow: Color32::from_rgb(234, 234, 234),
             ruler_background: Color32::from_rgb(232, 232, 232),
             ruler_ticks: Color32::from_rgb(120, 120, 120),
+            grid_minor: Color32::from_rgb(190, 190, 190),
+            grid_major: Color32::from_rgb(160, 160, 160),
+            selection: Color32::from_rgb(31, 111, 235),
+            handle_fill: Color32::WHITE,
+            snap_guide: Color32::from_rgb(220, 80, 60),
+            marquee_fill: Color32::from_rgb(31, 111, 235).gamma_multiply(MARQUEE_ALPHA),
         }
     }
 }
@@ -343,16 +373,11 @@ pub struct CanvasOutput {
     pub events: Vec<ToolEvent>,
     /// The id of the canvas widget (the shortcut focus scope reads it).
     pub focus_id: Option<egui::Id>,
+    /// The page viewport of this frame: the canvas rect inside the
+    /// rulers, in screen points (task P7-19).
+    pub viewport: Option<Rect>,
 }
 
-/// The selection outline colour (our own choice).
-const SELECTION: Color32 = Color32::from_rgb(31, 111, 235);
-/// The handle fill colour (our own choice).
-const HANDLE_FILL: Color32 = Color32::WHITE;
-/// The snap guide colour (our own choice).
-const SNAP_GUIDE: Color32 = Color32::from_rgb(220, 80, 60);
-/// The marquee fill and stroke (our own choice).
-const MARQUEE_FILL: Color32 = Color32::from_rgba_premultiplied(31, 111, 235, 24);
 /// The handle square's half side, in screen points (the hit test's
 /// [`crate::handles::HANDLE_HALF_PX`]).
 const HANDLE_HALF: f32 = crate::handles::HANDLE_HALF_PX as f32;
@@ -385,6 +410,12 @@ pub fn show_with_overlay(
     let (rect, response) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
     let viewport = viewport_rect(rect, session.view.show_rulers, ruler_width(ui));
     output.focus_id = Some(response.id);
+    output.viewport = Some(viewport);
+    // The fit commands read the measured viewport (task P7-20's
+    // `ViewState::viewport`, recorded here each frame by task P7-19).
+    if viewport.is_positive() {
+        session.view.viewport = Some((f64::from(viewport.width()), f64::from(viewport.height())));
+    }
 
     // Pan: middle-drag or space-drag.
     let space_down = ui.input(|input| input.keys_down.contains(&egui::Key::Space));
@@ -461,7 +492,7 @@ pub fn show_with_overlay(
         painter.rect_filled(dest, 0.0, colors.page_background);
         if session.view.show_grid {
             let on_page = painter.with_clip_rect(dest.intersect(painter.clip_rect()));
-            draw_grid(&on_page, viewport, session.view.pan, k);
+            draw_grid(&on_page, viewport, session.view.pan, k, &colors);
         }
         if let Some(texture) = cache.texture_id() {
             let uv = Rect::from_min_max(Pos2::ZERO, egui::pos2(1.0, 1.0));
@@ -476,6 +507,7 @@ pub fn show_with_overlay(
     }
     draw_overlay(
         &painter,
+        &colors,
         viewport,
         session.view.pan,
         k,
@@ -755,6 +787,7 @@ fn handle_cursor(
 /// Draws the transient overlay marks over the cached raster (ADR 0042).
 fn draw_overlay(
     painter: &egui::Painter,
+    colors: &CanvasColors,
     viewport: Rect,
     pan: Point,
     k: f64,
@@ -775,7 +808,7 @@ fn draw_overlay(
                 if points.len() == 4 {
                     painter.add(egui::Shape::closed_line(
                         points,
-                        Stroke::new(1.0, SELECTION),
+                        Stroke::new(1.0, colors.selection),
                     ));
                 }
             }
@@ -790,8 +823,8 @@ fn draw_overlay(
                             painter.circle(
                                 center,
                                 HANDLE_HALF + 0.5,
-                                HANDLE_FILL,
-                                Stroke::new(1.0, SELECTION),
+                                colors.handle_fill,
+                                Stroke::new(1.0, colors.selection),
                             );
                             continue;
                         }
@@ -799,11 +832,11 @@ fn draw_overlay(
                             center,
                             egui::vec2(HANDLE_HALF * 2.0, HANDLE_HALF * 2.0),
                         );
-                        painter.rect_filled(rect, 0.0, HANDLE_FILL);
+                        painter.rect_filled(rect, 0.0, colors.handle_fill);
                         painter.rect_stroke(
                             rect,
                             0.0,
-                            Stroke::new(1.0, SELECTION),
+                            Stroke::new(1.0, colors.selection),
                             egui::StrokeKind::Middle,
                         );
                     }
@@ -813,21 +846,27 @@ fn draw_overlay(
                 let min = to_screen(bounds.min);
                 let max = to_screen(PageRect::new(bounds.min, bounds.max).max);
                 let rect = Rect::from_two_pos(min, max);
-                painter.rect_filled(rect, 0.0, MARQUEE_FILL);
+                painter.rect_filled(rect, 0.0, colors.marquee_fill);
                 painter.rect_stroke(
                     rect,
                     0.0,
-                    Stroke::new(1.0, SELECTION),
+                    Stroke::new(1.0, colors.selection),
                     egui::StrokeKind::Middle,
                 );
             }
             OverlayMark::SnapGuide { a, b } => {
-                painter.line_segment([to_screen(*a), to_screen(*b)], Stroke::new(1.0, SNAP_GUIDE));
+                painter.line_segment(
+                    [to_screen(*a), to_screen(*b)],
+                    Stroke::new(1.0, colors.snap_guide),
+                );
             }
             OverlayMark::ConnectorPreview { points } => {
                 let points: Vec<Pos2> = points.iter().map(|point| to_screen(*point)).collect();
                 if points.len() >= 2 {
-                    painter.add(egui::Shape::line(points, Stroke::new(1.5, SELECTION)));
+                    painter.add(egui::Shape::line(
+                        points,
+                        Stroke::new(1.5, colors.selection),
+                    ));
                 }
             }
             _ => {}
@@ -1079,7 +1118,7 @@ fn active_page_label(session: &DocumentSession) -> String {
 
 /// The page size in inches: `PageWidth`/`PageHeight` when positive, the
 /// scene builder's fallback otherwise.
-pub(crate) fn page_size(doc: &Document, page: Option<PageId>) -> (f64, f64) {
+pub fn page_size(doc: &Document, page: Option<PageId>) -> (f64, f64) {
     let Some(page) = page else {
         return FALLBACK_PAGE_SIZE;
     };
@@ -1321,17 +1360,31 @@ fn clamp_scale(ctx: &Context, width_in: f64, height_in: f64, wanted: f64) -> f64
 /// The grid on the page, behind the texture (ADR 0033): lines at
 /// [`TICK_IN`] inches,
 /// a stronger line every inch.
-fn draw_grid(painter: &egui::Painter, viewport: Rect, pan: Point, k: f64) {
+fn draw_grid(painter: &egui::Painter, viewport: Rect, pan: Point, k: f64, colors: &CanvasColors) {
     for (x, major) in tick_positions(viewport.min.x, viewport.width(), pan.x, k) {
         painter.line_segment(
             [egui::pos2(x, viewport.min.y), egui::pos2(x, viewport.max.y)],
-            Stroke::new(1.0, if major { GRID_MAJOR } else { GRID_MINOR }),
+            Stroke::new(
+                1.0,
+                if major {
+                    colors.grid_major
+                } else {
+                    colors.grid_minor
+                },
+            ),
         );
     }
     for (y, major) in tick_positions(viewport.min.y, viewport.height(), pan.y, k) {
         painter.line_segment(
             [egui::pos2(viewport.min.x, y), egui::pos2(viewport.max.x, y)],
-            Stroke::new(1.0, if major { GRID_MAJOR } else { GRID_MINOR }),
+            Stroke::new(
+                1.0,
+                if major {
+                    colors.grid_major
+                } else {
+                    colors.grid_minor
+                },
+            ),
         );
     }
 }

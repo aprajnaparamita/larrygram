@@ -115,6 +115,9 @@ impl Edge {
 struct Drag {
     start_size: f32,
     origin: f32,
+    /// The open size before the gesture: a drag that ends collapsed
+    /// keeps it, not the minimum it passed on the way down.
+    restore: Option<f32>,
 }
 
 /// One pane border (task P7-19).
@@ -214,12 +217,16 @@ impl Splitter {
                     .or(response.interact_pointer_pos())
                     .map(|pos| pos[axis]);
                 if let Some(origin) = origin {
-                    let start_size = if self.collapsed {
-                        COLLAPSED_SIZE
+                    let (start_size, restore) = if self.collapsed {
+                        (COLLAPSED_SIZE, None)
                     } else {
-                        limits.clamp(size)
+                        (limits.clamp(size), Some(limits.clamp(size)))
                     };
-                    self.drag = Some(Drag { start_size, origin });
+                    self.drag = Some(Drag {
+                        start_size,
+                        origin,
+                        restore,
+                    });
                 }
             }
             if let Some(drag) = self.drag
@@ -227,7 +234,7 @@ impl Splitter {
                 && let Some(pointer) = response.interact_pointer_pos()
             {
                 let wanted = drag.start_size + self.edge.sign() * (pointer[axis] - drag.origin);
-                self.apply_drag(wanted, limits);
+                self.apply_drag(wanted, limits, drag.restore);
             }
             if response.drag_stopped() {
                 self.drag = None;
@@ -254,8 +261,9 @@ impl Splitter {
     }
 
     /// One drag step to the `wanted` size: collapse below half the
-    /// minimum, else the size within the limits.
-    fn apply_drag(&mut self, wanted: f32, limits: Limits) {
+    /// minimum (keeping the `restore` size from before the gesture),
+    /// else the size within the limits.
+    fn apply_drag(&mut self, wanted: f32, limits: Limits, restore: Option<f32>) {
         if !wanted.is_finite() {
             return;
         }
@@ -263,6 +271,9 @@ impl Splitter {
             if !self.collapsed {
                 self.collapsed = true;
                 self.dirty = true;
+            }
+            if let Some(restore) = restore {
+                self.size = Some(restore);
             }
             return;
         }
@@ -415,19 +426,24 @@ mod tests {
     fn a_drag_clamps_collapses_and_reopens() {
         let mut splitter = Splitter::new("panes", Edge::Left);
         splitter.seed(&BTreeMap::new(), limits());
-        splitter.apply_drag(250.0, limits());
+        splitter.apply_drag(250.0, limits(), None);
         assert_eq!(splitter.size(), Some(250.0));
-        splitter.apply_drag(1000.0, limits());
+        splitter.apply_drag(1000.0, limits(), None);
         assert_eq!(splitter.size(), Some(400.0), "the maximum");
-        splitter.apply_drag(70.0, limits());
+        splitter.apply_drag(70.0, limits(), None);
         assert_eq!(splitter.size(), Some(100.0), "the minimum, still open");
         assert!(!splitter.is_collapsed());
-        splitter.apply_drag(f32::NAN, limits());
+        splitter.apply_drag(f32::NAN, limits(), None);
         assert_eq!(splitter.size(), Some(100.0), "a NaN step is ignored");
-        splitter.apply_drag(20.0, limits());
+        splitter.apply_drag(20.0, limits(), Some(300.0));
         assert!(splitter.is_collapsed(), "below half the minimum");
-        assert_eq!(splitter.size(), Some(100.0), "the size is kept");
-        splitter.apply_drag(20.0, limits());
+        assert_eq!(
+            splitter.size(),
+            Some(300.0),
+            "the size from before the drag"
+        );
+        splitter.apply_drag(20.0, limits(), None);
+        assert_eq!(splitter.size(), Some(300.0), "kept without a restore size");
         splitter.reopen();
         assert!(!splitter.is_collapsed());
         splitter.reopen();
@@ -446,10 +462,11 @@ mod tests {
         splitter.commit(&mut stored);
         assert!(stored.is_empty(), "nothing changed");
         splitter.seed(&stored, limits());
-        splitter.apply_drag(300.0, limits());
+        splitter.apply_drag(300.0, limits(), None);
         splitter.drag = Some(Drag {
             start_size: 200.0,
             origin: 0.0,
+            restore: None,
         });
         assert!(splitter.is_dragging());
         splitter.commit(&mut stored);
