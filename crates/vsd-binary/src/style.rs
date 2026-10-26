@@ -136,9 +136,26 @@ pub fn collect_with(
     let names = name_strings(chunks, version);
     let style_name_ids = style_name_ids(chunks);
 
+    // Quick-style and theme colours are outside the alpha scope (ADR
+    // 0070 amendment, P8-11 F3): the records carry the colour the
+    // theme resolves, not the theme itself, so the imported colour can
+    // differ from Visio's. The degradation is visible once per file
+    // that carries fill or line records, never silent.
+    let mut noted_quick_style = false;
+
     for chunk in chunks {
         match chunk.record {
             COLOURS => map_colours(chunk.data, document, warnings),
+            LINE | FILL_AND_SHADOW if !noted_quick_style => {
+                noted_quick_style = true;
+                warn(
+                    warnings,
+                    "document",
+                    WarningKind::Unsupported {
+                        what: "quick-style and theme colours",
+                    },
+                );
+            }
             FONT_LIST | FONTFACES => warn(
                 warnings,
                 "document",
@@ -1335,7 +1352,7 @@ mod tests {
             ],
         );
         let (document, warnings) = collect(&chunks);
-        assert!(warnings.is_empty(), "{warnings:?}");
+        assert!(without_scope_note(&warnings).is_empty(), "{warnings:?}");
         let style = &document.stylesheet.styles[0];
 
         assert_eq!(value(&style.sheet, "LineWeight"), number(0.25));
@@ -1423,7 +1440,7 @@ mod tests {
         line[24] = 7;
         let chunks = style_chunks(&sheet, &[(0x85, 1, &line)]);
         let (document, warnings) = collect(&chunks);
-        assert!(warnings.is_empty(), "{warnings:?}");
+        assert!(without_scope_note(&warnings).is_empty(), "{warnings:?}");
         let style = &document.stylesheet.styles[0];
         assert_eq!(value(&style.sheet, "BeginArrow"), number(2.0));
         assert_eq!(value(&style.sheet, "EndArrow"), number(3.0));
@@ -1583,6 +1600,44 @@ mod tests {
     }
 
     #[test]
+    fn quick_style_and_theme_colours_note_once_per_file() {
+        // P8-11 F3: the quick-style and theme colours are outside the
+        // alpha scope, and the degradation is visible, never silent.
+        let sheet = style_sheet(u32::MAX, u32::MAX, u32::MAX);
+        let line = line_record(0.1, [0, 0, 0, 0], 1);
+        let chunks = style_chunks(&sheet, &[(0x85, 1, &line), (0x85, 2, &line)]);
+        let (_, warnings) = collect(&chunks);
+        assert_eq!(
+            warnings,
+            vec![ImportWarning {
+                context: "document".to_owned(),
+                kind: WarningKind::Unsupported {
+                    what: "quick-style and theme colours",
+                },
+            }]
+        );
+        let character = character_record();
+        let chunks = style_chunks(&sheet, &[(0x94, 0, &character)]);
+        let (_, warnings) = collect(&chunks);
+        assert!(warnings.is_empty(), "{warnings:?}");
+    }
+
+    /// The warnings without the quick-style scope note (P8-11 F3):
+    /// these tests pin the per-record warnings only.
+    fn without_scope_note(warnings: &[ImportWarning]) -> Vec<ImportWarning> {
+        warnings
+            .iter()
+            .filter(|warning| {
+                warning.kind
+                    != WarningKind::Unsupported {
+                        what: "quick-style and theme colours",
+                    }
+            })
+            .cloned()
+            .collect()
+    }
+
+    #[test]
     fn an_index_outside_the_model_patterns_is_dropped() {
         let sheet = style_sheet(u32::MAX, u32::MAX, u32::MAX);
         let line = line_record(0.1, [0, 0, 0, 0], 200);
@@ -1599,6 +1654,7 @@ mod tests {
         assert_eq!(value(&style.sheet, "LinePattern"), None);
         assert_eq!(value(&style.sheet, "FillPattern"), None);
         assert_eq!(value(&style.sheet, "ShdwPattern"), None);
+        let warnings = without_scope_note(&warnings);
         assert_eq!(warnings.len(), 3);
         assert!(
             warnings
@@ -1616,6 +1672,7 @@ mod tests {
         let (document, warnings) = collect(&chunks);
         let style = &document.stylesheet.styles[0];
         assert_eq!(value(&style.sheet, "LineWeight"), None);
+        let warnings = without_scope_note(&warnings);
         assert_eq!(warnings.len(), 1);
         assert!(matches!(
             warnings[0].kind,
@@ -1671,7 +1728,7 @@ mod tests {
         let chunks = style_chunks(&sheet, &[(0x86, 2, &fill)]);
         let (document, warnings) = collect(&chunks);
         let style = &document.stylesheet.styles[0];
-        assert!(warnings.is_empty());
+        assert!(without_scope_note(&warnings).is_empty());
         assert_eq!(value(&style.sheet, "ShapeShdwOffsetX"), None);
         assert_eq!(value(&style.sheet, "ShapeShdwOffsetY"), None);
     }
@@ -1711,7 +1768,7 @@ mod tests {
         let chunks = style_chunks(&sheet, &[(0x85, 1, &line[..10])]);
         let (document, warnings) = collect(&chunks);
         let style = &document.stylesheet.styles[0];
-        assert!(warnings.is_empty());
+        assert!(without_scope_note(&warnings).is_empty());
         assert_eq!(value(&style.sheet, "LineWeight"), number(0.1));
         assert_eq!(value(&style.sheet, "LineColor"), None);
     }
@@ -1721,6 +1778,7 @@ mod tests {
         let sheet = style_sheet(u32::MAX, u32::MAX, u32::MAX);
         let chunks = style_chunks(&sheet, &[(0x86, 2, &[])]);
         let (_, warnings) = collect(&chunks);
+        let warnings = without_scope_note(&warnings);
         assert_eq!(warnings.len(), 1);
         assert!(matches!(
             warnings[0].kind,
@@ -1789,7 +1847,7 @@ mod tests {
     }
 
     #[test]
-    fn the_mapped_style_matches_the_vsdx_reader_spelling() {
+    fn the_mapped_style_matches_the_pinned_vsdx_spelling() {
         let sheet = style_sheet(3, 4, 6);
         let line = line_record(0.25, [0, 0, 0, 0], 1);
         let chunks = style_chunks(&sheet, &[(0x85, 1, &line)]);
