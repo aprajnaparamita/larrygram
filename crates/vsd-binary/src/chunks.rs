@@ -495,15 +495,60 @@ impl Record {
     pub fn is_mapped(self) -> bool {
         matches!(
             self,
-            TEXT | PAGE | COLORS | STYLES | STENCILS | STENCIL_PAGE | PAGES | NAME_LIST | NAME
-                | NAME_LIST2 | NAME2 | NAMEIDX123 | NAMEIDX | PAGE_SHEET | SHAPE_GROUP | SHAPE_SHAPE
-                | STYLE_SHEET | SHAPE_GUIDE | SHAPE_FOREIGN | SHAPE_LIST | FIELD_LIST | CHAR_LIST
-                | PARA_LIST | TABS_DATA_LIST | GEOM_LIST | LAYER_LIST | LAYER | SHAPE_ID | LINE
-                | FILL_AND_SHADOW | TEXT_BLOCK | TABS_DATA_1 | TABS_DATA_2 | TABS_DATA_3
-                | TABS_DATA_4 | GEOMETRY | MOVE_TO | LINE_TO | ARC_TO | INFINITE_LINE | ELLIPSE
-                | ELLIPTICAL_ARC_TO | SPLINE_START | SPLINE_KNOT | POLYLINE_TO | NURBS_TO
-                | PAGE_PROPS | CHAR_IX | PARA_IX | XFORM_DATA | TEXT_XFORM | XFORM_1D | TEXT_FIELD
-                | LAYER_MEMBERSHIP | SHAPE_DATA
+            TEXT | PAGE
+                | COLORS
+                | STYLES
+                | STENCILS
+                | STENCIL_PAGE
+                | PAGES
+                | NAME_LIST
+                | NAME
+                | NAME_LIST2
+                | NAME2
+                | NAMEIDX123
+                | NAMEIDX
+                | PAGE_SHEET
+                | SHAPE_GROUP
+                | SHAPE_SHAPE
+                | STYLE_SHEET
+                | SHAPE_GUIDE
+                | SHAPE_FOREIGN
+                | SHAPE_LIST
+                | FIELD_LIST
+                | CHAR_LIST
+                | PARA_LIST
+                | TABS_DATA_LIST
+                | GEOM_LIST
+                | LAYER_LIST
+                | LAYER
+                | SHAPE_ID
+                | LINE
+                | FILL_AND_SHADOW
+                | TEXT_BLOCK
+                | TABS_DATA_1
+                | TABS_DATA_2
+                | TABS_DATA_3
+                | TABS_DATA_4
+                | GEOMETRY
+                | MOVE_TO
+                | LINE_TO
+                | ARC_TO
+                | INFINITE_LINE
+                | ELLIPSE
+                | ELLIPTICAL_ARC_TO
+                | SPLINE_START
+                | SPLINE_KNOT
+                | POLYLINE_TO
+                | NURBS_TO
+                | PAGE_PROPS
+                | CHAR_IX
+                | PARA_IX
+                | XFORM_DATA
+                | TEXT_XFORM
+                | XFORM_1D
+                | TEXT_FIELD
+                | LAYER_MEMBERSHIP
+                | SHAPE_DATA
         )
     }
 }

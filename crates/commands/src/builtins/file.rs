@@ -1641,4 +1641,70 @@ mod tests {
         );
         std::fs::remove_dir_all(&dir).expect("clean up");
     }
+
+    // -----------------------------------------------------------------------
+    // The failure arms of the open and save paths (P8-12 major 3)
+    // -----------------------------------------------------------------------
+
+    /// A corrupt binary file through `file.open` is one error line
+    /// that names the file, never a crash.
+    #[test]
+    fn a_corrupt_binary_file_fails_the_open_with_one_error_line() {
+        let dir = scratch_dir();
+        let path = dir.join("broken.vsd");
+        std::fs::write(&path, b"not a compound file").expect("write");
+        let mut ctx = AppCtx::new(crate::Settings::default());
+        let error = run_open(&mut ctx, &open_invocation(&path)).expect_err("fails");
+        let message = error.to_string();
+        assert!(message.contains("cannot read input"), "{message}");
+        assert!(message.contains("broken.vsd"), "{message}");
+        std::fs::remove_dir_all(&dir).expect("clean up");
+    }
+
+    /// A corrupt package through `file.open` is one error line.
+    #[test]
+    fn a_corrupt_package_fails_the_open_with_one_error_line() {
+        let dir = scratch_dir();
+        let path = dir.join("broken.vsdx");
+        std::fs::write(&path, b"not a package").expect("write");
+        let mut ctx = AppCtx::new(crate::Settings::default());
+        let error = run_open(&mut ctx, &open_invocation(&path)).expect_err("fails");
+        let message = error.to_string();
+        assert!(message.contains("cannot read input"), "{message}");
+        assert!(message.contains("broken.vsdx"), "{message}");
+        std::fs::remove_dir_all(&dir).expect("clean up");
+    }
+
+    /// A missing input file is one error line.
+    #[test]
+    fn a_missing_input_file_fails_the_open_with_one_error_line() {
+        let mut ctx = AppCtx::new(crate::Settings::default());
+        let path = Path::new("/no/such/larrygram-file.vsdx");
+        let error = run_open(&mut ctx, &open_invocation(path)).expect_err("fails");
+        let message = error.to_string();
+        assert!(message.contains("cannot read input"), "{message}");
+        assert!(message.contains("larrygram-file.vsdx"), "{message}");
+    }
+
+    /// A supplied file that fails to import (the picker's and the wasm
+    /// upload's bytes seam) is one error line.
+    #[test]
+    fn a_supplied_file_that_fails_to_import_is_one_error_line() {
+        let mut ctx = AppCtx::new(crate::Settings::default());
+        let error =
+            read_input_document(&mut ctx, b"\0\0", Path::new("picked.vsd")).expect_err("fails");
+        let message = error.to_string();
+        assert!(message.contains("cannot read input"), "{message}");
+        assert!(message.contains("picked.vsd"), "{message}");
+    }
+
+    /// A write into a target that cannot be written is one error line.
+    #[test]
+    fn a_write_into_an_unwritable_target_is_one_error_line() {
+        let dir = scratch_dir();
+        let error = write_file(&dir, b"bytes").expect_err("a directory is not a file");
+        let message = error.to_string();
+        assert!(message.contains("cannot write output"), "{message}");
+        std::fs::remove_dir_all(&dir).expect("clean up");
+    }
 }

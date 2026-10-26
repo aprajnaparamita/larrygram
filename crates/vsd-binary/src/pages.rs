@@ -946,7 +946,8 @@ pub(crate) fn cell_block_string(
     let mut pos = start;
     loop {
         let header = data.get(pos..pos.checked_add(6)?)?;
-        let length = usize::try_from(u32::from_le_bytes(header.get(0..4)?.try_into().ok()?)).ok()?;
+        let length =
+            usize::try_from(u32::from_le_bytes(header.get(0..4)?.try_into().ok()?)).ok()?;
         if length <= 6 {
             // A zero length ends the region; a shorter one is malformed.
             return None;
@@ -2162,7 +2163,13 @@ mod tests {
                 what: "layer record"
             }]
         );
-        assert_eq!(document.page_layers(document.pages[0].id).expect("layers").len(), 1);
+        assert_eq!(
+            document
+                .page_layers(document.pages[0].id)
+                .expect("layers")
+                .len(),
+            1
+        );
     }
 
     #[test]
@@ -2220,8 +2227,14 @@ mod tests {
         // payload, a value that is not a string and a string cut short
         // all end the scan as `None`, never a panic (P8-12).
         assert_eq!(cell_block_string(&[], 0, FormatVersion::V11, 0), None);
-        assert_eq!(cell_block_string(&[0, 0, 0, 0], 0, FormatVersion::V11, 0), None);
-        assert_eq!(cell_block_string(&[1, 0, 0, 0], 0, FormatVersion::V11, 0), None);
+        assert_eq!(
+            cell_block_string(&[0, 0, 0, 0], 0, FormatVersion::V11, 0),
+            None
+        );
+        assert_eq!(
+            cell_block_string(&[1, 0, 0, 0], 0, FormatVersion::V11, 0),
+            None
+        );
         assert_eq!(
             cell_block_string(&[200, 0, 0, 0, 2, 0], 0, FormatVersion::V11, 0),
             None

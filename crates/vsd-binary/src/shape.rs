@@ -748,8 +748,7 @@ impl<'a> Walker<'a> {
                     let context = format!("shape {}", open.shape.visio_id);
                     match crate::pages::cell_block_string(chunk.data, 6, self.version, 0) {
                         Some(membership) => {
-                            let mut cell =
-                                Cell::new(CellName::from_static("LayerMember"));
+                            let mut cell = Cell::new(CellName::from_static("LayerMember"));
                             cell.value = Some(CellValue::Str(membership));
                             cell.unit = Unit::Unitsless;
                             open.shape.sheet.cells.push(cell);
@@ -1052,7 +1051,12 @@ pub(crate) fn drop_unreferenced(document: &mut Document, warnings: &mut Vec<Impo
         .pages
         .iter()
         .flat_map(|page| page.shapes.iter())
-        .chain(document.masters.iter().flat_map(|master| master.shapes.iter()))
+        .chain(
+            document
+                .masters
+                .iter()
+                .flat_map(|master| master.shapes.iter()),
+        )
         .map(|id| usize::try_from(id.index).unwrap_or(usize::MAX))
         .collect();
     while let Some(index) = pending.pop() {
@@ -4155,12 +4159,13 @@ mod tests {
 
     /// The text of one cell by name.
     fn text_of(cells: &[Cell], name: &str) -> Option<String> {
-        cells.iter().find(|cell| cell.name.as_str() == name).and_then(
-            |cell| match cell.value.as_ref() {
+        cells
+            .iter()
+            .find(|cell| cell.name.as_str() == name)
+            .and_then(|cell| match cell.value.as_ref() {
                 Some(CellValue::Str(text)) => Some(text.clone()),
                 _ => None,
-            },
-        )
+            })
     }
 
     // -- layers and the deferred rows (P8-11 F1) -----------------------
@@ -4267,9 +4272,7 @@ mod tests {
                 WarningKind::Dropped {
                     what: "connection points"
                 },
-                WarningKind::Dropped {
-                    what: "controls"
-                },
+                WarningKind::Dropped { what: "controls" },
             ]
         );
     }
@@ -4484,9 +4487,8 @@ mod tests {
             (0xc1, polyline_inline),
         ];
         for (record, payload) in cases {
-            let curve = (record == 0xc3 && payload == referenced).then(|| {
-                nurbs_data(1.0, 3, 0, 1, &[(0.25, 0.5, 0.0, 1.0)])
-            });
+            let curve = (record == 0xc3 && payload == referenced)
+                .then(|| nurbs_data(1.0, 3, 0, 1, &[(0.25, 0.5, 0.0, 1.0)]));
             let (full, full_warnings) = geometry_rows_of(record, &payload, curve.clone());
             for cut in 0..=payload.len() {
                 let (rows, warnings) = geometry_rows_of(record, &payload[..cut], curve.clone());
@@ -4514,7 +4516,8 @@ mod tests {
                         match (cell.value.as_ref(), other) {
                             (Some(CellValue::Str(text)), Some(_)) if text.is_empty() => {}
                             (mine, other) => assert_eq!(
-                                mine, other,
+                                mine,
+                                other,
                                 "quiet difference: 0x{record:02x} cut {cut} {}",
                                 cell.name.as_str()
                             ),
@@ -4527,7 +4530,8 @@ mod tests {
         // offset: the row keeps its cells and drops the E text, or
         // warns.
         let curve_payload = nurbs_data(1.0, 3, 0, 1, &[(0.25, 0.5, 0.0, 1.0)]);
-        let (full, full_warnings) = geometry_rows_of(0xc3, &referenced, Some(curve_payload.clone()));
+        let (full, full_warnings) =
+            geometry_rows_of(0xc3, &referenced, Some(curve_payload.clone()));
         for cut in 0..=curve_payload.len() {
             let (rows, warnings) =
                 geometry_rows_of(0xc3, &referenced, Some(curve_payload[..cut].to_vec()));
@@ -4548,7 +4552,8 @@ mod tests {
                     match (cell.value.as_ref(), other) {
                         (Some(CellValue::Str(text)), Some(_)) if text.is_empty() => {}
                         (mine, other) => assert_eq!(
-                            mine, other,
+                            mine,
+                            other,
                             "quiet difference: curve cut {cut} {}",
                             cell.name.as_str()
                         ),
