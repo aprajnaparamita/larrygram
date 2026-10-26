@@ -910,12 +910,326 @@ fn run_page_reorder(ctx: &mut AppCtx, registry: &Registry, id: &'static str, pic
     try_dispatch(ctx, registry, id, args);
 }
 
+// --- The formatting commands (task P7-21) ---
+
+/// `text.font` (task P7-21): a family name from the pick.
+fn run_text_font(ctx: &mut AppCtx, registry: &Registry, id: &'static str, pick: u32) {
+    select_tops(ctx, 1 + (pick % 2) as usize);
+    let mut args = numbers(&[]);
+    args.set("font", ArgValue::Text(format!("Family{pick}")));
+    try_dispatch(ctx, registry, id, args);
+}
+
+/// `text.font.size`: a size in points from the pick.
+fn run_text_size(ctx: &mut AppCtx, registry: &Registry, id: &'static str, pick: u32) {
+    select_tops(ctx, 1 + (pick % 2) as usize);
+    try_dispatch(
+        ctx,
+        registry,
+        id,
+        numbers(&[("size", 8.0 + f64::from(pick))]),
+    );
+}
+
+/// `text.font.color`, `format.set.fill.color` and
+/// `format.set.line.color`: a hex colour that changes with the pick.
+fn run_format_color(ctx: &mut AppCtx, registry: &Registry, id: &'static str, pick: u32) {
+    select_tops(ctx, 1 + (pick % 2) as usize);
+    let mut args = numbers(&[]);
+    let shade = 32 * (1 + pick % 7);
+    args.set("color", ArgValue::Text(format!("#{shade:02X}1010")));
+    try_dispatch(ctx, registry, id, args);
+}
+
+/// `shape.transparency` and `shape.transparency.dlg`: a percentage
+/// from the pick.
+fn run_transparency(ctx: &mut AppCtx, registry: &Registry, id: &'static str, pick: u32) {
+    select_tops(ctx, 1 + (pick % 2) as usize);
+    try_dispatch(
+        ctx,
+        registry,
+        id,
+        numbers(&[("transparency", f64::from(pick % 5) * 15.0)]),
+    );
+}
+
+/// `format.set.line.weight`: a weight in points from the pick.
+fn run_line_weight(ctx: &mut AppCtx, registry: &Registry, id: &'static str, pick: u32) {
+    select_tops(ctx, 1 + (pick % 2) as usize);
+    try_dispatch(
+        ctx,
+        registry,
+        id,
+        numbers(&[("weight", 0.5 + f64::from(pick))]),
+    );
+}
+
+/// `format.set.line.pattern`: a pattern index from the pick.
+fn run_line_pattern(ctx: &mut AppCtx, registry: &Registry, id: &'static str, pick: u32) {
+    select_tops(ctx, 1 + (pick % 2) as usize);
+    try_dispatch(
+        ctx,
+        registry,
+        id,
+        numbers(&[("pattern", 1.0 + f64::from(pick % 3))]),
+    );
+}
+
+/// `format.set.line.ends`: an arrowhead index from the pick.
+fn run_line_ends(ctx: &mut AppCtx, registry: &Registry, id: &'static str, pick: u32) {
+    select_tops(ctx, 1 + (pick % 2) as usize);
+    try_dispatch(
+        ctx,
+        registry,
+        id,
+        numbers(&[("value", f64::from(pick % 4))]),
+    );
+}
+
+/// `tools.format_painter` (task P7-21): copy the first selected
+/// shape's format, then apply it to the selection (the copy records
+/// state and is not an edit; the apply is the one undo step).
+fn run_format_painter(ctx: &mut AppCtx, registry: &Registry, id: &'static str, _pick: u32) {
+    select_tops(ctx, 1);
+    try_dispatch(ctx, registry, id, Args::new());
+    select_tops(ctx, 2);
+    let mut args = Args::new();
+    args.set("apply", ArgValue::Flag(true));
+    try_dispatch(ctx, registry, id, args);
+}
+
+/// `arrange.align.box`: the Align gallery's `value` (task P7-21).
+fn run_align_box(ctx: &mut AppCtx, registry: &Registry, id: &'static str, pick: u32) {
+    select_tops(ctx, 2);
+    const NAMES: [&str; 4] = ["left", "top", "right", "middle"];
+    let mut args = numbers(&[]);
+    args.set(
+        "value",
+        ArgValue::Text(
+            NAMES
+                .get(pick as usize % NAMES.len())
+                .copied()
+                .unwrap_or("left")
+                .to_owned(),
+        ),
+    );
+    try_dispatch(ctx, registry, id, args);
+}
+
+/// `arrange.position`: the Position gallery's `value` (task P7-21).
+fn run_position(ctx: &mut AppCtx, registry: &Registry, id: &'static str, pick: u32) {
+    select_tops(ctx, 2);
+    const NAMES: [&str; 4] = [
+        "distribute horizontal",
+        "distribute vertical",
+        "distribute center",
+        "distribute middle",
+    ];
+    let mut args = numbers(&[]);
+    args.set(
+        "value",
+        ArgValue::Text(
+            NAMES
+                .get(pick as usize % NAMES.len())
+                .copied()
+                .unwrap_or("distribute horizontal")
+                .to_owned(),
+        ),
+    );
+    try_dispatch(ctx, registry, id, args);
+}
+
 /// Every editing command id of the registry and how the property runs
 /// it. The list is generated against the registry:
 /// `every_implemented_id_is_classified` fails when an implemented
 /// command has no entry here and no non-editing reason below (ADR 0040
 /// rule 4).
 const CASES: &[Case] = &[
+    // Task P7-21: the formatting set and the arrange additions.
+    Case {
+        id: "text.font",
+        run: run_text_font,
+    },
+    Case {
+        id: "text.font.size",
+        run: run_text_size,
+    },
+    Case {
+        id: "text.font.size.increase",
+        run: run_selected,
+    },
+    Case {
+        id: "text.font.size.decrease",
+        run: run_selected,
+    },
+    Case {
+        id: "format.text.increase_size",
+        run: run_selected,
+    },
+    Case {
+        id: "format.text.decrease_size",
+        run: run_selected,
+    },
+    Case {
+        id: "format.text.bold",
+        run: run_selected,
+    },
+    Case {
+        id: "format.text.italic",
+        run: run_selected,
+    },
+    Case {
+        id: "format.text.underline",
+        run: run_selected,
+    },
+    Case {
+        id: "tools.strikethrough",
+        run: run_selected,
+    },
+    Case {
+        id: "text.font.color",
+        run: run_format_color,
+    },
+    Case {
+        id: "format.text_color.use_default",
+        run: run_selected,
+    },
+    Case {
+        id: "format.text.align_left",
+        run: run_selected,
+    },
+    Case {
+        id: "format.text.align_center",
+        run: run_selected,
+    },
+    Case {
+        id: "format.text.align_right",
+        run: run_selected,
+    },
+    Case {
+        id: "format.text.align_justify",
+        run: run_selected,
+    },
+    Case {
+        id: "format.text.align_top",
+        run: run_selected,
+    },
+    Case {
+        id: "format.text.align_middle",
+        run: run_selected,
+    },
+    Case {
+        id: "format.text.align_bottom",
+        run: run_selected,
+    },
+    Case {
+        id: "text.bullets",
+        run: run_selected,
+    },
+    Case {
+        id: "format.set.fill.color",
+        run: run_format_color,
+    },
+    Case {
+        id: "format.fill_color.no_fill",
+        run: run_selected,
+    },
+    Case {
+        id: "format.fill_color.use_default",
+        run: run_selected,
+    },
+    Case {
+        id: "shape.transparency",
+        run: run_transparency,
+    },
+    Case {
+        id: "shape.transparency.dlg",
+        run: run_transparency,
+    },
+    Case {
+        id: "format.transparency.no_transparency",
+        run: run_selected,
+    },
+    Case {
+        id: "format.set.line.color",
+        run: run_format_color,
+    },
+    Case {
+        id: "format.line_color.use_default",
+        run: run_selected,
+    },
+    Case {
+        id: "format.line_color.no_line",
+        run: run_selected,
+    },
+    Case {
+        id: "format.set.line.weight",
+        run: run_line_weight,
+    },
+    Case {
+        id: "format.set.line.pattern",
+        run: run_line_pattern,
+    },
+    Case {
+        id: "format.line_pattern.no_line",
+        run: run_selected,
+    },
+    Case {
+        id: "format.set.line.ends",
+        run: run_line_ends,
+    },
+    Case {
+        id: "format.line_ends.no_line_ends",
+        run: run_selected,
+    },
+    Case {
+        id: "tools.format_painter",
+        run: run_format_painter,
+    },
+    Case {
+        id: "arrange.align.box",
+        run: run_align_box,
+    },
+    Case {
+        id: "arrange.align.center",
+        run: run_selected,
+    },
+    Case {
+        id: "arrange.position",
+        run: run_position,
+    },
+    Case {
+        id: "arrange.distribute_shapes.distribute_horizontal_spacing",
+        run: run_selected,
+    },
+    Case {
+        id: "arrange.distribute_shapes.distribute_vertical_spacing",
+        run: run_selected,
+    },
+    Case {
+        id: "arrange.distribute_shapes.distribute_center",
+        run: run_selected,
+    },
+    Case {
+        id: "arrange.distribute_shapes.distribute_middle",
+        run: run_selected,
+    },
+    Case {
+        id: "arrange.rotate90.clockwise",
+        run: run_selected,
+    },
+    Case {
+        id: "arrange.object.rotate90",
+        run: run_selected,
+    },
+    Case {
+        id: "arrange.flip_horizontal",
+        run: run_selected,
+    },
+    Case {
+        id: "arrange.flip_vertical",
+        run: run_selected,
+    },
     Case {
         id: "arrange.align.left",
         run: run_selected,
@@ -1234,6 +1548,10 @@ const NON_EDITING: &[(&str, &str)] = &[
     (
         "edit.redo",
         "the undo stack itself (the property drives it)",
+    ),
+    (
+        "edit.redo.or.repeat",
+        "the undo stack itself (`edit.redo` under its repeat label)",
     ),
     (
         "connector.reroute_all",
