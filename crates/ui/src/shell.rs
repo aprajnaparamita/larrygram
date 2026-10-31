@@ -413,14 +413,25 @@ impl Shell {
         self.app.active_tool
     }
 
-    /// The status line shown in the title strip: the chords typed so
-    /// far while a shortcut sequence is half-typed (ADR 0036, P4-14),
+    /// The status line of the status bar: the chords typed so far
+    /// while a shortcut sequence is half-typed (ADR 0036, P4-14),
     /// else the last command message.
     pub fn status_line(&self) -> String {
         if self.shortcuts.pending() {
             self.shortcuts.pending_display()
         } else {
             self.status.clone()
+        }
+    }
+
+    /// The status shown in the title strip: the half-typed chords
+    /// only (task P7-23: a command message like "Selected 0 shapes"
+    /// shows in the status bar only, never twice).
+    pub fn title_status(&self) -> String {
+        if self.shortcuts.pending() {
+            self.shortcuts.pending_display()
+        } else {
+            String::new()
         }
     }
 
@@ -733,7 +744,7 @@ impl Shell {
                 ui.separator();
                 ui.label("Larrygram");
                 ui.separator();
-                ui.label(self.status_line());
+                ui.label(self.title_status());
             });
         });
         // The `menu_bar` and `toolbars` regions: one chrome (the
@@ -750,7 +761,7 @@ impl Shell {
                 let input = PanelInput::new(&set.v2, &self.registry, &self.app)
                     .with_mode(mode)
                     .with_lists(&live)
-                    .with_checked(&ToolLatch);
+                    .with_checked(&ShellChecks);
                 match self.panel_classic.show(ui, &input) {
                     Ok(mut more) => produced.append(&mut more),
                     Err(error) => errors.push(error.to_string()),
@@ -873,7 +884,7 @@ impl Shell {
                 ui.separator();
                 ui.label(self.title_text());
                 ui.separator();
-                ui.label(self.status_line());
+                ui.label(self.title_status());
                 let kind = self.app.settings.ui_layout;
                 let set = self.layouts.get(kind);
                 let produced = self
@@ -1385,7 +1396,7 @@ impl Shell {
         let input = PanelInput::new(&set.v2, &self.registry, &self.app)
             .with_mode(mode)
             .with_lists(&live)
-            .with_checked(&ToolLatch);
+            .with_checked(&ShellChecks);
         match self.panel_classic.context_menu(ui, &input, &menu_id, None) {
             Ok(mut more) => intents.append(&mut more),
             Err(error) => self.note_error(error.to_string()),
@@ -2226,6 +2237,19 @@ fn layout_radio_checked(app: &AppCtx, id: &str) -> Option<bool> {
         _ => return None,
     };
     Some(app.settings.ui_layout == kind)
+}
+
+/// The checked state the Panel Classic widgets read (task P7-23): the
+/// layout rows are radios over [`Settings::ui_layout`] (ADR 0032),
+/// every other command defers to [`ToolLatch`] (the tool latch,
+/// task P5-17).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct ShellChecks;
+
+impl panel_classic::CheckedState for ShellChecks {
+    fn is_checked(&self, command: &str, app: &AppCtx) -> Option<bool> {
+        layout_radio_checked(app, command).or_else(|| ToolLatch.is_checked(command, app))
+    }
 }
 
 /// A status-bar button that shows `glyph` for the registry id `id`
@@ -4409,6 +4433,38 @@ mod tests {
             assert_eq!(checked, id == "view.ui_layout.panel_365", "{id}");
         }
         assert_eq!(layout_radio_checked(&shell.app, "file.new"), None);
+    }
+
+    /// Task P7-23: the checked state the Panel Classic widgets read
+    /// covers the layout radios and defers to the tool latch.
+    #[test]
+    fn shell_checks_answer_for_the_layout_rows_and_defer_to_the_tool_latch() {
+        use larrygram_commands::app::ActiveTool;
+        use panel_classic::CheckedState;
+        let mut shell = full_shell();
+        shell.set_layout_kind(LayoutKind::PanelClassic);
+        let checks = ShellChecks;
+        assert_eq!(
+            checks.is_checked("view.ui_layout.panel_classic", &shell.app),
+            Some(true)
+        );
+        assert_eq!(
+            checks.is_checked("view.ui_layout.panel_modern", &shell.app),
+            Some(false)
+        );
+        shell.app.active_tool = ActiveTool::Pointer;
+        assert_eq!(checks.is_checked("tools.pointer", &shell.app), Some(true));
+        assert_eq!(checks.is_checked("file.new", &shell.app), None);
+    }
+
+    /// Task P7-23 Goal 5: the title strip shows no command message
+    /// (the status bar shows it).
+    #[test]
+    fn the_title_status_never_repeats_the_command_message() {
+        let mut shell = full_shell();
+        shell.status = "Selected 0 shapes".to_owned();
+        assert_eq!(shell.status_line(), "Selected 0 shapes");
+        assert_eq!(shell.title_status(), "");
     }
 
     #[test]

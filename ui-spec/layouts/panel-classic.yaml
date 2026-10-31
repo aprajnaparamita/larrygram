@@ -730,6 +730,19 @@ menu_bars:
         command: view.custom
         visuicmd: visCmdViewCustom
         begin_group: true
+    - id: drawing.view.ui_layout_modern
+      kind: check
+      label: Panel Modern
+      access: "m"
+      command: view.ui_layout.panel_modern
+      new_command: true
+      begin_group: true
+    - id: drawing.view.ui_layout_classic
+      kind: check
+      label: Panel Classic
+      access: "i"
+      command: view.ui_layout.panel_classic
+      new_command: true
   - id: drawing.insert
     label: Insert
     access: "i"
