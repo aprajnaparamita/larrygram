@@ -4,10 +4,11 @@ expression: report
 ---
 layout: panel-classic
 surface: menu_bars
-  button: items 360 (hidden 13) widgets 347
+  button: items 367 (hidden 13) widgets 354
   check: items 9 (hidden 0) widgets 9
   list: items 25 (hidden 0) widgets 25
-  submenu: items 31 (hidden 1) widgets 30
+  options: items 5 (hidden 0) widgets 5
+  submenu: items 36 (hidden 1) widgets 35
 surface: toolbars
   button: items 243 (hidden 3) widgets 240
   check: items 7 (hidden 0) widgets 7

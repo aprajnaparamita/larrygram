@@ -841,6 +841,16 @@ fn need_text(inv: &Invocation, names: &[&str], prompt: &str) -> Result<String, C
     }
 }
 
+/// The text of a numeric argument without its optional trailing `pt`
+/// (the picker labels spell points: "0.25 pt").
+fn strip_pt(text: &str) -> &str {
+    let trimmed = text.trim();
+    trimmed
+        .strip_suffix("pt")
+        .map(|rest| rest.trim_end())
+        .unwrap_or(trimmed)
+}
+
 /// The first argument present under any of `names`, spelled as text.
 fn arg_text(inv: &Invocation, names: &[&str]) -> Option<String> {
     for name in names {
@@ -856,7 +866,9 @@ fn arg_text(inv: &Invocation, names: &[&str]) -> Option<String> {
 }
 
 /// The first numeric argument present under any of `names`. A text
-/// argument must parse as a finite number.
+/// argument must parse as a finite number, with an optional trailing
+/// `pt` (the line weight and font size pickers spell their values
+/// with one: "2.25 pt").
 fn arg_number(inv: &Invocation, names: &[&str]) -> Result<Option<f64>, CommandError> {
     for name in names {
         match inv.args.get(name) {
@@ -868,7 +880,7 @@ fn arg_number(inv: &Invocation, names: &[&str]) -> Result<Option<f64>, CommandEr
             }
             Some(crate::ArgValue::Integer(value)) => return Ok(Some(*value as f64)),
             Some(crate::ArgValue::Text(text)) => {
-                return match text.trim().parse::<f64>() {
+                return match strip_pt(text).parse::<f64>() {
                     Ok(value) if value.is_finite() => Ok(Some(value)),
                     Ok(_) => Err(CommandError::invalid_args(format!("{name} must be finite"))),
                     Err(_) => Err(CommandError::invalid_args(format!(
@@ -1375,21 +1387,29 @@ fn run_line_pattern(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, Comma
     })
 }
 
-/// The pattern index of the `value`/`pattern` argument: a number or the
-/// name `none` (0) / `solid` (1).
+/// The pattern index of the `value`/`pattern` argument: a number, the
+/// name `none` (0) / `solid` (1), or one of the pattern labels the
+/// pickers show ("Dashed", "Dotted", ...).
 fn pattern_index(inv: &Invocation) -> Result<f64, CommandError> {
     if let Some(text) = arg_text(inv, &["pattern", "value"]) {
         let key = text.trim().to_ascii_lowercase();
         return match key.as_str() {
             "none" | "no line" | "noline" => Ok(0.0),
             "solid" => Ok(1.0),
+            "dashed" => Ok(2.0),
+            "dotted" => Ok(3.0),
+            "dash-dot" => Ok(4.0),
+            "dash-dot-dot" => Ok(5.0),
+            "dot-dash-dash" => Ok(6.0),
+            "long dash" => Ok(7.0),
+            "long-short dash" => Ok(8.0),
             _ => match key.parse::<f64>() {
                 Ok(value) if value.is_finite() && (0.0..=24.0).contains(&value) => Ok(value),
                 Ok(_) => Err(CommandError::invalid_args(
                     "line pattern must be between 0 and 24",
                 )),
                 Err(_) => Err(CommandError::invalid_args(
-                    "line pattern must be a number, \"none\" or \"solid\"",
+                    "line pattern must be a number or a pattern name",
                 )),
             },
         };
@@ -1445,20 +1465,26 @@ fn run_line_no_ends(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, Comm
     })
 }
 
-/// The arrowhead index of the `value`/`begin`/`end` argument: a number
-/// or the name `none` (0).
+/// The arrowhead index of the `value`/`begin`/`end` argument: a number,
+/// the name `none` (0), or one of the arrowhead labels the pickers
+/// show ("Arrow", "Open", "Stealth", "Diamond", "Dot").
 fn arrow_index(inv: &Invocation, names: &[&str]) -> Result<Option<f64>, CommandError> {
     if let Some(text) = arg_text(inv, names) {
         let key = text.trim().to_ascii_lowercase();
         return match key.as_str() {
             "none" | "no line ends" | "nolineends" => Ok(Some(0.0)),
+            "arrow" => Ok(Some(1.0)),
+            "open" => Ok(Some(2.0)),
+            "stealth" => Ok(Some(3.0)),
+            "diamond" => Ok(Some(4.0)),
+            "dot" => Ok(Some(5.0)),
             _ => match key.parse::<f64>() {
                 Ok(value) if value.is_finite() && (0.0..=24.0).contains(&value) => Ok(Some(value)),
                 Ok(_) => Err(CommandError::invalid_args(
                     "arrowhead must be between 0 and 24",
                 )),
                 Err(_) => Err(CommandError::invalid_args(
-                    "arrowhead must be a number or \"none\"",
+                    "arrowhead must be a number or a name",
                 )),
             },
         };
@@ -1944,6 +1970,60 @@ mod tests {
         assert!(error.to_string().contains("arrowhead"), "{error}");
         let error = call(&mut ctx, "format.set.line.ends", Args::new()).expect_err("no arrow");
         assert!(error.to_string().contains("arrowhead"), "{error}");
+    }
+
+    #[test]
+    fn pattern_and_arrow_labels_parse_like_the_picker_rows() {
+        let (mut ctx, _session, shape) = session();
+        call(
+            &mut ctx,
+            "format.set.line.pattern",
+            Args::new().with("value", ArgValue::Text("Dashed".to_owned())),
+        )
+        .expect("pattern label");
+        assert_eq!(
+            cell_of(
+                &ctx.active_document().expect("document").document,
+                shape,
+                "LinePattern"
+            )
+            .and_then(|cell| cell.value),
+            Some(larrygram_model::CellValue::Number(2.0)),
+            "the label spells the index"
+        );
+        call(
+            &mut ctx,
+            "format.set.line.ends",
+            Args::new()
+                .with("begin", ArgValue::Text("Stealth".to_owned()))
+                .with("end", ArgValue::Text("Dot".to_owned())),
+        )
+        .expect("arrow labels");
+        let doc = &ctx.active_document().expect("document").document;
+        assert_eq!(
+            cell_of(doc, shape, "BeginArrow").and_then(|cell| cell.value),
+            Some(larrygram_model::CellValue::Number(3.0)),
+            "stealth is 3"
+        );
+        assert_eq!(
+            cell_of(doc, shape, "EndArrow").and_then(|cell| cell.value),
+            Some(larrygram_model::CellValue::Number(5.0)),
+            "dot is 5"
+        );
+    }
+
+    #[test]
+    fn line_weight_accepts_a_points_spelling() {
+        let (mut ctx, _session, shape) = session();
+        call(
+            &mut ctx,
+            "format.set.line.weight",
+            Args::new().with("value", ArgValue::Text("2.25 pt".to_owned())),
+        )
+        .expect("pt spelling");
+        let doc = &ctx.active_document().expect("document").document;
+        let value = cell_of(doc, shape, "LineWeight").and_then(|cell| cell.value);
+        assert_eq!(value, Some(larrygram_model::CellValue::Number(2.25 / 72.0)));
     }
 
     #[test]
