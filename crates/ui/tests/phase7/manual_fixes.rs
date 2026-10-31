@@ -29,7 +29,7 @@ const SHAPE: (f64, f64) = (3.0, 3.0);
 /// A shell in `kind` with the rich state (the rectangle and the
 /// picture), the rectangle deselected: the tests select it with a
 /// real canvas click.
-fn rig(kind: LayoutKind) -> ShellRig {
+fn shell_rig(kind: LayoutKind) -> ShellRig {
     let mut app = RichApp::rich().0;
     app.settings.ui_layout = kind;
     app.selection.shapes.clear();
@@ -241,7 +241,7 @@ fn open_fill_picker(rig: &mut ShellRig, kind: LayoutKind) {
 #[test]
 fn the_picker_click_keeps_the_selection_and_applies() {
     for kind in LAYOUTS {
-        let mut rig = rig(kind);
+        let mut rig = shell_rig(kind);
         select_shape(&mut rig);
         let shape = rectangle(&rig.shell.borrow().app);
         open_fill_picker(&mut rig, kind);
@@ -262,4 +262,176 @@ fn the_picker_click_keeps_the_selection_and_applies() {
             "{kind:?}: the picture shows the fill: got ({r},{g},{b})"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// Goal 1: formatting applies from the Format menu, the formatting
+// toolbar (Panel Classic) and the Home tab (Panel Modern).
+// ---------------------------------------------------------------------------
+
+/// Opens the classic Format menu of `rig` and walks to `path` (menu
+/// title, then one row label per level), leaving the deepest level
+/// open.
+fn open_format_menu(rig: &mut ShellRig, path: &[&str]) {
+    click(rig, Role::Button, "Format");
+    for label in &path[..path.len() - 1] {
+        click(rig, Role::MenuItem, label);
+    }
+}
+
+/// The Format menu's five controls apply from the menu rows (goal 1).
+#[test]
+fn the_format_menu_rows_apply_to_the_selection() {
+    let mut rig = shell_rig(LAYOUTS[0]);
+    select_shape(&mut rig);
+    let shape = rectangle(&rig.shell.borrow().app);
+
+    // Fill Color ▸ Red.
+    open_format_menu(&mut rig, &["Fill Color", "Red"]);
+    click(&mut rig, Role::MenuItem, "Red");
+    assert_eq!(
+        cell_text(&rig, shape, "FillForegnd").as_deref(),
+        Some("RGB(255,0,0)"),
+        "the Fill Color row applies"
+    );
+
+    // Line Weight ▸ 2.25 pt.
+    open_format_menu(&mut rig, &["Line Weight", "2.25 pt"]);
+    click(&mut rig, Role::MenuItem, "2.25 pt");
+    let weight = number(&rig, shape, "LineWeight");
+    assert!(
+        (weight - 2.25 / 72.0).abs() < 1.0e-9,
+        "the Line Weight row applies ({weight})"
+    );
+
+    // Line Pattern ▸ Dashed.
+    open_format_menu(&mut rig, &["Line Pattern", "Dashed"]);
+    click(&mut rig, Role::MenuItem, "Dashed");
+    assert_eq!(
+        number(&rig, shape, "LinePattern"),
+        2.0,
+        "the Line Pattern row applies"
+    );
+
+    // Arrowheads ▸ Stealth.
+    open_format_menu(&mut rig, &["Arrowheads", "Stealth"]);
+    click(&mut rig, Role::MenuItem, "Stealth");
+    assert_eq!(
+        number(&rig, shape, "BeginArrow"),
+        3.0,
+        "the Arrowheads row applies"
+    );
+}
+
+/// Without a selection the Format menu rows disable with the reason
+/// (goal 1).
+#[test]
+fn the_format_menu_rows_disable_without_a_selection() {
+    let mut rig = shell_rig(LAYOUTS[0]);
+    open_format_menu(&mut rig, &["Fill Color", "Red"]);
+    assert!(has(&mut rig, Role::MenuItem, "Red"), "the row draws");
+    assert!(
+        disabled(&mut rig, Role::MenuItem, "Red"),
+        "the row disables without a selection"
+    );
+    assert_eq!(
+        tooltip(&mut rig, Role::MenuItem, "Red").as_deref(),
+        Some("no selection"),
+        "the row carries the reason"
+    );
+}
+
+/// The Panel Classic formatting toolbar's splits apply from their
+/// pickers (goal 1) and disable without a selection.
+#[test]
+fn the_classic_formatting_toolbar_applies_and_disables() {
+    let mut rig = shell_rig(LAYOUTS[0]);
+    select_shape(&mut rig);
+    let shape = rectangle(&rig.shell.borrow().app);
+    // Line Weight split → picker row "2.25 pt".
+    click(&mut rig, Role::Button, "Line Weight menu");
+    click(&mut rig, Role::Button, "2.25 pt");
+    let weight = number(&rig, shape, "LineWeight");
+    assert!(
+        (weight - 2.25 / 72.0).abs() < 1.0e-9,
+        "the toolbar split applies ({weight})"
+    );
+
+    // With no selection the split's main button disables with the
+    // reason.
+    drop(rig);
+    let mut rig = shell_rig(LAYOUTS[0]);
+    assert!(
+        disabled(&mut rig, Role::Button, "Line Weight"),
+        "the split disables without a selection"
+    );
+    assert_eq!(
+        tooltip(&mut rig, Role::Button, "Line Weight").as_deref(),
+        Some("no selection"),
+        "the split carries the reason"
+    );
+}
+
+/// The Panel Modern Home tab applies the same five controls (goal 1).
+#[test]
+fn the_home_tab_applies_the_line_controls() {
+    let mut rig = shell_rig(LAYOUTS[1]);
+    select_shape(&mut rig);
+    let shape = rectangle(&rig.shell.borrow().app);
+    // Line split ▸ Weight ▸ "2.25 pt".
+    open_line_weight(&mut rig);
+    click(&mut rig, Role::Button, "2.25 pt");
+    let weight = number(&rig, shape, "LineWeight");
+    assert!(
+        (weight - 2.25 / 72.0).abs() < 1.0e-9,
+        "the Home tab applies the weight ({weight})"
+    );
+    // And the fill from the Fill split's picker (goal 1's colour).
+    open_fill_picker(&mut rig, LAYOUTS[1]);
+    click(&mut rig, Role::Button, "Accent #1F5BC4");
+    assert_eq!(
+        cell_text(&rig, shape, "FillForegnd").as_deref(),
+        Some("RGB(31,91,196)"),
+        "the Fill split applies"
+    );
+}
+
+/// The Home tab's Line split disables without a selection (goal 1).
+#[test]
+fn the_home_tab_line_split_disables_without_a_selection() {
+    let mut rig = shell_rig(LAYOUTS[1]);
+    assert!(
+        disabled(&mut rig, Role::Button, "Line"),
+        "the Line split disables without a selection"
+    );
+    assert_eq!(
+        tooltip(&mut rig, Role::Button, "Line").as_deref(),
+        Some("no selection"),
+        "the Line split carries the reason"
+    );
+}
+
+/// Opens the Panel Modern Line split's Weight submenu (the split's
+/// arrow, then the "Weight" row).
+fn open_line_weight(rig: &mut ShellRig) {
+    // The "More items" arrow nearest the "Line" button.
+    rig.run();
+    let root = rig.harness().root();
+    let line = root
+        .query_all_by_role_and_label(Role::Button, "Line")
+        .next()
+        .expect("the Line split")
+        .rect();
+    let best = root
+        .query_all_by_role_and_label(Role::Button, "More items")
+        .min_by(|a, b| {
+            (a.rect().center() - line.center())
+                .length()
+                .total_cmp(&(b.rect().center() - line.center()).length())
+        })
+        .expect("a More items arrow");
+    best.click();
+    rig.run();
+    // The Weight submenu row (Panel Modern menu rows are buttons).
+    click(rig, Role::Button, "Weight");
 }

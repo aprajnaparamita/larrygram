@@ -909,6 +909,84 @@ menu_bars:
       command: format.fill
       visuicmd: visCmdFormatFill
       icon: format.fill
+    - id: drawing.format.fill_color
+      kind: submenu
+      label: Fill Color
+      access: "g"
+      items:
+      - id: drawing.format.fill_color.options
+        kind: options
+        command: format.set.fill.color
+        options: ["Black", "White", "Red", "Green", "Blue", "Yellow", "Orange", "Purple", "Gray", "Brown", "Pink"]
+      - id: drawing.format.fill_color.no_fill
+        kind: button
+        label: No Fill
+        command: format.fill_color.no_fill
+        begin_group: true
+      - id: drawing.format.fill_color.use_default
+        kind: button
+        label: Use Default
+        command: format.fill_color.use_default
+    - id: drawing.format.line_color
+      kind: submenu
+      label: Line Color
+      access: "k"
+      items:
+      - id: drawing.format.line_color.options
+        kind: options
+        command: format.set.line.color
+        options: ["Black", "White", "Red", "Green", "Blue", "Yellow", "Orange", "Purple", "Gray", "Brown", "Pink"]
+      - id: drawing.format.line_color.no_line
+        kind: button
+        label: No Line
+        command: format.line_color.no_line
+        begin_group: true
+      - id: drawing.format.line_color.use_default
+        kind: button
+        label: Use Default
+        command: format.line_color.use_default
+    - id: drawing.format.line_weight
+      kind: submenu
+      label: Line Weight
+      access: "a"
+      items:
+      - id: drawing.format.line_weight.options
+        kind: options
+        command: format.set.line.weight
+        options: ["0.25 pt", "0.5 pt", "0.75 pt", "1 pt", "1.5 pt", "2.25 pt", "3 pt", "4.5 pt", "6 pt"]
+      - id: drawing.format.line_weight.no_line
+        kind: button
+        label: No Line
+        command: format.line_color.no_line
+        begin_group: true
+    - id: drawing.format.line_pattern
+      kind: submenu
+      label: Line Pattern
+      access: "j"
+      items:
+      - id: drawing.format.line_pattern.options
+        kind: options
+        command: format.set.line.pattern
+        options: ["Solid", "Dashed", "Dotted", "Dash-dot", "Dash-dot-dot", "Dot-dash-dash", "Long dash", "Long-short dash"]
+      - id: drawing.format.line_pattern.no_line
+        kind: button
+        label: No Line
+        command: format.line_pattern.no_line
+        begin_group: true
+    - id: drawing.format.arrowheads
+      kind: submenu
+      label: Arrowheads
+      access: "u"
+      items:
+      - id: drawing.format.arrowheads.options
+        kind: options
+        command: format.set.line.ends
+        options: ["None", "Arrow", "Open", "Stealth", "Diamond", "Dot"]
+      - id: drawing.format.arrowheads.no_ends
+        kind: button
+        label: No Line Ends
+        command: format.line_ends.no_line_ends
+        begin_group: true
     - id: drawing.format.shadow
       kind: button
       label: Shadow...
