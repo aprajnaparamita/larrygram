@@ -49,7 +49,7 @@ Phase 7: Panel and Classic layouts, the Larrygram rename and the welcome wizard.
 | [P7-20](tasks/P7-20.md) | implementer | P7-17 | G | merged (33 commands from stub to implemented; Ctrl+N/O/S) | `1cdc338` |
 | [P7-21](tasks/P7-21.md) | implementer | P7-18, P7-20 | H | merged (format and arrange commands, pickers, Page Setup dialog; parity 40 to 65 controls) | `e2fdf55` |
 | [P7-22](tasks/P7-22.md) | implementer | P7-21, P8-14 | I | ready (manual-pass fixes: Delete key, groups, Insert Text Box and Picture, flip) | — |
-| [P7-23](tasks/P7-23.md) | implementer | P7-21, P8-14 | I | ready (manual-pass fixes: whole Shapes tiles, search, menu hints, Shape Data pane, layout switch, Settings) | — |
+| [P7-23](tasks/P7-23.md) | implementer | P7-21, P8-14 | I | merged (menu hints at the pointer, panes, one status message, layout radio items, Options from Tools, File and Cmd+,) | `382b128` |
 | [P7-24](tasks/P7-24.md) | implementer (Opus 5.5) | P7-21, P8-14 | I | ready (manual-pass fixes: formatting from the selection, font and size, Zoom box, Text Block tool, Text icon, Format Painter, Page Setup) | — |
 
 Tasks start as soon as their own dependencies merge (no whole-group waits); run at most twelve workers at once across Phase 7 and Phase 8.
