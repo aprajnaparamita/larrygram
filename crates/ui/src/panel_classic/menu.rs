@@ -213,7 +213,9 @@ fn draw_row(
         WidgetInfo::labeled(egui::accesskit::Role::MenuItem, enabled, row.label.clone())
     });
     if !row.tooltip.is_empty() {
-        response = response.on_hover_text(row.tooltip.clone());
+        // The hint appears next to the item under the pointer (task
+        // P7-23), not below the row's left edge.
+        response = response.on_hover_text_at_pointer(row.tooltip.clone());
     }
     response
 }
