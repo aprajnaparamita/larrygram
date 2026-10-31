@@ -413,14 +413,25 @@ impl Shell {
         self.app.active_tool
     }
 
-    /// The status line shown in the title strip: the chords typed so
-    /// far while a shortcut sequence is half-typed (ADR 0036, P4-14),
+    /// The status line of the status bar: the chords typed so far
+    /// while a shortcut sequence is half-typed (ADR 0036, P4-14),
     /// else the last command message.
     pub fn status_line(&self) -> String {
         if self.shortcuts.pending() {
             self.shortcuts.pending_display()
         } else {
             self.status.clone()
+        }
+    }
+
+    /// The status shown in the title strip: the half-typed chords
+    /// only (task P7-23: a command message like "Selected 0 shapes"
+    /// shows in the status bar only, never twice).
+    pub fn title_status(&self) -> String {
+        if self.shortcuts.pending() {
+            self.shortcuts.pending_display()
+        } else {
+            String::new()
         }
     }
 
@@ -733,7 +744,7 @@ impl Shell {
                 ui.separator();
                 ui.label("Larrygram");
                 ui.separator();
-                ui.label(self.status_line());
+                ui.label(self.title_status());
             });
         });
         // The `menu_bar` and `toolbars` regions: one chrome (the
@@ -873,7 +884,7 @@ impl Shell {
                 ui.separator();
                 ui.label(self.title_text());
                 ui.separator();
-                ui.label(self.status_line());
+                ui.label(self.title_status());
                 let kind = self.app.settings.ui_layout;
                 let set = self.layouts.get(kind);
                 let produced = self
