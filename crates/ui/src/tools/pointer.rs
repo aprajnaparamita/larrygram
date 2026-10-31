@@ -9,6 +9,7 @@
 //! (ADR 0040): the tool emits one command intent on release and previews
 //! the drag with overlay marks in between.
 
+use larrygram_commands::app::Selection;
 use larrygram_commands::{AppCtx, ArgValue, Args, CommandId, Invocation, SessionId, Source};
 use larrygram_geom::{Angle, Point, Rect};
 use larrygram_model::{Document, PageId, ShapeId};
@@ -57,6 +58,9 @@ enum Mode {
         start: Point,
         /// The shape under the press.
         shape: ShapeId,
+        /// The member of `shape` a click subselects (task P7-22): the
+        /// second click on a selected group descends one level.
+        descend: Option<ShapeId>,
     },
     /// A marquee from empty space.
     Marquee {
@@ -83,6 +87,10 @@ enum Mode {
         alt: bool,
         /// The zoom at the start (screen-pixel thresholds).
         zoom: f64,
+        /// The member of the selection a click subselects (task
+        /// P7-22): a Move press on a member of the selected group,
+        /// released below the drag threshold.
+        descend: Option<ShapeId>,
     },
 }
 
@@ -217,6 +225,16 @@ fn down(
             selection_frame(ctx, scene)?
         }
     };
+    // The shape under the press (the topmost hit), for the selection
+    // and the group rules.
+    let tolerance = HIT_TOLERANCE_PX / (zoom * crate::canvas::POINTS_PER_INCH);
+    let hit = {
+        let Some(scene) = state.state.scene(ctx)? else {
+            return Ok(effect);
+        };
+        let hits = hit_test(scene, pos, &HitOptions::new(tolerance)).map_err(render_error)?;
+        hits.iter().find_map(|hit| hit.shape_id)
+    };
     // A resize or rotate handle wins with any modifier (task P7-19: a
     // Shift or Ctrl press on a handle outside the shape started a
     // marquee); the move interior is a plain press only, so Shift and
@@ -226,6 +244,15 @@ fn down(
         && let Some(kind) = handle_at(pos, bounds, angle, zoom)?
         && (plain || kind != HandleKind::Move)
     {
+        // A plain Move press on a member of the sole selected group
+        // may be the second click that subselects the member (task
+        // P7-22); `up` decides, a drag above the threshold still moves
+        // the selection.
+        let descend = if plain && kind == HandleKind::Move {
+            hit.and_then(|raw| press_target(&session.document, raw, &ctx.selection).1)
+        } else {
+            None
+        };
         state.state.mode = Mode::Drag {
             kind,
             start: pos,
@@ -234,6 +261,7 @@ fn down(
             moving: ctx.selection.shapes.clone(),
             alt: modifiers.alt,
             zoom,
+            descend,
         };
         let mode = state.state.mode.clone();
         let Some(scene) = state.state.scene(ctx)? else {
@@ -243,18 +271,8 @@ fn down(
         return Ok(effect);
     }
 
-    let tolerance = HIT_TOLERANCE_PX / (zoom * crate::canvas::POINTS_PER_INCH);
-    let hit = {
-        let Some(scene) = state.state.scene(ctx)? else {
-            return Ok(effect);
-        };
-        let hits = hit_test(scene, pos, &HitOptions::new(tolerance)).map_err(render_error)?;
-        hits.iter()
-            .find_map(|hit| hit.shape_id)
-            .map(|shape| selectable_shape(&session.document, shape, ctx.selection.entered))
-    };
     match hit {
-        Some(shape) => {
+        Some(raw) => {
             let mode = if modifiers.ctrl {
                 "add"
             } else if modifiers.shift {
@@ -262,10 +280,26 @@ fn down(
             } else {
                 "replace"
             };
+            // A plain press follows the group rules (task P7-22): one
+            // click selects the whole group, a click on the selected
+            // group subselects the member (on release, so a drag from
+            // the member still moves the group).
+            let (shape, descend) = if mode == "replace" {
+                press_target(&session.document, raw, &ctx.selection)
+            } else {
+                (
+                    selectable_shape(&session.document, raw, ctx.selection.entered),
+                    None,
+                )
+            };
             effect
                 .intents
                 .push(select_intent(&session.document, mode, &[shape])?);
-            state.state.mode = Mode::Pressed { start: pos, shape };
+            state.state.mode = Mode::Pressed {
+                start: pos,
+                shape,
+                descend,
+            };
         }
         None => {
             let add = modifiers.shift || modifiers.ctrl;
@@ -297,10 +331,20 @@ fn moved(
 ) -> Result<ToolEffect, UiError> {
     let mut effect = ToolEffect::new();
     match state.state.mode.clone() {
-        Mode::Pressed { start, shape } => {
+        Mode::Pressed {
+            start,
+            shape,
+            descend,
+            ..
+        } => {
             let threshold = DRAG_THRESHOLD_PX / (zoom * crate::canvas::POINTS_PER_INCH);
             let delta = pos.sub(start);
             if delta.x.hypot(delta.y) < threshold {
+                state.state.mode = Mode::Pressed {
+                    start,
+                    shape,
+                    descend,
+                };
                 return Ok(effect);
             }
             let handle_frame = {
@@ -322,6 +366,7 @@ fn moved(
                 },
                 alt: modifiers.alt,
                 zoom,
+                descend,
             };
         }
         Mode::Marquee { start, add, .. } => {
@@ -339,6 +384,7 @@ fn moved(
             moving,
             alt: _,
             zoom: start_zoom,
+            descend,
         } => {
             state.state.mode = Mode::Drag {
                 kind,
@@ -348,6 +394,7 @@ fn moved(
                 moving,
                 alt: modifiers.alt,
                 zoom: start_zoom,
+                descend,
             };
         }
         Mode::Idle => return Ok(effect),
@@ -374,10 +421,26 @@ fn up(
     let mode = std::mem::replace(&mut state.state.mode, Mode::Idle);
     match mode {
         Mode::Idle => {}
-        Mode::Pressed { .. } => {
-            let overlay = idle_overlay(state, ctx)?;
-            if let Some(overlay) = overlay {
+        Mode::Pressed { descend, .. } => {
+            // A click on a member of the selected group subselects the
+            // member (task P7-22); a drag never reaches this arm.
+            if let Some(member) = descend {
+                if let Some(session) = ctx.active_document() {
+                    effect
+                        .intents
+                        .push(select_intent(&session.document, "replace", &[member])?);
+                }
+                let scene = state.state.scene(ctx)?;
+                let overlay = match scene {
+                    Some(scene) => overlay_for_shapes(ctx, scene, &[member])?,
+                    None => Overlay::new(),
+                };
                 effect.overlay = overlay;
+            } else {
+                let overlay = idle_overlay(state, ctx)?;
+                if let Some(overlay) = overlay {
+                    effect.overlay = overlay;
+                }
             }
         }
         Mode::Marquee { start, add, .. } => {
@@ -426,11 +489,29 @@ fn up(
             moving,
             alt,
             zoom: start_zoom,
+            descend,
         } => {
             let _ = modifiers;
             let _ = zoom;
             let alt = alt || modifiers.alt;
             let scene = state.state.scene(ctx)?;
+            // A Move press on a member of the selected group, released
+            // below the drag threshold, subselects the member (task
+            // P7-22): a click, not a drag.
+            let threshold = DRAG_THRESHOLD_PX / (start_zoom * crate::canvas::POINTS_PER_INCH);
+            let delta = pos.sub(start);
+            let clicked = delta.x.hypot(delta.y) < threshold;
+            if let (true, Some(member)) = (clicked, descend) {
+                if let Some(session) = ctx.active_document() {
+                    effect
+                        .intents
+                        .push(select_intent(&session.document, "replace", &[member])?);
+                }
+                if let Some(scene) = scene {
+                    effect.overlay = overlay_for_shapes(ctx, scene, &[member])?;
+                }
+                return Ok(effect);
+            }
             if let Some(intent) = drag_intent(
                 ctx, scene, kind, start, pos, frame, &moving, alt, start_zoom,
             )? {
@@ -484,6 +565,58 @@ fn double_click(
         effect.intents.push(intent("text.begin", Args::new())?);
     }
     Ok(effect)
+}
+
+/// The shape a plain press on `hit` selects, and the member a click on
+/// the selected group subselects (task P7-22).
+///
+/// The group rules of the manual pass: a first click on any member
+/// selects the whole group (the top-level ancestor), a second click on
+/// the selected group subselects the member one level below the
+/// selection. The caller subselects the returned member when the press
+/// turns out to be a click (press and release with no drag), so a drag
+/// from a member of the selected group still moves the group. Inside
+/// an entered group the entered-group rule of `selectable_shape` wins
+/// (a click selects the entered group's direct child), so the
+/// subselect applies at page level only.
+pub fn press_target(
+    doc: &Document,
+    hit: ShapeId,
+    selection: &Selection,
+) -> (ShapeId, Option<ShapeId>) {
+    if selection.entered.is_none()
+        && let [sel] = selection.shapes.as_slice()
+    {
+        if hit == *sel {
+            return (*sel, None);
+        }
+        if let Some(child) = child_containing(doc, *sel, hit) {
+            return (*sel, Some(child));
+        }
+    }
+    (selectable_shape(doc, hit, selection.entered), None)
+}
+
+/// The direct child of `sel` on `hit`'s parent chain, when `hit` is a
+/// strict descendant of `sel` (task P7-22); `None` when `hit` is
+/// `sel`, outside `sel`, or the chain loops or runs out.
+fn child_containing(doc: &Document, sel: ShapeId, hit: ShapeId) -> Option<ShapeId> {
+    let mut current = hit;
+    let mut seen = Vec::new();
+    loop {
+        if current == sel {
+            return None;
+        }
+        if seen.contains(&current) {
+            return None;
+        }
+        seen.push(current);
+        let parent = doc.shape(current)?.parent?;
+        if parent == sel {
+            return Some(current);
+        }
+        current = parent;
+    }
 }
 
 /// Maps a scene hit to the shape the user selects: the top-level ancestor
@@ -547,6 +680,7 @@ fn drag_overlay(
             moving,
             alt,
             zoom,
+            ..
         } => {
             let mut overlay = Overlay::new();
             let (bounds, angle, snapped) = preview_frame(

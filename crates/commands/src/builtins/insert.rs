@@ -60,6 +60,18 @@ pub(crate) const TABLE: CommandTable = &[
         has_pages,
         run_text_box,
     ),
+    (
+        "insert.text.box",
+        "Text Box",
+        has_pages,
+        run_text_box_horizontal,
+    ),
+    (
+        "insert.vert.text.box",
+        "Vertical Text Box",
+        has_pages,
+        run_text_box_vertical,
+    ),
 ];
 
 /// The kind of drawing shape one `insert.drawing.*` command creates.
@@ -206,6 +218,79 @@ pub(super) fn run_line(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, Co
 /// `insert.drawing.text_box`: one text box (the text tool opens it).
 pub(super) fn run_text_box(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError> {
     insert_drawing(ctx, inv, Drawing::TextBox)
+}
+
+/// `insert.text.box` (task P7-22 item 4): one horizontal text box at
+/// the page centre.
+pub(super) fn run_text_box_horizontal(
+    ctx: &mut AppCtx,
+    inv: &Invocation,
+) -> Result<Outcome, CommandError> {
+    text_box_at_page_centre(ctx, inv, false)
+}
+
+/// `insert.vert.text.box` (task P7-22 item 4): one vertical text box
+/// at the page centre.
+pub(super) fn run_text_box_vertical(
+    ctx: &mut AppCtx,
+    inv: &Invocation,
+) -> Result<Outcome, CommandError> {
+    text_box_at_page_centre(ctx, inv, true)
+}
+
+/// One text box at the page centre (task P7-22 item 4).
+///
+/// The menu commands place the box where the user is looking — the
+/// centre of the page — and select it, the placement choice recorded
+/// in the task's Result. The box is 2 x 0.5 in (the P5-07 text-box
+/// size); the vertical variant stands upright (its `Angle` is a
+/// quarter turn).
+fn text_box_at_page_centre(
+    ctx: &mut AppCtx,
+    _inv: &Invocation,
+    vertical: bool,
+) -> Result<Outcome, CommandError> {
+    let (session, page) = active_page(ctx)?;
+    let label = if vertical {
+        "Insert Vertical Text Box"
+    } else {
+        "Insert Text Box"
+    };
+    let shape = {
+        let doc = document_mut(ctx, session)?;
+        let (page_w, page_h) = {
+            let entity = doc
+                .page(page)
+                .ok_or_else(|| CommandError::failed("the active page is gone"))?;
+            super::view::page_size(entity)
+        };
+        let (width, height) = (2.0, 0.5);
+        let x = (page_w - width) * 0.5;
+        let y = (page_h - height) * 0.5;
+        let mut shape = drawing_shape(Drawing::TextBox, x, y, width, height);
+        if vertical {
+            set_angle(&mut shape, std::f64::consts::FRAC_PI_2);
+        }
+        doc.insert_shape(page, shape, None).map_err(model_error)?
+    };
+    let edit = {
+        let doc = document_mut(ctx, session)?;
+        StructuralEdit::insertion(doc, session, label.to_owned(), shape)?
+    };
+    select_new(ctx, session, page, shape)?;
+    ctx.touch_session(session);
+    Ok(edit_outcome(label, Vec::new(), Box::new(edit)))
+}
+
+/// Sets a fresh shape's `Angle` cell (the vertical text box).
+fn set_angle(shape: &mut Shape, radians: f64) {
+    for cell in &mut shape.sheet.cells {
+        if cell.name.as_str() == "Angle" {
+            cell.formula = Some(radians.to_string());
+            cell.value = Some(CellValue::Number(radians));
+            cell.unit = Unit::Radians;
+        }
+    }
 }
 
 /// Creates one drawing shape and its insertion undo step.
@@ -716,6 +801,7 @@ fn optional_row(args: &crate::Args, name: &str) -> Result<Option<usize>, Command
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Source;
     use crate::app::{DocumentSession, Settings};
 
     /// A session with one page and one 2x1 rectangle on it.
@@ -800,5 +886,82 @@ mod tests {
         )
         .expect("stage");
         assert_eq!(edit.len(), 1);
+    }
+    // --- task P7-22 item 4: Insert > Text Box ------------------------
+
+    /// The cell value of the last shape on the fixture page.
+    fn last_number(ctx: &AppCtx, page: larrygram_model::PageId, name: &str) -> f64 {
+        let session = ctx.active_document().expect("session");
+        let id = *session
+            .document
+            .page(page)
+            .expect("page")
+            .shapes
+            .last()
+            .expect("the new box");
+        let shape = session.document.shape(id).expect("shape");
+        shape
+            .sheet
+            .cells
+            .iter()
+            .find(|cell| cell.name.as_str() == name)
+            .and_then(|cell| match cell.value {
+                Some(CellValue::Number(value)) => Some(value),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("no {name} on the shape"))
+    }
+
+    #[test]
+    fn insert_text_box_places_the_box_at_the_page_centre() {
+        let (mut ctx, _session, page, _shape) = fixture();
+        let outcome =
+            run_text_box_horizontal(&mut ctx, &Invocation::empty(Source::Ui)).expect("box");
+        let (x, y) = (
+            last_number(&ctx, page, "PinX"),
+            last_number(&ctx, page, "PinY"),
+        );
+        assert!(
+            (x - 4.25).abs() < 1e-9 && (y - 5.5).abs() < 1e-9,
+            "({x}, {y})"
+        );
+        let (w, h) = (
+            last_number(&ctx, page, "Width"),
+            last_number(&ctx, page, "Height"),
+        );
+        assert!(
+            (w - 2.0).abs() < 1e-9 && (h - 0.5).abs() < 1e-9,
+            "({w}, {h})"
+        );
+        // The new box is selected and one undo step was pushed.
+        let session = ctx.active_document().expect("session");
+        let id = *session
+            .document
+            .page(page)
+            .expect("page")
+            .shapes
+            .last()
+            .expect("the new box");
+        assert_eq!(ctx.selection.shapes, vec![id]);
+        assert!(outcome.edit.is_some(), "one undo step");
+    }
+
+    #[test]
+    fn insert_vertical_text_box_stands_upright() {
+        let (mut ctx, _session, page, _shape) = fixture();
+        run_text_box_vertical(&mut ctx, &Invocation::empty(Source::Ui)).expect("box");
+        let angle = last_number(&ctx, page, "Angle");
+        assert!(
+            (angle - core::f64::consts::FRAC_PI_2).abs() < 1e-9,
+            "{angle}"
+        );
+    }
+
+    #[test]
+    fn the_text_box_commands_need_an_open_page() {
+        let mut ctx = AppCtx::new(Settings::default());
+        let error = run_text_box_horizontal(&mut ctx, &Invocation::empty(Source::Ui))
+            .expect_err("no document");
+        assert!(error.to_string().contains("no open document"), "{error}");
     }
 }

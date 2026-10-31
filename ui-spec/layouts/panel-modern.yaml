@@ -2297,6 +2297,13 @@ context_menus:
     access: "p"
     command: edit.paste
     icon: edit.paste
+  - id: context.shape.delete
+    kind: button
+    label: Delete
+    access: "d"
+    command: edit.clear
+    visuicmd: visCmdUFEditClear
+    icon: edit.clear
   - id: context.shape.insert_shape_before
     kind: button
     label: Insert Shape Before
@@ -2333,6 +2340,51 @@ context_menus:
       visuicmd: visCmdObjectUngroup
       shortcut: Shift+Ctrl+U
       icon: arrange.ungroup
+    - id: context.shape.group.bring_to_front
+      kind: button
+      label: Bring to Front
+      access: "f"
+      command: arrange.bring_to_front
+      visuicmd: visCmdObjectBringToFront
+      icon: arrange.bring_to_front
+      begin_group: true
+    - id: context.shape.group.send_to_back
+      kind: button
+      label: Send to Back
+      access: "b"
+      command: arrange.send_to_back
+      visuicmd: visCmdObjectSendToBack
+      icon: arrange.send_to_back
+    - id: context.shape.group.rotate_left
+      kind: button
+      label: Rotate Left 90°
+      access: "l"
+      command: arrange.object.rotate90
+      visuicmd: visCmdObjectRotate90
+      icon: arrange.object.rotate90
+      begin_group: true
+    - id: context.shape.group.rotate_right
+      kind: button
+      label: Rotate Right 90°
+      access: "r"
+      command: arrange.rotate90.clockwise
+      visuicmd: visCmdRotate90Clockwise
+      icon: arrange.rotate90.clockwise
+    - id: context.shape.group.flip_horizontal
+      kind: button
+      label: Flip Horizontal
+      access: "h"
+      command: arrange.flip_horizontal
+      visuicmd: visCmdObjectFlipHorizontal
+      icon: arrange.flip_horizontal
+      begin_group: true
+    - id: context.shape.group.flip_vertical
+      kind: button
+      label: Flip Vertical
+      access: "v"
+      command: arrange.flip_vertical
+      visuicmd: visCmdObjectFlipVertical
+      icon: arrange.flip_vertical
     - id: context.shape.group.object
       kind: button
       label: Object...
