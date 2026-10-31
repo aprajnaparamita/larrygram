@@ -48,7 +48,7 @@ Phase 7: Panel and Classic layouts, the Larrygram rename and the welcome wizard.
 | [P7-19](tasks/P7-19.md) | implementer (Opus 5.5) | P7-17 | G | merged (whole Shapes tiles, own splitters with remembered widths, zoom-aware handles, canvas tokens, full screen) | `031ea85` |
 | [P7-20](tasks/P7-20.md) | implementer | P7-17 | G | merged (33 commands from stub to implemented; Ctrl+N/O/S) | `1cdc338` |
 | [P7-21](tasks/P7-21.md) | implementer | P7-18, P7-20 | H | merged (format and arrange commands, pickers, Page Setup dialog; parity 40 to 65 controls) | `e2fdf55` |
-| [P7-22](tasks/P7-22.md) | implementer | P7-21, P8-14 | I | ready (manual-pass fixes: Delete key, groups, Insert Text Box and Picture, flip) | — |
+| [P7-22](tasks/P7-22.md) | implementer | P7-21, P8-14 | I | merged (Mac delete key, group click and menus, Delete in context menus, Insert Text Box, popup press gate; Picture stops at the media writer) | `9fd5de6` |
 | [P7-23](tasks/P7-23.md) | implementer | P7-21, P8-14 | I | merged (menu hints at the pointer, panes, one status message, layout radio items, Options from Tools, File and Cmd+,) | `382b128` |
 | [P7-24](tasks/P7-24.md) | implementer (Opus 5.5) | P7-21, P8-14 | I | ready (manual-pass fixes: formatting from the selection, font and size, Zoom box, Text Block tool, Text icon, Format Painter, Page Setup) | — |
 
