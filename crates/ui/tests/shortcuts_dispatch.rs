@@ -147,11 +147,12 @@ fn the_committed_shortcut_table_loads() {
     assert!(!committed.entries.is_empty());
     let map = map_of(committed.entries.clone());
     assert!(!map.is_empty());
-    // One binding per (sequence, scope) pair: the 94 entries of the
-    // committed table collapse into 78 bindings and 16 exact repeats,
+    // One binding per (sequence, scope) pair: the 95 entries of the
+    // committed table collapse into 79 bindings and 16 exact repeats,
     // all dropped silently (P4-14). P7-20 adds the four OWN_SHORTCUTS
-    // bindings (Ctrl+N, Ctrl+O, Ctrl+S, Ctrl+Alt+P).
-    assert_eq!(map.len(), 78);
+    // bindings (Ctrl+N, Ctrl+O, Ctrl+S, Ctrl+Alt+P); P7-23 adds `Ctrl+,`
+    // (the Options dialog).
+    assert_eq!(map.len(), 79);
     assert_eq!(map.len() + 16, committed.entries.len());
 }
 
@@ -168,9 +169,9 @@ fn the_committed_table_has_no_sequence_scope_conflict() {
 fn len_counts_the_bindings_of_the_committed_table() {
     let map = map_of(committed_shortcuts().entries.clone());
     // `len()` counts bindings, not source entries and not sequences:
-    // 65 distinct sequences, 78 (sequence, scope) pairs (61 and 74
-    // before P7-20's four own bindings).
-    assert_eq!(map.len(), 78);
+    // 66 distinct sequences, 79 (sequence, scope) pairs (61 and 74
+    // before P7-20's four own bindings and P7-23's `Ctrl+,`).
+    assert_eq!(map.len(), 79);
 }
 
 #[test]

@@ -37,7 +37,8 @@ pub const SNAPSHOT_URL: &str = "https://web.archive.org/web/20251205120214id_/ht
 /// The pinned source identifier recorded in the file header.
 pub const SOURCE_REVISION: &str = "web snapshot 20251205120214 (2025-12-05)";
 
-/// Our own bindings (task P7-20), appended to the page-derived rows.
+/// Our own bindings (tasks P7-20 and P7-23), appended to the
+/// page-derived rows.
 ///
 /// The chords come from the committed Panel Classic layout data
 /// (`shortcut:` on the menu and toolbar items, our own compiled data
@@ -54,6 +55,14 @@ pub const OWN_SHORTCUTS: &[(&str, &str, &str, &[&str])] = &[
         "global",
         "Common",
         &["Ctrl", "Alt", "P"],
+    ),
+    // Cmd+, on macOS (task P7-23): the Options dialog, the macOS
+    // convention Larrygram follows without a native app-menu item.
+    (
+        "tools.options.preferences",
+        "global",
+        "Common",
+        &["Ctrl", ","],
     ),
 ];
 
@@ -1148,9 +1157,9 @@ fn render_shortcuts_yaml(entries: &[Value]) -> ExtractResult<String> {
     out.push_str(&format!("# Snapshot URL: {SNAPSHOT_URL}\n"));
     out.push_str(&format!("# Source commit: {SOURCE_REVISION}\n"));
     out.push_str(
-        "# The Ctrl+N, Ctrl+O, Ctrl+S and Ctrl+Alt+P bindings\n\
-         # (OWN_SHORTCUTS, task P7-20) are our own, from the committed Panel Classic\n\
-         # layout data; the page does not list them.\n",
+        "# The Ctrl+N, Ctrl+O, Ctrl+S, Ctrl+Alt+P and Ctrl+, bindings\n\
+         # (OWN_SHORTCUTS, tasks P7-20 and P7-23) are our own, from the committed Panel\n\
+         # Classic layout data; the page does not list them.\n",
     );
     out.push_str(&text);
     Ok(out)
