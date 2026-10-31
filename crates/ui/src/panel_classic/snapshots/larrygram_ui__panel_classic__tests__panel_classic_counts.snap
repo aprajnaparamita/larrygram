@@ -5,7 +5,7 @@ expression: report
 layout: panel-classic
 surface: menu_bars
   button: items 360 (hidden 13) widgets 347
-  check: items 7 (hidden 0) widgets 7
+  check: items 9 (hidden 0) widgets 9
   list: items 25 (hidden 0) widgets 25
   submenu: items 31 (hidden 1) widgets 30
 surface: toolbars

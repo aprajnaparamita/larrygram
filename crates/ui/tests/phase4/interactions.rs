@@ -160,9 +160,12 @@ fn the_help_menu_opens_the_about_dialog() {
         "About Larrygram",
         "`help.about` ran through the registry"
     );
-    // The modal window is drawn (its title and close button appear).
+    // The modal window is drawn (its body and close button appear).
+    // The body's dedication, not the status message (task P7-23: the
+    // title strip no longer repeats command messages).
     assert!(
-        rig.names().contains_key("About Larrygram"),
+        rig.names()
+            .contains_key("This app is dedicated to Larry Jeffus."),
         "the About window renders"
     );
     assert!(rig.names().contains_key("Close window"), "closable");

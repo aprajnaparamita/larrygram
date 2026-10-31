@@ -1,12 +1,14 @@
 //! The Shape Data and Size & Position panes (ADR 0035, ADR 0058).
 //!
-//! With no selection the panes show honest page and document data;
-//! with a selection they show the anchor shape (the panes' subject,
-//! ADR 0041): its `Prop` rows typed (ADR 0058) and its size, position
-//! and angle as typed fields. An edit is parsed with the formula
-//! grammar's own parser, converted through the engine's unit table and
-//! dispatched as one `shape.set.*` command (P5-05); the pane itself
-//! never mutates `AppCtx` and never opens a dialog.
+//! With no selection the Shape Data pane shows the honest document and
+//! page data (once, task P7-23) and the Size & Position pane labels
+//! its empty state; with a selection both panes show the anchor shape
+//! (the panes' subject, ADR 0041): its `Prop` rows typed (ADR 0058)
+//! and its size, position and angle as typed fields. An edit is parsed
+//! with the formula grammar's own parser, converted through the
+//! engine's unit table and dispatched as one `shape.set.*` command
+//! (P5-05); the pane itself never mutates `AppCtx` and never opens a
+//! dialog.
 //!
 //! # Typed values (ADR 0058)
 //!
@@ -69,7 +71,7 @@ use larrygram_commands::{
     AppCtx, ArgValue, Args, CommandId, DisplayUnits, DocumentSession, Invocation, Source,
 };
 use larrygram_model::{
-    CellLookup, CellName, CellReader, CellValue, Page, PageId, ShapeId, SheetRef, ValueSource,
+    CellLookup, CellName, CellReader, CellValue, Page, ShapeId, SheetRef, ValueSource,
 };
 use larrygram_shapesheet::{
     CellRef, Error as FormulaError, EvalContext, EvalWarning, Expr, ExprKind, UnaryOp, Unit,
@@ -82,6 +84,10 @@ use crate::canvas::{format_length, format_number};
 
 /// The value shown for a missing, non-finite or empty value (ADR 0035).
 const MISSING_VALUE: &str = "—";
+
+/// The Size & Position pane's empty state with no shape selected
+/// (task P7-23).
+const NO_SHAPE_SELECTED: &str = "No shape selected.";
 
 /// The marker a formula cell carries beside its value (ADR 0058).
 const FORMULA_MARKER: &str = "(formula)";
@@ -271,9 +277,8 @@ pub fn shape_data_rows(app: &mut AppCtx) -> Result<Vec<PaneRow>, UiError> {
 /// `PinY` and `Angle` as typed fields (the `shape.set.*` commands),
 /// then the evaluated `LocPinX`, `LocPinY`, `FlipX` and `FlipY`. Cells
 /// that carry a formula are read-only (ADR 0058). Without a selection:
-/// the active page's width and height in
-/// [`larrygram_commands::Settings::units`], then its name. A missing
-/// value renders "—" and records one warning.
+/// no rows (the pane labels its empty state instead, task P7-23). A
+/// missing value renders "—" and records one warning.
 pub fn size_position_rows(app: &mut AppCtx) -> Result<Vec<PaneRow>, UiError> {
     Ok(size_position_entries(app)?
         .into_iter()
@@ -284,14 +289,22 @@ pub fn size_position_rows(app: &mut AppCtx) -> Result<Vec<PaneRow>, UiError> {
 /// Draws the Shape Data pane (ADR 0035) and returns the edit intents.
 pub fn show_shape_data(ui: &mut Ui, app: &mut AppCtx) -> Result<Vec<Intent>, UiError> {
     let entries = shape_data_entries(app)?;
-    Ok(show_pane(ui, app, "Shape Data", &entries))
+    Ok(show_pane(ui, app, "Shape Data", &entries, ""))
 }
 
 /// Draws the Size & Position pane (ADR 0035) and returns the edit
-/// intents.
+/// intents. With no shape selected the pane hides its rows and labels
+/// the empty state (task P7-23: the page's data shows once, in the
+/// Shape Data pane).
 pub fn show_size_position(ui: &mut Ui, app: &mut AppCtx) -> Result<Vec<Intent>, UiError> {
     let entries = size_position_entries(app)?;
-    Ok(show_pane(ui, app, "Size & Position", &entries))
+    Ok(show_pane(
+        ui,
+        app,
+        "Size & Position",
+        &entries,
+        NO_SHAPE_SELECTED,
+    ))
 }
 
 /// Builds the Shape Data entries (ADR 0058).
@@ -337,6 +350,10 @@ fn shape_data_entries(app: &mut AppCtx) -> Result<Vec<Entry>, UiError> {
 }
 
 /// Builds the Size & Position entries (ADR 0058).
+///
+/// With no shape selected there are no rows: the pane labels its
+/// empty state instead (task P7-23), and the page's data shows once,
+/// in the Shape Data pane.
 fn size_position_entries(app: &mut AppCtx) -> Result<Vec<Entry>, UiError> {
     let units = app.settings.units;
     let mut rows = Vec::new();
@@ -351,22 +368,7 @@ fn size_position_entries(app: &mut AppCtx) -> Result<Vec<Entry>, UiError> {
         for entry in shape_row_entries(app, &data, units)? {
             rows.push(entry);
         }
-        return Ok(rows);
     }
-    let page = active_page(session);
-    let page_id = page.map(|page| page.id);
-    let width = page.and_then(|page| page_number(session, page.id, "PageWidth"));
-    let height = page.and_then(|page| page_number(session, page.id, "PageHeight"));
-    let name = page.map(|page| page.name.clone()).unwrap_or_default();
-    let width_formula = page_id
-        .map(|id| cell_has_formula(session, SheetRef::Page(id), "PageWidth"))
-        .unwrap_or(false);
-    let height_formula = page_id
-        .map(|id| cell_has_formula(session, SheetRef::Page(id), "PageHeight"))
-        .unwrap_or(false);
-    rows.push(push_length(app, "Width", width, units, width_formula));
-    rows.push(push_length(app, "Height", height, units, height_formula));
-    push_text(app, &mut rows, "Name", &name);
     Ok(rows)
 }
 
@@ -897,11 +899,22 @@ fn typed_entry(text: &str, unit: EntryUnit) -> Result<f64, String> {
     }
 }
 
-/// Draws one pane: its title and the rows as a two-column grid.
-fn show_pane(ui: &mut Ui, app: &mut AppCtx, title: &str, entries: &[Entry]) -> Vec<Intent> {
+/// Draws one pane: its title and the rows as a two-column grid. With
+/// no rows it draws `empty` instead of the grid (task P7-23).
+fn show_pane(
+    ui: &mut Ui,
+    app: &mut AppCtx,
+    title: &str,
+    entries: &[Entry],
+    empty: &str,
+) -> Vec<Intent> {
     ui.label(RichText::new(title).strong());
     if app.active_document().is_none() {
         ui.label("No document");
+        return Vec::new();
+    }
+    if entries.is_empty() {
+        ui.weak(empty);
         return Vec::new();
     }
     let mut intents = Vec::new();
@@ -1138,11 +1151,6 @@ fn read_flag(session: &DocumentSession, sheet: SheetRef, cell: &str) -> Option<b
     }
 }
 
-/// Reads one page number cell (inches).
-fn page_number(session: &DocumentSession, page: PageId, cell: &str) -> Option<f64> {
-    read_number(session, SheetRef::Page(page), cell)
-}
-
 /// Whether a formula computes something (P6-07's classification): one
 /// that reads a cell or calls a function. A constant literal (`-2`,
 /// `2+3`, `5 in`) computes nothing and is not a formula a write would
@@ -1217,26 +1225,6 @@ fn missing_entry(app: &mut AppCtx, label: &str, reason: &str) -> Entry {
     Entry::shown(PaneRow::read_only(label, MISSING_VALUE))
 }
 
-/// Adds one length row: formatted with units, or "—" plus one warning.
-/// A formula cell keeps its marker (ADR 0058).
-fn push_length(
-    app: &mut AppCtx,
-    label: &str,
-    value: Option<f64>,
-    units: DisplayUnits,
-    formula: bool,
-) -> Entry {
-    let mut entry = match value {
-        Some(value) if value.is_finite() => {
-            Entry::shown(PaneRow::read_only(label, format_length(value, units)))
-        }
-        Some(_) => missing_entry(app, label, "not a number"),
-        None => missing_entry(app, label, "no value"),
-    };
-    entry.formula = formula;
-    entry
-}
-
 /// Adds one text row: the value, or "—" plus one warning when empty.
 fn push_text(app: &mut AppCtx, rows: &mut Vec<Entry>, label: &str, value: &str) {
     if value.is_empty() {
@@ -1295,6 +1283,11 @@ mod tests {
 
     /// A document with one selected 2x1 shape at (3, 4), turned 30°.
     fn selected_document() -> (AppCtx, ShapeId) {
+        selected_document_in(DisplayUnits::Inches)
+    }
+
+    /// [`selected_document`] in the given display units.
+    fn selected_document_in(units: DisplayUnits) -> (AppCtx, ShapeId) {
         let mut doc = Document::new();
         let mut shape = Shape::new(ShapeId { index: 0 }, 7);
         shape.name = "Box".to_owned();
@@ -1313,7 +1306,7 @@ mod tests {
         let mut page = page("Page-1");
         page.shapes.push(id);
         doc.pages.push(page);
-        let mut app = app_with(doc, DisplayUnits::Inches);
+        let mut app = app_with(doc, units);
         app.selection.shapes = vec![id];
         app.selection.anchor = Some(id);
         app.selection.page = Some(PageId { index: 0 });
@@ -1485,58 +1478,60 @@ mod tests {
     }
 
     #[test]
-    fn size_position_rows_show_the_page_size_and_name() {
+    fn with_no_selection_the_size_and_position_rows_are_hidden() {
+        // Task P7-23: the page's data shows once (in the Shape Data
+        // pane); the Size & Position rows hide when there is no shape.
         let mut app = app_with(document(), DisplayUnits::Inches);
-        let rows = size_position_rows(&mut app).expect("rows");
+        assert!(size_position_rows(&mut app).expect("rows").is_empty());
+        let data = shape_data_rows(&mut app).expect("rows");
         assert_eq!(
-            rows,
+            data,
             vec![
-                PaneRow::read_only("Width", "8.5 in"),
-                PaneRow::read_only("Height", "11 in"),
+                PaneRow::read_only("title", "Diagram 1"),
                 PaneRow::read_only("Name", "Page-1"),
             ]
         );
-        assert!(rows.iter().all(|row| row.edit.is_none()));
     }
 
     #[test]
-    fn page_size_converts_at_the_units_edge() {
-        let mut mm = app_with(document(), DisplayUnits::Millimeters);
+    fn shape_values_convert_at_the_units_edge() {
+        // The selected shape's Width (2 in) in the display units.
+        let (mut mm, _id) = selected_document_in(DisplayUnits::Millimeters);
         let rows = size_position_rows(&mut mm).expect("rows");
-        assert_eq!(rows[0].value, "215.9 mm");
-        assert_eq!(rows[1].value, "279.4 mm");
+        assert_eq!(rows[0].value, "50.8 mm");
 
-        let mut cm = app_with(document(), DisplayUnits::Centimeters);
+        let (mut cm, _id) = selected_document_in(DisplayUnits::Centimeters);
         let rows = size_position_rows(&mut cm).expect("rows");
-        assert_eq!(rows[0].value, "21.59 cm");
+        assert_eq!(rows[0].value, "5.08 cm");
     }
 
     #[test]
     fn missing_values_render_a_dash_and_record_one_warning() {
         let mut doc = Document::new();
-        doc.pages.push(Page::new(PageId { index: 0 }, 0));
+        let id = doc.add_shape(Shape::new(ShapeId { index: 0 }, 3));
+        let mut page = page("Page-1");
+        page.shapes.push(id);
+        doc.pages.push(page);
         let mut app = app_with(doc, DisplayUnits::Inches);
+        app.selection.shapes = vec![id];
+        app.selection.anchor = Some(id);
         let rows = size_position_rows(&mut app).expect("rows");
         assert_eq!(rows[0], PaneRow::read_only("Width", MISSING_VALUE));
         assert_eq!(rows[1], PaneRow::read_only("Height", MISSING_VALUE));
-        assert_eq!(
-            rows.last().cloned(),
-            Some(PaneRow::read_only("Name", MISSING_VALUE))
-        );
-        assert_eq!(rows.len(), 3);
-        assert_eq!(app.warnings.len(), 3);
+        assert!(!app.warnings.is_empty());
         assert_eq!(app.warnings[0], "Width: no value");
 
         // A second frame does not duplicate the same warning.
+        let before = app.warnings.len();
         let _ = size_position_rows(&mut app).expect("rows");
-        assert_eq!(app.warnings.len(), 3);
+        assert_eq!(app.warnings.len(), before);
 
+        // With no selection the Size & Position rows hide (task
+        // P7-23) and the Shape Data pane names the page once.
+        app.selection.clear();
+        assert!(size_position_rows(&mut app).expect("rows").is_empty());
         let rows = shape_data_rows(&mut app).expect("rows");
-        assert_eq!(rows, vec![PaneRow::read_only("Name", MISSING_VALUE)]);
-        assert_eq!(
-            app.warnings.last().map(String::as_str),
-            Some("Name: no value")
-        );
+        assert_eq!(rows, vec![PaneRow::read_only("Name", "Page-1")]);
     }
 
     #[test]
@@ -1561,14 +1556,17 @@ mod tests {
 
     #[test]
     fn a_non_finite_value_renders_a_dash() {
-        let mut doc = Document::new();
-        let mut page = page("Page-1");
-        page.sheet.cells = vec![
-            cell("PageWidth", f64::NAN),
-            cell("PageHeight", f64::INFINITY),
-        ];
-        doc.pages.push(page);
-        let mut app = app_with(doc, DisplayUnits::Inches);
+        let (mut app, id) = selected_document();
+        let session = app.active_document_mut().expect("session");
+        if let Some(shape) = session.document.shape_mut(id) {
+            for cell in &mut shape.sheet.cells {
+                match cell.name.as_str() {
+                    "Width" => cell.value = Some(CellValue::Number(f64::NAN)),
+                    "Height" => cell.value = Some(CellValue::Number(f64::INFINITY)),
+                    _ => {}
+                }
+            }
+        }
         let rows = size_position_rows(&mut app).expect("rows");
         for label in ["Width", "Height"] {
             assert_eq!(row(&rows, label).value, MISSING_VALUE, "{label}");
@@ -2141,25 +2139,25 @@ mod tests {
         let entries = size_position_entries(&mut app).expect("entries");
         assert!(entry_of(&entries, "Width").formula);
         with_ui(|ui| {
-            let intents = show_pane(ui, &mut app, "Size & Position", &entries);
+            let intents = show_pane(ui, &mut app, "Size & Position", &entries, "");
             assert!(intents.is_empty(), "a read-only row dispatches nothing");
         });
     }
 
     #[test]
     fn non_finite_values_take_the_warning_path() {
-        let mut app = AppCtx::new(Settings::default());
-        let mut rows = Vec::new();
-        let row = push_length(
-            &mut app,
-            "Width",
-            Some(f64::NAN),
-            DisplayUnits::Inches,
-            false,
-        );
-        assert_eq!(row.row.value, MISSING_VALUE);
-        rows.push(row);
-        assert_eq!(rows[0].row.value, MISSING_VALUE);
+        let (mut app, id) = selected_document();
+        let session = app.active_document_mut().expect("session");
+        if let Some(shape) = session.document.shape_mut(id) {
+            for cell in &mut shape.sheet.cells {
+                if cell.name.as_str() == "Width" {
+                    cell.value = Some(CellValue::Number(f64::NAN));
+                }
+            }
+        }
+        let rows = size_position_rows(&mut app).expect("rows");
+        assert_eq!(rows[0].label, "Width");
+        assert_eq!(rows[0].value, MISSING_VALUE);
     }
 
     #[test]

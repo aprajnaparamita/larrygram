@@ -137,7 +137,8 @@ fn draw_row(
     }
 
     // The gutter: an icon, a check mark for a checked item with no
-    // icon, or a pressed frame around a checked icon.
+    // icon, or a pressed frame around a checked icon. The layout
+    // switch rows draw a radio dot (task P7-23: `view.ui_layout.*`).
     match (&row.icon, row.check) {
         (Some(icon), checked) => {
             let icon_rect = Rect::from_center_size(gutter.center(), Vec2::splat(m.menu_icon));
@@ -150,6 +151,13 @@ fn draw_row(
                 );
             }
             paint_icon(ui, icon_rect, icon, enabled, m.menu_icon);
+        }
+        (None, Some(true)) if is_layout_radio(row) => {
+            paint_radio(
+                ui,
+                gutter.center(),
+                crate::theme::color_at(ui.ctx(), "chrome.text"),
+            );
         }
         (None, Some(true)) => {
             paint_check(
@@ -213,9 +221,20 @@ fn draw_row(
         WidgetInfo::labeled(egui::accesskit::Role::MenuItem, enabled, row.label.clone())
     });
     if !row.tooltip.is_empty() {
-        response = response.on_hover_text(row.tooltip.clone());
+        // The hint appears next to the item under the pointer (task
+        // P7-23), not below the row's left edge.
+        response = response.on_hover_text_at_pointer(row.tooltip.clone());
     }
     response
+}
+
+/// Whether `row` is one of the layout switch rows (`view.ui_layout.*`
+/// in a [`Row`]): the radio dot of the gutter (task P7-23, ADR 0032).
+fn is_layout_radio(row: &Row) -> bool {
+    match &row.activation {
+        Activation::Intent(intent) => intent.command.as_str().starts_with("view.ui_layout."),
+        _ => false,
+    }
 }
 
 /// The menu-bar title ("File"): one menu bar high, with the open and
@@ -359,6 +378,11 @@ fn paint_check(ui: &Ui, center: Pos2, color: Color32) {
         ],
         stroke,
     );
+}
+
+/// The dot of a selected radio row (task P7-23).
+fn paint_radio(ui: &Ui, center: Pos2, color: Color32) {
+    ui.painter().circle_filled(center, 3.0, color);
 }
 
 /// A right-pointing triangle (egui's fonts have no ▸ glyph).
