@@ -28,15 +28,18 @@ fn workspace_root() -> PathBuf {
 
 /// The pinned count of items with an `icon` key, per layout.
 const ICON_ITEMS: &[(LayoutKind, usize)] = &[
-    (LayoutKind::PanelModern, 246),
-    (LayoutKind::PanelClassic, 511),
+    // Task P7-22 items 2 and 6 grew both context menus: Modern's
+    // Group submenu gains six arrange rows and a Delete row, Classic's
+    // Shape submenu two rotate rows and a Delete row.
+    (LayoutKind::PanelModern, 253),
+    (LayoutKind::PanelClassic, 514),
     (LayoutKind::Panel2016, 409),
     (LayoutKind::Panel365, 449),
 ];
 
 /// The pinned count of distinct icon keys, per layout.
 const ICON_KEYS: &[(LayoutKind, usize)] = &[
-    (LayoutKind::PanelModern, 212),
+    (LayoutKind::PanelModern, 213),
     (LayoutKind::PanelClassic, 270),
     (LayoutKind::Panel2016, 355),
     (LayoutKind::Panel365, 386),
