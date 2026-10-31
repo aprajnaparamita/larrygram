@@ -2,7 +2,7 @@
 //! pass: "the Delete key does nothing on any shape, a text object
 //! included"). The tests press the real key events in both layouts.
 
-use crate::{rig_with_rect, LAYOUTS, ShellRig};
+use crate::{LAYOUTS, ShellRig, rig_with_rect};
 
 /// Selects the rectangle with a real click.
 fn select(rig: &mut ShellRig) {

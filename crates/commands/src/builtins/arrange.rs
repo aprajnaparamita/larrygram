@@ -89,7 +89,7 @@ pub(crate) const TABLE: CommandTable = &[
         has_selection,
         run_distribute_vertical,
     ),
-    ("arrange.group", "Group", has_selection, run_group),
+    ("arrange.group", "Group", has_two_or_more, run_group),
     ("arrange.ungroup", "Ungroup", can_ungroup, run_ungroup),
     (
         "arrange.bring_forward",
@@ -481,6 +481,20 @@ fn move_cell_edit(
         edit.push(step);
     }
     Ok(Some(Box::new(edit)))
+}
+
+/// Enabled with two or more shapes selected (task P7-22: "the shape
+/// context menu offers Group with two or more shapes selected"), the
+/// manual-pass rule; the `contexts.yaml` row keeps the 2007 table's
+/// group/picture/container entries as documented differences.
+fn has_two_or_more(ctx: &AppCtx) -> crate::Enabled {
+    if ctx.selection.len() >= 2 {
+        crate::Enabled::yes()
+    } else if ctx.selection.is_empty() {
+        crate::Enabled::no("no selection")
+    } else {
+        crate::Enabled::no("select two or more shapes")
+    }
 }
 
 /// `arrange.group`: groups the selection into a new group shape.

@@ -1522,7 +1522,7 @@ impl Shell {
             let Some(pos) = secondary.1 else {
                 return;
             };
-            if !rect.contains(pos) {
+            if !rect.contains(pos) || !canvas::press_lands_on_canvas(ui, pos) {
                 return;
             }
             if self.editor.is_active() {
@@ -1531,8 +1531,21 @@ impl Shell {
             }
             match self.shape_under(ui, pos, rect) {
                 Some(shape) => {
-                    if self.app.selection.anchor != Some(shape)
-                        && let Some(intent) = select_intent(&self.app, shape)
+                    // The right-click rule of the manual pass (task
+                    // P7-22): a hit inside the sole selected shape
+                    // keeps the selection, so the menu acts on the
+                    // whole group after one click.
+                    let target = self.app.active_document().map(|session| {
+                        crate::tools::pointer::press_target(
+                            &session.document,
+                            shape,
+                            &self.app.selection,
+                        )
+                        .0
+                    });
+                    if let Some(target) = target
+                        && !self.app.selection.contains(target)
+                        && let Some(intent) = select_intent(&self.app, target)
                     {
                         intents.push(intent);
                     }
