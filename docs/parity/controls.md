@@ -874,6 +874,7 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | tools.options.go.to.drawing | Drawing | implemented |
 | tools.options.new.page | Page | implemented |
 | tools.options.page.setup | Setup | implemented |
+| tools.options.preferences | Preferences | implemented |
 | tools.pointer | Pointer Tool | implemented |
 | tools.rectangle | Rectangle | implemented |
 | tools.strikethrough | Strikethrough | implemented |
@@ -1639,7 +1640,6 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | tools.options.color.palette.dlg | Dlg | stub |
 | tools.options.edit.background | Background | stub |
 | tools.options.edit.drawing | Drawing | stub |
-| tools.options.preferences | Preferences | stub |
 | tools.options.protect.document | Document | stub |
 | tools.options.reorder.pages | Pages | stub |
 | tools.org.chart.change.style | Org Chart Change Style | stub |

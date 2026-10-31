@@ -111,6 +111,7 @@ const NO_ROW: &[&str] = &[
     "tools.options.go.to.drawing",
     "tools.options.new.page",
     "tools.options.page.setup",
+    "tools.options.preferences",
     "view.custom",
     "view.fit.in.window",
     "view.full_screen_mode",

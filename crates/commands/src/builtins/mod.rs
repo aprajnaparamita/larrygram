@@ -127,6 +127,14 @@ const BUILTINS: &[(&str, &str, EnabledFn, RunFn)] = &[
         always,
         view::run_options,
     ),
+    // Task P7-23: the Panel Classic Tools > Options row (`tools.
+    // options.preferences`) links to the same View/Options dialog.
+    (
+        "tools.options.preferences",
+        "Options",
+        always,
+        view::run_options,
+    ),
     ("app.quit", "Exit", always, file::run_quit),
     ("file.new", "New", always, file::run_new),
     (
