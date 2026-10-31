@@ -763,6 +763,12 @@ fn run_drawing(ctx: &mut AppCtx, registry: &Registry, id: &'static str, pick: u3
     );
 }
 
+/// The argument-less commands (task P7-22 item 4): dispatch with no
+/// arguments.
+fn run_plain(ctx: &mut AppCtx, registry: &Registry, id: &'static str, _pick: u32) {
+    try_dispatch(ctx, registry, id, Args::new());
+}
+
 /// `connector.glue_begin` / `connector.glue_end`: the first top-level
 /// shape glues to the last one; `point` is omitted for outline glue
 /// every third pick (both glue kinds, ADR 0045 rule 1).
@@ -1347,6 +1353,14 @@ const CASES: &[Case] = &[
         run: run_drawing,
     },
     Case {
+        id: "insert.text.box",
+        run: run_plain,
+    },
+    Case {
+        id: "insert.vert.text.box",
+        run: run_plain,
+    },
+    Case {
         id: "page.add",
         run: run_page_named,
     },
@@ -1491,6 +1505,14 @@ const NON_EDITING: &[(&str, &str)] = &[
         "opens a new document, no undo (P7-20)",
     ),
     ("file.open", "reads a file, no undo (P4-02)"),
+    (
+        "file.import",
+        "stops at the image pipeline boundary (task P7-22 item 5): it never edits",
+    ),
+    (
+        "tools.picture.insert.from.file",
+        "stops at the image pipeline boundary (task P7-22 item 5): it never edits",
+    ),
     ("file.save", "writes a file (ADR 0048)"),
     ("file.save_as", "writes a file (ADR 0048)"),
     ("file.close", "closes a session (UiRequest::ConfirmClose)"),

@@ -58,6 +58,7 @@ A row listed in `ui-spec/out-of-scope.txt` stays `out-of-scope` even when a comm
 | Paste | button | Paste | tab/TabIconEditor/GroupIconEditClipboard | implemented |
 | PasteDuplicate | button | PasteDuplicate | tab/TabHome/GroupClipboard | implemented |
 | PasteMenu | splitButton | PasteMenu | tab/TabHome/GroupClipboard | implemented |
+| PictureInsertFromFile | button | PictureInsertFromFile | tab/TabInsert/GroupInsertIllustrations | implemented |
 | PointerTool | toggleButton | PointerTool | tab/TabInkToolsPens/GroupInkTools | implemented |
 | PositionMenu | gallery | PositionMenu | tab/TabHome/GroupArrange | implemented |
 | RectangleTool | toggleButton | RectangleTool | tab/TabDeveloper/GroupShapeDesign | implemented |
@@ -71,6 +72,9 @@ A row listed in `ui-spec/out-of-scope.txt` stays `out-of-scope` even when a comm
 | TextAlignBottom | toggleButton | TextAlignBottom | tab/TabHome/GroupParagraph | implemented |
 | TextAlignMiddle | toggleButton | TextAlignMiddle | tab/TabHome/GroupParagraph | implemented |
 | TextAlignTop | toggleButton | TextAlignTop | tab/TabHome/GroupParagraph | implemented |
+| TextBoxInsertHorizontal | toggleButton | TextBoxInsertHorizontal | tab/TabInsert/GroupTextBoxText | implemented |
+| TextBoxInsertMenu | splitButton | TextBoxInsertMenu | tab/TabInsert/GroupTextBoxText | implemented |
+| TextBoxInsertVertical | toggleButton | TextBoxInsertVertical | tab/TabInsert/GroupTextBoxText | implemented |
 | TextTool | toggleButton | TextTool | tab/TabHome/GroupTools | implemented |
 | Underline | toggleButton | Underline | tab/TabHome/GroupFont | implemented |
 | Undo | gallery | Undo | qat | implemented |
@@ -525,7 +529,6 @@ A row listed in `ui-spec/out-of-scope.txt` stays `out-of-scope` even when a comm
 | PictureContrastGallery | gallery | PictureContrastGallery | tab/TabPictureToolsFormat/GroupPictureToolAdjust | stub |
 | PictureCorrectionsDialog | button | PictureCorrectionsDialog | tab/TabPictureToolsFormat/GroupPictureToolAdjust | stub |
 | PictureFormatDialogVisio | buttonDialogBoxLauncher | PictureFormatDialogVisio | tab/TabPictureToolsFormat/GroupPictureToolAdjust | stub |
-| PictureInsertFromFile | button | PictureInsertFromFile | tab/TabInsert/GroupInsertIllustrations | stub |
 | PinnableGroupCloudGettingStartedOpenMRUPlacesOrNavSlab | group | PinnableGroupCloudGettingStartedOpenMRUPlacesOrNavSlab | backstage/TabRecent | stub |
 | PlaceTabHome | tab | PlaceTabHome | backstage/PlaceTabHome | stub |
 | PointerModeOptions | gallery | PointerModeOptions | qat | stub |
@@ -656,9 +659,6 @@ A row listed in `ui-spec/out-of-scope.txt` stays `out-of-scope` even when a comm
 | TaskPanesMenuVisio | menu | TaskPanesMenuVisio | tab/TabView/GroupViewShowHide | stub |
 | TextAllCaps | toggleButton | TextAllCaps | tab/TabHome/GroupFont | stub |
 | TextBlockTool | toggleButton | TextBlockTool | tab/TabHome/GroupTools | stub |
-| TextBoxInsertHorizontal | toggleButton | TextBoxInsertHorizontal | tab/TabInsert/GroupTextBoxText | stub |
-| TextBoxInsertMenu | splitButton | TextBoxInsertMenu | tab/TabInsert/GroupTextBoxText | stub |
-| TextBoxInsertVertical | toggleButton | TextBoxInsertVertical | tab/TabInsert/GroupTextBoxText | stub |
 | TextDirectionLeftToRight | toggleButton | TextDirectionLeftToRight | tab/TabHome/GroupParagraph | stub |
 | TextDirectionRightToLeft | toggleButton | TextDirectionRightToLeft | tab/TabHome/GroupParagraph | stub |
 | TextDirectionVertical | button | TextDirectionVertical | tab/TabHome/GroupParagraph | stub |
@@ -785,6 +785,7 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | file.close | Close | implemented |
 | file.exit | Exit | implemented |
 | file.export | Export | implemented |
+| file.import | Import | implemented |
 | file.inspect | Inspect | implemented |
 | file.new | New | implemented |
 | file.new.blank.drawing | Drawing | implemented |
@@ -829,6 +830,8 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | insert.drawing.text_box | Text Box | implemented |
 | insert.new.background.page | Background Page Insert | implemented |
 | insert.shape | Shape | implemented |
+| insert.text.box | Text Box Insert Horizontal | implemented |
+| insert.vert.text.box | Vertical Text Box | implemented |
 | page.add | New Page | implemented |
 | page.delete | Delete Page | implemented |
 | page.move_left | Move Page Left | implemented |
@@ -875,6 +878,7 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | tools.options.new.page | Page | implemented |
 | tools.options.page.setup | Setup | implemented |
 | tools.options.preferences | Preferences | implemented |
+| tools.picture.insert.from.file | Picture Insert From File | implemented |
 | tools.pointer | Pointer Tool | implemented |
 | tools.rectangle | Rectangle | implemented |
 | tools.strikethrough | Strikethrough | implemented |
@@ -1164,7 +1168,6 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | file.email.routing | Routing | stub |
 | file.export.database.addon | Addon | stub |
 | file.header.footer | Footer | stub |
-| file.import | Import | stub |
 | file.last.file1 | File1 | stub |
 | file.last.file10 | File10 | stub |
 | file.last.file11 | File11 | stub |
@@ -1346,9 +1349,7 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | insert.section | Section... | stub |
 | insert.spin.control | Control | stub |
 | insert.stamp.tool | Tool | stub |
-| insert.text.box | Text Box Insert Horizontal | stub |
 | insert.toggle.button.control | Control | stub |
-| insert.vert.text.box | Vertical Text Box | stub |
 | insert.word.art | Art | stub |
 | layer.dialog | Dialog | stub |
 | layer.dlg | Dlg | stub |
@@ -1679,7 +1680,6 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | tools.picture.compress | Picture Compress | stub |
 | tools.picture.contrast | Picture Contrast | stub |
 | tools.picture.corrections.dialog | Picture Corrections Dialog | stub |
-| tools.picture.insert.from.file | Picture Insert From File | stub |
 | tools.pointer.mode.options | Pointer Mode Options | stub |
 | tools.pointer_tool.multiple_select | Multiple Select | stub |
 | tools.prepare.visio.diagram.for.export.to.flow | Prepare Visio Diagram For Export To Flow | stub |

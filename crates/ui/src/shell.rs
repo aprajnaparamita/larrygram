@@ -124,6 +124,10 @@ const MAX_ZOOM: f64 = 64.0;
 /// XML packages and the read-only binary formats.
 const OPEN_EXTENSIONS: &[&str] = &["vsdx", "vssx", "vstx", "vsd", "vss", "vst"];
 
+/// The image extensions the picture dialog accepts (task P7-22 item
+/// 5): the PNG and JPEG formats `file.import` validates.
+const PICTURE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg"];
+
 /// The file extensions a save dialog offers (task P8-09): the XML
 /// formats only, the binary ones being read-only inputs.
 const SAVE_EXTENSIONS: &[&str] = &["vsdx", "vssx", "vstx"];
@@ -2100,6 +2104,35 @@ impl Shell {
         needed: &NeededInput,
     ) -> Result<Ask, UiError> {
         match needed {
+            // The picture dialog (task P7-22 item 5): `file.import`
+            // (and Panel Modern's `tools.picture.insert.from.file`)
+            // asks for a PNG or JPEG, not for a document.
+            NeededInput::Path {
+                purpose: PathPurpose::OpenFile,
+                suggested,
+            } if matches!(
+                command.as_str(),
+                "file.import" | "tools.picture.insert.from.file"
+            ) =>
+            {
+                let request = OpenRequest {
+                    title: format!("Insert Picture ({command})"),
+                    extensions: PICTURE_EXTENSIONS.iter().map(|e| (*e).to_owned()).collect(),
+                    suggested: suggested.clone(),
+                };
+                let choice = match self.picker.open(&request)? {
+                    Some(choice) => Some(choice),
+                    None => match self.picker.poll() {
+                        PickState::Picked(choice) => Some(choice),
+                        PickState::Pending => return Ok(Ask::Pending),
+                        _ => None,
+                    },
+                };
+                Ok(match choice {
+                    Some(choice) => Ask::Again(with_choice(invocation, choice)),
+                    None => Ask::Cancelled,
+                })
+            }
             NeededInput::Path {
                 purpose: PathPurpose::OpenFile,
                 suggested,

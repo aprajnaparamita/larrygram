@@ -15,7 +15,9 @@
 // these helpers are test code and use `expect`/`panic` freely.
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
+mod flip;
 mod groups;
+mod insert;
 mod keys;
 
 use std::cell::RefCell;
@@ -275,6 +277,20 @@ impl ShellRig {
     /// open; a submenu row opens its children on click).
     pub fn click_menu_row(&mut self, label: &str) {
         self.click_menu_nth(label, 0);
+    }
+
+    /// Clicks the first widget named `label` (a menu-bar title or a
+    /// tab), whatever its role.
+    pub fn click_named(&mut self, label: &str) {
+        use egui_kittest::kittest::Queryable;
+        self.run();
+        let root = self.harness.root();
+        let node = root
+            .query_all_by_label(label)
+            .next()
+            .unwrap_or_else(|| panic!("no widget named {label:?}"));
+        node.click();
+        self.run();
     }
 
     /// Clicks the `nth` menu row named `label` (a submenu and its item
