@@ -543,11 +543,20 @@ pub fn token_is_known(token: &str) -> bool {
 /// The token of the shifted symbol keys depends on Shift being held:
 /// `Comma` is `,` and (with Shift) `<`; `Period` is `.` and `>`;
 /// `Equals` is `=` and (with Shift, on most layouts) `+`.
+///
+/// The delete key also depends on the platform (task P7-22): the
+/// macOS delete key is `Backspace` to egui (winit `NamedKey::Backspace`),
+/// so an unmodified `Backspace` is the `Delete` token — the delete key
+/// of either platform matches a `Delete` binding. With a modifier it
+/// stays `Backspace` (`Ctrl+Backspace` is delete-back-word and egui's
+/// text edit owns it), so a plain `Backspace` chord is never typed and
+/// the table has no reachable `Backspace`-only binding.
 fn key_token(key: Key, modifiers: Modifiers) -> Option<&'static str> {
     let token = match key {
         Key::ArrowDown | Key::ArrowLeft | Key::ArrowRight | Key::ArrowUp => ARROWS_TOKEN,
         Key::Escape => "Esc",
         Key::Tab => "Tab",
+        Key::Backspace if modifiers.is_none() => "Delete",
         Key::Backspace => "Backspace",
         Key::Enter => "Enter",
         Key::Space => "Space",
@@ -1037,7 +1046,10 @@ mod tests {
             (Key::ArrowUp, none, ARROWS_TOKEN),
             (Key::Escape, none, "Esc"),
             (Key::Tab, none, "Tab"),
-            (Key::Backspace, none, "Backspace"),
+            // The macOS delete key is an unmodified `Backspace` (task
+            // P7-22); with a modifier it stays `Backspace`.
+            (Key::Backspace, none, "Delete"),
+            (Key::Backspace, shift, "Backspace"),
             (Key::Enter, none, "Enter"),
             (Key::Space, none, "Space"),
             (Key::Insert, none, "Insert"),
