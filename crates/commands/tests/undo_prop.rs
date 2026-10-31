@@ -1472,6 +1472,8 @@ const CASES: &[Case] = &[
 /// `Outcome::edit`.
 const NON_EDITING: &[(&str, &str)] = &[
     ("app.office.center.options", "opens a dialog (UiRequest)"),
+    // Task P7-23: the Panel Classic Tools > Options row.
+    ("tools.options.preferences", "opens a dialog (UiRequest)"),
     ("app.quit", "quits (UiRequest)"),
     ("help.about", "opens a dialog (UiRequest)"),
     ("help.welcome", "opens a dialog (UiRequest)"),
