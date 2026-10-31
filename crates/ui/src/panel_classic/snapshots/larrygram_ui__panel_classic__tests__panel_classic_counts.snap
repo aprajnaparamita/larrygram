@@ -20,6 +20,6 @@ surface: toolbars
   split_recent: items 4 (hidden 0) widgets 4
   submenu: items 10 (hidden 0) widgets 10
 surface: context_menus
-  button: items 217 (hidden 0) widgets 217
+  button: items 220 (hidden 0) widgets 220
   list: items 6 (hidden 0) widgets 6
   submenu: items 11 (hidden 0) widgets 11

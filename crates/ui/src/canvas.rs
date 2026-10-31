@@ -624,9 +624,13 @@ fn tool_events(
     if pressed {
         // The press lands where the button went down, not where the
         // pointer moved to later in the same frame (task P7-19: a fast
-        // press-and-move on a handle missed it).
+        // press-and-move on a handle missed it). A press on a popup
+        // drawn over the canvas (the context menu) belongs to the
+        // popup: the canvas must not steal it as raw input (task
+        // P7-22).
         if let Some(screen) = origin.or(pos)
             && viewport.contains(screen)
+            && press_lands_on_canvas(ui, screen)
         {
             cache.pointer_down = true;
             events.push(ToolEvent::PointerDown {
@@ -647,6 +651,7 @@ fn tool_events(
     if double
         && let Some(screen) = pos
         && viewport.contains(screen)
+        && press_lands_on_canvas(ui, screen)
     {
         events.push(ToolEvent::DoubleClick {
             pos: to_page(screen),
@@ -662,6 +667,21 @@ fn tool_events(
         }
     }
     events
+}
+
+/// Whether a pointer press at `screen` lands on the canvas itself and
+/// not on a popup drawn over it (task P7-22).
+///
+/// The canvas reads raw pointer input, so a click on an open context
+/// menu would also reach the canvas underneath and race the menu's
+/// command. A press is stolen only when a real popup layer covers the
+/// point; a tooltip layer does not take clicks and passes through.
+/// (Task P7-24 applies the same rule to its popups.)
+pub(crate) fn press_lands_on_canvas(ui: &Ui, screen: Pos2) -> bool {
+    match ui.ctx().layer_id_at(screen) {
+        None => true,
+        Some(layer) => layer == ui.layer_id() || layer.order == egui::Order::Tooltip,
+    }
 }
 
 /// The page point of a screen point in the canvas viewport.
