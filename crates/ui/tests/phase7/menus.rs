@@ -1266,7 +1266,8 @@ const KNOWN_EDIT: &[(&str, &str)] = &[
     ("Object...", "button"),
 ];
 
-/// The View menu's 20 top-level rows.
+/// The View menu's 22 top-level rows (task P7-23 adds the two layout
+/// radios).
 const KNOWN_VIEW: &[(&str, &str)] = &[
     ("Shapes Window", "button"),
     ("Pan & Zoom Window", "button"),
@@ -1288,6 +1289,8 @@ const KNOWN_VIEW: &[(&str, &str)] = &[
     ("Layer Properties...", "button"),
     ("Full Screen", "button"),
     ("Zoom", "submenu"),
+    ("Panel Modern", "check"),
+    ("Panel Classic", "check"),
 ];
 
 /// The committed File, Edit and View menus match the hand-written
