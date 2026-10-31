@@ -156,6 +156,18 @@ const BUILTINS: &[(&str, &str, EnabledFn, RunFn)] = &[
         file::run_new_blank_us,
     ),
     ("file.open", "Open", always, file::run_open),
+    (
+        "file.import",
+        "Insert Picture",
+        file::can_import_picture,
+        file::run_import,
+    ),
+    (
+        "tools.picture.insert.from.file",
+        "Pictures",
+        file::can_import_picture,
+        file::run_import,
+    ),
     ("file.save", "Save", has_document, file::run_save),
     ("file.save_as", "Save As", has_document, file::run_save_as),
     ("file.close", "Close", has_document, file::run_close),

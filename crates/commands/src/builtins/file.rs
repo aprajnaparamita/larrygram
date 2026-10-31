@@ -81,6 +81,109 @@ pub(crate) fn need_path(
     }
 }
 
+/// Why Insert > Picture stops at the pipeline boundary (task P7-22
+/// item 5): saving a new image needs the `.vsdx` image writer (binary
+/// media parts and their relationships for shapes created in memory)
+/// and showing it needs image rendering (an image node in the render
+/// scene). Neither exists yet, so the command refuses with this
+/// reason instead of faking support.
+pub(crate) const PICTURE_DISABLED_REASON: &str = "Insert Picture needs the .vsdx image writer (media parts and relationships) and the image renderer; neither is available yet";
+
+/// `file.import`'s enabled state: the menu row is disabled with the
+/// pipeline-boundary reason (task P7-22 item 5).
+pub(super) fn can_import_picture(ctx: &AppCtx) -> crate::Enabled {
+    if ctx.active_document().is_none() {
+        return crate::Enabled::no("no open document");
+    }
+    crate::Enabled::no(PICTURE_DISABLED_REASON)
+}
+
+/// `file.import`: Insert > Picture > From File (task P7-22 item 5).
+///
+/// The command takes `path` (the shell's picture dialog asks for it;
+/// [`need_path`] raises the request), reads the file and validates a
+/// PNG or JPEG, then stops at the pipeline boundary with
+/// [`PICTURE_DISABLED_REASON`] and the file's kind and size. No shape
+/// is created: an image that would neither draw nor save is not an
+/// inserted picture. The image work that is missing is named in the
+/// task's Result.
+pub(super) fn run_import(_ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError> {
+    let path = need_path(&inv.args, "path", PathPurpose::OpenFile)?;
+    let bytes = std::fs::read(&path).map_err(|error| read_error(&path, error))?;
+    let (format, width, height) = image_size(&bytes).ok_or_else(|| {
+        CommandError::invalid_args(format!("{} is not a PNG or JPEG image", path.display()))
+    })?;
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.display().to_string());
+    Err(CommandError::failed(format!(
+        "cannot insert {name}: read {format} {width}x{height} px, but {PICTURE_DISABLED_REASON}"
+    )))
+}
+
+/// The image format and pixel size of PNG or JPEG `bytes`, or `None`
+/// for anything else (task P7-22 item 5). The parse is bounded and
+/// never panics: PNG reads the IHDR size; JPEG scans the segment
+/// headers for a start-of-frame marker.
+fn image_size(bytes: &[u8]) -> Option<(&'static str, u32, u32)> {
+    /// A big-endian `u32` at `at`.
+    fn be32(bytes: &[u8], at: usize) -> Option<u32> {
+        Some(u32::from_be_bytes([
+            *bytes.get(at)?,
+            *bytes.get(at + 1)?,
+            *bytes.get(at + 2)?,
+            *bytes.get(at + 3)?,
+        ]))
+    }
+    /// A big-endian `u16` at `at`.
+    fn be16(bytes: &[u8], at: usize) -> Option<u16> {
+        Some(u16::from_be_bytes([*bytes.get(at)?, *bytes.get(at + 1)?]))
+    }
+
+    const PNG_SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+    if bytes.len() >= 24 && bytes.get(..8) == Some(PNG_SIGNATURE.as_slice()) {
+        let width = be32(bytes, 16)?;
+        let height = be32(bytes, 20)?;
+        return Some(("PNG", width, height));
+    }
+    if bytes.len() >= 4 && bytes.get(..2) == Some(&[0xFF, 0xD8]) {
+        let mut index = 2usize;
+        for _ in 0..64 {
+            // Every segment starts with an FF marker byte.
+            if bytes.get(index) != Some(&0xFF) {
+                return None;
+            }
+            let mut marker_at = index + 1;
+            let marker = loop {
+                match bytes.get(marker_at) {
+                    Some(0xFF) => marker_at += 1,
+                    Some(marker) => break *marker,
+                    None => return None,
+                }
+            };
+            index = marker_at + 1;
+            match marker {
+                // Standalone markers carry no length.
+                0xD8 | 0x01 | 0xD0..=0xD7 => continue,
+                // End of image and start of scan: no frame came first.
+                0xD9 | 0xDA => return None,
+                _ => {}
+            }
+            let length = usize::from(be16(bytes, index)?.max(2));
+            let frame = index + 2;
+            if (0xC0..=0xCF).contains(&marker) && !matches!(marker, 0xC4 | 0xC8 | 0xCC) {
+                let height = u32::from(be16(bytes, frame + 1)?);
+                let width = u32::from(be16(bytes, frame + 3)?);
+                return Some(("JPEG", width, height));
+            }
+            index = index.checked_add(length)?;
+        }
+        return None;
+    }
+    None
+}
+
 /// The `page` argument (1-based), or `None` when the caller left it out.
 ///
 /// A number outside `1..=u32::MAX` is an argument error, and every
@@ -1706,5 +1809,94 @@ mod tests {
         let message = error.to_string();
         assert!(message.contains("cannot write output"), "{message}");
         std::fs::remove_dir_all(&dir).expect("clean up");
+    }
+    // --- task P7-22 item 5: Insert > Picture ------------------------
+
+    /// The bytes of a `width` x `height` PNG header (the 8-byte
+    /// signature and a minimal IHDR).
+    fn png_bytes(width: u32, height: u32) -> Vec<u8> {
+        let mut bytes = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+        bytes.extend_from_slice(&13u32.to_be_bytes());
+        bytes.extend_from_slice(b"IHDR");
+        bytes.extend_from_slice(&width.to_be_bytes());
+        bytes.extend_from_slice(&height.to_be_bytes());
+        bytes
+    }
+
+    /// The bytes of a `width` x `height` JPEG: SOI and one SOF0
+    /// segment.
+    fn jpeg_bytes(width: u16, height: u16) -> Vec<u8> {
+        let mut bytes = vec![0xFF, 0xD8, 0xFF, 0xC0, 0x00, 0x0B, 0x08];
+        bytes.extend_from_slice(&height.to_be_bytes());
+        bytes.extend_from_slice(&width.to_be_bytes());
+        bytes.push(0x01);
+        bytes.push(0xFF);
+        bytes.push(0xD9);
+        bytes
+    }
+
+    #[test]
+    fn image_size_reads_png_and_jpeg_headers_and_refuses_the_rest() {
+        assert_eq!(image_size(&png_bytes(640, 480)), Some(("PNG", 640, 480)));
+        assert_eq!(image_size(&jpeg_bytes(3, 5)), Some(("JPEG", 3, 5)));
+        assert_eq!(image_size(b"hello, world"), None);
+        assert_eq!(image_size(&[]), None);
+        // A truncated header is not an image, never a panic.
+        assert_eq!(image_size(&png_bytes(1, 1)[..20]), None);
+        assert_eq!(image_size(&[0xFF, 0xD8, 0xFF]), None);
+        // A JPEG without a frame has no size.
+        assert_eq!(image_size(&[0xFF, 0xD8, 0xFF, 0xD9]), None);
+    }
+
+    #[test]
+    fn import_without_a_path_asks_for_one() {
+        let mut ctx = AppCtx::new(crate::Settings::default());
+        let error = run_import(&mut ctx, &Invocation::empty(Source::Ui)).expect_err("asks");
+        assert!(
+            matches!(
+                error,
+                CommandError::NeedsInput(NeededInput::Path {
+                    purpose: PathPurpose::OpenFile,
+                    ..
+                })
+            ),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn import_validates_the_file_and_stops_at_the_boundary() {
+        let dir = scratch_dir();
+        let png = dir.join("picture.png");
+        std::fs::write(&png, png_bytes(64, 32)).expect("write");
+        let mut ctx = AppCtx::new(crate::Settings::default());
+        ctx.open_document(crate::app::DocumentSession::new(Document::new(), None));
+        let error = run_import(&mut ctx, &open_invocation(&png)).expect_err("boundary");
+        let message = error.to_string();
+        assert!(message.contains("PNG 64x32"), "{message}");
+        assert!(message.contains("image writer"), "{message}");
+        assert!(message.contains("image renderer"), "{message}");
+
+        // Not an image: an argument error that says so.
+        let text = dir.join("notes.txt");
+        std::fs::write(&text, b"hello").expect("write");
+        let error = run_import(&mut ctx, &open_invocation(&text)).expect_err("not an image");
+        assert!(error.to_string().contains("not a PNG or JPEG"), "{error}");
+
+        // A missing file is a read failure.
+        let error = run_import(&mut ctx, &open_invocation(&dir.join("gone.png")))
+            .expect_err("missing file");
+        assert!(error.to_string().contains("cannot read input"), "{error}");
+    }
+
+    #[test]
+    fn the_picture_commands_are_disabled_with_the_pipeline_reason() {
+        let mut ctx = AppCtx::new(crate::Settings::default());
+        let reason = can_import_picture(&ctx).reason.expect("a disabled reason");
+        assert!(reason.contains("no open document"), "{reason}");
+        ctx.open_document(crate::app::DocumentSession::new(Document::new(), None));
+        let reason = can_import_picture(&ctx).reason.expect("a disabled reason");
+        assert!(reason.contains("image writer"), "{reason}");
+        assert!(reason.contains("image renderer"), "{reason}");
     }
 }

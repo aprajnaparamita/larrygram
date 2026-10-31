@@ -53,6 +53,7 @@ const NO_ROW: &[&str] = &[
     "edit.select",
     "file.close",
     "file.exit",
+    "file.import",
     "file.export",
     "file.inspect",
     "file.new.blank.drawing",
@@ -137,6 +138,46 @@ const NO_ROW_REASON: &str = "Larrygram-only or Phase 5/7 command with no 2007 co
 /// Differences accepted for P7-08. Each reason says why the table row
 /// and the runtime predicate must differ.
 const ALLOWED: &[Allow] = &[
+    Allow {
+        command: "tools.picture.insert.from.file",
+        context: ContextId::EmptyPage,
+        reason: "the command stops at the image pipeline boundary (task P7-22 item 5): the .vsdx media writer and the image renderer are missing",
+    },
+    Allow {
+        command: "tools.picture.insert.from.file",
+        context: ContextId::ShapesSelected,
+        reason: "the command stops at the image pipeline boundary (task P7-22 item 5): the .vsdx media writer and the image renderer are missing",
+    },
+    Allow {
+        command: "tools.picture.insert.from.file",
+        context: ContextId::GroupSelected,
+        reason: "the command stops at the image pipeline boundary (task P7-22 item 5): the .vsdx media writer and the image renderer are missing",
+    },
+    Allow {
+        command: "tools.picture.insert.from.file",
+        context: ContextId::SecondPage,
+        reason: "the command stops at the image pipeline boundary (task P7-22 item 5): the .vsdx media writer and the image renderer are missing",
+    },
+    Allow {
+        command: "tools.picture.insert.from.file",
+        context: ContextId::PictureSelected,
+        reason: "the command stops at the image pipeline boundary (task P7-22 item 5): the .vsdx media writer and the image renderer are missing",
+    },
+    Allow {
+        command: "tools.picture.insert.from.file",
+        context: ContextId::ContainerSelected,
+        reason: "the command stops at the image pipeline boundary (task P7-22 item 5): the .vsdx media writer and the image renderer are missing",
+    },
+    Allow {
+        command: "insert.text.box",
+        context: ContextId::ShapesheetWindow,
+        reason: "the menu command places a text box at the page centre and needs an open page (task P7-22 item 4); the 2007 table hides it in the ShapeSheet window",
+    },
+    Allow {
+        command: "insert.vert.text.box",
+        context: ContextId::ShapesheetWindow,
+        reason: "the menu command places a text box at the page centre and needs an open page (task P7-22 item 4); the 2007 table hides it in the ShapeSheet window",
+    },
     Allow {
         command: "arrange.group",
         context: ContextId::TextEditing,
