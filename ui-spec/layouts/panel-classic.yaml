@@ -5069,6 +5069,13 @@ context_menus:
     command: edit.paste
     visuicmd: visCmdUFEditPaste
     icon: edit.paste
+  - id: context.shape.delete
+    kind: button
+    label: Delete
+    access: "d"
+    command: edit.clear
+    visuicmd: visCmdUFEditClear
+    icon: edit.clear
   - id: context.shape.format
     kind: submenu
     label: Format
@@ -5231,6 +5238,21 @@ context_menus:
       command: arrange.send_backward
       visuicmd: visCmdObjectSendBackward
       icon: arrange.send_backward
+    - id: context.shape.shape.rotate_left
+      kind: button
+      label: Rotate Left
+      access: "l"
+      command: arrange.object.rotate90
+      visuicmd: visCmdObjectRotate90
+      icon: arrange.object.rotate90
+      begin_group: true
+    - id: context.shape.shape.rotate_right
+      kind: button
+      label: Rotate Right
+      access: "r"
+      command: arrange.rotate90.clockwise
+      visuicmd: visCmdRotate90Clockwise
+      icon: arrange.rotate90.clockwise
     - id: context.shape.shape.flip_horizontal
       kind: button
       label: Flip Horizontal

@@ -138,6 +138,26 @@ const NO_ROW_REASON: &str = "Larrygram-only or Phase 5/7 command with no 2007 co
 /// and the runtime predicate must differ.
 const ALLOWED: &[Allow] = &[
     Allow {
+        command: "arrange.group",
+        context: ContextId::TextEditing,
+        reason: "the manual-pass rule: Group is enabled with two or more shapes selected (task P7-22); the 2007 table also offers it on one group, picture or container",
+    },
+    Allow {
+        command: "arrange.group",
+        context: ContextId::GroupSelected,
+        reason: "the manual-pass rule: Group is enabled with two or more shapes selected (task P7-22); the 2007 table also offers it on one group, picture or container",
+    },
+    Allow {
+        command: "arrange.group",
+        context: ContextId::PictureSelected,
+        reason: "the manual-pass rule: Group is enabled with two or more shapes selected (task P7-22); the 2007 table also offers it on one group, picture or container",
+    },
+    Allow {
+        command: "arrange.group",
+        context: ContextId::ContainerSelected,
+        reason: "the manual-pass rule: Group is enabled with two or more shapes selected (task P7-22); the 2007 table also offers it on one group, picture or container",
+    },
+    Allow {
         command: "arrange.align.box",
         context: ContextId::ShapesheetWindow,
         reason: "the formatting command needs a selection; the 2007 table hides it in the ShapeSheet window (task P7-21)",

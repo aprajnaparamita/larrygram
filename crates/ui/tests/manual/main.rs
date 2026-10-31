@@ -141,11 +141,7 @@ impl ShellRig {
     pub fn with_app(app: AppCtx) -> Self {
         let registry: Registry =
             larrygram_commands::builtins::registry().expect("the registry builds");
-        let shell = Rc::new(RefCell::new(Shell::new(
-            registry,
-            sets().clone(),
-            app,
-        )));
+        let shell = Rc::new(RefCell::new(Shell::new(registry, sets().clone(), app)));
         let harness_shell = Rc::clone(&shell);
         let harness = Harness::builder()
             .with_size(WINDOW)
@@ -199,6 +195,16 @@ impl ShellRig {
 
     /// A press and a release in one frame at a screen point.
     pub fn click_at(&mut self, pos: egui::Pos2) {
+        self.click_at_mods(pos, egui::Modifiers::NONE);
+    }
+
+    /// A press and a release in one frame at a screen point with
+    /// `modifiers` (Shift+click toggles the selection). The modifiers
+    /// are set with `ModifiersChanged` (egui keeps the frame's
+    /// modifier state there, not on the button events).
+    pub fn click_at_mods(&mut self, pos: egui::Pos2, modifiers: egui::Modifiers) {
+        self.harness()
+            .event(egui::Event::ModifiersChanged(modifiers));
         self.harness().event(egui::Event::PointerMoved(pos));
         self.run();
         for pressed in [true, false] {
@@ -206,9 +212,12 @@ impl ShellRig {
                 pos,
                 button: egui::PointerButton::Primary,
                 pressed,
-                modifiers: egui::Modifiers::NONE,
+                modifiers,
             });
         }
+        self.run();
+        self.harness()
+            .event(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
         self.run();
     }
 
@@ -248,12 +257,7 @@ impl ShellRig {
         let shell = self.shell.borrow();
         let session = shell.app.active_document().expect("session");
         let page = session.active_page.expect("page");
-        session
-            .document
-            .page(page)
-            .expect("page")
-            .shapes
-            .clone()
+        session.document.page(page).expect("page").shapes.clone()
     }
 
     /// The undo depth of the active document.
@@ -265,6 +269,46 @@ impl ShellRig {
             .expect("session")
             .undo
             .len()
+    }
+
+    /// Clicks the first menu row named `label` (the context menu is
+    /// open; a submenu row opens its children on click).
+    pub fn click_menu_row(&mut self, label: &str) {
+        self.click_menu_nth(label, 0);
+    }
+
+    /// Clicks the `nth` menu row named `label` (a submenu and its item
+    /// can share a label).
+    pub fn click_menu_nth(&mut self, label: &str, nth: usize) {
+        use egui::accesskit::Role;
+        use egui_kittest::kittest::Queryable;
+        self.run();
+        let root = self.harness.root();
+        let node = root
+            .query_all_by_role_and_label(Role::MenuItem, label)
+            .nth(nth)
+            .unwrap_or_else(|| panic!("no menu row named {label:?} (#{nth})"));
+        node.click();
+        self.run();
+    }
+
+    /// The labels of the open context menu's rows (all levels).
+    pub fn menu_rows(&mut self) -> Vec<String> {
+        use egui::accesskit::Role;
+        use egui_kittest::kittest::NodeT;
+        self.run();
+        self.harness()
+            .root()
+            .children_recursive()
+            .filter(|node| node.accesskit_node().data().role() == Role::MenuItem)
+            .map(|node| {
+                node.accesskit_node()
+                    .data()
+                    .label()
+                    .unwrap_or_default()
+                    .to_owned()
+            })
+            .collect()
     }
 }
 
