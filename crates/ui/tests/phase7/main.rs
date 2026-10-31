@@ -25,6 +25,7 @@ mod fit;
 mod golden;
 mod interaction;
 mod layouts;
+mod manual;
 mod menus;
 mod modern;
 mod palette;
