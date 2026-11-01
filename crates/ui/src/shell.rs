@@ -245,6 +245,16 @@ pub struct Shell {
     /// Its body is `page_setup::show`; it re-dispatches
     /// `tools.options.page.setup` with its arguments.
     page_setup: Option<crate::page_setup::State>,
+    /// The Fill dialog (task P7-28): `Some` while it is open. Its body
+    /// is `format_dialogs::fill_dialog`; it re-dispatches `format.fill`
+    /// with its fields (one undo step per OK or Apply).
+    fill_dialog: Option<crate::format_dialogs::FillForm>,
+    /// The Line dialog (task P7-28): `Some` while it is open; it
+    /// re-dispatches `format.line` with its fields.
+    line_dialog: Option<crate::format_dialogs::LineForm>,
+    /// The Format Shape pane (task P7-28): `Some` while it is open;
+    /// its fields apply as they change and it follows the selection.
+    format_shape: Option<panes::FormatShape>,
     /// The welcome wizard (ADR 0066): `Some` while it is open.
     wizard: Option<wizard::State>,
     /// The first launch has not shown the wizard yet (ADR 0066).
@@ -315,6 +325,9 @@ impl Shell {
             options_open: false,
             about_open: false,
             page_setup: None,
+            fill_dialog: None,
+            line_dialog: None,
+            format_shape: None,
             wizard: None,
             welcome_pending,
             confirm_close: None,
@@ -1935,7 +1948,8 @@ impl Shell {
     ///
     /// The keys apply on the page's keyboard scope (the canvas has the
     /// keyboard, ADR 0036) with no dialog open, so a field in the
-    /// Options or Page Setup dialog keeps its own typing.
+    /// Options, Page Setup, Fill or Line dialog or the Format Shape
+    /// pane keeps its own typing.
     fn text_edit_keys(&mut self, ui: &Ui, intents: &mut Vec<Intent>) {
         self.text_seed = None;
         if self.editor.is_active() || self.focus != ShortcutScope::Page {
@@ -1947,6 +1961,9 @@ impl Shell {
         if self.wizard.is_some()
             || self.options_open
             || self.page_setup.is_some()
+            || self.fill_dialog.is_some()
+            || self.line_dialog.is_some()
+            || self.format_shape.is_some()
             || self.about_open
             || self.confirm_close.is_some()
         {
@@ -2083,6 +2100,100 @@ impl Shell {
             }
             Some(crate::page_setup::Outcome::Cancel) => self.page_setup = None,
             Some(crate::page_setup::Outcome::None) | None => {}
+        }
+        // The Fill dialog (task P7-28): its body re-dispatches
+        // `format.fill` with every field — one run is one undo step,
+        // and Cancel (or the window's close button) changes nothing,
+        // also after an Apply (the applied step stands).
+        let fill_outcome = if let Some(state) = &mut self.fill_dialog {
+            let mut open = true;
+            let mut outcome = crate::format_dialogs::Outcome::None;
+            egui::Window::new("Fill")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                .open(&mut open)
+                .show(ui.ctx(), |ui| {
+                    outcome = crate::format_dialogs::fill_dialog(ui, state);
+                });
+            if open {
+                Some(outcome)
+            } else {
+                Some(crate::format_dialogs::Outcome::Cancel)
+            }
+        } else {
+            None
+        };
+        match fill_outcome {
+            Some(crate::format_dialogs::Outcome::Ok(args)) => {
+                self.fill_dialog = None;
+                if let Some(intent) = format_intent("format.fill", args) {
+                    intents.push(intent);
+                }
+            }
+            Some(crate::format_dialogs::Outcome::Apply(args)) => {
+                if let Some(intent) = format_intent("format.fill", args) {
+                    intents.push(intent);
+                }
+            }
+            Some(crate::format_dialogs::Outcome::Cancel) => self.fill_dialog = None,
+            Some(crate::format_dialogs::Outcome::None) | None => {}
+        }
+        // The Line dialog (task P7-28): the same pattern over
+        // `format.line`.
+        let line_outcome = if let Some(state) = &mut self.line_dialog {
+            let mut open = true;
+            let mut outcome = crate::format_dialogs::Outcome::None;
+            egui::Window::new("Line")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                .open(&mut open)
+                .show(ui.ctx(), |ui| {
+                    outcome = crate::format_dialogs::line_dialog(ui, state);
+                });
+            if open {
+                Some(outcome)
+            } else {
+                Some(crate::format_dialogs::Outcome::Cancel)
+            }
+        } else {
+            None
+        };
+        match line_outcome {
+            Some(crate::format_dialogs::Outcome::Ok(args)) => {
+                self.line_dialog = None;
+                if let Some(intent) = format_intent("format.line", args) {
+                    intents.push(intent);
+                }
+            }
+            Some(crate::format_dialogs::Outcome::Apply(args)) => {
+                if let Some(intent) = format_intent("format.line", args) {
+                    intents.push(intent);
+                }
+            }
+            Some(crate::format_dialogs::Outcome::Cancel) => self.line_dialog = None,
+            Some(crate::format_dialogs::Outcome::None) | None => {}
+        }
+        // The Format Shape pane (task P7-28 goal 3): a tool window
+        // whose Fill and Line sections apply as the user changes a
+        // field, and which follows the selection.
+        if let Some(mut state) = self.format_shape.take() {
+            let mut open = true;
+            let mut produced: Vec<Intent> = Vec::new();
+            egui::Window::new("Format Shape")
+                .collapsible(false)
+                .resizable(true)
+                .default_width(300.0)
+                .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-12.0, 48.0))
+                .open(&mut open)
+                .show(ui.ctx(), |ui| {
+                    produced = panes::show_format_shape(ui, &mut self.app, &mut state);
+                });
+            if open {
+                self.format_shape = Some(state);
+            }
+            intents.append(&mut produced);
         }
         if self.about_open {
             let mut open = true;
@@ -2376,6 +2487,24 @@ impl Shell {
             Some(UiRequest::ShowPageSetup) => {
                 self.page_setup = Some(crate::page_setup::State::from_app(&self.app));
             }
+            // The Fill and Line dialogs and the Format Shape pane
+            // (task P7-28): each answers its command's no-argument
+            // request with the anchor's resolved cells.
+            Some(UiRequest::ShowFillDialog) => {
+                self.fill_dialog = Some(crate::format_dialogs::FillForm::from_app(&self.app));
+            }
+            Some(UiRequest::ShowLineDialog) => {
+                self.line_dialog = Some(crate::format_dialogs::LineForm::from_app(&self.app));
+            }
+            Some(UiRequest::ShowFormatShape) => {
+                // The pane toggles (a second `format.shape.pane` run
+                // closes it), like the Panel Classic toolbar row it
+                // shares its data id with.
+                self.format_shape = match self.format_shape.take() {
+                    Some(_) => None,
+                    None => Some(panes::FormatShape::from_app(&self.app)),
+                };
+            }
             Some(UiRequest::ConfirmClose { name }) => self.confirm_close = Some(name.clone()),
             Some(UiRequest::Quit) => self.quit_requested = true,
             _ => {}
@@ -2419,6 +2548,15 @@ impl Shell {
             Err(error) => self.note_error(error.to_string()),
         }
     }
+}
+
+/// One `format.fill` / `format.line` dispatch from a dialog's apply
+/// (task P7-28): the command with the fields as arguments (ADR 0028:
+/// the dialog itself never writes the model). `None` only when the id
+/// does not parse, which cannot happen for these two static ids.
+fn format_intent(command: &'static str, args: larrygram_commands::Args) -> Option<Intent> {
+    let id = CommandId::parse(command).ok()?;
+    Some(Intent::new(id, Invocation::new(args, Source::Ui)))
 }
 
 /// One menu of a shell menu bar (File, View, Help). Every item is a

@@ -18,6 +18,7 @@ pub mod checked;
 pub mod contexts;
 pub mod dialogs;
 pub mod file_view;
+pub mod format_dialogs;
 pub mod handles;
 pub mod icons;
 pub mod lists;

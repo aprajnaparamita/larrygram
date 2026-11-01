@@ -49,6 +49,18 @@ fn wizard(rig: &mut ShellRig) {
     rig.dispatch("help.welcome");
 }
 
+fn fill_dialog(rig: &mut ShellRig) {
+    rig.dispatch("format.fill");
+}
+
+fn line_dialog(rig: &mut ShellRig) {
+    rig.dispatch("format.line");
+}
+
+fn format_shape_pane(rig: &mut ShellRig) {
+    rig.dispatch("format.shape.pane");
+}
+
 fn context_menu(rig: &mut ShellRig) {
     click_at(
         rig,
@@ -73,6 +85,9 @@ const SURFACES: &[(&str, Prepare)] = &[
     ("options", options),
     ("about", about),
     ("wizard", wizard),
+    ("fill dialog", fill_dialog),
+    ("line dialog", line_dialog),
+    ("Format Shape pane", format_shape_pane),
     ("context menu", context_menu),
     ("menu or File view", first_menu),
 ];

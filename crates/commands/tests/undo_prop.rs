@@ -1021,6 +1021,38 @@ fn run_format_painter(ctx: &mut AppCtx, registry: &Registry, id: &'static str, _
     try_dispatch(ctx, registry, id, args);
 }
 
+/// `format.fill` (task P7-28): the Fill dialog's cells from the pick.
+fn run_format_fill(ctx: &mut AppCtx, registry: &Registry, id: &'static str, pick: u32) {
+    select_tops(ctx, 1 + (pick % 2) as usize);
+    let mut args = numbers(&[
+        ("pattern", 1.0 + f64::from(pick % 3)),
+        ("transparency", f64::from(pick % 5) * 15.0),
+    ]);
+    let shade = 32 * (1 + pick % 7);
+    args.set("color", ArgValue::Text(format!("#{shade:02X}1010")));
+    args.set("background", ArgValue::Text("#101010".to_owned()));
+    try_dispatch(ctx, registry, id, args);
+}
+
+/// `format.line` (task P7-28): the Line dialog's cells from the pick.
+fn run_format_line(ctx: &mut AppCtx, registry: &Registry, id: &'static str, pick: u32) {
+    select_tops(ctx, 1 + (pick % 2) as usize);
+    let mut args = numbers(&[
+        ("weight", 0.5 + f64::from(pick)),
+        ("pattern", 1.0 + f64::from(pick % 3)),
+        ("cap", f64::from(pick % 3)),
+        ("transparency", f64::from(pick % 5) * 15.0),
+        ("begin", f64::from(pick % 4)),
+        ("end", f64::from(pick % 4)),
+        ("begin_size", f64::from(pick % 7)),
+        ("end_size", f64::from(pick % 7)),
+        ("rounding", 0.125 * f64::from(pick % 3)),
+    ]);
+    let shade = 32 * (1 + pick % 7);
+    args.set("color", ArgValue::Text(format!("#{shade:02X}1010")));
+    try_dispatch(ctx, registry, id, args);
+}
+
 /// `arrange.align.box`: the Align gallery's `value` (task P7-21).
 fn run_align_box(ctx: &mut AppCtx, registry: &Registry, id: &'static str, pick: u32) {
     select_tops(ctx, 2);
@@ -1212,6 +1244,15 @@ const CASES: &[Case] = &[
     Case {
         id: "tools.format_painter",
         run: run_format_painter,
+    },
+    // Task P7-28: the Fill and Line dialogs.
+    Case {
+        id: "format.fill",
+        run: run_format_fill,
+    },
+    Case {
+        id: "format.line",
+        run: run_format_line,
     },
     Case {
         id: "arrange.align.box",
@@ -1512,6 +1553,10 @@ const NON_EDITING: &[(&str, &str)] = &[
     ("app.quit", "quits (UiRequest)"),
     ("help.about", "opens a dialog (UiRequest)"),
     ("help.welcome", "opens a dialog (UiRequest)"),
+    (
+        "format.shape.pane",
+        "opens the Format Shape pane (UiRequest::ShowFormatShape, task P7-28)",
+    ),
     ("file.new", "replaces the active document, no undo (P4-02)"),
     (
         "file.new.blank.drawing",
