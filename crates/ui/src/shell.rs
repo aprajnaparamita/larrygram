@@ -1452,6 +1452,12 @@ impl Shell {
             // or selection change under the border being dragged.
             events.clear();
         }
+        // The Format Painter takes Escape too (task P7-24 item 6): the
+        // recorded copy cancels instead of the shortcut table's
+        // full-screen toggle.
+        if self.escape_pressed && self.app.format_painter.is_some() {
+            events.insert(0, crate::tools::ToolEvent::Cancel);
+        }
         let had_events = !events.is_empty();
         if stencil::is_dragging(&self.tools) {
             self.route_stencil_drag(ui, &mut produced, &mut errors);
@@ -1592,14 +1598,16 @@ impl Shell {
             })
     }
 
-    /// Consumes Escape while the text editor or a stencil drag owns it
-    /// (ADR 0044, task P5-17 Goal 3 and 5). The committed shortcut table
-    /// binds `Esc` to full-screen mode; the editor and the drag must see
-    /// it first.
+    /// Consumes Escape while the text editor, a stencil drag or the
+    /// Format Painter owns it (ADR 0044, task P5-17 Goal 3 and 5, task
+    /// P7-24 item 6). The committed shortcut table binds `Esc` to
+    /// full-screen mode; those owners must see it first.
     fn capture_escape(&mut self, egui_ctx: &Context) {
         let escape = egui_ctx.input(|input| input.key_pressed(egui::Key::Escape));
-        self.escape_pressed =
-            escape && (self.editor.is_active() || stencil::is_dragging(&self.tools));
+        self.escape_pressed = escape
+            && (self.editor.is_active()
+                || stencil::is_dragging(&self.tools)
+                || self.app.format_painter.is_some());
         if self.escape_pressed {
             egui_ctx.input_mut(|input| {
                 input.events.retain(|event| {
@@ -2294,7 +2302,11 @@ struct ShellChecks;
 
 impl panel_classic::CheckedState for ShellChecks {
     fn is_checked(&self, command: &str, app: &AppCtx) -> Option<bool> {
-        layout_radio_checked(app, command).or_else(|| ToolLatch.is_checked(command, app))
+        layout_radio_checked(app, command)
+            .or_else(|| ToolLatch.is_checked(command, app))
+            // The text toggles read the selection's cells (task P7-24
+            // item 10).
+            .or_else(|| panel_classic::text_toggle_checked(app, command))
     }
 }
 

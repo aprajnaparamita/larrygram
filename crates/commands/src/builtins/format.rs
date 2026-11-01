@@ -61,7 +61,9 @@
 //!   `format.line_ends.no_line_ends` clears both;
 //! - `tools.format_painter` — no arguments: copy the format of the
 //!   selection's anchor shape (or, with a copy already recorded, apply
-//!   it to the selection); `apply` (a flag) forces the apply form.
+//!   it to the selection); `apply` (a flag) forces the apply form and
+//!   `cancel` (a flag) drops a recorded copy without applying (task
+//!   P7-24 item 6, Escape on the canvas).
 //!
 //! Every run is one undoable edit ([`FormatEdit`], ADR 0040) and
 //! writes the cells of every selected shape in one step.
@@ -841,6 +843,16 @@ fn need_text(inv: &Invocation, names: &[&str], prompt: &str) -> Result<String, C
     }
 }
 
+/// The text of a numeric argument without its optional trailing `pt`
+/// (the picker labels spell points: "0.25 pt").
+fn strip_pt(text: &str) -> &str {
+    let trimmed = text.trim();
+    trimmed
+        .strip_suffix("pt")
+        .map(|rest| rest.trim_end())
+        .unwrap_or(trimmed)
+}
+
 /// The first argument present under any of `names`, spelled as text.
 fn arg_text(inv: &Invocation, names: &[&str]) -> Option<String> {
     for name in names {
@@ -856,7 +868,9 @@ fn arg_text(inv: &Invocation, names: &[&str]) -> Option<String> {
 }
 
 /// The first numeric argument present under any of `names`. A text
-/// argument must parse as a finite number.
+/// argument must parse as a finite number, with an optional trailing
+/// `pt` (the line weight and font size pickers spell their values
+/// with one: "2.25 pt").
 fn arg_number(inv: &Invocation, names: &[&str]) -> Result<Option<f64>, CommandError> {
     for name in names {
         match inv.args.get(name) {
@@ -868,7 +882,7 @@ fn arg_number(inv: &Invocation, names: &[&str]) -> Result<Option<f64>, CommandEr
             }
             Some(crate::ArgValue::Integer(value)) => return Ok(Some(*value as f64)),
             Some(crate::ArgValue::Text(text)) => {
-                return match text.trim().parse::<f64>() {
+                return match strip_pt(text).parse::<f64>() {
                     Ok(value) if value.is_finite() => Ok(Some(value)),
                     Ok(_) => Err(CommandError::invalid_args(format!("{name} must be finite"))),
                     Err(_) => Err(CommandError::invalid_args(format!(
@@ -1375,21 +1389,29 @@ fn run_line_pattern(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, Comma
     })
 }
 
-/// The pattern index of the `value`/`pattern` argument: a number or the
-/// name `none` (0) / `solid` (1).
+/// The pattern index of the `value`/`pattern` argument: a number, the
+/// name `none` (0) / `solid` (1), or one of the pattern labels the
+/// pickers show ("Dashed", "Dotted", ...).
 fn pattern_index(inv: &Invocation) -> Result<f64, CommandError> {
     if let Some(text) = arg_text(inv, &["pattern", "value"]) {
         let key = text.trim().to_ascii_lowercase();
         return match key.as_str() {
             "none" | "no line" | "noline" => Ok(0.0),
             "solid" => Ok(1.0),
+            "dashed" => Ok(2.0),
+            "dotted" => Ok(3.0),
+            "dash-dot" => Ok(4.0),
+            "dash-dot-dot" => Ok(5.0),
+            "dot-dash-dash" => Ok(6.0),
+            "long dash" => Ok(7.0),
+            "long-short dash" => Ok(8.0),
             _ => match key.parse::<f64>() {
                 Ok(value) if value.is_finite() && (0.0..=24.0).contains(&value) => Ok(value),
                 Ok(_) => Err(CommandError::invalid_args(
                     "line pattern must be between 0 and 24",
                 )),
                 Err(_) => Err(CommandError::invalid_args(
-                    "line pattern must be a number, \"none\" or \"solid\"",
+                    "line pattern must be a number or a pattern name",
                 )),
             },
         };
@@ -1445,20 +1467,26 @@ fn run_line_no_ends(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, Comm
     })
 }
 
-/// The arrowhead index of the `value`/`begin`/`end` argument: a number
-/// or the name `none` (0).
+/// The arrowhead index of the `value`/`begin`/`end` argument: a number,
+/// the name `none` (0), or one of the arrowhead labels the pickers
+/// show ("Arrow", "Open", "Stealth", "Diamond", "Dot").
 fn arrow_index(inv: &Invocation, names: &[&str]) -> Result<Option<f64>, CommandError> {
     if let Some(text) = arg_text(inv, names) {
         let key = text.trim().to_ascii_lowercase();
         return match key.as_str() {
             "none" | "no line ends" | "nolineends" => Ok(Some(0.0)),
+            "arrow" => Ok(Some(1.0)),
+            "open" => Ok(Some(2.0)),
+            "stealth" => Ok(Some(3.0)),
+            "diamond" => Ok(Some(4.0)),
+            "dot" => Ok(Some(5.0)),
             _ => match key.parse::<f64>() {
                 Ok(value) if value.is_finite() && (0.0..=24.0).contains(&value) => Ok(Some(value)),
                 Ok(_) => Err(CommandError::invalid_args(
                     "arrowhead must be between 0 and 24",
                 )),
                 Err(_) => Err(CommandError::invalid_args(
-                    "arrowhead must be a number or \"none\"",
+                    "arrowhead must be a number or a name",
                 )),
             },
         };
@@ -1472,10 +1500,16 @@ fn arrow_index(inv: &Invocation, names: &[&str]) -> Result<Option<f64>, CommandE
 
 /// `tools.format_painter`: with no recorded copy (or a `copy` flag) it
 /// copies the anchor shape's format; with one (or an `apply` flag) it
-/// applies the recorded format to the selection and clears.
+/// applies the recorded format to the selection and clears; a `cancel`
+/// flag drops a recorded copy without applying (task P7-24 item 6).
 fn run_format_painter(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError> {
     let force_apply = inv.args.flag("apply").unwrap_or(false);
     let force_copy = inv.args.flag("copy").unwrap_or(false);
+    if inv.args.flag("cancel").unwrap_or(false) {
+        // Escape on the canvas (task P7-24 item 6): drop the copy.
+        ctx.format_painter = None;
+        return Ok(outcome("Format Painter cancelled", Vec::new()));
+    }
     let recorded = if force_copy {
         None
     } else {
@@ -1947,6 +1981,60 @@ mod tests {
     }
 
     #[test]
+    fn pattern_and_arrow_labels_parse_like_the_picker_rows() {
+        let (mut ctx, _session, shape) = session();
+        call(
+            &mut ctx,
+            "format.set.line.pattern",
+            Args::new().with("value", ArgValue::Text("Dashed".to_owned())),
+        )
+        .expect("pattern label");
+        assert_eq!(
+            cell_of(
+                &ctx.active_document().expect("document").document,
+                shape,
+                "LinePattern"
+            )
+            .and_then(|cell| cell.value),
+            Some(larrygram_model::CellValue::Number(2.0)),
+            "the label spells the index"
+        );
+        call(
+            &mut ctx,
+            "format.set.line.ends",
+            Args::new()
+                .with("begin", ArgValue::Text("Stealth".to_owned()))
+                .with("end", ArgValue::Text("Dot".to_owned())),
+        )
+        .expect("arrow labels");
+        let doc = &ctx.active_document().expect("document").document;
+        assert_eq!(
+            cell_of(doc, shape, "BeginArrow").and_then(|cell| cell.value),
+            Some(larrygram_model::CellValue::Number(3.0)),
+            "stealth is 3"
+        );
+        assert_eq!(
+            cell_of(doc, shape, "EndArrow").and_then(|cell| cell.value),
+            Some(larrygram_model::CellValue::Number(5.0)),
+            "dot is 5"
+        );
+    }
+
+    #[test]
+    fn line_weight_accepts_a_points_spelling() {
+        let (mut ctx, _session, shape) = session();
+        call(
+            &mut ctx,
+            "format.set.line.weight",
+            Args::new().with("value", ArgValue::Text("2.25 pt".to_owned())),
+        )
+        .expect("pt spelling");
+        let doc = &ctx.active_document().expect("document").document;
+        let value = cell_of(doc, shape, "LineWeight").and_then(|cell| cell.value);
+        assert_eq!(value, Some(larrygram_model::CellValue::Number(2.25 / 72.0)));
+    }
+
+    #[test]
     fn line_weight_checks_its_range() {
         let (mut ctx, _session, _shape) = session();
         let error = call(
@@ -2073,6 +2161,28 @@ mod tests {
         )
         .expect_err("nothing recorded");
         assert!(error.to_string().contains("no format"), "{error}");
+    }
+
+    #[test]
+    fn the_format_painter_cancel_drops_the_copy_without_applying() {
+        let (mut ctx, _session, shape) = session();
+        call(&mut ctx, "tools.format_painter", Args::new()).expect("copy");
+        assert!(ctx.format_painter.is_some());
+        let outcome = call(
+            &mut ctx,
+            "tools.format_painter",
+            Args::new().with("cancel", ArgValue::Flag(true)),
+        )
+        .expect("cancel");
+        assert!(ctx.format_painter.is_none(), "the copy is dropped");
+        assert_eq!(
+            outcome.message.as_deref(),
+            Some("Format Painter cancelled"),
+            "the cancel reports"
+        );
+        // The shape is untouched: no apply ran.
+        let doc = &ctx.active_document().expect("document").document;
+        assert_eq!(cell_of(doc, shape, "FillForegnd"), None, "nothing applied");
     }
 
     #[test]

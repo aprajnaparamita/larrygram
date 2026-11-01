@@ -16,6 +16,7 @@
 use egui::{Align, Layout, RichText, Ui};
 use larrygram_commands::app::{AppCtx, DisplayUnits};
 use larrygram_commands::{ArgValue, Args};
+use larrygram_model::{CellName, CellValue, Document, PageId, ValueSource};
 
 use crate::theme;
 
@@ -55,29 +56,11 @@ pub struct State {
 }
 
 impl State {
-    /// The dialog over the active page's size (inches), falling back to
-    /// the default Letter size when no document is open.
+    /// The dialog over the active page's rendered size (goal 11:
+    /// `rendered_size`), falling back to the default Letter size
+    /// when no document is open.
     pub fn from_app(app: &AppCtx) -> Self {
-        let (width, height) = app
-            .active_document()
-            .and_then(|session| session.active_page)
-            .and_then(|page| {
-                let doc = &app.active_document()?.document;
-                let sheet = &doc.pages.get(page.index as usize)?.sheet;
-                let number = |name: &str| -> Option<f64> {
-                    sheet
-                        .cells
-                        .iter()
-                        .find(|cell| cell.name.as_str() == name)
-                        .and_then(|cell| match cell.value {
-                            Some(larrygram_model::CellValue::Number(value)) => Some(value),
-                            _ => None,
-                        })
-                };
-                Some((number("PageWidth")?, number("PageHeight")?))
-            })
-            .filter(|(width, height)| *width > 0.0 && *height > 0.0)
-            .unwrap_or((8.5, 11.0));
+        let (width, height) = rendered_size(app);
         let orientation = if width > height {
             Orientation::Landscape
         } else {
@@ -106,6 +89,49 @@ impl State {
             )
             .with("units", ArgValue::Text(self.units.to_owned())))
     }
+}
+
+/// The page size as the app renders it (goal 11): `PageWidth` and
+/// `PageHeight` resolved through the model (P6-05: the page's own
+/// cells, then its style chain) with one rung added — a size
+/// inherited from the page's background page. A missing or
+/// non-positive size takes the scene builder's fallback (US Letter).
+fn rendered_size(app: &AppCtx) -> (f64, f64) {
+    let fallback = larrygram_render::FALLBACK_PAGE_SIZE;
+    let Some(session) = app.active_document() else {
+        return fallback;
+    };
+    let Some(page) = session.active_page else {
+        return fallback;
+    };
+    let doc = &session.document;
+    let width = resolved_size_cell(doc, page, "PageWidth", 0).unwrap_or(fallback.0);
+    let height = resolved_size_cell(doc, page, "PageHeight", 0).unwrap_or(fallback.1);
+    (width, height)
+}
+
+/// One positive page-size cell of `page`: its own cell or its style
+/// chain (P6-05), else the same cell of its background page (the
+/// inherited size, goal 11), up to four backgrounds deep (a background
+/// cycle can never recurse forever).
+fn resolved_size_cell(doc: &Document, page: PageId, cell: &str, depth: u32) -> Option<f64> {
+    let resolved = doc.resolve_page_cell(page, &CellName::new(cell)).ok()?;
+    let defined = match resolved.source {
+        ValueSource::Local | ValueSource::Style(_) => match resolved.value {
+            Some(CellValue::Number(value)) if value.is_finite() && *value > 0.0 => Some(*value),
+            _ => None,
+        },
+        _ => None,
+    };
+    if defined.is_some() {
+        return defined;
+    }
+    if depth < 4
+        && let Some(background) = doc.page(page).and_then(|entry| entry.background)
+    {
+        return resolved_size_cell(doc, background, cell, depth + 1);
+    }
+    None
 }
 
 /// One size field as a positive number of inches.
@@ -211,6 +237,72 @@ mod tests {
         assert_eq!(state.height, "11");
         assert_eq!(state.orientation, Orientation::Portrait);
         assert_eq!(state.units, "Inches");
+    }
+
+    /// One size cell of a page sheet.
+    fn page_cell(name: &'static str, value: f64) -> larrygram_model::Cell {
+        let mut cell = larrygram_model::Cell::new(CellName::from_static(name));
+        cell.value = Some(CellValue::Number(value));
+        cell
+    }
+
+    /// Two pages: the first has no size of its own and inherits from
+    /// the second (goal 11's case).
+    fn app_with_background(first: &[(f64, f64)], second: &[(f64, f64)]) -> AppCtx {
+        let mut doc = Document::new();
+        doc.add_page("Page-1").expect("page");
+        doc.add_page("Page-2").expect("page");
+        for (index, sizes) in [(0usize, first), (1, second)] {
+            let page = doc.pages.get_mut(index).expect("page");
+            page.sheet.cells = sizes
+                .iter()
+                .flat_map(|(width, height)| {
+                    [
+                        page_cell("PageWidth", *width),
+                        page_cell("PageHeight", *height),
+                    ]
+                })
+                .collect();
+        }
+        doc.pages[0].background = Some(PageId { index: 1 });
+        let mut app = AppCtx::new(Settings::default());
+        app.open_document(larrygram_commands::DocumentSession::new(doc, None));
+        app
+    }
+
+    #[test]
+    fn the_state_reads_a_size_inherited_from_the_background_page() {
+        let app = app_with_background(&[], &[(10.0, 6.0)]);
+        let state = State::from_app(&app);
+        assert_eq!(state.width, "10");
+        assert_eq!(state.height, "6");
+        assert_eq!(state.orientation, Orientation::Landscape);
+    }
+
+    #[test]
+    fn the_pages_own_size_wins_over_the_background() {
+        let app = app_with_background(&[(3.0, 4.0)], &[(10.0, 6.0)]);
+        let state = State::from_app(&app);
+        assert_eq!(state.width, "3");
+        assert_eq!(state.height, "4");
+    }
+
+    #[test]
+    fn a_background_cycle_falls_back_to_letter() {
+        let mut app = app_with_background(&[], &[]);
+        let session = app.active_document_mut().expect("session");
+        session.document.pages[1].background = Some(PageId { index: 0 });
+        let state = State::from_app(&app);
+        assert_eq!(state.width, "8.5");
+        assert_eq!(state.height, "11");
+    }
+
+    #[test]
+    fn a_non_positive_size_falls_through_to_the_background() {
+        let app = app_with_background(&[(0.0, -1.0)], &[(10.0, 6.0)]);
+        let state = State::from_app(&app);
+        assert_eq!(state.width, "10");
+        assert_eq!(state.height, "6");
     }
 
     #[test]

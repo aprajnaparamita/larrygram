@@ -1,6 +1,7 @@
 //! The formatting pickers (task P7-21): the colour picker, the font
 //! family list, the font size box, the line weight and pattern lists
-//! and the arrowhead list.
+//! and the arrowhead list, plus the zoom box's preset list (task
+//! P7-24 goal 3).
 //!
 //! A picker is the **body** of a host control's popup: the command-bar
 //! splits and combos of Panel Modern and the toolbar splits of Panel
@@ -19,7 +20,9 @@
 //! is its name and its `#RRGGBB` value.
 
 use egui::{Color32, RichText, Ui, Vec2};
+use larrygram_commands::app::AppCtx;
 use larrygram_commands::{ArgValue, Args, CommandId, Invocation, Source};
+use larrygram_model::{CellName, CellReader, SheetRef};
 
 use crate::Intent;
 
@@ -44,6 +47,8 @@ pub enum PickerKind {
     LinePattern,
     /// `format.set.line.ends`: the arrowhead list.
     LineEnds,
+    /// `shape.draw.zoom`: the zoom box's preset list (task P7-24 goal 3).
+    Zoom,
 }
 
 /// The picker that hosts the popup of a control whose command is
@@ -53,6 +58,7 @@ pub fn picker_for(command: &str) -> Option<PickerKind> {
         "text.font" => Some(PickerKind::Font),
         "text.font.size" => Some(PickerKind::FontSize),
         "text.font.color" => Some(PickerKind::FontColor),
+        "shape.draw.zoom" => Some(PickerKind::Zoom),
         "format.set.fill.color" => Some(PickerKind::FillColor),
         "format.set.line.color" => Some(PickerKind::LineColor),
         "format.set.line.weight" => Some(PickerKind::LineWeight),
@@ -206,6 +212,17 @@ pub const ARROWS: &[(f64, &str)] = &[
 /// The fill transparency rows, in percent.
 pub const TRANSPARENCY: &[f64] = &[0.0, 25.0, 50.0, 75.0, 100.0];
 
+/// The zoom box's drop-down presets (task P7-24 goal 3): the zoom
+/// commands of the View > Zoom submenu, descending.
+pub const ZOOM_PRESETS: &[(&str, &str)] = &[
+    ("400%", "view.view400"),
+    ("200%", "view.view200"),
+    ("150%", "view.view150"),
+    ("100%", "view.view100"),
+    ("75%", "view.view75"),
+    ("50%", "view.view50"),
+];
+
 /// The first row's label of one picker (the host sweeps look for it
 /// to know the picker drew).
 pub fn first_row(kind: PickerKind) -> &'static str {
@@ -216,6 +233,7 @@ pub fn first_row(kind: PickerKind) -> &'static str {
         PickerKind::FillColor => "No Fill",
         PickerKind::LineColor | PickerKind::LineWeight | PickerKind::LinePattern => "No Line",
         PickerKind::LineEnds => "No Line Ends",
+        PickerKind::Zoom => ZOOM_PRESETS.first().map_or("100%", |(label, _)| *label),
     }
 }
 
@@ -234,19 +252,27 @@ pub fn swatch_value(swatch: &Swatch) -> String {
 
 /// Draws one picker body and pushes the intent of every chosen row
 /// onto `out`. Returns `true` when a choice was made (the host closes
-/// its popup then).
-pub fn show(ui: &mut Ui, kind: PickerKind, source: Source, out: &mut Vec<Intent>) -> bool {
+/// its popup then). `fill` is the fill colour the transparency rows
+/// preview (task P7-24 item 7; [`fill_preview`]).
+pub fn show(
+    ui: &mut Ui,
+    kind: PickerKind,
+    source: Source,
+    fill: egui::Color32,
+    out: &mut Vec<Intent>,
+) -> bool {
     ui.set_min_width(180.0);
     let mut nav = Nav::new(ui, kind);
     let chosen = match kind {
         PickerKind::Font => font_list(ui, &mut nav, source, out),
         PickerKind::FontSize => font_size(ui, &mut nav, source, out),
-        PickerKind::FontColor => color_picker(ui, &mut nav, Role::Font, source, out),
-        PickerKind::FillColor => color_picker(ui, &mut nav, Role::Fill, source, out),
-        PickerKind::LineColor => color_picker(ui, &mut nav, Role::Line, source, out),
+        PickerKind::FontColor => color_picker(ui, &mut nav, Role::Font, source, fill, out),
+        PickerKind::FillColor => color_picker(ui, &mut nav, Role::Fill, source, fill, out),
+        PickerKind::LineColor => color_picker(ui, &mut nav, Role::Line, source, fill, out),
         PickerKind::LineWeight => weight_list(ui, &mut nav, source, out),
         PickerKind::LinePattern => pattern_list(ui, &mut nav, source, out),
         PickerKind::LineEnds => arrow_list(ui, &mut nav, source, out),
+        PickerKind::Zoom => zoom_list(ui, &mut nav, source, out),
     };
     nav.save(ui, kind);
     chosen
@@ -395,6 +421,21 @@ fn push_size(out: &mut Vec<Intent>, points: f64, source: Source) {
     push(out, "text.font.size", args, source);
 }
 
+/// The zoom box's drop-down: one row per zoom preset, each its
+/// `view.viewNN` command (task P7-24 goal 3).
+fn zoom_list(ui: &mut Ui, nav: &mut Nav, source: Source, out: &mut Vec<Intent>) -> bool {
+    let mut chosen = false;
+    for (label, command) in ZOOM_PRESETS {
+        let highlighted = nav.highlighted();
+        let response = row(ui, RichText::new(*label), label, highlighted);
+        if nav.chosen(highlighted, &response) {
+            push(out, command, Args::new(), source);
+            chosen = true;
+        }
+    }
+    chosen
+}
+
 /// The colour picker: the role's rows, then the theme and standard
 /// swatches. The fill role also lists the transparencies.
 fn color_picker(
@@ -402,6 +443,7 @@ fn color_picker(
     nav: &mut Nav,
     role: Role,
     source: Source,
+    fill: egui::Color32,
     out: &mut Vec<Intent>,
 ) -> bool {
     let mut chosen = false;
@@ -438,9 +480,8 @@ fn color_picker(
         ui.separator();
         ui.label(RichText::new("Transparency").weak());
         for percent in TRANSPARENCY {
-            let label = format!("{percent:.0}%");
             let highlighted = nav.highlighted();
-            let response = row(ui, RichText::new(label.clone()), &label, highlighted);
+            let response = transparency_row(ui, fill, *percent, highlighted);
             if nav.chosen(highlighted, &response) {
                 let args = Args::new()
                     .with("transparency", ArgValue::Number(*percent))
@@ -451,6 +492,109 @@ fn color_picker(
         }
     }
     chosen
+}
+
+/// The fill colour the transparency rows preview (task P7-24 item 7):
+/// the selection anchor's `FillForegnd` resolved through the model,
+/// or a neutral grey when there is none to read.
+pub fn fill_preview(app: &AppCtx) -> egui::Color32 {
+    const NEUTRAL: egui::Color32 = egui::Color32::from_rgb(0x80, 0x80, 0x80);
+    let Some(session) = app.active_document() else {
+        return NEUTRAL;
+    };
+    let Some(shape) = app
+        .selection
+        .anchor
+        .or_else(|| app.selection.shapes.first().copied())
+    else {
+        return NEUTRAL;
+    };
+    let mut reader = CellReader::new(&session.document);
+    match reader.color(SheetRef::Shape(shape), &CellName::new("FillForegnd")) {
+        Ok(color) => egui::Color32::from_rgb(color.r, color.g, color.b),
+        Err(_) => NEUTRAL,
+    }
+}
+
+/// One transparency row: the preview swatch (the fill colour over a
+/// checkerboard at that transparency) beside the percentage (task
+/// P7-24 item 7).
+fn transparency_row(
+    ui: &mut Ui,
+    fill: egui::Color32,
+    percent: f64,
+    highlighted: bool,
+) -> egui::Response {
+    let label = format!("{percent:.0}%");
+    let swatch = egui::Atom::paint(Vec2::new(18.0, 12.0), move |ui, args| {
+        paint_transparency(ui.painter(), args.rect, fill, percent);
+    });
+    let widget = egui::Button::new((swatch, RichText::new(label.clone()).size(12.0))).frame(false);
+    let response = ui.add_sized(Vec2::new(ui.available_width().max(120.0), 22.0), widget);
+    if highlighted {
+        let rect = response.rect.shrink2(Vec2::new(2.0, 0.0));
+        let radius = crate::theme::metric_at(ui.ctx(), "radius.control", 0.0);
+        let highlight = crate::theme::color_at(ui.ctx(), "menu.highlight.fill");
+        let border = crate::theme::color_at(ui.ctx(), "menu.highlight.border");
+        ui.painter().rect_filled(rect, radius, highlight);
+        ui.painter().rect_stroke(
+            rect,
+            radius,
+            egui::Stroke::new(1.0, border),
+            egui::StrokeKind::Inside,
+        );
+    }
+    response
+        .on_hover_text(label.as_str())
+        .accessible_name(label)
+}
+
+/// The preview swatch of one transparency row: `fill` at the row's
+/// transparency over a checkerboard, so both fully opaque and fully
+/// transparent rows read at a glance (task P7-24 item 7).
+fn paint_transparency(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    fill: egui::Color32,
+    percent: f64,
+) {
+    const CELL: f32 = 4.0;
+    let light = egui::Color32::from_rgb(0xf2, 0xf2, 0xf2);
+    let dark = egui::Color32::from_rgb(0xcc, 0xcc, 0xcc);
+    let mut row_index = 0u32;
+    let mut y = rect.min.y;
+    while y < rect.max.y {
+        let mut column_index = 0u32;
+        let mut x = rect.min.x;
+        while x < rect.max.x {
+            let cell = egui::Rect::from_min_max(
+                egui::pos2(x, y),
+                egui::pos2((x + CELL).min(rect.max.x), (y + CELL).min(rect.max.y)),
+            );
+            let colour = if (row_index + column_index).is_multiple_of(2) {
+                light
+            } else {
+                dark
+            };
+            painter.rect_filled(cell, 0.0, colour);
+            x += CELL;
+            column_index += 1;
+        }
+        y += CELL;
+        row_index += 1;
+    }
+    let alpha = ((1.0 - percent / 100.0).clamp(0.0, 1.0) * 255.0).round() as u8;
+    painter.rect_filled(
+        rect,
+        0.0,
+        egui::Color32::from_rgba_unmultiplied(fill.r(), fill.g(), fill.b(), alpha),
+    );
+    painter.rect_stroke(
+        rect,
+        0.0,
+        egui::Stroke::new(1.0, egui::Color32::from_gray(0x8a)),
+        egui::StrokeKind::Inside,
+    );
 }
 
 /// One row of swatches: five per line, each a small colour button.
@@ -716,7 +860,13 @@ mod tests {
             .build_ui({
                 let out = Rc::clone(&out);
                 move |ui| {
-                    show(ui, kind, Source::Test, &mut out.borrow_mut());
+                    show(
+                        ui,
+                        kind,
+                        Source::Test,
+                        egui::Color32::GRAY,
+                        &mut out.borrow_mut(),
+                    );
                 }
             });
         (harness, out)

@@ -153,11 +153,14 @@ impl TextEditor {
             .fixed_pos(rect.min)
             .show(ui.ctx(), |ui| {
                 ui.set_min_width(rect.width().max(80.0));
-                let output = egui::TextEdit::multiline(&mut self.buffer)
+                let mut output = egui::TextEdit::multiline(&mut self.buffer)
                     .desired_width(rect.width().max(80.0))
                     .desired_rows(1)
                     .hint_text("Text")
                     .show(ui);
+                // The editor's accessible name (task P7-24: the tests
+                // and screen readers find the field by it).
+                output.response.response = output.response.response.clone().accessible_name("Text");
                 if request_focus {
                     output.response.request_focus();
                 }

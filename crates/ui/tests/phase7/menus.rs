@@ -681,12 +681,24 @@ pub fn drawn_toolbar_items(
 }
 
 /// The node sequence one toolbar item draws: its main button (or
-/// combo), then the split arrow ("`label` menu") when it has one.
+/// combo), then the drop-down arrow ("`label` menu") when it has one
+/// (splits always; combos with a drop-down list, task P7-24).
 fn toolbar_node_labels(item: &larrygram_ui_spec::v2::Item) -> Vec<(String, Role)> {
     let label = item.label.clone().unwrap_or_default();
     let mut out = Vec::new();
     match item.kind {
-        ItemKind::Combo => out.push((label, Role::ComboBox)),
+        ItemKind::Combo => {
+            out.push((label.clone(), Role::ComboBox));
+            if item
+                .command
+                .as_ref()
+                .map(|id| id.as_str())
+                .and_then(larrygram_ui::pickers::picker_for)
+                .is_some()
+            {
+                out.push((format!("{label} menu"), Role::Button));
+            }
+        }
         ItemKind::Split | ItemKind::SplitRecent => {
             out.push((label.clone(), Role::Button));
             out.push((format!("{label} menu"), Role::Button));
