@@ -25,6 +25,7 @@ mod text;
 mod tools;
 mod view;
 
+pub use format::{LINE_ARROWS, LINE_PATTERNS};
 pub use view::{ZOOM_MAX, ZOOM_MIN};
 
 use std::sync::OnceLock;

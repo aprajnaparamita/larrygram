@@ -19,16 +19,19 @@
 // these helpers are test code and use `expect`/`panic` freely.
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
+mod combo_fixes;
 mod expect;
 mod first_run;
 mod fit;
 mod golden;
 mod interaction;
+mod latch_fixes;
 mod layouts;
 mod manual;
 mod manual_fixes;
 mod menus;
 mod modern;
+mod page_size;
 mod palette;
 mod pickers;
 mod placement;

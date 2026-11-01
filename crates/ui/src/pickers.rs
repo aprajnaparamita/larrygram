@@ -186,28 +186,14 @@ pub const SIZE_LADDER: &[f64] = &[
 pub const WEIGHTS: &[f64] = &[0.25, 0.5, 0.75, 1.0, 1.5, 2.25, 3.0, 4.5, 6.0];
 
 /// The line patterns: `(index, label)`. Index 1 is solid; the rest
-/// dash the stroke (the `render::styles` table).
-pub const PATTERNS: &[(f64, &str)] = &[
-    (1.0, "Solid"),
-    (2.0, "Dashed"),
-    (3.0, "Dotted"),
-    (4.0, "Dash-dot"),
-    (5.0, "Dash-dot-dot"),
-    (6.0, "Dot-dash-dash"),
-    (7.0, "Long dash"),
-    (8.0, "Long-short dash"),
-];
+/// dash the stroke (the `render::styles` table). The one table the
+/// commands and the pickers share (task P7-27 item 4): it lives in
+/// [`larrygram_commands`] and this is the pickers' name for it.
+pub use larrygram_commands::builtins::LINE_PATTERNS as PATTERNS;
 
 /// The arrowheads: `(index, label)`. Index 0 is no arrowhead (the
-/// `render::styles` table).
-pub const ARROWS: &[(f64, &str)] = &[
-    (0.0, "None"),
-    (1.0, "Arrow"),
-    (2.0, "Open"),
-    (3.0, "Stealth"),
-    (4.0, "Diamond"),
-    (5.0, "Dot"),
-];
+/// `render::styles` table). The shared table, as [`PATTERNS`].
+pub use larrygram_commands::builtins::LINE_ARROWS as ARROWS;
 
 /// The fill transparency rows, in percent.
 pub const TRANSPARENCY: &[f64] = &[0.0, 25.0, 50.0, 75.0, 100.0];

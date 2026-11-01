@@ -261,10 +261,9 @@ fn text_box_at_page_centre(
     let shape = {
         let doc = document_mut(ctx, session)?;
         let (page_w, page_h) = {
-            let entity = doc
-                .page(page)
+            doc.page(page)
                 .ok_or_else(|| CommandError::failed("the active page is gone"))?;
-            super::view::page_size(entity)
+            super::view::page_size(doc, page)
         };
         let (width, height) = (2.0, 0.5);
         let x = (page_w - width) * 0.5;

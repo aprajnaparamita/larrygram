@@ -39,8 +39,15 @@ fn finish(response: egui::Response, action: &Action, tip: &str, out: &mut Vec<In
 
 /// The gutter width of this frame (the shared `menu.gutter.width`
 /// token: icons sit in a gutter column, `docs/ui/panel-modern.md`).
+/// The token is read through [`crate::theme`], so Panel Modern never
+/// calls into `panel_classic` (task P7-27 item 2).
 fn gutter(ctx: &egui::Context) -> f32 {
-    crate::panel_classic::metrics::ClassicMetrics::for_ctx(ctx).menu_gutter_width
+    let width = crate::theme::metric_at(ctx, "menu.gutter.width", 24.0);
+    if width.is_finite() && width > 0.0 {
+        width
+    } else {
+        24.0
+    }
 }
 
 /// What the controls draw from: run-time lists, sizes, toggle state
@@ -1073,16 +1080,17 @@ fn enabled(action: &Action) -> bool {
 
 /// Whether a `check` or `toggle` draws latched (display-only state).
 fn latched(toggles: &Toggles, app: &larrygram_commands::app::AppCtx, item: &Item) -> bool {
-    if toggles.contains(item.id.as_str()) {
-        return true;
-    }
     // The text toggles (Bold, Italic, Underline and the alignments)
-    // latch from the selection's cells (task P7-24 item 10).
-    item.command
-        .as_ref()
-        .map(|command| command.as_str())
-        .and_then(|command| crate::panel_classic::text_toggle_checked(app, command))
-        .unwrap_or(false)
+    // latch from the selection's cells alone (task P7-24 item 10): when
+    // the selection gives a state, the display-only set is ignored, so
+    // a click on one shape cannot leave the control latched after the
+    // selection moves to another (the P7-27 review A5).
+    if let Some(command) = item.command.as_ref().map(|command| command.as_str())
+        && let Some(checked) = crate::checked::text_toggle_checked(app, command)
+    {
+        return checked;
+    }
+    toggles.contains(item.id.as_str())
 }
 
 /// Records the display-only latch of one control.
@@ -1240,6 +1248,38 @@ mod tests {
         assert!(latched(&toggles, &app, &target));
         set_latched(&mut toggles, &target, false);
         assert!(!latched(&toggles, &app, &target));
+    }
+
+    #[test]
+    fn the_text_toggle_state_wins_over_the_display_set() {
+        // A `format.text.*` control follows the selection: when the
+        // selection gives a state, the display-only set is ignored (the
+        // P7-27 review A5).
+        let mut target = item("bold", ItemKind::Check, "Bold");
+        target.command = Some(larrygram_ui_spec::CommandId("format.text.bold".to_owned()));
+        let mut toggles = Toggles::default();
+        set_latched(&mut toggles, &target, true);
+        // With no selection the display set counts.
+        let app = AppCtx::new(Settings::default());
+        assert!(latched(&toggles, &app, &target));
+        // A selected plain shape gives the state "off": the stale
+        // display latch shows nothing.
+        let mut doc = larrygram_model::Document::new();
+        let id = doc.add_shape(larrygram_model::Shape::new(
+            larrygram_model::ShapeId { index: 0 },
+            1,
+        ));
+        let mut page = larrygram_model::Page::new(larrygram_model::PageId { index: 0 }, 1);
+        page.shapes.push(id);
+        doc.pages.push(page);
+        let mut app = AppCtx::new(Settings::default());
+        app.open_document(larrygram_commands::app::DocumentSession::new(doc, None));
+        app.selection.shapes = vec![id];
+        app.selection.anchor = Some(id);
+        assert!(
+            !latched(&toggles, &app, &target),
+            "the plain shape's state wins over the display latch"
+        );
     }
 
     #[test]

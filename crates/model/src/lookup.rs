@@ -137,6 +137,92 @@ impl Document {
     ) -> Result<Resolved<'_>, crate::Error> {
         self.resolve_page_cell_with_table(page, cell, CELLS)
     }
+
+    /// The page size in inches, resolved as **one pair** (the P7-27
+    /// amendment of ADR 0019): `PageWidth` and `PageHeight` come from the
+    /// same sheet — the page's own sheet first, then the sheets of its
+    /// style chain (the `LineStyle`/`FillStyle`/`TextStyle` links, each
+    /// chain followed as in [`Document::resolve_page_cell`]) — else the
+    /// [`DEFAULT_PAGE_SIZE`] pair.
+    ///
+    /// A rung sheet supplies the pair when at least one of the two cells
+    /// is a positive finite number there; the other axis then takes that
+    /// axis of [`DEFAULT_PAGE_SIZE`]. Both axes therefore never mix
+    /// sheets (no width from the page and height from a style). There is
+    /// no background-page rung: no allowed source ([MS-VSDX] 2.2.2.4 and
+    /// 2.2.2.5, the ShapeSheet reference's `PageWidth`/`PageHeight` cells)
+    /// says a foreground page takes its size from its background page.
+    ///
+    /// Every reader (the scene builder, the canvas, zoom-to-fit and the
+    /// Page Setup dialog) calls this one helper, so they cannot disagree.
+    /// An unknown page id answers the default pair (a caller bug, not
+    /// file data: never an error at the size).
+    pub fn page_size(&self, page: crate::id::PageId) -> (f64, f64) {
+        let Some(entity) = self.page(page) else {
+            return DEFAULT_PAGE_SIZE;
+        };
+        if let Some(size) = sheet_page_size(&entity.sheet) {
+            return size;
+        }
+        let mut visited_styles: Vec<StyleId> = Vec::new();
+        for kind in [StyleKind::Line, StyleKind::Fill, StyleKind::Text] {
+            let mut link = page_style_link(entity, kind);
+            while let Some(visio_id) = link {
+                let Some(style) = self.style_by_visio_id(visio_id) else {
+                    // A dangling style reference ends the chain.
+                    break;
+                };
+                let id = style.id;
+                if visited_styles.contains(&id) {
+                    // A cyclic style chain: stop it.
+                    break;
+                }
+                visited_styles.push(id);
+                if let Some(size) = sheet_page_size(&style.sheet) {
+                    return size;
+                }
+                link = match kind {
+                    StyleKind::Line => style.line_style,
+                    StyleKind::Fill => style.fill_style,
+                    StyleKind::Text => style.text_style,
+                };
+            }
+        }
+        DEFAULT_PAGE_SIZE
+    }
+}
+
+/// The default page size: US Letter portrait, in inches. A page that
+/// defines no positive `PageWidth`/`PageHeight` on any rung of
+/// [`Document::page_size`] gets this pair (files without a page sheet
+/// exist in the corpus; a zero-size scene cannot be rasterized).
+pub const DEFAULT_PAGE_SIZE: (f64, f64) = (8.5, 11.0);
+
+/// The page-size pair one sheet defines ([`Document::page_size`]):
+/// `Some` when at least one of `PageWidth` and `PageHeight` is a
+/// positive finite number there. The axis the sheet does not supply
+/// takes that axis of [`DEFAULT_PAGE_SIZE`], so both axes come from one
+/// sheet.
+fn sheet_page_size(sheet: &Sheet) -> Option<(f64, f64)> {
+    let axis = |name: &str| -> Option<f64> {
+        let (cell, _) = sheet_cell(sheet, &CellName::new(name))?;
+        if !defines(cell) {
+            return None;
+        }
+        match cell.value {
+            Some(CellValue::Number(value)) if value.is_finite() && value > 0.0 => Some(value),
+            _ => None,
+        }
+    };
+    let width = axis("PageWidth");
+    let height = axis("PageHeight");
+    if width.is_none() && height.is_none() {
+        return None;
+    }
+    Some((
+        width.unwrap_or(DEFAULT_PAGE_SIZE.0),
+        height.unwrap_or(DEFAULT_PAGE_SIZE.1),
+    ))
 }
 
 /// The identity of one cell of a repeated section for a lookup: the
@@ -3124,6 +3210,92 @@ mod phase3_tests {
             .resolve_page_cell(page, &CellName::from_static("LineWeight"))
             .expect("resolves");
         assert_eq!(resolved.source, ValueSource::HardDefault);
+    }
+
+    #[test]
+    fn page_size_reads_the_page_sheet() {
+        let (doc, page) = page_with_style(
+            vec![
+                number_cell("PageWidth", 11.0),
+                number_cell("PageHeight", 8.5),
+            ],
+            Vec::new(),
+        );
+        assert_eq!(doc.page_size(page), (11.0, 8.5));
+    }
+
+    #[test]
+    fn page_size_comes_from_the_style_chain() {
+        // The page sheet defines no size; the style it links does.
+        let (doc, page) = page_with_style(
+            Vec::new(),
+            vec![
+                number_cell("PageWidth", 10.0),
+                number_cell("PageHeight", 6.0),
+            ],
+        );
+        assert_eq!(doc.page_size(page), (10.0, 6.0));
+    }
+
+    #[test]
+    fn page_size_takes_both_axes_from_one_sheet() {
+        // The page defines only its width: the height is the default's,
+        // never the style sheet's (width and height resolve together).
+        let (doc, page) = page_with_style(
+            vec![number_cell("PageWidth", 3.0)],
+            vec![
+                number_cell("PageWidth", 10.0),
+                number_cell("PageHeight", 6.0),
+            ],
+        );
+        assert_eq!(doc.page_size(page), (3.0, DEFAULT_PAGE_SIZE.1));
+    }
+
+    #[test]
+    fn page_size_skips_a_non_positive_size() {
+        // Neither axis is positive on the page sheet, so the pair falls
+        // through to the style chain.
+        let (doc, page) = page_with_style(
+            vec![
+                number_cell("PageWidth", 0.0),
+                number_cell("PageHeight", -1.0),
+            ],
+            vec![
+                number_cell("PageWidth", 10.0),
+                number_cell("PageHeight", 6.0),
+            ],
+        );
+        assert_eq!(doc.page_size(page), (10.0, 6.0));
+    }
+
+    #[test]
+    fn page_size_falls_back_to_letter() {
+        let (doc, page) = page_with_style(Vec::new(), Vec::new());
+        assert_eq!(doc.page_size(page), DEFAULT_PAGE_SIZE);
+        // A stale page id: the default pair, never an error.
+        assert_eq!(
+            doc.page_size(PageId { index: 3 }),
+            DEFAULT_PAGE_SIZE,
+            "an unknown page gets the default pair"
+        );
+    }
+
+    #[test]
+    fn page_size_stops_a_cyclic_style_chain() {
+        // The style links to itself: the chain stops at the repeat and
+        // the default pair answers.
+        let (mut doc, page) = page_with_style(
+            Vec::new(),
+            vec![
+                number_cell("PageWidth", 10.0),
+                number_cell("PageHeight", 6.0),
+            ],
+        );
+        doc.stylesheet.styles[0].line_style = Some(7);
+        assert_eq!(doc.page_size(page), (10.0, 6.0));
+        let (mut doc, page) = page_with_style(Vec::new(), vec![inherited_cell("LineWeight")]);
+        doc.stylesheet.styles[0].line_style = Some(7);
+        assert_eq!(doc.page_size(page), DEFAULT_PAGE_SIZE);
     }
 
     #[test]

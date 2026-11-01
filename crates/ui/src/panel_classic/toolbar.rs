@@ -589,8 +589,11 @@ fn draw_combo(
             rows::combo_activation(item, input, Source::Ui, buffer.clone())
         {
             // The typed value also goes as `percent`, the number the
-            // zoom box's `shape.draw.zoom` reads (task P7-24 goal 3).
-            if let Some(number) = typed_number(&buffer) {
+            // zoom box's `shape.draw.zoom` reads (task P7-24 goal 3);
+            // every other combo reads `value` alone (the P7-27 review
+            // A6).
+            if let Some(number) = combo_percent(item.command.as_ref().map(|c| c.as_str()), &buffer)
+            {
                 intent
                     .invocation
                     .args
@@ -609,6 +612,16 @@ fn draw_combo(
     }
 }
 
+/// The `percent` argument of a combo's typed value (task P7-24 goal
+/// 3): only the zoom box's `shape.draw.zoom` reads it, so only that
+/// combo sends it (the P7-27 review A6).
+fn combo_percent(command: Option<&str>, typed: &str) -> Option<f64> {
+    match command {
+        Some("shape.draw.zoom") => typed_number(typed),
+        _ => None,
+    }
+}
+
 /// Whether one combo's drop-down button draws (task P7-24: the font
 /// and size boxes list the pickers' rows and the zoom box the
 /// presets).
@@ -621,15 +634,14 @@ fn combo_list(item: &Item) -> bool {
 }
 
 /// The number a combo's typed value stands for: the text with an
-/// optional `pt` or `%` suffix trimmed ("18 pt", "150%").
+/// optional `pt` or `%` suffix trimmed ("18 pt", "18 PT", "150%").
 fn typed_number(typed: &str) -> Option<f64> {
     let trimmed = typed.trim();
     let trimmed = trimmed.strip_suffix('%').unwrap_or(trimmed).trim();
-    let trimmed = trimmed
-        .strip_suffix("pt")
-        .or_else(|| trimmed.strip_suffix("PT"))
-        .unwrap_or(trimmed)
-        .trim();
+    let trimmed = match trimmed.split_at_checked(trimmed.len().saturating_sub(2)) {
+        Some((head, tail)) if tail.eq_ignore_ascii_case("pt") => head.trim(),
+        _ => trimmed,
+    };
     trimmed.parse::<f64>().ok().filter(|n| n.is_finite())
 }
 
@@ -873,4 +885,30 @@ fn find_in_menus<'a>(menus: &'a [larrygram_ui_spec::v2::Menu], id: &str) -> Opti
     menus
         .iter()
         .find_map(|menu| super::find_item(&menu.items, id))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_the_zoom_combo_sends_percent() {
+        // `percent` is the zoom box's argument (task P7-24 goal 3); the
+        // other numeric combos send `value` alone (the P7-27 review A6).
+        assert_eq!(combo_percent(Some("shape.draw.zoom"), "150"), Some(150.0));
+        assert_eq!(combo_percent(Some("shape.draw.zoom"), "150%"), Some(150.0));
+        assert_eq!(combo_percent(Some("text.font.size"), "36"), None);
+        assert_eq!(combo_percent(Some("text.font"), "Carlito"), None);
+        assert_eq!(combo_percent(None, "36"), None);
+    }
+
+    #[test]
+    fn typed_number_trims_the_suffixes_in_any_case() {
+        assert_eq!(typed_number("18 pt"), Some(18.0));
+        assert_eq!(typed_number("18 PT"), Some(18.0));
+        assert_eq!(typed_number("18 Pt"), Some(18.0));
+        assert_eq!(typed_number(" 150% "), Some(150.0));
+        assert_eq!(typed_number("wide"), None);
+        assert_eq!(typed_number(""), None);
+    }
 }

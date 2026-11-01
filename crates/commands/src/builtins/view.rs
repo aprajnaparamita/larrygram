@@ -9,8 +9,6 @@
 //! default and say so (ADR 0032 amendment), the other view commands
 //! are disabled with a reason instead of doing nothing.
 
-use larrygram_model::{CellValue, Page};
-
 use crate::app::AppCtx;
 use crate::error::CommandError;
 use crate::{Invocation, Outcome, UiRequest};
@@ -31,10 +29,6 @@ pub const ZOOM_MAX: f64 = 40.0;
 /// Canvas points per page inch at zoom 1, the scale the canvas draws
 /// at (ADR 0025: 96 pixels per inch). The fit commands divide by it.
 const POINTS_PER_INCH: f64 = 96.0;
-
-// The page size of a sheet with no positive `PageWidth` or
-// `PageHeight`: the renderer's own fallback.
-use larrygram_render::FALLBACK_PAGE_SIZE;
 
 /// `edit.undo`: reverts the newest edit of the active document.
 pub(super) fn run_undo(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandError> {
@@ -213,13 +207,10 @@ pub(super) fn run_zoom_page_width(
     let page_id = session
         .active_page
         .ok_or_else(|| CommandError::failed("no active page"))?;
-    let page = session
-        .document
-        .pages
-        .iter()
-        .find(|page| page.id == page_id)
-        .ok_or_else(|| CommandError::failed("no active page"))?;
-    let (page_width, _) = page_size(page);
+    if session.document.page(page_id).is_none() {
+        return Err(CommandError::failed("no active page"));
+    }
+    let (page_width, _) = page_size(&session.document, page_id);
     let fit = (width / (page_width * POINTS_PER_INCH)).clamp(ZOOM_MIN, ZOOM_MAX);
     session.view.zoom = fit;
     Ok(outcome(format!("Zoom {:.0}%", fit * 100.0), Vec::new()))
@@ -240,13 +231,10 @@ pub(super) fn run_zoom_fit(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome
     let page_id = session
         .active_page
         .ok_or_else(|| CommandError::failed("no active page"))?;
-    let page = session
-        .document
-        .pages
-        .iter()
-        .find(|page| page.id == page_id)
-        .ok_or_else(|| CommandError::failed("no active page"))?;
-    let (page_width, page_height) = page_size(page);
+    if session.document.page(page_id).is_none() {
+        return Err(CommandError::failed("no active page"));
+    }
+    let (page_width, page_height) = page_size(&session.document, page_id);
     let fit = ((width / (page_width * POINTS_PER_INCH))
         .min(height / (page_height * POINTS_PER_INCH)))
     .clamp(ZOOM_MIN, ZOOM_MAX);
@@ -309,25 +297,14 @@ fn viewport_size(
     }
 }
 
-/// The page size in inches, mirroring the renderer's per-axis fallback.
-pub(super) fn page_size(page: &Page) -> (f64, f64) {
-    (
-        positive_cell(page, "PageWidth", FALLBACK_PAGE_SIZE.0),
-        positive_cell(page, "PageHeight", FALLBACK_PAGE_SIZE.1),
-    )
-}
-
-/// The positive cached number of one page-sheet cell, or `fallback`.
-fn positive_cell(page: &Page, name: &str, fallback: f64) -> f64 {
-    page.sheet
-        .cells
-        .iter()
-        .find(|cell| cell.name.as_str() == name)
-        .and_then(|cell| match &cell.value {
-            Some(CellValue::Number(value)) if value.is_finite() && *value > 0.0 => Some(*value),
-            _ => None,
-        })
-        .unwrap_or(fallback)
+/// The page size in inches: [`larrygram_model::Document::page_size`],
+/// the one resolver every reader calls (the P7-27 amendment of ADR
+/// 0019: the page's own sheet, then its style chain, then US Letter).
+pub(super) fn page_size(
+    doc: &larrygram_model::Document,
+    page: larrygram_model::PageId,
+) -> (f64, f64) {
+    doc.page_size(page)
 }
 
 /// `view.toggle_grid`: flips the grid of the active document and
@@ -673,7 +650,7 @@ pub(super) fn run_welcome(_ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcom
 mod tests {
     use super::*;
     use crate::app::{AppCtx, DocumentSession, Settings};
-    use larrygram_model::{Cell, CellName, Page, PageId};
+    use larrygram_model::{Cell, CellName, CellValue, Page, PageId};
 
     #[test]
     fn undo_and_redo_without_history_say_so() {
