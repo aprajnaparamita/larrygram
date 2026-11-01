@@ -239,6 +239,11 @@ impl ShapesWindow {
         {
             return;
         }
+        // A dialog or pane field keeps its own keys (task P7-28):
+        // Enter there commits the field and must never drop a master.
+        if ctx.text_edit_focused() {
+            return;
+        }
         let keys = [
             egui::Key::ArrowUp,
             egui::Key::ArrowDown,

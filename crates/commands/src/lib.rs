@@ -428,9 +428,10 @@ pub enum UiRequest {
     /// arguments; the dialog collects the line cells and re-dispatches
     /// the command with them).
     ShowLineDialog,
-    /// Show the Format Shape pane (task P7-28: `format.shape.pane`; the
-    /// pane edits the same fill and line cells field by field and
-    /// follows the selection).
+    /// Show the Format Shape pane (task P7-28: `format.shape.pane`;
+    /// the pane edits the fill and line cells field by field and
+    /// follows the selection. The command toggles: a second run with
+    /// the pane open closes it).
     ShowFormatShape,
     /// Ask the user to confirm closing a document.
     ConfirmClose {
