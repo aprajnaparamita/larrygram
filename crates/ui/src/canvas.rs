@@ -152,8 +152,9 @@ impl CanvasColors {
     }
 
     /// The active theme's colours, or [`CanvasColors::default`] before
-    /// the shell applies a theme.
-    fn active(ctx: &Context) -> Self {
+    /// the shell applies a theme. `pub(crate)`: the in-place editor's
+    /// one outline uses the selection colour (task P7-25 item 9).
+    pub(crate) fn active(ctx: &Context) -> Self {
         theme::current(ctx).map_or_else(Self::default, |theme| Self::from_theme(&theme))
     }
 }
@@ -530,9 +531,6 @@ pub fn show_text_editor(
     rect: Rect,
     editor: &mut TextEditor,
 ) -> Result<EditorAction, UiError> {
-    let Some(shape) = editor.shape else {
-        return Ok(EditorAction::Pending);
-    };
     let Some(page) = session.active_page else {
         return Ok(EditorAction::Pending);
     };
@@ -542,13 +540,26 @@ pub fn show_text_editor(
             message: error.to_string(),
         }
     })?;
-    let Some(editor_rect) = text_edit::editor_rect(
-        &scene,
-        shape,
-        viewport,
-        session.view.pan,
-        safe_zoom(session.view.zoom),
-    ) else {
+    // A pending text box (task P7-25 item 9) maps its own page rect;
+    // an edited shape maps its text block through the scene.
+    let editor_rect = match (editor.pending, editor.shape) {
+        (Some(bounds), _) => text_edit::pending_editor_rect(
+            viewport,
+            session.view.pan,
+            safe_zoom(session.view.zoom),
+            scene.height,
+            bounds,
+        ),
+        (None, Some(shape)) => text_edit::editor_rect(
+            &scene,
+            shape,
+            viewport,
+            session.view.pan,
+            safe_zoom(session.view.zoom),
+        ),
+        (None, None) => None,
+    };
+    let Some(editor_rect) = editor_rect else {
         return Ok(EditorAction::Pending);
     };
     Ok(editor.show(ui, editor_rect))

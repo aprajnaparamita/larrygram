@@ -139,6 +139,8 @@ pub struct ToolMachine {
     pub(crate) stencil: stencil::State,
     /// The connector tool's drag state (P5-08).
     pub(crate) connector: connector::ConnectorState,
+    /// The text tool's pending text box (task P7-25 item 9).
+    pub(crate) text: text::State,
     /// The text block tool's drag state (task P7-25 item 4).
     pub(crate) text_block: text_block::State,
 }

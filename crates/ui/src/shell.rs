@@ -217,6 +217,10 @@ pub struct Shell {
     tools: ToolMachine,
     /// The in-place text editor (ADR 0044, task P5-17).
     editor: TextEditor,
+    /// The typed character that starts the next text edit (task P7-25
+    /// item 8: "a typed character starts the text with that
+    /// character"); consumed by [`Shell::begin_text_editor`].
+    text_seed: Option<String>,
     /// Whether a synthetic `PointerDown` reached the stencil tool for the
     /// current Shapes-window drag.
     stencil_down: bool,
@@ -302,6 +306,7 @@ impl Shell {
             tab_bar_rect: None,
             tools: ToolMachine::new(),
             editor: TextEditor::new(),
+            text_seed: None,
             stencil_down: false,
             escape_pressed: false,
             overlay: Overlay::new(),
@@ -561,6 +566,9 @@ impl Shell {
             // the shortcut table nudges shapes with them (task P7-19).
             self.shapes.handle_keys(ui.ctx());
         }
+        // F2 and a typed character start editing the selected shape's
+        // text (task P7-25 item 8).
+        self.text_edit_keys(ui, &mut intents);
         self.begin_splitters(ui.ctx());
         // `Esc` and `F5` both toggle `view.full_screen_mode` in the
         // shortcut table; Esc only leaves full screen, it never enters
@@ -1429,7 +1437,14 @@ impl Shell {
         let mut produced = Vec::new();
         let mut errors = Vec::new();
         let mut events = Vec::new();
-        let overlay = self.overlay.clone();
+        // One outline while the text editor is open (task P7-25 item
+        // 9): the tool overlay is suppressed and the editor draws its
+        // own outline around the text block.
+        let overlay = if self.editor.is_active() {
+            Overlay::new()
+        } else {
+            self.overlay.clone()
+        };
         {
             let session = self.app.active_document_mut();
             if let Some(session) = session {
@@ -1453,6 +1468,18 @@ impl Shell {
             // or selection change under the border being dragged.
             events.clear();
         }
+        // Any click with the Text tool first commits the text being
+        // typed (task P7-25 item 9): the commit intents run before the
+        // click's own, so a click inside the object being typed sees
+        // the written text.
+        if self.tools.tool == crate::tools::Tool::Text
+            && self.editor.is_active()
+            && events
+                .iter()
+                .any(|event| matches!(event, crate::tools::ToolEvent::PointerUp { .. }))
+        {
+            self.commit_editor(&mut produced);
+        }
         let had_events = !events.is_empty();
         if stencil::is_dragging(&self.tools) {
             self.route_stencil_drag(ui, &mut produced, &mut errors);
@@ -1470,6 +1497,14 @@ impl Shell {
                     Err(error) => errors.push(error.to_string()),
                 }
             }
+        }
+        // A click with the Text tool on empty page starts a pending
+        // text box (task P7-25 item 9): the editor opens over it and
+        // the box is inserted with its text when the edit commits.
+        if let Some(box_) = self.tools.text.take_pending() {
+            let min = larrygram_geom::Point::new(box_.x, box_.y);
+            let max = larrygram_geom::Point::new(box_.x + box_.width, box_.y + box_.height);
+            self.editor.begin_new(larrygram_geom::Rect::new(min, max));
         }
         if !had_events && !stencil::is_dragging(&self.tools) {
             match self.tools.idle_overlay(&self.app) {
@@ -1727,9 +1762,12 @@ impl Shell {
             return;
         }
         let shape = self.editor.shape;
+        let pending = self.editor.pending;
         let action = if self.escape_pressed {
-            // Escape commits (ADR 0044). The shell took it from the
-            // shortcut table before the editor's own input saw it.
+            // Escape commits (ADR 0044): it ends the edit and keeps
+            // the text (task P7-25 item 9). The shell took the key
+            // from the shortcut table before the editor's own input
+            // saw it.
             match self.editor.finish() {
                 Ok(text) => Ok(EditorAction::Committed(text)),
                 Err(error) => Err(error),
@@ -1744,13 +1782,78 @@ impl Shell {
         match action {
             Ok(EditorAction::Pending) => {}
             Ok(EditorAction::Committed(Some(text))) => {
-                if let Some(mut produced) = self.text_commit_intents(shape, &text) {
+                if let Some(mut produced) = self.text_committed_intents(shape, pending, &text) {
                     intents.append(&mut produced);
                 }
             }
             Ok(EditorAction::Committed(None)) => {}
             Err(error) => self.note_error(error.to_string()),
         }
+    }
+
+    /// Finishes the text edit outside [`Shell::show_editor`] and
+    /// dispatches its commit: the Text tool's click commits the text
+    /// being typed before it acts (task P7-25 item 9).
+    fn commit_editor(&mut self, intents: &mut Vec<Intent>) {
+        let shape = self.editor.shape;
+        let pending = self.editor.pending;
+        match self.editor.finish() {
+            Ok(Some(text)) => {
+                if let Some(mut produced) = self.text_committed_intents(shape, pending, &text) {
+                    intents.append(&mut produced);
+                }
+            }
+            Ok(None) => {}
+            Err(error) => self.note_error(error.to_string()),
+        }
+    }
+
+    /// The intents of one committed text edit (task P7-25 item 9): a
+    /// pending text box is inserted with its text in one undo step, an
+    /// edited shape gets its `shape.set.text` pair.
+    fn text_committed_intents(
+        &self,
+        shape: Option<ShapeId>,
+        pending: Option<larrygram_geom::Rect>,
+        text: &TextContent,
+    ) -> Option<Vec<Intent>> {
+        match pending {
+            Some(bounds) => self.text_insert_intents(bounds, text),
+            None => self.text_commit_intents(shape, text),
+        }
+    }
+
+    /// The `insert.drawing.text_box` intent of one committed pending
+    /// text box (task P7-25 item 9): the command writes the box and
+    /// its text in one undo step (its `text` argument).
+    fn text_insert_intents(
+        &self,
+        bounds: larrygram_geom::Rect,
+        text: &TextContent,
+    ) -> Option<Vec<Intent>> {
+        let literal: String = text
+            .parts
+            .iter()
+            .filter_map(|part| match part {
+                TextPart::Text(part) => Some(part.as_str()),
+                _ => None,
+            })
+            .collect();
+        if literal.is_empty() {
+            // Nothing typed, no text object (task P7-25 item 9).
+            return None;
+        }
+        let mut args = larrygram_commands::Args::new();
+        args.set("x", ArgValue::Number(bounds.min.x));
+        args.set("y", ArgValue::Number(bounds.min.y));
+        args.set("width", ArgValue::Number(bounds.width()));
+        args.set("height", ArgValue::Number(bounds.height()));
+        args.set("text", ArgValue::Text(literal));
+        let command = CommandId::parse("insert.drawing.text_box").ok()?;
+        Some(vec![Intent::new(
+            command,
+            Invocation::new(args, Source::Ui),
+        )])
     }
 
     /// Presses the editor's shape, then writes its text: one command
@@ -1785,6 +1888,11 @@ impl Shell {
     }
 
     /// Opens the editor after a successful `text.begin` (task P5-17).
+    ///
+    /// An edit already open on the same shape keeps its buffer (task
+    /// P7-25 item 9: a second `text.begin` never drops what is being
+    /// typed). The [`Shell::text_seed`] of the frame starts the text
+    /// with the typed character (task P7-25 item 8).
     fn begin_text_editor(&mut self) {
         let Some(shape) = self
             .app
@@ -1792,8 +1900,13 @@ impl Shell {
             .anchor
             .or_else(|| self.app.selection.shapes.last().copied())
         else {
+            self.text_seed = None;
             return;
         };
+        if self.editor.shape == Some(shape) {
+            self.text_seed = None;
+            return;
+        }
         let text = self
             .app
             .active_document()
@@ -1802,6 +1915,55 @@ impl Shell {
             .unwrap_or_default();
         if let Err(error) = self.editor.begin(shape, &text) {
             self.note_error(error.to_string());
+        }
+        if let Some(seed) = self.text_seed.take() {
+            self.editor.buffer = seed;
+        }
+    }
+
+    /// F2 and a typed character start editing the selected shape's
+    /// text (task P7-25 item 8): "a typed character starts the text
+    /// with that character", replacing the old text.
+    ///
+    /// The keys apply on the page's keyboard scope (the canvas has the
+    /// keyboard, ADR 0036) with no dialog open, so a field in the
+    /// Options or Page Setup dialog keeps its own typing.
+    fn text_edit_keys(&mut self, ui: &Ui, intents: &mut Vec<Intent>) {
+        self.text_seed = None;
+        if self.editor.is_active() || self.focus != ShortcutScope::Page {
+            return;
+        }
+        if self.app.selection.shapes.is_empty() {
+            return;
+        }
+        if self.wizard.is_some()
+            || self.options_open
+            || self.page_setup.is_some()
+            || self.about_open
+            || self.confirm_close.is_some()
+        {
+            return;
+        }
+        let (f2, typed) = ui.input(|input| {
+            let plain = !input.modifiers.ctrl && !input.modifiers.command && !input.modifiers.alt;
+            let typed: String = input
+                .events
+                .iter()
+                .filter_map(|event| match event {
+                    egui::Event::Text(text) if plain => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect();
+            (input.key_pressed(egui::Key::F2) && plain, typed)
+        });
+        if !f2 && typed.is_empty() {
+            return;
+        }
+        if !typed.is_empty() {
+            self.text_seed = Some(typed);
+        }
+        if let Ok(command) = CommandId::parse("text.begin") {
+            intents.push(Intent::new(command, Invocation::empty(Source::Ui)));
         }
     }
 

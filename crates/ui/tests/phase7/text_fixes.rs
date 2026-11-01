@@ -15,7 +15,7 @@
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
 use egui::accesskit::Role;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use larrygram_commands::app::AppCtx;
 use larrygram_geom::{Point, Unit};
 use larrygram_model::{
@@ -260,12 +260,13 @@ fn has(rig: &mut ShellRig, role: Role, name: &str) -> bool {
         .is_some()
 }
 
-/// Whether the in-place editor (a `TextInput` row) is on screen.
+/// Whether the in-place editor (the "Text" multiline input) is on
+/// screen.
 fn editing(rig: &mut ShellRig) -> bool {
     rig.run();
     rig.harness()
         .root()
-        .query_all_by_role(Role::TextInput)
+        .query_all_by_role_and_label(Role::MultilineTextInput, "Text")
         .next()
         .is_some()
 }
@@ -636,6 +637,325 @@ fn the_text_block_tool_resizes_the_text_block_in_one_undo_step() {
         assert!(
             (number(&rig, shape, "TxtWidth") - 1.0).abs() < 1.0e-9,
             "{kind:?}: one undo restores the size"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Item 8: starting text on a shape.
+// ---------------------------------------------------------------------------
+
+/// Item 8: double-clicking a shape starts editing its text (the
+/// pointer tool keeps the group click rule); the edit commits on
+/// Escape and keeps the text.
+#[test]
+fn double_clicking_a_shape_starts_editing_its_text() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        let shape = rectangle(&rig.shell.borrow().app);
+        assert_eq!(shape_text(&rig, shape), "Hello", "{kind:?}: the fixture");
+        let pos = screen(&rig, SHAPE.0, SHAPE.1);
+        double_click_at(&mut rig, pos);
+        assert!(
+            editing(&mut rig),
+            "{kind:?}: the double click opens the editor"
+        );
+        type_text(&mut rig, "!");
+        press_key(&mut rig, egui::Key::Escape, egui::Modifiers::NONE);
+        assert!(!editing(&mut rig), "{kind:?}: Escape ends editing");
+        assert_eq!(
+            shape_text(&rig, shape),
+            "Hello!",
+            "{kind:?}: the typed text lands and stays"
+        );
+    }
+}
+
+/// Item 8: typing a character with a shape selected starts the text
+/// with that character (the old text is replaced).
+#[test]
+fn typing_a_character_starts_the_text_with_it() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        let shape = rectangle(&rig.shell.borrow().app);
+        select_shape(&mut rig);
+        type_text(&mut rig, "Q");
+        assert!(
+            editing(&mut rig),
+            "{kind:?}: the typed character opens the editor"
+        );
+        press_key(&mut rig, egui::Key::Escape, egui::Modifiers::NONE);
+        assert_eq!(
+            shape_text(&rig, shape),
+            "Q",
+            "{kind:?}: the text starts with the typed character"
+        );
+    }
+}
+
+/// Item 8: F2 starts editing the selected shape's text.
+#[test]
+fn f2_starts_editing_the_shape_text() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        let shape = rectangle(&rig.shell.borrow().app);
+        select_shape(&mut rig);
+        press_key(&mut rig, egui::Key::F2, egui::Modifiers::NONE);
+        assert!(editing(&mut rig), "{kind:?}: F2 opens the editor");
+        type_text(&mut rig, "Y");
+        press_key(&mut rig, egui::Key::Escape, egui::Modifiers::NONE);
+        assert_eq!(
+            shape_text(&rig, shape),
+            "HelloY",
+            "{kind:?}: the edit keeps its text"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Item 9: the Text tool.
+// ---------------------------------------------------------------------------
+
+/// Clicks the Undo button (Panel Modern names it for the last edit,
+/// "Undo Insert Text Box"; the split's "Undo menu" is not the button).
+fn undo(rig: &mut ShellRig) {
+    rig.run();
+    let root = rig.harness().root();
+    let node = root
+        .children_recursive()
+        .find(|node| {
+            let data = node.accesskit_node().data();
+            data.role() == Role::Button
+                && data.label().is_some_and(|label| {
+                    label == "Undo" || (label.starts_with("Undo ") && label != "Undo menu")
+                })
+        })
+        .expect("the Undo button");
+    node.click();
+    rig.run();
+}
+
+/// The newest shape on `rig`'s page.
+fn last_shape(rig: &ShellRig) -> ShapeId {
+    let shell = rig.shell.borrow();
+    let session = shell.app.active_document().expect("session");
+    let page = session.active_page.expect("page");
+    *session
+        .document
+        .page(page)
+        .expect("page")
+        .shapes
+        .last()
+        .expect("a shape")
+}
+
+/// Makes one text object with the Text tool at (1, 5): click on empty
+/// page, type, Escape (task P7-25 item 9).
+fn make_text_object(rig: &mut ShellRig) -> ShapeId {
+    let pos = screen(rig, 1.0, 5.0);
+    click_at(rig, pos);
+    assert!(
+        editing(rig),
+        "the click on empty page starts a new text object"
+    );
+    type_text(rig, "Hi");
+    press_key(rig, egui::Key::Escape, egui::Modifiers::NONE);
+    assert!(!editing(rig), "Escape ends editing and keeps the text");
+    let shape = last_shape(rig);
+    assert_eq!(
+        shape_text(rig, shape),
+        "Hi",
+        "the text object carries its text"
+    );
+    shape
+}
+
+/// Item 9: a click on empty page starts a new text object, Escape
+/// ends editing and keeps the text, and Undo — Cmd+Z, Ctrl+Z and the
+/// Undo button — removes the object with its text in one step.
+#[test]
+fn the_text_tool_makes_a_text_object_in_one_undo_step() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        choose_text_tool(&mut rig, kind);
+
+        // Cmd+Z.
+        let before = shape_count(&rig);
+        make_text_object(&mut rig);
+        assert_eq!(shape_count(&rig), before + 1, "{kind:?}: one new object");
+        press_key(
+            &mut rig,
+            egui::Key::Z,
+            egui::Modifiers {
+                command: true,
+                ..egui::Modifiers::NONE
+            },
+        );
+        assert_eq!(
+            shape_count(&rig),
+            before,
+            "{kind:?}: Cmd+Z removes the object with its text in one step"
+        );
+
+        // Ctrl+Z.
+        make_text_object(&mut rig);
+        press_key(
+            &mut rig,
+            egui::Key::Z,
+            egui::Modifiers {
+                ctrl: true,
+                ..egui::Modifiers::NONE
+            },
+        );
+        assert_eq!(
+            shape_count(&rig),
+            before,
+            "{kind:?}: Ctrl+Z removes it in one step"
+        );
+
+        // The Undo button.
+        make_text_object(&mut rig);
+        undo(&mut rig);
+        assert_eq!(
+            shape_count(&rig),
+            before,
+            "{kind:?}: the Undo button removes it in one step"
+        );
+    }
+}
+
+/// Item 9: any click with the Text tool first commits the text being
+/// typed (the typed text is never dropped); a click inside an
+/// existing text object edits that object's text and no new box
+/// appears.
+#[test]
+fn a_click_with_the_text_tool_commits_first_and_edits_the_object() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        let box_ = text_box(&rig.shell.borrow().app);
+        choose_text_tool(&mut rig, kind);
+        let pos = screen(&rig, BOX.0, BOX.1);
+        click_at(&mut rig, pos);
+        assert!(
+            editing(&mut rig),
+            "{kind:?}: a click inside a text object edits its text"
+        );
+        type_text(&mut rig, "!");
+        // The second click inside the same object's border commits the
+        // typed text first (task P7-25: it used to drop it) and then
+        // edits the object again.
+        click_at(&mut rig, pos);
+        assert_eq!(
+            shape_text(&rig, box_),
+            "Box!",
+            "{kind:?}: the click keeps the typed text"
+        );
+        assert!(
+            editing(&mut rig),
+            "{kind:?}: and starts editing the object again"
+        );
+        assert_eq!(shape_count(&rig), 2, "{kind:?}: no stray text box");
+        press_key(&mut rig, egui::Key::Escape, egui::Modifiers::NONE);
+        assert_eq!(shape_text(&rig, box_), "Box!", "{kind:?}: Escape keeps it");
+    }
+}
+
+/// The colours of the page-space vertical strip at `x`, `y0..=y1`.
+fn strip_colors(
+    rig: &ShellRig,
+    image: &image::RgbaImage,
+    x: f64,
+    y0: f64,
+    y1: f64,
+) -> Vec<(u8, u8, u8)> {
+    let top = screen(rig, x, y1);
+    let bottom = screen(rig, x, y0);
+    let px = top.x.clamp(0.0, image.width() as f32 - 1.0) as u32;
+    let (y0, y1) = (
+        top.y.clamp(0.0, image.height() as f32 - 1.0) as u32,
+        bottom.y.clamp(0.0, image.height() as f32 - 1.0) as u32,
+    );
+    (y0..=y1)
+        .map(|y| {
+            let p = image.get_pixel(px, y);
+            (p[0], p[1], p[2])
+        })
+        .collect()
+}
+
+/// Whether any pixel of the screen region between the two page
+/// corners is within `tol` of `target`.
+#[allow(clippy::too_many_arguments)] // one picture-check seam
+fn region_has_color(
+    rig: &ShellRig,
+    image: &image::RgbaImage,
+    x0: f64,
+    y0: f64,
+    x1: f64,
+    y1: f64,
+    target: (u8, u8, u8),
+    tol: u8,
+) -> bool {
+    let top_left = screen(rig, x0, y1);
+    let bottom_right = screen(rig, x1, y0);
+    let (px0, py0) = (
+        top_left.x.clamp(0.0, image.width() as f32 - 1.0) as u32,
+        top_left.y.clamp(0.0, image.height() as f32 - 1.0) as u32,
+    );
+    let (px1, py1) = (
+        bottom_right.x.clamp(0.0, image.width() as f32 - 1.0) as u32,
+        bottom_right.y.clamp(0.0, image.height() as f32 - 1.0) as u32,
+    );
+    (py0..=py1).any(|y| {
+        (px0..=px1).any(|x| {
+            let p = image.get_pixel(x, y);
+            near((p[0], p[1], p[2]), target, tol)
+        })
+    })
+}
+
+/// Whether `colour` is within `tol` per channel of `target`.
+fn near(colour: (u8, u8, u8), target: (u8, u8, u8), tol: u8) -> bool {
+    let (a, b) = (
+        [colour.0, colour.1, colour.2],
+        [target.0, target.1, target.2],
+    );
+    (0..3).all(|c| a[c].abs_diff(b[c]) <= tol)
+}
+
+/// Item 9: while editing, one outline shows (the text block's), not
+/// both the text block's and the shape's.
+#[test]
+fn while_editing_one_outline_shows() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        let pos = screen(&rig, SHAPE.0, SHAPE.1);
+        double_click_at(&mut rig, pos);
+        assert!(editing(&mut rig), "{kind:?}: the edit is open");
+        // The picture with no tool cursor over the samples.
+        let park = screen(&rig, 0.5, 8.0);
+        rig.harness().event(egui::Event::PointerMoved(park));
+        rig.run();
+        let image = rig.render();
+        let selection = {
+            let colors = larrygram_ui::canvas::CanvasColors::from_theme(&sets().get(kind).theme);
+            (
+                colors.selection.r(),
+                colors.selection.g(),
+                colors.selection.b(),
+            )
+        };
+        // The text block's outline shows (the editor rect: the text
+        // extents from the block's top-left corner, inside the shape).
+        assert!(
+            region_has_color(&rig, &image, 2.2, 2.7, 3.8, 3.4, selection, 8),
+            "{kind:?}: the text block's outline shows ({selection:?})"
+        );
+        // The shape's own top edge shows no second outline.
+        let shape_edge = strip_colors(&rig, &image, SHAPE.0, 3.46, 3.54);
+        assert!(
+            shape_edge.iter().all(|c| !near(*c, selection, 8)),
+            "{kind:?}: no second outline on the shape"
         );
     }
 }
