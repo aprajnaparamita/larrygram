@@ -24,7 +24,7 @@ use larrygram_model::{
 };
 use larrygram_ui_spec::LayoutKind;
 
-use crate::ShellRig;
+use crate::{ShellRig, sets};
 
 /// Both committed layouts every item must work in.
 const LAYOUTS: [LayoutKind; 2] = [LayoutKind::PanelClassic, LayoutKind::PanelModern];
@@ -367,6 +367,161 @@ fn picture(rig: &mut ShellRig) -> image::RgbaImage {
         h.min(image.height() - y),
     )
     .to_image()
+}
+
+// ---------------------------------------------------------------------------
+// Item 5: the Text tool's icon.
+// ---------------------------------------------------------------------------
+
+/// The Text tool button's label in one layout.
+fn text_tool_button(kind: LayoutKind) -> &'static str {
+    match kind {
+        LayoutKind::PanelClassic => "Text Tool",
+        _ => "Text",
+    }
+}
+
+/// Chooses the Text tool with a real control click.
+fn choose_text_tool(rig: &mut ShellRig, kind: LayoutKind) {
+    click(rig, Role::Button, text_tool_button(kind));
+}
+
+/// The rect of the first widget named `name`.
+fn button_rect(rig: &mut ShellRig, name: &str) -> egui::Rect {
+    rig.run();
+    rig.harness()
+        .root()
+        .query_all_by_label(name)
+        .next()
+        .unwrap_or_else(|| panic!("no widget named {name:?}"))
+        .rect()
+}
+
+/// The project's own rasterisation of the icon `key` at `size`
+/// points, over the frame's button colour (so the tiles composite
+/// identically).
+fn reference_icon(kind: LayoutKind, key: &str, size: f32, bg: image::Rgba<u8>) -> image::RgbaImage {
+    let theme = sets().get(kind).theme.clone();
+    let side = size.ceil() as u32 + 8;
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(egui::vec2(side as f32, side as f32))
+        .with_pixels_per_point(1.0)
+        .build_ui(move |ui| {
+            ui.painter().rect_filled(
+                egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(side as f32, side as f32)),
+                0.0,
+                egui::Color32::from_rgba_unmultiplied(bg.0[0], bg.0[1], bg.0[2], bg.0[3]),
+            );
+            let rect = egui::Rect::from_min_size(egui::pos2(4.0, 4.0), egui::vec2(size, size));
+            let _ = larrygram_ui::icons::draw(ui, rect, key, size, &theme, true);
+        });
+    let image = harness.render().expect("the reference renders");
+    image::imageops::crop_imm(&image, 4, 4, size as u32, size as u32).to_image()
+}
+
+/// The most common pixel of `rect` in `image` (the flat button fill).
+fn mode_pixel(image: &image::RgbaImage, rect: egui::Rect) -> image::Rgba<u8> {
+    let mut counts: std::collections::BTreeMap<[u8; 4], usize> = Default::default();
+    for y in rect.min.y.max(0.0) as u32..rect.max.y.min(image.height() as f32) as u32 {
+        for x in rect.min.x.max(0.0) as u32..rect.max.x.min(image.width() as f32) as u32 {
+            *counts.entry(image.get_pixel(x, y).0).or_default() += 1;
+        }
+    }
+    image::Rgba(
+        *counts
+            .iter()
+            .max_by_key(|(_, count)| *count)
+            .map(|(colour, _)| colour)
+            .unwrap_or(&[0, 0, 0, 255]),
+    )
+}
+
+/// Whether the icon tile appears anywhere inside `rect` of `frame`.
+///
+/// Both pictures are blurred first: a layout at fractional
+/// coordinates samples the icon texture between texels (Panel
+/// Modern), which shifts edge pixels too far for an exact compare.
+/// The reference's ink pixels must land on the same colours after
+/// that, anywhere in the button.
+fn icon_match(frame: &image::RgbaImage, rect: egui::Rect, icon: &image::RgbaImage) -> bool {
+    let blurred_frame = image::imageops::blur(frame, 1.0);
+    let blurred_icon = image::imageops::blur(icon, 1.0);
+    let (frame, icon) = (&blurred_frame, &blurred_icon);
+    let (iw, ih) = icon.dimensions();
+    let bg = *icon.get_pixel(0, 0);
+    let ink: Vec<(u32, u32)> = (0..ih)
+        .flat_map(|y| {
+            (0..iw).filter_map(move |x| {
+                let p = icon.get_pixel(x, y);
+                (0..3)
+                    .any(|c| p.0[c].abs_diff(bg.0[c]) > 8)
+                    .then_some((x, y))
+            })
+        })
+        .collect();
+    if ink.is_empty() {
+        return false;
+    }
+    let x0 = rect.min.x.round() as i64;
+    let y0 = rect.min.y.round() as i64;
+    let (w, h) = (frame.width() as i64, frame.height() as i64);
+    for dy in -2..=(rect.height() as i64 - i64::from(ih) + 2) {
+        for dx in -2..=(rect.width() as i64 - i64::from(iw) + 2) {
+            let mut ok = 0usize;
+            for &(ix, iy) in &ink {
+                let (fx, fy) = (x0 + i64::from(ix) + dx, y0 + i64::from(iy) + dy);
+                if fx < 0 || fy < 0 || fx >= w || fy >= h {
+                    continue;
+                }
+                let f = frame.get_pixel(fx as u32, fy as u32);
+                let e = icon.get_pixel(ix, iy);
+                if (0..3).all(|c| f.0[c].abs_diff(e.0[c]) <= 24) {
+                    ok += 1;
+                }
+            }
+            if ok * 100 >= ink.len() * 90 {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Item 5: a real click on the Text tool button chooses the tool and
+/// its icon is the clear letter-A `typeface` glyph (task P7-25: the
+/// old `letter-a` read as a thumb), not some other icon.
+#[test]
+fn the_text_tool_button_draws_the_typeface_icon() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        let name = text_tool_button(kind);
+        choose_text_tool(&mut rig, kind);
+        assert_eq!(
+            rig.shell.borrow().app.active_tool(),
+            larrygram_commands::app::ActiveTool::Text,
+            "{kind:?}: the button click chooses the Text tool"
+        );
+        let rect = button_rect(&mut rig, name);
+        // Park the pointer away from the button: the drawn cursor
+        // would sit on the icon.
+        let park = screen(&rig, SHAPE.0, SHAPE.1);
+        rig.harness().event(egui::Event::PointerMoved(park));
+        rig.run();
+        let frame = rig.render();
+        let bg = mode_pixel(&frame, rect);
+        // The layouts draw the small icon at their own metric size, so
+        // the check probes the sizes the metrics use.
+        let matches = |key: &str| {
+            [12.0f32, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0]
+                .iter()
+                .any(|size| icon_match(&frame, rect, &reference_icon(kind, key, *size, bg)))
+        };
+        assert!(
+            matches("tools.text"),
+            "{kind:?}: the Text tool button draws the typeface icon"
+        );
+        assert!(!matches("edit.cut"), "{kind:?}: and not some other icon");
+    }
 }
 
 // ---------------------------------------------------------------------------
