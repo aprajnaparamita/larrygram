@@ -24,6 +24,7 @@ mod first_run;
 mod fit;
 mod golden;
 mod interaction;
+mod latch_fixes;
 mod layouts;
 mod manual;
 mod manual_fixes;
