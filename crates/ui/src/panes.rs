@@ -2622,6 +2622,15 @@ mod tests {
         assert_eq!(app.warnings.len(), before + 1, "one status line");
     }
 
+    /// With no document open the pane says so and dispatches nothing.
+    #[test]
+    fn the_format_shape_pane_says_no_document() {
+        let mut app = AppCtx::new(Settings::default());
+        let mut state = FormatShape::from_app(&app);
+        let intents = with_ui(|ui| show_format_shape(ui, &mut app, &mut state));
+        assert!(intents.is_empty());
+    }
+
     /// With no shape selected the pane labels its empty state and
     /// dispatches nothing (task P7-23's rule).
     #[test]

@@ -675,6 +675,14 @@ fn the_format_shape_pane_applies_per_field_and_follows_the_selection() {
             "{kind:?}: a choice applies at once"
         );
 
+        // The Line section applies the same way.
+        set_field(&mut rig, "Corner rounding", "0.25");
+        assert_eq!(
+            cell_number(&rig, shape, "Rounding"),
+            Some(0.25),
+            "{kind:?}: the Line section applies per field too"
+        );
+
         // The pane follows the selection: the picture has no
         // transparency of its own, so the field re-reads to 0.
         assert_eq!(

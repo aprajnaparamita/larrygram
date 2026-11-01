@@ -1464,4 +1464,222 @@ mod tests {
             "the dialog names the rejected field"
         );
     }
+
+    /// A field name the forms do not know is an error, not a crash
+    /// (the defensive arm).
+    #[test]
+    fn an_unknown_field_name_is_an_error_not_a_crash() {
+        let fill = empty_fill();
+        let error = fill.field_args("nope").expect_err("unknown field");
+        assert!(error.contains("unknown fill field"), "{error}");
+        let line = LineForm {
+            color: "#000000".to_owned(),
+            weight: "0.75".to_owned(),
+            pattern: 1.0,
+            cap: 0.0,
+            transparency: "0".to_owned(),
+            begin: 0.0,
+            end: 0.0,
+            begin_size: 2.0,
+            end_size: 2.0,
+            rounding: "0".to_owned(),
+            error: None,
+        };
+        let error = line.field_args("nope").expect_err("unknown field");
+        assert!(error.contains("unknown line field"), "{error}");
+    }
+
+    /// The colour rules: the `#RGB` spelling, the preview fallback
+    /// and the refused text.
+    #[test]
+    fn the_colour_rules_take_hex_and_fall_back_for_the_preview() {
+        assert_eq!(color_or("#F0C", (1, 2, 3)), Color::new(0xFF, 0x00, 0xCC));
+        assert_eq!(color_or("#1F5BC4", (1, 2, 3)), Color::new(0x1f, 0x5b, 0xc4));
+        assert_eq!(color_or("#12345", (1, 2, 3)), Color::new(1, 2, 3));
+        assert_eq!(color_or("nope", (1, 2, 3)), Color::new(1, 2, 3));
+        assert_eq!(hex_arg("fill colour", "#f0c").expect("hex"), "#f0c");
+        assert!(hex_arg("fill colour", "#12345").is_err());
+        assert!(hex_arg("fill colour", "red").is_err());
+    }
+
+    /// The number fields' own rules (the ranges the command enforces
+    /// again).
+    #[test]
+    fn the_number_fields_take_their_ranges() {
+        assert!(percent_arg("transparency", "101").is_err());
+        assert!(percent_arg("transparency", "wide").is_err());
+        assert!(weight_arg("line weight", "150").is_err());
+        assert!(weight_arg("line weight", "wide").is_err());
+        assert!(rounding_arg("corner rounding", "-1").is_err());
+        assert!(rounding_arg("corner rounding", "wide").is_err());
+    }
+
+    /// Every preview dash rhythm is a list (the picker's samples).
+    #[test]
+    fn every_pattern_draws_a_dash_rhythm() {
+        for pattern in 0..=12 {
+            let dashes = dash_rhythm(pattern);
+            if (2..=8).contains(&pattern) {
+                assert!(!dashes.is_empty(), "pattern {pattern} dashes");
+            } else {
+                assert!(dashes.is_empty(), "pattern {pattern} is solid");
+            }
+        }
+    }
+
+    /// The previews draw for every pattern and for the dot arrowhead
+    /// (the patterned fill, the no-pattern line, the bad colour and
+    /// weight fallbacks).
+    #[test]
+    fn the_previews_draw_for_every_choice() {
+        let fill = FillForm {
+            color: "#1F5BC4".to_owned(),
+            pattern: 2.0,
+            background: "nope".to_owned(),
+            transparency: "25".to_owned(),
+            error: None,
+        };
+        let line = LineForm {
+            color: "nope".to_owned(),
+            weight: "wide".to_owned(),
+            pattern: 5.0,
+            cap: 0.0,
+            transparency: "0".to_owned(),
+            begin: 5.0,
+            end: 3.0,
+            begin_size: 2.0,
+            end_size: 2.0,
+            rounding: "0".to_owned(),
+            error: None,
+        };
+        let mut harness = Harness::builder()
+            .with_size(egui::vec2(260.0, 480.0))
+            .build_ui(move |ui| {
+                for pattern in [0.0, 1.0, 2.0, 8.0] {
+                    let mut fill = fill.clone();
+                    fill.pattern = pattern;
+                    fill_preview(ui, &fill);
+                    let mut line = line.clone();
+                    line.pattern = pattern;
+                    line_preview(ui, &line);
+                }
+            });
+        harness.run();
+    }
+
+    /// The defensive preview paths: a two-point polygon and a
+    /// zero-length dashed segment draw nothing and never panic.
+    #[test]
+    fn the_preview_helpers_take_degenerate_input() {
+        let mut harness = Harness::builder()
+            .with_size(egui::vec2(260.0, 120.0))
+            .build_ui(move |ui| {
+                let texture = preview_texture(ui);
+                let painter = ui.painter();
+                preview_polygon(painter, texture, &[Pos2::ZERO], Color32::RED);
+                preview_dashed(
+                    painter,
+                    texture,
+                    Pos2::ZERO,
+                    Pos2::ZERO,
+                    1.0,
+                    Color32::RED,
+                    &[2.0, 1.0],
+                );
+                preview_dashed(
+                    painter,
+                    texture,
+                    Pos2::ZERO,
+                    Pos2::new(8.0, 0.0),
+                    1.0,
+                    Color32::RED,
+                    &[],
+                );
+            });
+        harness.run();
+    }
+
+    /// The weight ladder beside the weight field commits a choice
+    /// (the editable-combo rule of the Line form).
+    #[test]
+    fn the_weight_list_commits_a_choice() {
+        let form = Rc::new(RefCell::new(LineForm {
+            color: "#000000".to_owned(),
+            weight: "0.75".to_owned(),
+            pattern: 1.0,
+            cap: 0.0,
+            transparency: "0".to_owned(),
+            begin: 0.0,
+            end: 0.0,
+            begin_size: 2.0,
+            end_size: 2.0,
+            rounding: "0".to_owned(),
+            error: None,
+        }));
+        let changes: Shared<Vec<Change>> = Rc::new(RefCell::new(Vec::new()));
+        let mut harness = line_fields_harness(Rc::clone(&form), Rc::clone(&changes));
+        harness.run();
+        click(&mut harness, "Line weight list");
+        click(&mut harness, "2.25 pt");
+        assert_eq!(form.borrow().weight, "2.25");
+        let seen = changes.borrow().clone();
+        let args = seen.first().expect("change").as_ref().expect("accepted");
+        assert_eq!(args.number("weight"), Some(2.25));
+    }
+
+    /// A refused entry of the Line form is one change carrying the
+    /// reason (the pane records it as its status line).
+    #[test]
+    fn a_bad_line_entry_is_refused_with_the_reason() {
+        let form = Rc::new(RefCell::new(LineForm {
+            color: "#000000".to_owned(),
+            weight: "0.75".to_owned(),
+            pattern: 1.0,
+            cap: 0.0,
+            transparency: "0".to_owned(),
+            begin: 0.0,
+            end: 0.0,
+            begin_size: 2.0,
+            end_size: 2.0,
+            rounding: String::new(),
+            error: None,
+        }));
+        let changes: Shared<Vec<Change>> = Rc::new(RefCell::new(Vec::new()));
+        let mut harness = line_fields_harness(Rc::clone(&form), Rc::clone(&changes));
+        harness.run();
+        type_into(&mut harness, "Corner rounding", "wide");
+        let seen = changes.borrow().clone();
+        let reason = seen.first().expect("change").as_ref().expect_err("refused");
+        assert!(reason.contains("corner rounding"), "{reason}");
+    }
+
+    /// A colour typed into the palette's text field commits like any
+    /// typed value.
+    #[test]
+    fn a_colour_typed_into_the_field_commits() {
+        let form = Rc::new(RefCell::new(empty_fill()));
+        form.borrow_mut().color = String::new();
+        let changes: Shared<Vec<Change>> = Rc::new(RefCell::new(Vec::new()));
+        let mut harness = fields_harness(Rc::clone(&form), Rc::clone(&changes));
+        harness.run();
+        type_into(&mut harness, "Fill colour", "#FF8800");
+        assert_eq!(form.borrow().color, "#FF8800");
+        let seen = changes.borrow().clone();
+        let args = seen.first().expect("change").as_ref().expect("accepted");
+        assert_eq!(args.text("color"), Some("#FF8800"));
+    }
+
+    /// Apply rejects a bad field like OK does (the message keeps the
+    /// dialog open).
+    #[test]
+    fn apply_rejects_a_bad_field_too() {
+        let form = Rc::new(RefCell::new(empty_fill()));
+        form.borrow_mut().transparency = "wide".to_owned();
+        let outcome: Shared<Vec<Outcome>> = Rc::new(RefCell::new(Vec::new()));
+        let mut harness = fill_harness(Rc::clone(&form), Rc::clone(&outcome));
+        harness.run();
+        click(&mut harness, "Apply");
+        assert!(outcome.borrow().is_empty(), "nothing applies");
+        assert!(form.borrow().error.is_some(), "the message shows");
+    }
 }
