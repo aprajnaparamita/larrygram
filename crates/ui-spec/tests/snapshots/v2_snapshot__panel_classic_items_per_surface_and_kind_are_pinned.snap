@@ -10,4 +10,4 @@ panel-classic:
   toolbars: 21 (items: 345)
   file_view nav: 0
   context_menus: 30 (items: 237)
-  items by kind: button=830 check=16 combo=3 dropdown=1 heading=12 list=69 options=5 palette=1 split=26 split_recent=4 submenu=57
+  items by kind: button=825 check=21 combo=3 dropdown=1 heading=12 list=69 options=5 palette=1 split=26 split_recent=4 submenu=57

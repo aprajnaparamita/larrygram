@@ -2302,7 +2302,11 @@ struct ShellChecks;
 
 impl panel_classic::CheckedState for ShellChecks {
     fn is_checked(&self, command: &str, app: &AppCtx) -> Option<bool> {
-        layout_radio_checked(app, command).or_else(|| ToolLatch.is_checked(command, app))
+        layout_radio_checked(app, command)
+            .or_else(|| ToolLatch.is_checked(command, app))
+            // The text toggles read the selection's cells (task P7-24
+            // item 10).
+            .or_else(|| panel_classic::text_toggle_checked(app, command))
     }
 }
 
