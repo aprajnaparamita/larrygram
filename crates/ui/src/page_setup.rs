@@ -57,7 +57,7 @@ pub struct State {
 
 impl State {
     /// The dialog over the active page's rendered size (goal 11:
-    /// [`rendered_size`]), falling back to the default Letter size
+    /// `rendered_size`), falling back to the default Letter size
     /// when no document is open.
     pub fn from_app(app: &AppCtx) -> Self {
         let (width, height) = rendered_size(app);
