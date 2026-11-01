@@ -35,7 +35,10 @@ fn shell_rig(kind: LayoutKind) -> ShellRig {
     app.selection.shapes.clear();
     app.selection.anchor = None;
     let mut rig = ShellRig::with_app(app);
-    // One double-click window for the text tests (the P7-19 rule).
+    // One double-click window for the text tests (the P7-19 rule):
+    // the two clicks of `double_click_at` sit two runs (0.5 s) apart.
+    // `double_click_at` waits the window out first so no earlier click
+    // interferes (egui's triple-click rule).
     rig.harness().ctx.options_mut(|options| {
         options.input_options.max_double_click_delay = 10.0;
     });
@@ -95,7 +98,17 @@ fn click_at(rig: &mut ShellRig, pos: egui::Pos2) {
 }
 
 /// A double click at `pos` (two clicks inside one double-click window).
+///
+/// The wait first drains the double-click window: egui counts a click
+/// as a triple click when two earlier clicks sit inside the window,
+/// and widget clicks before the canvas double click would turn its
+/// second click into a triple click (`click.count == 3`, so
+/// `double_clicked_by` stays false). One harness run steps the clock
+/// 0.25 s, so 60 runs pass any 10 s window.
 fn double_click_at(rig: &mut ShellRig, pos: egui::Pos2) {
+    for _ in 0..60 {
+        rig.run();
+    }
     click_at(rig, pos);
     click_at(rig, pos);
 }
@@ -148,6 +161,27 @@ fn tooltip(rig: &mut ShellRig, role: Role, name: &str) -> Option<String> {
                 .data()
                 .description()
                 .map(|d| d.to_owned())
+        })
+}
+
+/// The text content of `shape` (`None` when it has none).
+fn shape_text(rig: &ShellRig, shape: ShapeId) -> Option<String> {
+    let shell = rig.shell.borrow();
+    let session = shell.app.active_document().expect("session");
+    session
+        .document
+        .shape(shape)
+        .expect("shape")
+        .text
+        .as_ref()
+        .map(|text| {
+            text.parts
+                .iter()
+                .filter_map(|part| match part {
+                    larrygram_model::TextPart::Text(part) => Some(part.as_str()),
+                    _ => None,
+                })
+                .collect::<String>()
         })
 }
 
@@ -949,6 +983,81 @@ fn the_transparency_rows_preview_and_apply() {
         assert!(
             (trans - 0.5).abs() < 1.0e-9,
             "{kind:?}: the 50% row applies ({trans})"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Goal 8 (the part that stays here): the text controls stay enabled on
+// a shape without text, and the format applies to text typed later.
+// ---------------------------------------------------------------------------
+
+/// On a shape without text the font, size and style controls stay
+/// enabled (goal 8) and the format they apply shows on text typed
+/// later.
+#[test]
+fn the_text_controls_stay_enabled_on_an_empty_shape_and_apply_to_later_text() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        select_shape(&mut rig);
+        let shape = rectangle(&rig.shell.borrow().app);
+        assert!(
+            shape_text(&rig, shape).is_none(),
+            "{kind:?}: the fixture starts without text"
+        );
+
+        // Every text control is enabled on the text-less shape (the
+        // centre button is "Align Center" in Panel Classic and
+        // "Center" in Panel Modern).
+        let role = combo_role(kind);
+        let centre = match kind {
+            LayoutKind::PanelClassic => "Align Center",
+            _ => "Center",
+        };
+        for (role, name) in [
+            (role, "Font"),
+            (role, "Font Size"),
+            (Role::Button, "Bold"),
+            (Role::Button, "Italic"),
+            (Role::Button, "Underline"),
+            (Role::Button, "Align Left"),
+            (Role::Button, centre),
+            (Role::Button, "Align Right"),
+        ] {
+            assert!(
+                !disabled(&mut rig, role, name),
+                "{kind:?}: {name} enables on a shape without text"
+            );
+        }
+
+        // The format applies now: bold and 36 pt.
+        click(&mut rig, Role::Button, "Bold");
+        open_size_list(&mut rig, kind);
+        click(&mut rig, Role::Button, "36 pt");
+        let style = row_number(&rig, shape, "Character", "Style")
+            .unwrap_or_else(|| panic!("{kind:?}: the Style cell"));
+        assert_eq!(style, 1.0, "{kind:?}: the bold bit records at once");
+        let size = row_number(&rig, shape, "Character", "Size")
+            .unwrap_or_else(|| panic!("{kind:?}: the Size cell"));
+        assert!(
+            (size - 0.5).abs() < 1.0e-9,
+            "{kind:?}: the size records at once ({size})"
+        );
+
+        // Text typed later paints at that format (a light fill first:
+        // the default fill is dark and the black text hides on it —
+        // and "No Fill" would leave the shape's interior unhittable).
+        open_fill_picker(&mut rig, kind);
+        click(&mut rig, Role::Button, "Surface #F5F5F5");
+        let before = ink(&mut rig, 2.05, 2.55, 3.95, 3.6);
+        let pos = screen(&rig, SHAPE.0, SHAPE.1);
+        double_click_at(&mut rig, pos);
+        type_into_editor(&mut rig, "MMMM");
+        press_key(&mut rig, egui::Key::Escape);
+        let after = ink(&mut rig, 2.05, 2.55, 3.95, 3.6);
+        assert!(
+            after > before * 2,
+            "{kind:?}: the later text paints at the recorded format ({before} to {after})"
         );
     }
 }
