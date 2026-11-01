@@ -66,7 +66,9 @@ editor on it immediately. Text-only shapes are ordinary shapes with
 The `Text` tool no longer "creates a shape … and opens the editor on it
 immediately". The box is **deferred** (task P7-25 item 9): a click on
 empty page only records where the box goes (`text::PendingBox`) and
-opens the editor over that rectangle while no shape exists yet. On
+opens the editor over that rectangle while no shape exists yet. A
+click records the default 2 × 0.5 in box at the click point; a drag on
+empty page records the dragged rectangle (task P7-26 item 9). On
 commit the box and its text are inserted **in one undo step**:
 `insert.drawing.text_box` takes a `text` argument and writes the shape
 and its text inside one `CompositeEdit`, so one undo removes the new
