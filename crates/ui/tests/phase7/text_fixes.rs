@@ -1865,3 +1865,54 @@ fn a_pointer_resize_drag_follows_the_pointer_at_0_and_90_degrees() {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Item 9 (task P7-26): a drag sizes the new text box.
+// ---------------------------------------------------------------------------
+
+/// Item 9: a drag on empty page makes a box of the dragged size at the
+/// dragged place, and a click keeps the default box (task P7-25 item
+/// 9's 2 x 0.5).
+#[test]
+fn a_drag_with_the_text_tool_sizes_the_new_text_box() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        choose_text_tool(&mut rig, kind);
+        let before = shape_count(&rig);
+        // A drag from (1, 5) to (3, 5.4).
+        let from = screen(&rig, 1.0, 5.0);
+        let to = screen(&rig, 3.0, 5.4);
+        drag(&mut rig, from, to);
+        assert!(editing(&mut rig), "{kind:?}: the drag starts a text box");
+        type_text(&mut rig, "Hi");
+        press_key(&mut rig, egui::Key::Escape, egui::Modifiers::NONE);
+        assert_eq!(shape_count(&rig), before + 1, "{kind:?}: one text box");
+        let shape = last_shape(&rig);
+        assert_eq!(shape_text(&rig, shape), "Hi", "{kind:?}: the text lands");
+        // The screen-to-page conversion rounds in f32: a fraction of a
+        // thousandth of an inch is noise.
+        assert!(
+            (number(&rig, shape, "Width") - 2.0).abs() < 1.0e-4
+                && (number(&rig, shape, "Height") - 0.4).abs() < 1.0e-4,
+            "{kind:?}: the box is the dragged size ({:?})",
+            (number(&rig, shape, "Width"), number(&rig, shape, "Height"))
+        );
+        assert!(
+            (number(&rig, shape, "PinX") - 2.0).abs() < 1.0e-4
+                && (number(&rig, shape, "PinY") - 5.2).abs() < 1.0e-4,
+            "{kind:?}: at the dragged place"
+        );
+        // A click keeps the default 2 x 0.5 box.
+        let pos = screen(&rig, 6.0, 5.6);
+        click_at(&mut rig, pos);
+        assert!(editing(&mut rig), "{kind:?}: the click starts a text box");
+        type_text(&mut rig, "A");
+        press_key(&mut rig, egui::Key::Escape, egui::Modifiers::NONE);
+        let shape = last_shape(&rig);
+        assert!(
+            (number(&rig, shape, "Width") - 2.0).abs() < 1.0e-4
+                && (number(&rig, shape, "Height") - 0.5).abs() < 1.0e-4,
+            "{kind:?}: a click keeps the default box"
+        );
+    }
+}
