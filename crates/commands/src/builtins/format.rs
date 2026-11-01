@@ -64,6 +64,24 @@
 //!   it to the selection); `apply` (a flag) forces the apply form and
 //!   `cancel` (a flag) drops a recorded copy without applying (task
 //!   P7-24 item 6, Escape on the canvas).
+//! - `format.fill` (task P7-28) — `color`: the fill colour (`FillForegnd`),
+//!   `pattern`: the fill pattern index (`FillPattern`, `none`/`solid`
+//!   or a pattern name), `background`: the pattern colour
+//!   (`FillBkgnd`) and `transparency`: percent (`FillForegndTrans`);
+//!   every argument is optional and with none of them the command
+//!   requests the Fill dialog (`UiRequest::ShowFillDialog`) and
+//!   changes nothing;
+//! - `format.line` (task P7-28) — `color` (`LineColor`), `weight`
+//!   (points, `LineWeight`), `pattern` (`LinePattern`), `cap`
+//!   (`LineCap`: `round`, `square`, `extended` or 0 to 2),
+//!   `transparency` (percent, `LineColorTrans`), `begin` and `end`
+//!   (arrowhead index or name, `BeginArrow`/`EndArrow`), `begin_size`
+//!   and `end_size` (arrowhead size class 0 to 6, or `very small` ..
+//!   `colossal`, `BeginArrowSize`/`EndArrowSize`) and `rounding`
+//!   (corner radius in inches, `Rounding`); with no arguments it
+//!   requests the Line dialog (`UiRequest::ShowLineDialog`);
+//! - `format.shape.pane` — no arguments: requests the Format Shape
+//!   pane (`UiRequest::ShowFormatShape`) and writes nothing.
 //!
 //! Every run is one undoable edit ([`FormatEdit`], ADR 0040) and
 //! writes the cells of every selected shape in one step.
@@ -77,7 +95,7 @@ use larrygram_shapesheet::CellAddress;
 use crate::app::{AppCtx, SessionId};
 use crate::error::CommandError;
 use crate::undo::Edit;
-use crate::{Invocation, Outcome};
+use crate::{Invocation, Outcome, UiRequest};
 
 use super::edit::{document_mut, number_literal, selection_targets};
 use super::{CommandTable, edit_outcome, model_error, outcome};
@@ -271,6 +289,15 @@ pub(crate) const TABLE: CommandTable = &[
         "Format Painter",
         can_paint,
         run_format_painter,
+    ),
+    // Task P7-28: the Fill and Line dialogs and the Format Shape pane.
+    ("format.fill", "Fill", can_format, run_fill),
+    ("format.line", "Line", can_format, run_line),
+    (
+        "format.shape.pane",
+        "Format Shape",
+        super::has_document,
+        run_shape_pane,
     ),
 ];
 
@@ -1432,7 +1459,13 @@ fn run_line_pattern(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, Comma
 /// name `none` (0), or one of the [`LINE_PATTERNS`] labels the pickers
 /// show ("Dashed", "Dotted", ...), in any case.
 fn pattern_index(inv: &Invocation) -> Result<f64, CommandError> {
-    if let Some(text) = arg_text(inv, &["pattern", "value"]) {
+    pattern_index_in(inv, "line pattern", &["pattern", "value"])
+}
+
+/// The pattern index under any of `names` (task P7-28: the Fill and
+/// Line dialogs name it `pattern` alone), named `what` in the errors.
+fn pattern_index_in(inv: &Invocation, what: &str, names: &[&str]) -> Result<f64, CommandError> {
+    if let Some(text) = arg_text(inv, names) {
         let key = text.trim().to_ascii_lowercase();
         return match key.as_str() {
             "none" | "no line" | "noline" => Ok(0.0),
@@ -1440,18 +1473,18 @@ fn pattern_index(inv: &Invocation) -> Result<f64, CommandError> {
                 Some(index) => Ok(index),
                 None => match key.parse::<f64>() {
                     Ok(value) if value.is_finite() && (0.0..=24.0).contains(&value) => Ok(value),
-                    Ok(_) => Err(CommandError::invalid_args(
-                        "line pattern must be between 0 and 24",
-                    )),
-                    Err(_) => Err(CommandError::invalid_args(
-                        "line pattern must be a number or a pattern name",
-                    )),
+                    Ok(_) => Err(CommandError::invalid_args(format!(
+                        "{what} must be between 0 and 24"
+                    ))),
+                    Err(_) => Err(CommandError::invalid_args(format!(
+                        "{what} must be a number or a pattern name"
+                    ))),
                 },
             },
         };
     }
     Err(CommandError::NeedsInput(crate::NeededInput::Text {
-        prompt: "line pattern".to_owned(),
+        prompt: what.to_owned(),
         default: None,
     }))
 }
@@ -1527,6 +1560,317 @@ fn arrow_index(inv: &Invocation, names: &[&str]) -> Result<Option<f64>, CommandE
         };
     }
     Ok(None)
+}
+
+// ---------------------------------------------------------------------------
+// The Fill and Line dialogs (task P7-28)
+// ---------------------------------------------------------------------------
+
+/// The fill cells `format.fill` writes (task P7-28): every field is
+/// optional, and the dialog re-dispatches the command with all four at
+/// once (one undo step). `transparency` is the fraction the
+/// `FillForegndTrans` cell takes (0 to 1), parsed from the percent the
+/// dialog and the command line show.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+struct FillSpec {
+    /// `FillForegnd`, the fill colour.
+    color: Option<larrygram_model::Color>,
+    /// `FillPattern`, the pattern index.
+    pattern: Option<f64>,
+    /// `FillBkgnd`, the pattern colour.
+    background: Option<larrygram_model::Color>,
+    /// `FillForegndTrans`, the transparency fraction.
+    transparency: Option<f64>,
+}
+
+/// The line cells `format.line` writes (task P7-28), the Line dialog's
+/// ten fields. `weight` is in points (the picker's unit) and `rounding`
+/// in inches, as the dialog shows them; `transparency` is the fraction
+/// `LineColorTrans` takes.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+struct LineSpec {
+    /// `LineColor`, the stroke colour.
+    color: Option<larrygram_model::Color>,
+    /// `LineWeight`, the stroke weight in points.
+    weight: Option<f64>,
+    /// `LinePattern`, the dash index.
+    pattern: Option<f64>,
+    /// `LineCap`: 0 round, 1 square, 2 extended.
+    cap: Option<f64>,
+    /// `LineColorTrans`, the transparency fraction.
+    transparency: Option<f64>,
+    /// `BeginArrow`, the begin arrowhead index.
+    begin: Option<f64>,
+    /// `EndArrow`, the end arrowhead index.
+    end: Option<f64>,
+    /// `BeginArrowSize`, the begin arrowhead size class.
+    begin_size: Option<f64>,
+    /// `EndArrowSize`, the end arrowhead size class.
+    end_size: Option<f64>,
+    /// `Rounding`, the corner radius in inches.
+    rounding: Option<f64>,
+}
+
+impl FillSpec {
+    /// The cells the arguments name (`color`, `pattern`, `background`,
+    /// `transparency`); every one is optional.
+    fn parse(inv: &Invocation) -> Result<Self, CommandError> {
+        let pattern = if has_arg(inv, &["pattern"]) {
+            Some(pattern_index_in(inv, "fill pattern", &["pattern"])?)
+        } else {
+            None
+        };
+        Ok(Self {
+            color: opt_color(inv, &["color"])?,
+            pattern,
+            background: opt_color(inv, &["background"])?,
+            transparency: opt_transparency(inv, &["transparency"])?,
+        })
+    }
+}
+
+impl LineSpec {
+    /// The cells the arguments name (`color`, `weight`, `pattern`,
+    /// `cap`, `transparency`, `begin`, `end`, `begin_size`, `end_size`,
+    /// `rounding`); every one is optional.
+    fn parse(inv: &Invocation) -> Result<Self, CommandError> {
+        let pattern = if has_arg(inv, &["pattern"]) {
+            Some(pattern_index_in(inv, "line pattern", &["pattern"])?)
+        } else {
+            None
+        };
+        Ok(Self {
+            color: opt_color(inv, &["color"])?,
+            weight: opt_weight(inv)?,
+            pattern,
+            cap: opt_cap(inv)?,
+            transparency: opt_transparency(inv, &["transparency"])?,
+            begin: arrow_index(inv, &["begin"])?,
+            end: arrow_index(inv, &["end"])?,
+            begin_size: opt_arrow_size(inv, &["begin_size"])?,
+            end_size: opt_arrow_size(inv, &["end_size"])?,
+            rounding: opt_rounding(inv)?,
+        })
+    }
+}
+
+/// Whether any of `names` carries an argument.
+fn has_arg(inv: &Invocation, names: &[&str]) -> bool {
+    names.iter().any(|name| inv.args.get(name).is_some())
+}
+
+/// The optional colour under any of `names`.
+fn opt_color(
+    inv: &Invocation,
+    names: &[&str],
+) -> Result<Option<larrygram_model::Color>, CommandError> {
+    let Some(text) = arg_text(inv, names) else {
+        return Ok(None);
+    };
+    parse_color(&text).map(Some).ok_or_else(|| {
+        CommandError::invalid_args(format!(
+            "unknown color {text:?}; use #RGB, #RRGGBB or a color name"
+        ))
+    })
+}
+
+/// The optional transparency percentage under any of `names`, stored
+/// as the fraction the `*Trans` cells take (0 to 1).
+fn opt_transparency(inv: &Invocation, names: &[&str]) -> Result<Option<f64>, CommandError> {
+    let Some(percent) = arg_number(inv, names)? else {
+        return Ok(None);
+    };
+    if !(0.0..=100.0).contains(&percent) {
+        return Err(CommandError::invalid_args(
+            "transparency must be between 0 and 100 percent",
+        ));
+    }
+    Ok(Some(percent / 100.0))
+}
+
+/// The optional weight under `weight` (points, the picker's unit).
+fn opt_weight(inv: &Invocation) -> Result<Option<f64>, CommandError> {
+    let Some(points) = arg_number(inv, &["weight"])? else {
+        return Ok(None);
+    };
+    if !(0.0..=100.0).contains(&points) {
+        return Err(CommandError::invalid_args(
+            "line weight must be between 0 and 100 points",
+        ));
+    }
+    Ok(Some(points))
+}
+
+/// The optional line cap under `cap`: 0 round, 1 square, 2 extended
+/// (the `LineCap` list), or one of those names.
+fn opt_cap(inv: &Invocation) -> Result<Option<f64>, CommandError> {
+    let Some(text) = arg_text(inv, &["cap"]) else {
+        return Ok(None);
+    };
+    let key = text.trim().to_ascii_lowercase();
+    let value = match key.as_str() {
+        "round" | "rounded" => 0.0,
+        "square" => 1.0,
+        "extended" | "butt" => 2.0,
+        _ => match key.parse::<f64>() {
+            Ok(value) if value.is_finite() && (0.0..=2.0).contains(&value) => value,
+            Ok(_) => {
+                return Err(CommandError::invalid_args(
+                    "cap must be 0, 1 or 2 (round, square, extended)",
+                ));
+            }
+            Err(_) => {
+                return Err(CommandError::invalid_args(
+                    "cap must be round, square, extended or a number",
+                ));
+            }
+        },
+    };
+    Ok(Some(value))
+}
+
+/// The optional arrowhead size class under any of `names` (the
+/// `*ArrowSize` list: 0 very small .. 6 colossal).
+fn opt_arrow_size(inv: &Invocation, names: &[&str]) -> Result<Option<f64>, CommandError> {
+    let Some(text) = arg_text(inv, names) else {
+        return Ok(None);
+    };
+    let key = text.trim().to_ascii_lowercase();
+    let value = match key.as_str() {
+        "very small" => 0.0,
+        "small" => 1.0,
+        "medium" => 2.0,
+        "large" => 3.0,
+        "extra large" | "very large" => 4.0,
+        "jumbo" => 5.0,
+        "colossal" => 6.0,
+        _ => match key.parse::<f64>() {
+            Ok(value) if value.is_finite() && (0.0..=6.0).contains(&value) => value,
+            Ok(_) => {
+                return Err(CommandError::invalid_args(
+                    "arrow size must be between 0 and 6",
+                ));
+            }
+            Err(_) => {
+                return Err(CommandError::invalid_args(
+                    "arrow size must be a number or a size name",
+                ));
+            }
+        },
+    };
+    Ok(Some(value))
+}
+
+/// The optional corner rounding under `rounding` (a non-negative
+/// radius in inches).
+fn opt_rounding(inv: &Invocation) -> Result<Option<f64>, CommandError> {
+    let Some(value) = arg_number(inv, &["rounding"])? else {
+        return Ok(None);
+    };
+    if !value.is_finite() || !(0.0..=1000.0).contains(&value) {
+        return Err(CommandError::invalid_args(
+            "rounding must be between 0 and 1000 inches",
+        ));
+    }
+    Ok(Some(value))
+}
+
+/// `format.fill` (task P7-28): the fill cells of every selected shape
+/// from the arguments — the Fill dialog re-dispatches this command with
+/// its fields, and one run is one undo step. With no arguments the
+/// command requests the dialog (`UiRequest::ShowFillDialog`) and
+/// changes nothing (AGENTS.md section 6).
+fn run_fill(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError> {
+    let spec = FillSpec::parse(inv)?;
+    if spec == FillSpec::default() {
+        return Ok(Outcome {
+            message: Some("Fill".to_owned()),
+            ui_request: Some(UiRequest::ShowFillDialog),
+            ..Outcome::default()
+        });
+    }
+    format_run(ctx, "Fill", move |_, targets| {
+        let mut ops = Vec::new();
+        for shape in targets {
+            if let Some(color) = spec.color {
+                ops.push(direct(*shape, "FillForegnd", color_write(color)));
+            }
+            if let Some(pattern) = spec.pattern {
+                ops.push(direct(*shape, "FillPattern", num(pattern)));
+            }
+            if let Some(background) = spec.background {
+                ops.push(direct(*shape, "FillBkgnd", color_write(background)));
+            }
+            if let Some(transparency) = spec.transparency {
+                ops.push(direct(*shape, "FillForegndTrans", num(transparency)));
+            }
+        }
+        Ok(ops)
+    })
+}
+
+/// `format.line` (task P7-28): the line cells of every selected shape
+/// from the arguments — the Line dialog and the Format Shape pane
+/// re-dispatch this command with their fields, and one run is one undo
+/// step. With no arguments the command requests the dialog
+/// (`UiRequest::ShowLineDialog`) and changes nothing.
+fn run_line(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError> {
+    let spec = LineSpec::parse(inv)?;
+    if spec == LineSpec::default() {
+        return Ok(Outcome {
+            message: Some("Line".to_owned()),
+            ui_request: Some(UiRequest::ShowLineDialog),
+            ..Outcome::default()
+        });
+    }
+    format_run(ctx, "Line", move |_, targets| {
+        let mut ops = Vec::new();
+        for shape in targets {
+            if let Some(color) = spec.color {
+                ops.push(direct(*shape, "LineColor", color_write(color)));
+            }
+            if let Some(points) = spec.weight {
+                ops.push(direct(*shape, "LineWeight", num(points_to_inches(points))));
+            }
+            if let Some(pattern) = spec.pattern {
+                ops.push(direct(*shape, "LinePattern", num(pattern)));
+            }
+            if let Some(cap) = spec.cap {
+                ops.push(direct(*shape, "LineCap", num(cap)));
+            }
+            if let Some(transparency) = spec.transparency {
+                ops.push(direct(*shape, "LineColorTrans", num(transparency)));
+            }
+            if let Some(begin) = spec.begin {
+                ops.push(direct(*shape, "BeginArrow", num(begin)));
+            }
+            if let Some(end) = spec.end {
+                ops.push(direct(*shape, "EndArrow", num(end)));
+            }
+            if let Some(size) = spec.begin_size {
+                ops.push(direct(*shape, "BeginArrowSize", num(size)));
+            }
+            if let Some(size) = spec.end_size {
+                ops.push(direct(*shape, "EndArrowSize", num(size)));
+            }
+            if let Some(rounding) = spec.rounding {
+                ops.push(direct(*shape, "Rounding", num(rounding)));
+            }
+        }
+        Ok(ops)
+    })
+}
+
+/// `format.shape.pane` (task P7-28): requests the Format Shape pane
+/// (`UiRequest::ShowFormatShape`) and changes nothing. The pane edits
+/// the same cells field by field, through `format.fill` and
+/// `format.line`.
+fn run_shape_pane(_ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandError> {
+    Ok(Outcome {
+        message: Some("Format Shape".to_owned()),
+        ui_request: Some(UiRequest::ShowFormatShape),
+        ..Outcome::default()
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -1721,6 +2065,9 @@ mod tests {
             "format.set.line.pattern" => run_line_pattern(ctx, &inv),
             "format.set.line.ends" => run_line_ends(ctx, &inv),
             "format.line_ends.no_line_ends" => run_line_no_ends(ctx, &inv),
+            "format.fill" => run_fill(ctx, &inv),
+            "format.line" => run_line(ctx, &inv),
+            "format.shape.pane" => run_shape_pane(ctx, &inv),
             "tools.format_painter" => run_format_painter(ctx, &inv),
             other => panic!("unknown test id {other}"),
         }
@@ -2611,6 +2958,254 @@ mod tests {
         let args = Args::new().with("copy", ArgValue::Flag(true));
         call(&mut ctx, "tools.format_painter", args).expect("copy again");
         assert!(ctx.format_painter.is_some(), "the copy is recorded");
+    }
+
+    // --- Task P7-28: the Fill and Line dialogs and the pane ---
+
+    #[test]
+    fn fill_with_no_arguments_requests_the_dialog() {
+        let (mut ctx, _session, shape) = session();
+        let outcome = call(&mut ctx, "format.fill", Args::new()).expect("fill");
+        assert_eq!(outcome.ui_request, Some(UiRequest::ShowFillDialog));
+        assert!(outcome.edit.is_none(), "the request writes nothing");
+        let doc = &ctx.active_document().expect("document").document;
+        assert!(cell_of(doc, shape, "FillForegnd").is_none());
+    }
+
+    #[test]
+    fn fill_writes_the_dialog_cells_in_one_undo_step() {
+        let (mut ctx, _session, shape) = session();
+        let args = Args::new()
+            .with("color", ArgValue::Text("#1F5BC4".to_owned()))
+            .with("pattern", ArgValue::Number(2.0))
+            .with("background", ArgValue::Text("white".to_owned()))
+            .with("transparency", ArgValue::Number(50.0));
+        let outcome = call(&mut ctx, "format.fill", args).expect("fill");
+        assert!(outcome.edit.is_some(), "one undo step");
+        {
+            let doc = &ctx.active_document().expect("document").document;
+            let color = cell_of(doc, shape, "FillForegnd").expect("FillForegnd");
+            assert_eq!(
+                color.value,
+                Some(CellValue::Color(larrygram_model::Color::new(
+                    0x1f, 0x5b, 0xc4
+                )))
+            );
+            assert_eq!(
+                cell_of(doc, shape, "FillPattern")
+                    .expect("FillPattern")
+                    .value,
+                Some(CellValue::Number(2.0))
+            );
+            let background = cell_of(doc, shape, "FillBkgnd").expect("FillBkgnd");
+            assert_eq!(
+                background.value,
+                Some(CellValue::Color(larrygram_model::Color::new(
+                    0xff, 0xff, 0xff
+                )))
+            );
+            // The percent the dialog shows is the fraction the cell
+            // stores (the `shape.transparency` convention).
+            assert_eq!(
+                cell_of(doc, shape, "FillForegndTrans")
+                    .expect("FillForegndTrans")
+                    .value,
+                Some(CellValue::Number(0.5))
+            );
+        }
+        // One undo restores every cell the run wrote.
+        let mut edit = outcome.edit.expect("edit");
+        edit.revert(&mut ctx).expect("revert");
+        let doc = &ctx.active_document().expect("document").document;
+        assert!(cell_of(doc, shape, "FillForegnd").is_none(), "undo restores");
+        assert!(cell_of(doc, shape, "FillPattern").is_none());
+    }
+
+    #[test]
+    fn fill_rejects_a_bad_colour_and_a_transparency_out_of_range() {
+        let (mut ctx, _session, _shape) = session();
+        let error = call(
+            &mut ctx,
+            "format.fill",
+            Args::new().with("color", ArgValue::Text("chartreuse-ish".to_owned())),
+        )
+        .expect_err("colour");
+        assert!(error.to_string().contains("unknown color"), "{error}");
+        let error = call(
+            &mut ctx,
+            "format.fill",
+            Args::new().with("transparency", ArgValue::Number(101.0)),
+        )
+        .expect_err("range");
+        assert!(error.to_string().contains("transparency"), "{error}");
+        let error = call(
+            &mut ctx,
+            "format.fill",
+            Args::new().with("pattern", ArgValue::Text("wavy".to_owned())),
+        )
+        .expect_err("pattern");
+        assert!(error.to_string().contains("fill pattern"), "{error}");
+    }
+
+    #[test]
+    fn line_with_no_arguments_requests_the_dialog() {
+        let (mut ctx, _session, shape) = session();
+        let outcome = call(&mut ctx, "format.line", Args::new()).expect("line");
+        assert_eq!(outcome.ui_request, Some(UiRequest::ShowLineDialog));
+        assert!(outcome.edit.is_none(), "the request writes nothing");
+        let doc = &ctx.active_document().expect("document").document;
+        assert!(cell_of(doc, shape, "LineColor").is_none());
+    }
+
+    #[test]
+    fn line_writes_the_dialog_cells_in_one_undo_step() {
+        let (mut ctx, _session, shape) = session();
+        let args = Args::new()
+            .with("color", ArgValue::Text("red".to_owned()))
+            .with("weight", ArgValue::Number(1.5))
+            .with("pattern", ArgValue::Text("dashed".to_owned()))
+            .with("cap", ArgValue::Text("square".to_owned()))
+            .with("transparency", ArgValue::Number(25.0))
+            .with("begin", ArgValue::Text("stealth".to_owned()))
+            .with("end", ArgValue::Number(4.0))
+            .with("begin_size", ArgValue::Text("large".to_owned()))
+            .with("end_size", ArgValue::Number(1.0))
+            .with("rounding", ArgValue::Number(0.25));
+        let outcome = call(&mut ctx, "format.line", args).expect("line");
+        assert!(outcome.edit.is_some(), "one undo step");
+        {
+            let doc = &ctx.active_document().expect("document").document;
+            assert_eq!(
+                cell_of(doc, shape, "LineColor").expect("LineColor").value,
+                Some(CellValue::Color(larrygram_model::Color::new(
+                    0xff, 0x00, 0x00
+                )))
+            );
+            // The weight is points on the wire and inches in the cell.
+            assert_eq!(
+                cell_of(doc, shape, "LineWeight").expect("LineWeight").value,
+                Some(CellValue::Number(1.5 / 72.0))
+            );
+            assert_eq!(
+                cell_of(doc, shape, "LinePattern")
+                    .expect("LinePattern")
+                    .value,
+                Some(CellValue::Number(2.0))
+            );
+            assert_eq!(
+                cell_of(doc, shape, "LineCap").expect("LineCap").value,
+                Some(CellValue::Number(1.0))
+            );
+            assert_eq!(
+                cell_of(doc, shape, "LineColorTrans")
+                    .expect("LineColorTrans")
+                    .value,
+                Some(CellValue::Number(0.25))
+            );
+            assert_eq!(
+                cell_of(doc, shape, "BeginArrow").expect("BeginArrow").value,
+                Some(CellValue::Number(3.0))
+            );
+            assert_eq!(
+                cell_of(doc, shape, "EndArrow").expect("EndArrow").value,
+                Some(CellValue::Number(4.0))
+            );
+            assert_eq!(
+                cell_of(doc, shape, "BeginArrowSize")
+                    .expect("BeginArrowSize")
+                    .value,
+                Some(CellValue::Number(3.0))
+            );
+            assert_eq!(
+                cell_of(doc, shape, "EndArrowSize")
+                    .expect("EndArrowSize")
+                    .value,
+                Some(CellValue::Number(1.0))
+            );
+            assert_eq!(
+                cell_of(doc, shape, "Rounding").expect("Rounding").value,
+                Some(CellValue::Number(0.25))
+            );
+        }
+        let mut edit = outcome.edit.expect("edit");
+        edit.revert(&mut ctx).expect("revert");
+        let doc = &ctx.active_document().expect("document").document;
+        assert!(cell_of(doc, shape, "LineColor").is_none(), "undo restores");
+        assert!(cell_of(doc, shape, "Rounding").is_none());
+    }
+
+    #[test]
+    fn line_rejects_a_bad_cap_size_and_rounding() {
+        let (mut ctx, _session, _shape) = session();
+        for (name, value, mentions) in [
+            ("cap", "bent", "cap"),
+            ("end_size", "huge", "arrow size"),
+            ("rounding", "-1", "rounding"),
+            ("begin", "twisty", "arrowhead"),
+        ] {
+            let error = call(
+                &mut ctx,
+                "format.line",
+                Args::new().with(name, ArgValue::Text(value.to_owned())),
+            )
+            .expect_err("a bad spelling is an argument error");
+            assert!(error.to_string().contains(mentions), "{name}: {error}");
+        }
+    }
+
+    #[test]
+    fn one_apply_covers_the_whole_selection_in_one_undo_step() {
+        let (mut ctx, _session, first) = session();
+        let second = {
+            let session = ctx.active_document_mut().expect("document");
+            let page = session.active_page.expect("page");
+            session
+                .document
+                .insert_shape(page, Shape::new(ShapeId { index: 0 }, 2), None)
+                .expect("shape")
+        };
+        ctx.selection.shapes = vec![first, second];
+        ctx.selection.anchor = Some(first);
+        let outcome = call(
+            &mut ctx,
+            "format.fill",
+            Args::new().with("pattern", ArgValue::Number(1.0)),
+        )
+        .expect("fill");
+        {
+            let doc = &ctx.active_document().expect("document").document;
+            for shape in [first, second] {
+                assert_eq!(
+                    cell_of(doc, shape, "FillPattern")
+                        .expect("FillPattern")
+                        .value,
+                    Some(CellValue::Number(1.0)),
+                    "shape {} takes the write",
+                    shape.index
+                );
+            }
+        }
+        assert!(outcome.edit.is_some(), "one step over the selection");
+    }
+
+    #[test]
+    fn the_format_shape_pane_requests_the_pane() {
+        let (mut ctx, _session, shape) = session();
+        let outcome = call(&mut ctx, "format.shape.pane", Args::new()).expect("pane");
+        assert_eq!(outcome.ui_request, Some(UiRequest::ShowFormatShape));
+        assert!(outcome.edit.is_none(), "the pane writes nothing on its own");
+        let doc = &ctx.active_document().expect("document").document;
+        assert!(cell_of(doc, shape, "FillPattern").is_none());
+    }
+
+    #[test]
+    fn fill_and_line_are_disabled_without_a_selection() {
+        let (mut ctx, _session, _shape) = session();
+        ctx.selection.shapes.clear();
+        ctx.selection.anchor = None;
+        let verdict = can_format(&ctx);
+        assert!(!verdict.is_enabled());
+        assert_eq!(verdict.reason.as_deref(), Some("no selection"));
     }
 
     #[test]
