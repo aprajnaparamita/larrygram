@@ -176,6 +176,13 @@ impl ToolMachine {
             _ => Ok(None),
         }
     }
+
+    /// The new text box the text tool started (task P7-25 item 9):
+    /// the shell consumes it to open the editor over the box before
+    /// the box exists in the model.
+    pub fn take_pending_text_box(&mut self) -> Option<text::PendingBox> {
+        self.text.take_pending()
+    }
 }
 
 #[cfg(test)]
