@@ -274,13 +274,41 @@ fn text_box_at_page_centre(
         }
         doc.insert_shape(page, shape, None).map_err(model_error)?
     };
-    let edit = {
+    // The same rollback rule as `insert_drawing` (review B5).
+    let edit = stage_insertion(ctx, session, shape, |ctx, session, shape| {
         let doc = document_mut(ctx, session)?;
-        StructuralEdit::insertion(doc, session, label.to_owned(), shape)?
-    };
+        let step = StructuralEdit::insertion(doc, session, label.to_owned(), shape)?;
+        let mut edit = CompositeEdit::new(label.to_owned());
+        edit.push(Box::new(step));
+        Ok(edit)
+    })?;
     select_new(ctx, session, page, shape)?;
     ctx.touch_session(session);
     Ok(edit_outcome(label, Vec::new(), Box::new(edit)))
+}
+
+/// The undo record of one shape that `insert_shape` already put in the
+/// document (review B5, task P7-26 item 6).
+///
+/// `build` snapshots the shape and applies the steps that must land
+/// beside its insertion (the text of a text box). A failure anywhere
+/// in it detaches the shape again: a command either leaves a shape
+/// with its undo record or nothing at all.
+fn stage_insertion(
+    ctx: &mut AppCtx,
+    session: SessionId,
+    shape: ShapeId,
+    build: impl FnOnce(&mut AppCtx, SessionId, ShapeId) -> Result<CompositeEdit, CommandError>,
+) -> Result<CompositeEdit, CommandError> {
+    match build(ctx, session, shape) {
+        Ok(edit) => Ok(edit),
+        Err(error) => {
+            if let Ok(doc) = document_mut(ctx, session) {
+                let _ = doc.detach_shape(shape);
+            }
+            Err(error)
+        }
+    }
 }
 
 /// Sets a fresh shape's `Angle` cell (the vertical text box).
@@ -342,24 +370,31 @@ fn insert_drawing(
         let shape = doc.insert_shape(page, shape, None).map_err(model_error)?;
         (drawing.label().to_owned(), shape)
     };
-    let mut edit = CompositeEdit::new(label.clone());
-    {
-        let doc = document_mut(ctx, session)?;
-        edit.push(Box::new(StructuralEdit::insertion(
-            doc,
-            session,
-            label.clone(),
-            shape,
-        )?));
-    }
-    if let Some(literal) = &literal {
-        let mut step = {
+    // The undo record and the text step are staged after the insert
+    // (they snapshot the shape), so any failure between them rolls the
+    // shape back out of the document (review B5, task P7-26 item 6):
+    // the page never holds a shape with no undo record.
+    let edit = stage_insertion(ctx, session, shape, |ctx, session, shape| {
+        let mut edit = CompositeEdit::new(label.clone());
+        {
             let doc = document_mut(ctx, session)?;
-            super::text::text_edit_step(doc, session, shape, literal)?
-        };
-        step.apply(ctx)?;
-        edit.push(step);
-    }
+            edit.push(Box::new(StructuralEdit::insertion(
+                doc,
+                session,
+                label.clone(),
+                shape,
+            )?));
+        }
+        if let Some(literal) = &literal {
+            let mut step = {
+                let doc = document_mut(ctx, session)?;
+                super::text::text_edit_step(doc, session, shape, literal)?
+            };
+            step.apply(ctx)?;
+            edit.push(step);
+        }
+        Ok(edit)
+    })?;
     select_new(ctx, session, page, shape)?;
     ctx.touch_session(session);
     Ok(edit_outcome(label, Vec::new(), Box::new(edit)))
@@ -993,6 +1028,40 @@ mod tests {
         let error = run_text_box_horizontal(&mut ctx, &Invocation::empty(Source::Ui))
             .expect_err("no document");
         assert!(error.to_string().contains("no open document"), "{error}");
+    }
+
+    /// Review B5 (task P7-26 item 6): a staging failure after the
+    /// insert rolls the shape back out of the document, so the page
+    /// never holds a shape with no undo record.
+    #[test]
+    fn a_failed_staging_rolls_the_inserted_shape_back() {
+        let (mut ctx, session, page, shape) = fixture();
+        let staged = stage_insertion(&mut ctx, session, shape, |_, _, _| {
+            Err(CommandError::failed("the undo record did not build"))
+        });
+        let Err(error) = staged else {
+            panic!("the staging fails");
+        };
+        assert!(error.to_string().contains("did not build"), "{error}");
+        let doc = &ctx.active_document().expect("session").document;
+        assert_eq!(doc.page_of(shape), None, "the shape is rolled back");
+        let entry = doc.page(page).expect("page");
+        assert!(entry.shapes.is_empty(), "{:?}", entry.shapes);
+    }
+
+    /// The happy path of `stage_insertion`: the shape stays and the
+    /// record carries the steps `build` produced.
+    #[test]
+    fn a_staged_insertion_keeps_the_shape_and_its_steps() {
+        let (mut ctx, session, page, shape) = fixture();
+        let edit = stage_insertion(&mut ctx, session, shape, |_, _, _| {
+            Ok(CompositeEdit::new("Insert Rectangle"))
+        })
+        .expect("stage");
+        assert_eq!(edit.label(), "Insert Rectangle");
+        assert_eq!(edit.len(), 0, "the steps `build` produced");
+        let doc = &ctx.active_document().expect("session").document;
+        assert_eq!(doc.page_of(shape), Some(page), "the shape stays");
     }
 
     /// Task P7-25 item 9: `insert.drawing.text_box` writes its `text`

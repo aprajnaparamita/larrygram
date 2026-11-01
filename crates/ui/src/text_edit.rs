@@ -173,12 +173,26 @@ impl TextEditor {
             .fixed_pos(rect.min)
             .show(ui.ctx(), |ui| {
                 ui.set_min_width(rect.width().max(80.0));
+                // A new text box's field fills the outlined box
+                // (task P7-26 item 3): a click anywhere inside the box
+                // moves the caret and keeps editing. An existing
+                // shape's edit keeps its one-row field (its click rule
+                // is task P7-25 item 9's commit-first).
+                let rows = if self.pending.is_some() {
+                    let font = egui::TextStyle::Body.resolve(ui.style());
+                    let row = ui.fonts_mut(|fonts| fonts.row_height(&font));
+                    ui.set_min_height(rect.height().max(row));
+                    let row = row.max(1.0);
+                    ((rect.height() / row).ceil() as usize).clamp(1, 64)
+                } else {
+                    1
+                };
                 let mut output = egui::TextEdit::multiline(&mut self.buffer)
                     // The one outline of the edit is the text block's,
                     // painted below (task P7-25 item 9).
                     .frame(egui::Frame::NONE)
                     .desired_width(rect.width().max(80.0))
-                    .desired_rows(1)
+                    .desired_rows(rows)
                     .hint_text("Text")
                     .show(ui);
                 // The editor's accessible name (task P7-24: the tests

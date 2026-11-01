@@ -221,6 +221,12 @@ pub struct Shell {
     /// item 8: "a typed character starts the text with that
     /// character"); consumed by [`Shell::begin_text_editor`].
     text_seed: Option<String>,
+    /// A menu, context menu or popup was open at the end of the
+    /// previous frame (task P7-26 item 2): its own keys — the access
+    /// letters of a Format menu, a picker's rows — must never start
+    /// shape text. Sampled at the end of the frame because egui only
+    /// knows about its popups once they have drawn.
+    popup_open: bool,
     /// Whether a synthetic `PointerDown` reached the stencil tool for the
     /// current Shapes-window drag.
     stencil_down: bool,
@@ -317,6 +323,7 @@ impl Shell {
             tools: ToolMachine::new(),
             editor: TextEditor::new(),
             text_seed: None,
+            popup_open: false,
             stencil_down: false,
             escape_pressed: false,
             overlay: Overlay::new(),
@@ -608,6 +615,7 @@ impl Shell {
             self.route_context_click(ui);
             self.draw_context_menus(ui, &mut intents);
             self.show_dialogs(ui, &mut intents);
+            self.note_open_menus(ui.ctx());
             return Ok(intents);
         }
 
@@ -623,6 +631,7 @@ impl Shell {
         self.draw_context_menus(ui, &mut intents);
         self.show_dialogs(ui, &mut intents);
         self.record_layout_state();
+        self.note_open_menus(ui.ctx());
         Ok(intents)
     }
 
@@ -1481,10 +1490,34 @@ impl Shell {
             // or selection change under the border being dragged.
             events.clear();
         }
+        // A click inside the new text box being typed (task P7-26 item
+        // 3) is a caret move: it neither commits the text nor starts a
+        // second box over the first. The editor field fills the box
+        // (`text_edit::show`), so egui's own hit test already keeps
+        // most such clicks; this is the raw-input backstop.
+        if let Some(bounds) = self.editor.pending {
+            events.retain(|event| {
+                !matches!(
+                    event,
+                    crate::tools::ToolEvent::PointerDown { pos, .. }
+                        | crate::tools::ToolEvent::PointerUp { pos, .. }
+                        if bounds.contains(*pos)
+                )
+            });
+        }
         // The Format Painter takes Escape too (task P7-24 item 6): the
         // recorded copy cancels instead of the shortcut table's
-        // full-screen toggle.
+        // full-screen toggle. Task P7-26 item 4: the cancel goes
+        // through the registry whatever tool is active (the tool route
+        // only reaches the painter on the pointer tool), and the
+        // `Cancel` event still drops a drag in flight.
         if self.escape_pressed && self.app.format_painter.is_some() {
+            if self.tools.tool != crate::tools::Tool::Pointer {
+                let cancel = larrygram_commands::Args::new().with("cancel", ArgValue::Flag(true));
+                if let Ok(command) = CommandId::parse("tools.format_painter") {
+                    produced.push(Intent::new(command, Invocation::new(cancel, Source::Ui)));
+                }
+            }
             events.insert(0, crate::tools::ToolEvent::Cancel);
         }
         // Any click with the Text tool first commits the text being
@@ -1948,11 +1981,28 @@ impl Shell {
     ///
     /// The keys apply on the page's keyboard scope (the canvas has the
     /// keyboard, ADR 0036) with no dialog open, so a field in the
-    /// Options, Page Setup, Fill or Line dialog or the Format Shape
-    /// pane keeps its own typing.
+    /// Options, Page Setup, Fill or Line dialog keeps its own typing
+    /// (the Format Shape pane does not: it stays open while the user
+    /// works, and its fields hold the keyboard through the focus
+    /// guard). Task P7-26 item 2 adds the two other holders of the
+    /// keyboard: a widget with egui's focus (a field over the canvas,
+    /// reached with the pointer or with Tab) and an open popup or
+    /// menu, whose access letters also reach `Event::Text`.
     fn text_edit_keys(&mut self, ui: &Ui, intents: &mut Vec<Intent>) {
         self.text_seed = None;
         if self.editor.is_active() || self.focus != ShortcutScope::Page {
+            return;
+        }
+        // egui's focus is the widget that takes the keys (task P7-26
+        // item 2): the canvas's own id is the only focus that may
+        // start shape text.
+        let focused = ui.ctx().memory(|memory| memory.focused());
+        if focused.is_some() && focused != self.canvas_id {
+            return;
+        }
+        // An open menu or popup keeps its own keys (task P7-26 item
+        // 2): the state is the one the previous frame ended with.
+        if self.popup_open {
             return;
         }
         if self.app.selection.shapes.is_empty() {
@@ -1963,7 +2013,6 @@ impl Shell {
             || self.page_setup.is_some()
             || self.fill_dialog.is_some()
             || self.line_dialog.is_some()
-            || self.format_shape.is_some()
             || self.about_open
             || self.confirm_close.is_some()
         {
@@ -1990,6 +2039,14 @@ impl Shell {
         if let Ok(command) = CommandId::parse("text.begin") {
             intents.push(Intent::new(command, Invocation::empty(Source::Ui)));
         }
+    }
+
+    /// Records whether a menu or popup is open (task P7-26 item 2),
+    /// for the next frame's [`Shell::text_edit_keys`]. The call sits
+    /// at the end of the frame: egui only knows about its popups once
+    /// they have drawn, and the Classic menus draw as their own areas.
+    fn note_open_menus(&mut self, egui_ctx: &Context) {
+        self.popup_open = self.panel_classic.menu_open() || egui_ctx.any_popup_open();
     }
 
     /// The modal windows: the welcome wizard, View/Options, About and

@@ -670,6 +670,13 @@ impl PanelClassic {
         self.popup_level_rects.clear();
     }
 
+    /// Whether a menu bar menu, a context menu or a toolbar popup is
+    /// open (task P7-26 item 2: the shell keeps its keys — the access
+    /// letters of an open menu reach the input layer as typed text).
+    pub fn menu_open(&self) -> bool {
+        self.open.is_some() || self.open_popup.is_some() || self.context.is_some()
+    }
+
     // --- menus -----------------------------------------------------
 
     /// The rows of every open level: the top menu, then one level per
