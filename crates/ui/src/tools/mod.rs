@@ -15,10 +15,13 @@
 //! - [`mod@draw`] — rectangle, ellipse and line drawing tools (P5-06);
 //! - [`mod@stencil`] — drag from the Shapes window, drop on the page (P5-06);
 //! - [`mod@text`] — the text tool and the in-place editor hand-off (P5-07);
-//! - [`mod@connector`] — the dynamic connector tool (P5-08).
+//! - [`mod@connector`] — the dynamic connector tool (P5-08);
+//! - [`mod@format_painter`] — the Format Painter's canvas mode (task
+//!   P7-24 item 6).
 
 pub mod connector;
 pub mod draw;
+pub mod format_painter;
 pub mod pointer;
 pub mod stencil;
 pub mod text;
@@ -149,6 +152,12 @@ impl ToolMachine {
     /// caller dispatches them (ADR 0028). Task P5-05 implements the
     /// pointer tool and dispatches to the other tool modules.
     pub fn handle(&mut self, event: ToolEvent, ctx: &AppCtx) -> Result<ToolEffect, UiError> {
+        // The Format Painter owns the pointer tool's events while a
+        // copy is recorded (task P7-24 item 6): a click on a shape
+        // applies it, Escape cancels. The other tools draw normally.
+        if ctx.format_painter.is_some() && self.tool == Tool::Pointer {
+            return format_painter::handle(self, &event, ctx);
+        }
         match self.tool {
             Tool::Pointer => pointer::handle(self, &event, ctx),
             Tool::Rectangle | Tool::Ellipse | Tool::Line => draw::handle(self, &event, ctx),

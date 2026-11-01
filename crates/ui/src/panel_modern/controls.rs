@@ -14,13 +14,28 @@ use larrygram_commands::AppCtx;
 use larrygram_ui_spec::v2::{ControlSize, Item, ItemKind};
 
 use super::common::{
-    Action, Arrow, DROPDOWN_TIP, MAX_DEPTH, Resolve, Toggles, arrow_atom, display_label, finish,
-    icon_key, spacer, too_deep, tooltip_text, with_value,
+    Action, Arrow, DROPDOWN_TIP, MAX_DEPTH, Resolve, Toggles, arrow_atom, display_label, icon_key,
+    spacer, too_deep, tooltip_text, with_value,
 };
 use super::metrics::Metrics;
 use super::place::Placed;
 use super::{ListData, ListEntries};
 use crate::{Intent, UiError};
+
+/// [`super::common::finish`], with the disabled reason also mapped to
+/// the widget's accessible description: egui's `on_disabled_hover_text`
+/// shows the tooltip but does not describe the widget, and the tests
+/// read the reason from the description (task P7-24 goal 1).
+fn finish(response: egui::Response, action: &Action, tip: &str, out: &mut Vec<Intent>) {
+    match action {
+        Action::Disabled { reason } => {
+            response
+                .on_hover_text(reason.as_str())
+                .on_disabled_hover_text(reason.as_str());
+        }
+        _ => super::common::finish(response, action, tip, out),
+    }
+}
 
 /// The gutter width of this frame (the shared `menu.gutter.width`
 /// token: icons sit in a gutter column, `docs/ui/panel-modern.md`).
@@ -103,7 +118,7 @@ fn button(
         draw.metrics,
     );
     let widget = Button::new(atoms)
-        .selected(latched(draw.toggles, item))
+        .selected(latched(draw.toggles, draw.app, item))
         .min_size(Vec2::new(placed.rect.width().min(MAX_W), 0.0));
     let response = put(ui, placed.rect, enabled(&action), widget, item, "main");
     let response = response.accessible_name(label.as_str());
@@ -122,7 +137,7 @@ fn check(
 ) -> Result<(), UiError> {
     let label = display_label(item, draw.app);
     let action = resolve(item);
-    let mut checked = latched(draw.toggles, item);
+    let mut checked = latched(draw.toggles, draw.app, item);
     let response = ui
         .push_id((item.id.as_str(), "check"), |ui| {
             ui.add_enabled_ui(enabled(&action), |ui| {
@@ -341,7 +356,13 @@ fn combo(
         .and_then(crate::pickers::picker_for)
     {
         if let Some(inner) = Popup::menu(&response).show(|ui| {
-            if crate::pickers::show(ui, kind, larrygram_commands::Source::CommandBar, out) {
+            if crate::pickers::show(
+                ui,
+                kind,
+                larrygram_commands::Source::CommandBar,
+                crate::pickers::fill_preview(draw.app),
+                out,
+            ) {
                 ui.close();
             }
         }) {
@@ -450,12 +471,28 @@ fn split(
         .map(|id| id.as_str())
         .and_then(crate::pickers::picker_for)
     {
-        if let Some(inner) = Popup::menu(&response).show(|ui| {
-            if crate::pickers::show(ui, kind, larrygram_commands::Source::CommandBar, out) {
+        // The picker hosts the popup body; the item's own rows draw
+        // below it (task P7-24: the Line split's Weight, Dashes and
+        // Arrows submenus open from the same menu, like Visio's).
+        if let Some(inner) = Popup::menu(&response).show(|ui| -> Result<(), UiError> {
+            if crate::pickers::show(
+                ui,
+                kind,
+                larrygram_commands::Source::CommandBar,
+                crate::pickers::fill_preview(draw.app),
+                out,
+            ) {
                 ui.close();
+                return Ok(());
             }
+            if !item.items.is_empty() {
+                ui.separator();
+                let inherited = inherited_resolve(item, resolve);
+                show_menu(ui, &item.items, draw, &inherited, out, depth + 1)?;
+            }
+            Ok(())
         }) {
-            let _ = inner;
+            inner.inner?;
         }
         return Ok(());
     }
@@ -508,7 +545,13 @@ fn dropdown(
         .and_then(crate::pickers::picker_for)
     {
         if let Some(inner) = Popup::menu(&response).show(|ui| {
-            if crate::pickers::show(ui, kind, larrygram_commands::Source::CommandBar, out) {
+            if crate::pickers::show(
+                ui,
+                kind,
+                larrygram_commands::Source::CommandBar,
+                crate::pickers::fill_preview(draw.app),
+                out,
+            ) {
                 ui.close();
             }
         }) {
@@ -673,7 +716,30 @@ fn show_menu_entry(
             ui.label(RichText::new(label).strong());
             Ok(())
         }
-        ItemKind::List => show_list_rows(ui, item, draw, resolve, out),
+        ItemKind::List => {
+            // A formatting picker hosts the row body when the list's
+            // command names one (task P7-24: the Line split's Weight,
+            // Dashes and Arrows lists are empty run-time lists; the
+            // pickers' own rows are the choices).
+            if let Some(kind) = item
+                .command
+                .as_ref()
+                .map(|id| id.as_str())
+                .and_then(crate::pickers::picker_for)
+            {
+                if crate::pickers::show(
+                    ui,
+                    kind,
+                    larrygram_commands::Source::CommandBar,
+                    crate::pickers::fill_preview(draw.app),
+                    out,
+                ) {
+                    egui::menu::MenuState::from_ui(ui, |state, _| state.open_item = None);
+                }
+                return Ok(());
+            }
+            show_list_rows(ui, item, draw, resolve, out)
+        }
         ItemKind::Options => show_options(ui, item, draw, resolve, out, depth),
         ItemKind::Submenu
         | ItemKind::Dropdown
@@ -708,7 +774,7 @@ fn show_menu_entry(
                 .accessible_name(label.as_str());
             let tip = match item.kind {
                 ItemKind::Check | ItemKind::Toggle => {
-                    let mark = if latched(draw.toggles, item) {
+                    let mark = if latched(draw.toggles, draw.app, item) {
                         "on, "
                     } else {
                         "off, "
@@ -717,10 +783,16 @@ fn show_menu_entry(
                 }
                 _ => tooltip_text(&label, item),
             };
-            let response = response.on_hover_text(tip);
+            // A disabled row's tooltip and description are the
+            // reason, not the label (goal 1).
+            let shown = match &action {
+                Action::Disabled { reason } => reason.as_str(),
+                Action::Emit(_) => tip.as_str(),
+            };
+            let response = response.on_hover_text(shown);
             if response.clicked() {
                 if matches!(item.kind, ItemKind::Check | ItemKind::Toggle) {
-                    set_latched(draw.toggles, item, !latched(draw.toggles, item));
+                    set_latched(draw.toggles, item, !latched(draw.toggles, draw.app, item));
                 }
                 if let Action::Emit(intent) = &action {
                     out.push(intent.clone());
@@ -1000,8 +1072,17 @@ fn enabled(action: &Action) -> bool {
 }
 
 /// Whether a `check` or `toggle` draws latched (display-only state).
-fn latched(toggles: &Toggles, item: &Item) -> bool {
-    toggles.contains(item.id.as_str())
+fn latched(toggles: &Toggles, app: &larrygram_commands::app::AppCtx, item: &Item) -> bool {
+    if toggles.contains(item.id.as_str()) {
+        return true;
+    }
+    // The text toggles (Bold, Italic, Underline and the alignments)
+    // latch from the selection's cells (task P7-24 item 10).
+    item.command
+        .as_ref()
+        .map(|command| command.as_str())
+        .and_then(|command| crate::panel_classic::text_toggle_checked(app, command))
+        .unwrap_or(false)
 }
 
 /// Records the display-only latch of one control.
@@ -1152,12 +1233,13 @@ mod tests {
     #[test]
     fn latching_round_trips_through_the_toggle_set() {
         let mut toggles = Toggles::default();
+        let app = AppCtx::new(Settings::default());
         let target = item("check", ItemKind::Check, "Check");
-        assert!(!latched(&toggles, &target));
+        assert!(!latched(&toggles, &app, &target));
         set_latched(&mut toggles, &target, true);
-        assert!(latched(&toggles, &target));
+        assert!(latched(&toggles, &app, &target));
         set_latched(&mut toggles, &target, false);
-        assert!(!latched(&toggles, &target));
+        assert!(!latched(&toggles, &app, &target));
     }
 
     #[test]

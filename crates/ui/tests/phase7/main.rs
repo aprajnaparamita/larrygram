@@ -26,6 +26,7 @@ mod golden;
 mod interaction;
 mod layouts;
 mod manual;
+mod manual_fixes;
 mod menus;
 mod modern;
 mod palette;
