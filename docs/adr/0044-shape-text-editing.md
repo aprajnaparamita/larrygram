@@ -59,6 +59,25 @@ editor on it immediately. Text-only shapes are ordinary shapes with
 - The `Text` scope finally activates (ADR 0036), which also closes the
   P4-08 note about `Ctrl+Backspace` deferring to egui inside edits.
 
+## Amendments
+
+### Amended 2026-11-02, P7-26: the new text box is inserted on commit
+
+The `Text` tool no longer "creates a shape … and opens the editor on it
+immediately". The box is **deferred** (task P7-25 item 9): a click on
+empty page only records where the box goes (`text::PendingBox`) and
+opens the editor over that rectangle while no shape exists yet. On
+commit the box and its text are inserted **in one undo step**:
+`insert.drawing.text_box` takes a `text` argument and writes the shape
+and its text inside one `CompositeEdit`, so one undo removes the new
+text object with its text (the P7-25 exit rule). A commit whose insert
+fails leaves nothing behind (review B5: `insert_drawing` stages its
+undo record and rolls the shape back out of the document on an error).
+
+While the box is being typed, a click **inside** it is a caret move
+that keeps editing (task P7-26 item 3); any other click commits the
+text first and then decides the click, and Escape commits as before.
+
 ## Alternatives considered
 
 - **A run-aware editor now.** Rejected for the alpha: run ranges over an
