@@ -73,7 +73,7 @@
 //!   changes nothing;
 //! - `format.line` (task P7-28) — `color` (`LineColor`), `weight`
 //!   (points, `LineWeight`), `pattern` (`LinePattern`), `cap`
-//!   (`LineCap`: `round`, `square`, `extended` or 0 to 2),
+//!   (`LineCap`: `rounded`, `square`, `extended` or 0 to 2),
 //!   `transparency` (percent, `LineColorTrans`), `begin` and `end`
 //!   (arrowhead index or name, `BeginArrow`/`EndArrow`), `begin_size`
 //!   and `end_size` (arrowhead size class 0 to 6, or `very small` ..
@@ -1435,6 +1435,25 @@ pub const LINE_ARROWS: &[(f64, &str)] = &[
     (5.0, "Dot"),
 ];
 
+/// The line caps: `(value, label)`, the `LineCap` cell's enumeration
+/// (the ShapeSheet reference: rounded, square, extended). The one
+/// table (the P7-27 review A6 rule), as [`LINE_PATTERNS`]: the Fill
+/// and Line forms draw these labels and `format.line` parses them.
+pub const LINE_CAPS: &[(f64, &str)] = &[(0.0, "Rounded"), (1.0, "Square"), (2.0, "Extended")];
+
+/// The arrowhead sizes: `(class, label)`, the `*ArrowSize` cells'
+/// enumeration (the ShapeSheet reference, 0 very small to 6
+/// colossal). The one table, as [`LINE_PATTERNS`].
+pub const ARROW_SIZES: &[(f64, &str)] = &[
+    (0.0, "Very small"),
+    (1.0, "Small"),
+    (2.0, "Medium"),
+    (3.0, "Large"),
+    (4.0, "Extra large"),
+    (5.0, "Jumbo"),
+    (6.0, "Colossal"),
+];
+
 /// The index of `key` (trimmed, any case) among the `labels` of one
 /// label table.
 fn label_index(key: &str, labels: &[(f64, &str)]) -> Option<f64> {
@@ -1595,7 +1614,7 @@ struct LineSpec {
     weight: Option<f64>,
     /// `LinePattern`, the dash index.
     pattern: Option<f64>,
-    /// `LineCap`: 0 round, 1 square, 2 extended.
+    /// `LineCap`: 0 rounded, 1 square, 2 extended.
     cap: Option<f64>,
     /// `LineColorTrans`, the transparency fraction.
     transparency: Option<f64>,
@@ -1708,20 +1727,18 @@ fn opt_cap(inv: &Invocation) -> Result<Option<f64>, CommandError> {
         return Ok(None);
     };
     let key = text.trim().to_ascii_lowercase();
-    let value = match key.as_str() {
-        "round" | "rounded" => 0.0,
-        "square" => 1.0,
-        "extended" | "butt" => 2.0,
-        _ => match key.parse::<f64>() {
+    let value = match label_index(&key, LINE_CAPS) {
+        Some(value) => value,
+        None => match key.parse::<f64>() {
             Ok(value) if value.is_finite() && (0.0..=2.0).contains(&value) => value,
             Ok(_) => {
                 return Err(CommandError::invalid_args(
-                    "cap must be 0, 1 or 2 (round, square, extended)",
+                    "cap must be 0, 1 or 2 (rounded, square, extended)",
                 ));
             }
             Err(_) => {
                 return Err(CommandError::invalid_args(
-                    "cap must be round, square, extended or a number",
+                    "cap must be rounded, square, extended or a number",
                 ));
             }
         },
@@ -1736,15 +1753,9 @@ fn opt_arrow_size(inv: &Invocation, names: &[&str]) -> Result<Option<f64>, Comma
         return Ok(None);
     };
     let key = text.trim().to_ascii_lowercase();
-    let value = match key.as_str() {
-        "very small" => 0.0,
-        "small" => 1.0,
-        "medium" => 2.0,
-        "large" => 3.0,
-        "extra large" | "very large" => 4.0,
-        "jumbo" => 5.0,
-        "colossal" => 6.0,
-        _ => match key.parse::<f64>() {
+    let value = match label_index(&key, ARROW_SIZES) {
+        Some(value) => value,
+        None => match key.parse::<f64>() {
             Ok(value) if value.is_finite() && (0.0..=6.0).contains(&value) => value,
             Ok(_) => {
                 return Err(CommandError::invalid_args(
