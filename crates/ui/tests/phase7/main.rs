@@ -19,6 +19,7 @@
 // these helpers are test code and use `expect`/`panic` freely.
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
+mod combo_fixes;
 mod expect;
 mod first_run;
 mod fit;
