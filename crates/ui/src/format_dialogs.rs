@@ -41,23 +41,11 @@ use larrygram_model::{CellName, CellReader, Color, SheetRef};
 
 use crate::pickers::{ARROWS, PATTERNS, STANDARD_COLORS, THEME_COLORS, WEIGHTS, swatch_name};
 
-/// The arrowhead sizes of the `*ArrowSize` cells: the class index and
-/// its short label (the ShapeSheet reference's enumeration, 0 very
-/// small to 6 colossal).
-pub const ARROW_SIZES: &[(f64, &str)] = &[
-    (0.0, "Very small"),
-    (1.0, "Small"),
-    (2.0, "Medium"),
-    (3.0, "Large"),
-    (4.0, "Extra large"),
-    (5.0, "Jumbo"),
-    (6.0, "Colossal"),
-];
-
-/// The line caps of the `LineCap` cell: the value and its short label
-/// (the ShapeSheet reference's enumeration: rounded, square,
-/// extended).
-pub const LINE_CAPS: &[(f64, &str)] = &[(0.0, "Rounded"), (1.0, "Square"), (2.0, "Extended")];
+/// The arrowhead sizes of the `*ArrowSize` cells and the line caps of
+/// the `LineCap` cell: the ShapeSheet reference's enumerations as
+/// short labels. The one table lives with the commands (the P7-27
+/// review A6 rule) and this module draws it.
+pub use larrygram_commands::builtins::{ARROW_SIZES, LINE_CAPS};
 
 /// One committed field change: the arguments of an accepted value, or
 /// the reason the entry was refused (the pane records the reason on
