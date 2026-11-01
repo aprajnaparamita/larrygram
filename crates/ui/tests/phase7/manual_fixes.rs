@@ -74,22 +74,19 @@ fn screen(rig: &ShellRig, x: f64, y: f64) -> egui::Pos2 {
 }
 
 /// A press and a release in one frame at `pos` (the `interaction`
-/// module's click rule: one harness run steps past egui's click time).
+/// module's click rule: one harness run steps past egui's click time,
+/// so the two halves must share a frame for the click to register).
 fn click_at(rig: &mut ShellRig, pos: egui::Pos2) {
     rig.harness().event(egui::Event::PointerMoved(pos));
-    rig.harness().event(egui::Event::PointerButton {
-        pos,
-        button: egui::PointerButton::Primary,
-        pressed: true,
-        modifiers: egui::Modifiers::NONE,
-    });
     rig.run();
-    rig.harness().event(egui::Event::PointerButton {
-        pos,
-        button: egui::PointerButton::Primary,
-        pressed: false,
-        modifiers: egui::Modifiers::NONE,
-    });
+    for pressed in [true, false] {
+        rig.harness().event(egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+    }
     rig.run();
 }
 
@@ -434,4 +431,291 @@ fn open_line_weight(rig: &mut ShellRig) {
     rig.run();
     // The Weight submenu row (Panel Modern menu rows are buttons).
     click(rig, Role::Button, "Weight");
+}
+
+// ---------------------------------------------------------------------------
+// Shared helpers: the Character-row cells, the newest shape, typing
+// and the picture's ink count (goal 2's picture check).
+// ---------------------------------------------------------------------------
+
+/// The value of one cell of `shape`'s first row of `section` (the
+/// `Character` `Font` and `Size` rows; `format.rs`'s `row_cell_of`).
+fn row_cell(rig: &ShellRig, shape: ShapeId, section: &str, name: &str) -> Option<CellValue> {
+    let shell = rig.shell.borrow();
+    let session = shell.app.active_document().expect("session");
+    session
+        .document
+        .shape(shape)
+        .expect("shape")
+        .sheet
+        .sections
+        .iter()
+        .find(|s| s.name.as_str() == section)
+        .and_then(|block| block.rows.first())
+        .and_then(|row| row.cells.iter().find(|c| c.name.as_str() == name))
+        .and_then(|cell| cell.value.clone())
+}
+
+/// The text of one `section` row cell of `shape`.
+fn row_str(rig: &ShellRig, shape: ShapeId, section: &str, name: &str) -> Option<String> {
+    match row_cell(rig, shape, section, name) {
+        Some(CellValue::Str(text)) => Some(text),
+        _ => None,
+    }
+}
+
+/// The number of one `section` row cell of `shape`.
+fn row_number(rig: &ShellRig, shape: ShapeId, section: &str, name: &str) -> Option<f64> {
+    match row_cell(rig, shape, section, name) {
+        Some(CellValue::Number(value)) => Some(value),
+        _ => None,
+    }
+}
+
+/// The shape most recently added to the active page.
+fn last_shape(app: &AppCtx) -> ShapeId {
+    let session = app.active_document().expect("session");
+    let page = session.active_page.expect("page");
+    *session
+        .document
+        .page(page)
+        .expect("page")
+        .shapes
+        .last()
+        .expect("a shape")
+}
+
+/// Types `text` into the in-place editor's field (the multiline
+/// input named "Text").
+fn type_into_editor(rig: &mut ShellRig, text: &str) {
+    rig.run();
+    let root = rig.harness().root();
+    let node = root
+        .query_all_by_role_and_label(Role::MultilineTextInput, "Text")
+        .next()
+        .expect("the editor field");
+    node.type_text(text);
+    rig.run();
+}
+
+/// Presses one key.
+fn press_key(rig: &mut ShellRig, key: egui::Key) {
+    rig.harness().key_press(key);
+    rig.run();
+}
+
+/// The count of non-background pixels in a page-rectangle region of
+/// the rendered frame (the picture check: the background is the
+/// region's most common colour).
+fn ink(rig: &mut ShellRig, x0: f64, y0: f64, x1: f64, y1: f64) -> usize {
+    let a = screen(rig, x0, y0);
+    let b = screen(rig, x1, y1);
+    let image = rig.render();
+    let width = image.width();
+    let height = image.height();
+    let xmin = (a.x.min(b.x).max(0.0) as u32).min(width.saturating_sub(1));
+    let xmax = (a.x.max(b.x).max(0.0) as u32).min(width);
+    let ymin = (a.y.min(b.y).max(0.0) as u32).min(height.saturating_sub(1));
+    let ymax = (a.y.max(b.y).max(0.0) as u32).min(height);
+    let mut counts: std::collections::HashMap<(u8, u8, u8), usize> = std::collections::HashMap::new();
+    for x in xmin..xmax {
+        for y in ymin..ymax {
+            let px = image.get_pixel(x, y);
+            *counts.entry((px[0], px[1], px[2])).or_default() += 1;
+        }
+    }
+    let background = counts
+        .iter()
+        .max_by_key(|(_, count)| *count)
+        .map(|(colour, _)| *colour)
+        .unwrap_or((0, 0, 0));
+    let mut inked = 0;
+    for x in xmin..xmax {
+        for y in ymin..ymax {
+            let px = image.get_pixel(x, y);
+            let far = i32::from(px[0]) - i32::from(background.0);
+            let far = far.abs().max((i32::from(px[1]) - i32::from(background.1)).abs());
+            let far = far.max((i32::from(px[2]) - i32::from(background.2)).abs());
+            if far > 40 {
+                inked += 1;
+            }
+        }
+    }
+    inked
+}
+
+// ---------------------------------------------------------------------------
+// Goal 2: font and size. The Classic font and size boxes get
+// drop-down lists like Panel Modern's (P7-21's open issue); both
+// layouts apply from the lists with a shape or text selected.
+// ---------------------------------------------------------------------------
+
+/// The role the font and size boxes draw in `kind`.
+fn combo_role(kind: LayoutKind) -> Role {
+    match kind {
+        LayoutKind::PanelClassic => Role::ComboBox,
+        _ => Role::Button,
+    }
+}
+
+/// Opens the font family list of `kind`'s font box (Classic's box
+/// opens from its "Font menu" strip, Modern's box from its face).
+fn open_font_list(rig: &mut ShellRig, kind: LayoutKind) {
+    match kind {
+        LayoutKind::PanelClassic => click(rig, Role::Button, "Font menu"),
+        _ => click(rig, Role::Button, "Font"),
+    }
+}
+
+/// Opens the size list of `kind`'s font size box.
+fn open_size_list(rig: &mut ShellRig, kind: LayoutKind) {
+    match kind {
+        LayoutKind::PanelClassic => click(rig, Role::Button, "Font Size menu"),
+        _ => click(rig, Role::Button, "Font Size"),
+    }
+}
+
+/// The font and size boxes are enabled with the shape selected, and
+/// their drop-down lists apply a family and a size (goal 2): the
+/// `Character` row cells change and the picture's text grows with
+/// the size.
+#[test]
+fn the_font_and_size_lists_apply_to_the_shape() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        // Give the rectangle text: a double click opens the in-place
+        // editor, Escape commits the buffer.
+        let pos = screen(&rig, SHAPE.0, SHAPE.1);
+        double_click_at(&mut rig, pos);
+        assert!(
+            has(&mut rig, Role::MultilineTextInput, "Text"),
+            "{kind:?}: the double click opens the editor"
+        );
+        type_into_editor(&mut rig, "MMMM");
+        press_key(&mut rig, egui::Key::Escape);
+        select_shape(&mut rig);
+        let shape = rectangle(&rig.shell.borrow().app);
+
+        // Enabled with the shape selected.
+        let role = combo_role(kind);
+        assert!(
+            !disabled(&mut rig, role, "Font"),
+            "{kind:?}: the font box enables"
+        );
+        assert!(
+            !disabled(&mut rig, role, "Font Size"),
+            "{kind:?}: the size box enables"
+        );
+
+        // The family list applies "Carlito".
+        open_font_list(&mut rig, kind);
+        assert!(
+            has(&mut rig, Role::Button, "Carlito"),
+            "{kind:?}: the drop-down list draws the families"
+        );
+        click(&mut rig, Role::Button, "Carlito");
+        assert_eq!(
+            row_str(&rig, shape, "Character", "Font").as_deref(),
+            Some("Carlito"),
+            "{kind:?}: the family row writes the Character Font cell"
+        );
+
+        // The size list applies 18 pt (0.25 in).
+        open_size_list(&mut rig, kind);
+        click(&mut rig, Role::Button, "18 pt");
+        let size = row_number(&rig, shape, "Character", "Size")
+            .unwrap_or_else(|| panic!("{kind:?}: the Size cell"));
+        assert!(
+            (size - 0.25).abs() < 1.0e-9,
+            "{kind:?}: the size row writes the Size cell ({size})"
+        );
+
+        // The picture: the text grows with the size (ink count over
+        // the text block region; the text is top-anchored). "No Fill"
+        // first: the default fill is dark and the black text hides
+        // on it.
+        open_fill_picker(&mut rig, kind);
+        click(&mut rig, Role::Button, "No Fill");
+        open_size_list(&mut rig, kind);
+        click(&mut rig, Role::Button, "8 pt");
+        let small = ink(&mut rig, 2.05, 2.55, 3.95, 3.6);
+        open_size_list(&mut rig, kind);
+        click(&mut rig, Role::Button, "36 pt");
+        let big = ink(&mut rig, 2.05, 2.55, 3.95, 3.6);
+        assert!(small > 0, "{kind:?}: the text paints ({small})");
+        assert!(
+            big > small * 2,
+            "{kind:?}: the rendered text grows with the size ({small} to {big})"
+        );
+    }
+}
+
+/// Right after adding text the font and size boxes stay enabled and
+/// apply to the new text box (goal 2's "including right after adding
+/// text").
+#[test]
+fn the_font_and_size_apply_right_after_adding_text() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        // The Text tool: a click on empty canvas makes a text box and
+        // opens the editor (classic "Text Tool", modern "Text").
+        match kind {
+            LayoutKind::PanelClassic => click(&mut rig, Role::Button, "Text Tool"),
+            _ => click(&mut rig, Role::Button, "Text"),
+        }
+        let pos = screen(&rig, 3.0, 5.0);
+        click_at(&mut rig, pos);
+        assert!(
+            has(&mut rig, Role::MultilineTextInput, "Text"),
+            "{kind:?}: the editor opens on the new text box"
+        );
+        type_into_editor(&mut rig, "Hello");
+        press_key(&mut rig, egui::Key::Escape);
+
+        // Enabled immediately, with no reselection.
+        let role = combo_role(kind);
+        assert!(
+            !disabled(&mut rig, role, "Font"),
+            "{kind:?}: the font box enables right after adding text"
+        );
+        assert!(
+            !disabled(&mut rig, role, "Font Size"),
+            "{kind:?}: the size box enables right after adding text"
+        );
+
+        // The lists apply to the new shape.
+        let new = last_shape(&rig.shell.borrow().app);
+        open_font_list(&mut rig, kind);
+        click(&mut rig, Role::Button, "Carlito");
+        open_size_list(&mut rig, kind);
+        click(&mut rig, Role::Button, "18 pt");
+        assert_eq!(
+            row_str(&rig, new, "Character", "Font").as_deref(),
+            Some("Carlito"),
+            "{kind:?}: the family applies to the new text"
+        );
+        let size = row_number(&rig, new, "Character", "Size")
+            .unwrap_or_else(|| panic!("{kind:?}: the Size cell"));
+        assert!(
+            (size - 0.25).abs() < 1.0e-9,
+            "{kind:?}: the size applies to the new text ({size})"
+        );
+
+        // The picture: the new text paints and grows with the size
+        // ("No Fill" first: the default fill is dark and the black
+        // text hides on it).
+        open_fill_picker(&mut rig, kind);
+        click(&mut rig, Role::Button, "No Fill");
+        open_size_list(&mut rig, kind);
+        click(&mut rig, Role::Button, "8 pt");
+        let small = ink(&mut rig, 2.05, 4.65, 3.95, 5.3);
+        open_size_list(&mut rig, kind);
+        click(&mut rig, Role::Button, "36 pt");
+        let big = ink(&mut rig, 2.05, 4.65, 3.95, 5.3);
+        assert!(small > 0, "{kind:?}: the new text paints ({small})");
+        assert!(
+            big > small * 2,
+            "{kind:?}: the new text grows with the size ({small} to {big})"
+        );
+    }
 }
