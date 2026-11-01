@@ -568,8 +568,12 @@ fn the_text_block_tool_moves_the_text_block_in_one_undo_step() {
         let mut rig = shell_rig(kind);
         select_shape(&mut rig);
         let shape = rectangle(&rig.shell.borrow().app);
+        white_fill(&mut rig, kind);
         choose_text_block(&mut rig, kind);
         let before = picture(&mut rig);
+        // The ink before the drag (the black text on the white fill).
+        let image = quiet_picture(&mut rig);
+        let ink_before = ink_top_left(ink_box(&rig, &image, (2.0, 2.4, 4.0, 3.6)));
         // Drag the block's centre half an inch right and a quarter up.
         let from = screen(&rig, SHAPE.0, SHAPE.1);
         let to = screen(&rig, SHAPE.0 + 0.5, SHAPE.1 + 0.25);
@@ -586,9 +590,17 @@ fn the_text_block_tool_moves_the_text_block_in_one_undo_step() {
             (number(&rig, shape, "TxtWidth") - 1.0).abs() < 1.0e-9,
             "{kind:?}: the size is untouched"
         );
-        // The picture moved with the block.
+        // The picture moved with the block: its ink moved by exactly
+        // the drag's distance (task P7-26 item 5).
         let after = picture(&mut rig);
         assert_ne!(before, after, "{kind:?}: the picture moved");
+        let image = quiet_picture(&mut rig);
+        let ink_after = ink_top_left(ink_box(&rig, &image, (2.4, 2.7, 4.4, 4.0)));
+        assert!(
+            (ink_after.0 - (ink_before.0 + 0.5)).abs() < 0.05
+                && (ink_after.1 - (ink_before.1 + 0.25)).abs() < 0.05,
+            "{kind:?}: the ink moved by the drag's distance: {ink_before:?} to {ink_after:?}"
+        );
         // One undo removes the whole drag.
         press_key(
             &mut rig,
@@ -680,7 +692,10 @@ fn double_clicking_a_shape_starts_editing_its_text() {
 }
 
 /// Item 8: typing a character with a shape selected starts the text
-/// with that character (the old text is replaced).
+/// with that character (the old text is replaced). The next two
+/// characters land after it (task P7-26 item 5: the caret sits after
+/// the seed and no key is dropped between `text.begin` and the editor
+/// taking focus).
 #[test]
 fn typing_a_character_starts_the_text_with_it() {
     for kind in LAYOUTS {
@@ -692,11 +707,13 @@ fn typing_a_character_starts_the_text_with_it() {
             editing(&mut rig),
             "{kind:?}: the typed character opens the editor"
         );
+        type_text(&mut rig, "r");
+        type_text(&mut rig, "s");
         press_key(&mut rig, egui::Key::Escape, egui::Modifiers::NONE);
         assert_eq!(
             shape_text(&rig, shape),
-            "Q",
-            "{kind:?}: the text starts with the typed character"
+            "Qrs",
+            "{kind:?}: the text starts with the typed character and keeps the next keys"
         );
     }
 }
@@ -828,6 +845,47 @@ fn the_text_tool_makes_a_text_object_in_one_undo_step() {
             shape_count(&rig),
             before,
             "{kind:?}: the Undo button removes it in one step"
+        );
+    }
+}
+
+/// Item 5 (task P7-26): redo brings back the shape and its text in one
+/// step (Ctrl+Y).
+#[test]
+fn redo_of_a_new_text_box_restores_the_shape_and_its_text() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        choose_text_tool(&mut rig, kind);
+        let before = shape_count(&rig);
+        let shape = make_text_object(&mut rig);
+        assert_eq!(shape_text(&rig, shape), "Hi", "{kind:?}: the fixture");
+        press_key(
+            &mut rig,
+            egui::Key::Z,
+            egui::Modifiers {
+                command: true,
+                ..egui::Modifiers::NONE
+            },
+        );
+        assert_eq!(shape_count(&rig), before, "{kind:?}: one undo removes it");
+        press_key(
+            &mut rig,
+            egui::Key::Y,
+            egui::Modifiers {
+                ctrl: true,
+                ..egui::Modifiers::NONE
+            },
+        );
+        assert_eq!(
+            shape_count(&rig),
+            before + 1,
+            "{kind:?}: one redo brings the box back"
+        );
+        let shape = last_shape(&rig);
+        assert_eq!(
+            shape_text(&rig, shape),
+            "Hi",
+            "{kind:?}: and its text comes back with it"
         );
     }
 }
