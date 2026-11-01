@@ -102,6 +102,7 @@ const NO_ROW: &[&str] = &[
     "shape.set.height",
     "shape.set.pin",
     "shape.set.text",
+    "shape.set.text_block",
     "shape.set.width",
     "shape.transparency",
     "shape.transparency.dlg",

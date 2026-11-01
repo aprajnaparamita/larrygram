@@ -145,6 +145,7 @@ fn tool_for(active: ActiveTool) -> Tool {
         ActiveTool::Line => Tool::Line,
         ActiveTool::Connector => Tool::Connector,
         ActiveTool::Text => Tool::Text,
+        ActiveTool::TextBlock => Tool::TextBlock,
         _ => Tool::Pointer,
     }
 }
