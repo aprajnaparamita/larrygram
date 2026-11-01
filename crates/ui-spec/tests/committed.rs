@@ -91,8 +91,9 @@ const PIN_365: LayoutCounts = LayoutCounts {
 // `OUR_COMMANDS` list of `xtask/src/extract/commands.rs`). P7-20 adds
 // `edit.paste.in.place` (Paste in Place) and moves the `LineTool`
 // Fluent id from `format.line` onto `shape.line` (the drawing Line
-// tool).
-const COMMANDS: usize = 1129;
+// tool). P7-25 adds `shape.set.text_block` (the Text Block tool's
+// drag, one undo step).
+const COMMANDS: usize = 1130;
 // 90 rows from the source page; P7-20 adds the four `OWN_SHORTCUTS`
 // bindings (Ctrl+N, Ctrl+O, Ctrl+S, Ctrl+Alt+P); P7-23 adds `Ctrl+,`
 // (the Options dialog, Cmd+, on macOS).
