@@ -923,6 +923,87 @@ fn the_escape_cancels_the_format_painter() {
 }
 
 // ---------------------------------------------------------------------------
+// Item 4 (task P7-26): the Format Painter's Escape and the tool change.
+// ---------------------------------------------------------------------------
+
+/// The Text tool button's label in one layout (a non-pointer tool for
+/// the Escape rule).
+fn text_tool_button(kind: LayoutKind) -> &'static str {
+    match kind {
+        LayoutKind::PanelClassic => "Text Tool",
+        _ => "Text",
+    }
+}
+
+/// Item 4: Escape cancels a recorded copy whatever tool is active.
+#[test]
+fn the_escape_cancels_the_format_painter_under_any_tool() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        select_shape(&mut rig);
+        // A drawing tool active, then the copy from the button.
+        click(&mut rig, Role::Button, text_tool_button(kind));
+        click(&mut rig, Role::Button, "Format Painter");
+        assert!(
+            rig.shell.borrow().app.format_painter.is_some(),
+            "{kind:?}: the copy is recorded with the Text tool active"
+        );
+        press_key(&mut rig, egui::Key::Escape);
+        assert!(
+            rig.shell.borrow().app.format_painter.is_none(),
+            "{kind:?}: Escape cancels the copy whatever tool is active"
+        );
+    }
+}
+
+/// Item 4: a copy never outlives a tool change.
+#[test]
+fn a_tool_change_clears_the_format_painter_copy() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        arm_format_painter(&mut rig, kind);
+        click(&mut rig, Role::Button, text_tool_button(kind));
+        assert!(
+            rig.shell.borrow().app.format_painter.is_none(),
+            "{kind:?}: choosing another tool clears the copy"
+        );
+    }
+}
+
+/// Item 4: with no copy recorded Escape leaves full screen again;
+/// while a copy is recorded it cancels the copy and stays.
+#[test]
+fn escape_leaves_full_screen_once_no_copy_is_recorded() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        press_key(&mut rig, egui::Key::F5);
+        assert!(rig.shell.borrow().app.full_screen, "{kind:?}: F5 enters");
+        press_key(&mut rig, egui::Key::Escape);
+        assert!(
+            !rig.shell.borrow().app.full_screen,
+            "{kind:?}: Escape leaves full screen with no copy"
+        );
+        arm_format_painter(&mut rig, kind);
+        press_key(&mut rig, egui::Key::F5);
+        assert!(rig.shell.borrow().app.full_screen, "{kind:?}: F5 enters");
+        press_key(&mut rig, egui::Key::Escape);
+        assert!(
+            rig.shell.borrow().app.format_painter.is_none(),
+            "{kind:?}: Escape cancels the copy"
+        );
+        assert!(
+            rig.shell.borrow().app.full_screen,
+            "{kind:?}: full screen stays while the copy was recorded"
+        );
+        press_key(&mut rig, egui::Key::Escape);
+        assert!(
+            !rig.shell.borrow().app.full_screen,
+            "{kind:?}: and then Escape leaves full screen"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Goal 7: the transparency rows preview the fill colour over a
 // checkerboard at that transparency, and choosing one applies.
 // ---------------------------------------------------------------------------
