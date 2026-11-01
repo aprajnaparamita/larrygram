@@ -1164,3 +1164,77 @@ fn the_toggle_buttons_show_the_current_state() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Goal 11: Page Setup reads the page size from the page as rendered,
+// including a size inherited from a background page.
+// ---------------------------------------------------------------------------
+
+/// One size cell of a page sheet.
+fn page_cell(name: &'static str, value: f64) -> larrygram_model::Cell {
+    let mut cell = larrygram_model::Cell::new(larrygram_model::CellName::from_static(name));
+    cell.value = Some(CellValue::Number(value));
+    cell
+}
+
+/// A shell whose active page has no size of its own and inherits it
+/// from a background page (goal 11's case).
+fn background_rig(kind: LayoutKind) -> ShellRig {
+    let mut app = RichApp::rich().0;
+    app.settings.ui_layout = kind;
+    {
+        let session = app.active_document_mut().expect("session");
+        let mut page = larrygram_model::Page::new(larrygram_model::PageId { index: 1 }, 2);
+        page.name = "Page-2".to_owned();
+        page.sheet.cells = vec![page_cell("PageWidth", 10.0), page_cell("PageHeight", 6.0)];
+        session.document.pages.push(page);
+        session.document.pages[0].background = Some(larrygram_model::PageId { index: 1 });
+    }
+    let mut rig = ShellRig::with_app(app);
+    rig.run();
+    rig
+}
+
+/// The value of the dialog field named `name`.
+fn field_text(rig: &mut ShellRig, name: &str) -> String {
+    rig.run();
+    rig.harness()
+        .root()
+        .query_all_by_role_and_label(Role::TextInput, name)
+        .next()
+        .unwrap_or_else(|| panic!("no field named {name:?}"))
+        .accesskit_node()
+        .data()
+        .value()
+        .unwrap_or_default()
+        .to_owned()
+}
+
+/// Page Setup shows the size the page inherits from its background
+/// page (goal 11), opened from each layout's own control.
+#[test]
+fn page_setup_shows_the_background_inherited_size() {
+    for kind in LAYOUTS {
+        let mut rig = background_rig(kind);
+        match kind {
+            LayoutKind::PanelClassic => {
+                click(&mut rig, Role::Button, "File");
+                click(&mut rig, Role::MenuItem, "Page Setup...");
+            }
+            _ => {
+                click(&mut rig, Role::Button, "Design");
+                click(&mut rig, Role::Button, "Page Setup...");
+            }
+        }
+        assert_eq!(
+            field_text(&mut rig, "Width").as_str(),
+            "10",
+            "{kind:?}: the inherited width shows"
+        );
+        assert_eq!(
+            field_text(&mut rig, "Height").as_str(),
+            "6",
+            "{kind:?}: the inherited height shows"
+        );
+    }
+}
