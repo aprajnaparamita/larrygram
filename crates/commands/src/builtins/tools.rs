@@ -55,7 +55,13 @@ pub(crate) const TABLE: CommandTable = &[
 ];
 
 /// Sets the active tool and reports it.
+///
+/// A recorded Format Painter copy never outlives a tool change (task
+/// P7-26 item 4): choosing another tool clears it, as in Visio.
 fn choose(ctx: &mut crate::AppCtx, tool: ActiveTool) -> Result<Outcome, super::CommandError> {
+    if ctx.active_tool != tool {
+        ctx.format_painter = None;
+    }
     ctx.active_tool = tool;
     Ok(outcome(format!("{} tool", tool.name()), Vec::new()))
 }
@@ -102,4 +108,38 @@ fn run_text_block(
     _inv: &Invocation,
 ) -> Result<Outcome, super::CommandError> {
     choose(ctx, ActiveTool::TextBlock)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::{DocumentSession, PaintSource, Settings};
+    use larrygram_model::ShapeId;
+
+    /// A tool change clears a recorded Format Painter copy (task
+    /// P7-26 item 4: a copy never outlives a tool change); re-choosing
+    /// the active tool is no change and keeps it.
+    #[test]
+    fn a_tool_change_clears_the_format_painter_copy() {
+        let mut ctx = crate::AppCtx::new(Settings::default());
+        let mut doc = larrygram_model::Document::new();
+        doc.add_page("Page-1").expect("page");
+        let session = DocumentSession::new(doc, None);
+        let session_id = session.id;
+        ctx.open_document(session);
+        ctx.format_painter = Some(PaintSource {
+            session: session_id,
+            shape: ShapeId { index: 0 },
+        });
+        choose(&mut ctx, ActiveTool::Pointer).expect("pointer");
+        assert!(
+            ctx.format_painter.is_some(),
+            "re-choosing the active tool keeps the copy"
+        );
+        choose(&mut ctx, ActiveTool::Rectangle).expect("rectangle");
+        assert!(
+            ctx.format_painter.is_none(),
+            "a tool change clears the copy"
+        );
+    }
 }
