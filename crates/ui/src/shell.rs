@@ -1490,6 +1490,21 @@ impl Shell {
             // or selection change under the border being dragged.
             events.clear();
         }
+        // A click inside the new text box being typed (task P7-26 item
+        // 3) is a caret move: it neither commits the text nor starts a
+        // second box over the first. The editor field fills the box
+        // (`text_edit::show`), so egui's own hit test already keeps
+        // most such clicks; this is the raw-input backstop.
+        if let Some(bounds) = self.editor.pending {
+            events.retain(|event| {
+                !matches!(
+                    event,
+                    crate::tools::ToolEvent::PointerDown { pos, .. }
+                        | crate::tools::ToolEvent::PointerUp { pos, .. }
+                        if bounds.contains(*pos)
+                )
+            });
+        }
         // The Format Painter takes Escape too (task P7-24 item 6): the
         // recorded copy cancels instead of the shortcut table's
         // full-screen toggle.
