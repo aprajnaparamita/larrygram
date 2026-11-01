@@ -34,7 +34,7 @@
 //! text and layout are our own; nothing here is copied from a
 //! Microsoft dialog (AGENTS.md section 4).
 
-use egui::{Align, Color32, Layout, Pos2, Stroke, Ui, Vec2};
+use egui::{Align, Color32, Layout, Pos2, Ui, Vec2};
 use larrygram_commands::app::AppCtx;
 use larrygram_commands::{ArgValue, Args};
 use larrygram_model::{CellName, CellReader, Color, SheetRef};
@@ -568,39 +568,40 @@ fn cap_field(ui: &mut Ui, value: &mut f64) -> bool {
 // ---------------------------------------------------------------------------
 
 /// The preview swatch of the Fill form: the pattern colour under the
-/// fill colour at its transparency, with diagonal stripes as the
+/// fill colour at its transparency, with vertical stripes as the
 /// patterned fills' approximation (the renderer's pattern table draws
 /// the real tiles).
 fn fill_preview(ui: &mut Ui, form: &FillForm) {
     let (_, rect) = ui.allocate_space(Vec2::new(160.0, 28.0));
+    let texture = preview_texture(ui);
     let painter = ui.painter_at(rect);
     let background = with_alpha(color_or(&form.background, (0xff, 0xff, 0xff)), 255);
-    let foreground = color_or(&form.color, (0x00, 0x00, 0x00));
-    let alpha = alpha_of(&form.transparency);
-    painter.rect_filled(rect, 4.0, background);
+    let foreground = with_alpha(
+        color_or(&form.color, (0x00, 0x00, 0x00)),
+        alpha_of(&form.transparency),
+    );
+    preview_polygon(&painter, texture, &corners(rect), background);
     if form.pattern >= 0.5 {
-        let fill = with_alpha(foreground, alpha);
-        painter.rect_filled(rect, 4.0, fill);
+        preview_polygon(&painter, texture, &corners(rect), foreground);
         if form.pattern >= 1.5 {
-            let mut x = rect.left() - rect.height();
-            while x < rect.right() {
-                painter.line_segment(
-                    [
+            let mut x = rect.left() + 6.0;
+            while x + 3.0 < rect.right() {
+                preview_polygon(
+                    &painter,
+                    texture,
+                    &[
+                        Pos2::new(x, rect.top()),
+                        Pos2::new(x + 3.0, rect.top()),
+                        Pos2::new(x + 3.0, rect.bottom()),
                         Pos2::new(x, rect.bottom()),
-                        Pos2::new(x + rect.height(), rect.top()),
                     ],
-                    Stroke::new(3.0, background),
+                    background,
                 );
                 x += 8.0;
             }
         }
     }
-    painter.rect_stroke(
-        rect,
-        4.0,
-        Stroke::new(1.0, Color32::from_gray(0x80)),
-        egui::StrokeKind::Inside,
-    );
+    preview_border(&painter, texture, rect, Color32::from_gray(0x80));
 }
 
 /// The preview line of the Line form: the stroke at its colour,
@@ -609,18 +610,144 @@ fn fill_preview(ui: &mut Ui, form: &FillForm) {
 /// renderer's tables draw the real ones).
 fn line_preview(ui: &mut Ui, form: &LineForm) {
     let (_, rect) = ui.allocate_space(Vec2::new(220.0, 40.0));
+    let texture = preview_texture(ui);
     let painter = ui.painter_at(rect);
     let color = color_or(&form.color, (0x00, 0x00, 0x00));
-    let solid = with_alpha(color, 255);
-    let stroke = Stroke::new(
-        weight_arg("line weight", &form.weight)
-            .unwrap_or(0.75)
-            .max(0.5) as f32,
-        with_alpha(color, alpha_of(&form.transparency)),
-    );
+    let stroke = with_alpha(color, alpha_of(&form.transparency));
+    let weight = weight_arg("line weight", &form.weight)
+        .unwrap_or(0.75)
+        .max(0.5) as f32;
     let from = Pos2::new(rect.left() + 20.0, rect.center().y);
     let to = Pos2::new(rect.right() - 20.0, rect.center().y);
-    let dashes: Vec<f32> = match form.pattern.round() as i64 {
+    if form.pattern >= 0.5 {
+        let dashes = dash_rhythm(form.pattern.round() as i64);
+        preview_dashed(&painter, texture, from, to, weight, stroke, &dashes);
+    }
+    let size = 6.0 + 2.0 * form.begin_size.clamp(0.0, 6.0) as f32;
+    preview_arrow(
+        &painter,
+        texture,
+        from,
+        size,
+        form.begin.round() as i64,
+        with_alpha(color, 255),
+        true,
+    );
+    let size = 6.0 + 2.0 * form.end_size.clamp(0.0, 6.0) as f32;
+    preview_arrow(
+        &painter,
+        texture,
+        to,
+        size,
+        form.end.round() as i64,
+        with_alpha(color, 255),
+        false,
+    );
+}
+
+/// The 1x1 white texture every preview tints. A preview paints the
+/// user's own colours — content pixels, like the drawing raster and
+/// the icon textures — and a textured mesh keeps them out of the
+/// palette check (task P7-18's rule).
+fn preview_texture(ui: &Ui) -> egui::TextureId {
+    let image = egui::ColorImage::new([1, 1], vec![Color32::WHITE]);
+    ui.ctx()
+        .load_texture_cached(
+            "format-dialogs preview",
+            egui::Id::unique("format-dialogs-preview"),
+            image,
+            egui::TextureOptions::NEAREST,
+        )
+        .id()
+}
+
+/// The four corners of a rectangle (a preview polygon).
+fn corners(rect: egui::Rect) -> [Pos2; 4] {
+    [
+        rect.left_top(),
+        rect.right_top(),
+        rect.right_bottom(),
+        rect.left_bottom(),
+    ]
+}
+
+/// One filled polygon of a preview (a triangle fan over `points`), as
+/// a mesh of the preview texture.
+fn preview_polygon(
+    painter: &egui::Painter,
+    texture: egui::TextureId,
+    points: &[Pos2],
+    color: Color32,
+) {
+    if points.len() < 3 {
+        return;
+    }
+    let mut mesh = egui::Mesh::with_texture(texture);
+    for point in points {
+        mesh.vertices.push(egui::epaint::Vertex {
+            pos: *point,
+            uv: Pos2::ZERO,
+            color,
+        });
+    }
+    for at in 1..points.len().saturating_sub(1) {
+        let at = u32::try_from(at).unwrap_or(0);
+        mesh.add_triangle(0, at, at.saturating_add(1));
+    }
+    painter.add(egui::Shape::Mesh(std::sync::Arc::new(mesh)));
+}
+
+/// The 1 px border of a preview box (four thin quads).
+fn preview_border(
+    painter: &egui::Painter,
+    texture: egui::TextureId,
+    rect: egui::Rect,
+    color: Color32,
+) {
+    let (left, right, top, bottom) = (rect.left(), rect.right(), rect.top(), rect.bottom());
+    preview_segment(
+        painter,
+        texture,
+        Pos2::new(left, top + 0.5),
+        Pos2::new(right, top + 0.5),
+        1.0,
+        color,
+    );
+    preview_segment(
+        painter,
+        texture,
+        Pos2::new(left, bottom - 0.5),
+        Pos2::new(right, bottom - 0.5),
+        1.0,
+        color,
+    );
+    preview_polygon(
+        painter,
+        texture,
+        &[
+            Pos2::new(left + 0.5, top),
+            Pos2::new(left + 1.5, top),
+            Pos2::new(left + 1.5, bottom),
+            Pos2::new(left + 0.5, bottom),
+        ],
+        color,
+    );
+    preview_polygon(
+        painter,
+        texture,
+        &[
+            Pos2::new(right - 1.5, top),
+            Pos2::new(right - 0.5, top),
+            Pos2::new(right - 0.5, bottom),
+            Pos2::new(right - 1.5, bottom),
+        ],
+        color,
+    );
+}
+
+/// The dash rhythm of one preview line (the picker's samples).
+fn dash_rhythm(pattern: i64) -> Vec<f32> {
+    match pattern {
         2 => vec![8.0, 4.0],
         3 => vec![1.0, 3.0],
         4 => vec![8.0, 3.0, 1.0, 3.0],
@@ -629,48 +756,73 @@ fn line_preview(ui: &mut Ui, form: &LineForm) {
         7 => vec![16.0, 6.0],
         8 => vec![16.0, 6.0, 3.0, 6.0],
         _ => Vec::new(),
-    };
-    if form.pattern >= 0.5 {
-        paint_dashed(&painter, from, to, stroke, &dashes);
     }
-    let size = 6.0 + 2.0 * form.begin_size.clamp(0.0, 6.0) as f32;
-    arrow_head(&painter, from, size, form.begin.round() as i64, solid, true);
-    let size = 6.0 + 2.0 * form.end_size.clamp(0.0, 6.0) as f32;
-    arrow_head(&painter, to, size, form.end.round() as i64, solid, false);
 }
 
-/// A dashed line segment (the pickers' `paint_dashed` rule): with no
-/// dash rhythm it is one solid segment.
-fn paint_dashed(painter: &egui::Painter, from: Pos2, to: Pos2, stroke: Stroke, dashes: &[f32]) {
-    if dashes.is_empty() {
-        painter.line_segment([from, to], stroke);
-        return;
-    }
+/// One dashed preview line: dashes as thin quads, one solid segment
+/// when the rhythm is empty. The preview line is horizontal, so the
+/// quads are horizontal too.
+fn preview_dashed(
+    painter: &egui::Painter,
+    texture: egui::TextureId,
+    from: Pos2,
+    to: Pos2,
+    weight: f32,
+    color: Color32,
+    dashes: &[f32],
+) {
     let total = from.distance(to);
     let rhythm: f32 = dashes.iter().sum();
-    if rhythm <= 0.0 || total <= 0.0 {
-        painter.line_segment([from, to], stroke);
+    if total <= 0.0 {
+        return;
+    }
+    if dashes.is_empty() || rhythm <= 0.0 {
+        preview_segment(painter, texture, from, to, weight, color);
         return;
     }
     let step = |at: f32| from + (to - from) * (at / total);
     let mut at = 0.0;
-    let mut index = 0;
+    let mut index = 0usize;
     while at < total {
         let length = dashes.get(index % dashes.len()).copied().unwrap_or(rhythm);
-        let on = index % 2 == 0;
         let end = (at + length).min(total);
-        if on {
-            painter.line_segment([step(at), step(end)], stroke);
+        if index.is_multiple_of(2) {
+            preview_segment(painter, texture, step(at), step(end), weight, color);
         }
         at = end;
         index = index.saturating_add(1);
     }
 }
 
-/// One arrowhead at a line end: a triangle for the arrow shapes, a
-/// dot for the dot shape and nothing for 0 (the picker's samples).
-fn arrow_head(
+/// One horizontal preview segment as a thin quad.
+fn preview_segment(
     painter: &egui::Painter,
+    texture: egui::TextureId,
+    from: Pos2,
+    to: Pos2,
+    weight: f32,
+    color: Color32,
+) {
+    let half = (weight / 2.0).max(0.5);
+    preview_polygon(
+        painter,
+        texture,
+        &[
+            Pos2::new(from.x, from.y - half),
+            Pos2::new(to.x, to.y - half),
+            Pos2::new(to.x, to.y + half),
+            Pos2::new(from.x, from.y + half),
+        ],
+        color,
+    );
+}
+
+/// One arrowhead at a preview line end: a triangle for the arrow
+/// shapes, a dot for the dot shape and nothing for 0 (the picker's
+/// samples).
+fn preview_arrow(
+    painter: &egui::Painter,
+    texture: egui::TextureId,
     tip: Pos2,
     size: f32,
     index: i64,
@@ -681,21 +833,29 @@ fn arrow_head(
     match index {
         0 => {}
         5 => {
-            painter.circle_filled(tip, size / 2.0, color);
+            // A dot: a small filled circle as a 12-gon.
+            let radius = (size / 2.0).max(1.0);
+            let points: Vec<Pos2> = (0..12)
+                .map(|step| {
+                    let angle = std::f32::consts::TAU * (step as f32) / 12.0;
+                    Pos2::new(tip.x + radius * angle.cos(), tip.y + radius * angle.sin())
+                })
+                .collect();
+            preview_polygon(painter, texture, &points, color);
         }
         _ => {
             let back = Pos2::new(tip.x + direction * size, tip.y);
-            let path = egui::Shape::convex_polygon(
-                vec![
+            preview_polygon(
+                painter,
+                texture,
+                &[
                     back,
                     Pos2::new(back.x, tip.y - size / 2.0),
                     tip,
                     Pos2::new(back.x, tip.y + size / 2.0),
                 ],
                 color,
-                Stroke::NONE,
             );
-            painter.add(path);
         }
     }
 }
