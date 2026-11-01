@@ -1428,3 +1428,50 @@ fn a_context_menu_from_the_keyboard_starts_no_text() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Item 3 (task P7-26): a click inside the new text box being typed is
+// a caret move, not a commit and a second box over the first.
+// ---------------------------------------------------------------------------
+
+/// Item 3: the click lower in the outlined box keeps the edit (the box
+/// is still being typed, nothing is inserted early) and no second box
+/// opens; Escape then inserts exactly one box with the typed text.
+#[test]
+fn a_click_inside_the_new_text_box_keeps_editing_it() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        choose_text_tool(&mut rig, kind);
+        let before = shape_count(&rig);
+        // A click on empty page starts a 2 x 0.5 box at (1, 5) as its
+        // lower-left corner.
+        let pos = screen(&rig, 1.0, 5.0);
+        click_at(&mut rig, pos);
+        assert!(editing(&mut rig), "{kind:?}: the click starts a text box");
+        type_text(&mut rig, "Hi");
+        // A click lower in the outlined box, below the first row.
+        let lower = screen(&rig, 2.0, 5.1);
+        click_at(&mut rig, lower);
+        assert!(
+            editing(&mut rig),
+            "{kind:?}: the click inside the box keeps editing"
+        );
+        assert_eq!(
+            shape_count(&rig),
+            before,
+            "{kind:?}: the click neither commits nor opens a second box"
+        );
+        press_key(&mut rig, egui::Key::Escape, egui::Modifiers::NONE);
+        assert_eq!(
+            shape_count(&rig),
+            before + 1,
+            "{kind:?}: exactly one text box"
+        );
+        let shape = last_shape(&rig);
+        assert_eq!(
+            shape_text(&rig, shape),
+            "Hi",
+            "{kind:?}: the typed text survived the click"
+        );
+    }
+}
