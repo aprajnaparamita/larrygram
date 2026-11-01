@@ -1507,8 +1507,17 @@ impl Shell {
         }
         // The Format Painter takes Escape too (task P7-24 item 6): the
         // recorded copy cancels instead of the shortcut table's
-        // full-screen toggle.
+        // full-screen toggle. Task P7-26 item 4: the cancel goes
+        // through the registry whatever tool is active (the tool route
+        // only reaches the painter on the pointer tool), and the
+        // `Cancel` event still drops a drag in flight.
         if self.escape_pressed && self.app.format_painter.is_some() {
+            if self.tools.tool != crate::tools::Tool::Pointer {
+                let cancel = larrygram_commands::Args::new().with("cancel", ArgValue::Flag(true));
+                if let Ok(command) = CommandId::parse("tools.format_painter") {
+                    produced.push(Intent::new(command, Invocation::new(cancel, Source::Ui)));
+                }
+            }
             events.insert(0, crate::tools::ToolEvent::Cancel);
         }
         // Any click with the Text tool first commits the text being
