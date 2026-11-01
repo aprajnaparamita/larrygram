@@ -1501,7 +1501,7 @@ impl Shell {
         // A click with the Text tool on empty page starts a pending
         // text box (task P7-25 item 9): the editor opens over it and
         // the box is inserted with its text when the edit commits.
-        if let Some(box_) = self.tools.text.take_pending() {
+        if let Some(box_) = self.tools.take_pending_text_box() {
             let min = larrygram_geom::Point::new(box_.x, box_.y);
             let max = larrygram_geom::Point::new(box_.x + box_.width, box_.y + box_.height);
             self.editor.begin_new(larrygram_geom::Rect::new(min, max));
