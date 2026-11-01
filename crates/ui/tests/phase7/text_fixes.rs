@@ -184,8 +184,16 @@ fn click_at(rig: &mut ShellRig, pos: egui::Pos2) {
     rig.run();
 }
 
-/// A double click at `pos` (two clicks inside one double-click window).
+/// A double click at `pos` (two clicks inside one double-click
+/// window). The wait first drains the window: egui counts the second
+/// click as a triple one when two earlier clicks (a tool drag's
+/// release, a widget click) sit inside it (`click.count == 3`, so
+/// `double_clicked_by` stays false). One harness run steps the clock
+/// 0.25 s, so 60 runs pass any 10 s window.
 fn double_click_at(rig: &mut ShellRig, pos: egui::Pos2) {
+    for _ in 0..60 {
+        rig.run();
+    }
     click_at(rig, pos);
     click_at(rig, pos);
 }
@@ -560,8 +568,12 @@ fn the_text_block_tool_moves_the_text_block_in_one_undo_step() {
         let mut rig = shell_rig(kind);
         select_shape(&mut rig);
         let shape = rectangle(&rig.shell.borrow().app);
+        white_fill(&mut rig, kind);
         choose_text_block(&mut rig, kind);
         let before = picture(&mut rig);
+        // The ink before the drag (the black text on the white fill).
+        let image = quiet_picture(&mut rig);
+        let ink_before = ink_top_left(ink_box(&rig, &image, (2.0, 2.4, 4.0, 3.6)));
         // Drag the block's centre half an inch right and a quarter up.
         let from = screen(&rig, SHAPE.0, SHAPE.1);
         let to = screen(&rig, SHAPE.0 + 0.5, SHAPE.1 + 0.25);
@@ -578,9 +590,17 @@ fn the_text_block_tool_moves_the_text_block_in_one_undo_step() {
             (number(&rig, shape, "TxtWidth") - 1.0).abs() < 1.0e-9,
             "{kind:?}: the size is untouched"
         );
-        // The picture moved with the block.
+        // The picture moved with the block: its ink moved by exactly
+        // the drag's distance (task P7-26 item 5).
         let after = picture(&mut rig);
         assert_ne!(before, after, "{kind:?}: the picture moved");
+        let image = quiet_picture(&mut rig);
+        let ink_after = ink_top_left(ink_box(&rig, &image, (2.4, 2.7, 4.4, 4.0)));
+        assert!(
+            (ink_after.0 - (ink_before.0 + 0.5)).abs() < 0.05
+                && (ink_after.1 - (ink_before.1 + 0.25)).abs() < 0.05,
+            "{kind:?}: the ink moved by the drag's distance: {ink_before:?} to {ink_after:?}"
+        );
         // One undo removes the whole drag.
         press_key(
             &mut rig,
@@ -620,10 +640,16 @@ fn the_text_block_tool_resizes_the_text_block_in_one_undo_step() {
             (number(&rig, shape, "TxtHeight") - 0.75).abs() < 1.0e-9,
             "{kind:?}: TxtHeight grew"
         );
-        // The centre stayed put: the pin keeps its place.
+        // The opposite corner stays put (task P7-26 item 8): the
+        // south-west corner of the block keeps its place and the pin
+        // follows the grown sides.
         assert!(
-            (number(&rig, shape, "TxtPinX") - 1.0).abs() < 1.0e-9,
-            "{kind:?}: the centre stayed"
+            (number(&rig, shape, "TxtPinX") - 1.25).abs() < 1.0e-9,
+            "{kind:?}: the pin follows the grown sides"
+        );
+        assert!(
+            (number(&rig, shape, "TxtPinY") - 0.625).abs() < 1.0e-9,
+            "{kind:?}: the pin follows the grown sides"
         );
         // One undo removes the whole resize.
         press_key(
@@ -672,7 +698,10 @@ fn double_clicking_a_shape_starts_editing_its_text() {
 }
 
 /// Item 8: typing a character with a shape selected starts the text
-/// with that character (the old text is replaced).
+/// with that character (the old text is replaced). The next two
+/// characters land after it (task P7-26 item 5: the caret sits after
+/// the seed and no key is dropped between `text.begin` and the editor
+/// taking focus).
 #[test]
 fn typing_a_character_starts_the_text_with_it() {
     for kind in LAYOUTS {
@@ -684,11 +713,13 @@ fn typing_a_character_starts_the_text_with_it() {
             editing(&mut rig),
             "{kind:?}: the typed character opens the editor"
         );
+        type_text(&mut rig, "r");
+        type_text(&mut rig, "s");
         press_key(&mut rig, egui::Key::Escape, egui::Modifiers::NONE);
         assert_eq!(
             shape_text(&rig, shape),
-            "Q",
-            "{kind:?}: the text starts with the typed character"
+            "Qrs",
+            "{kind:?}: the text starts with the typed character and keeps the next keys"
         );
     }
 }
@@ -820,6 +851,47 @@ fn the_text_tool_makes_a_text_object_in_one_undo_step() {
             shape_count(&rig),
             before,
             "{kind:?}: the Undo button removes it in one step"
+        );
+    }
+}
+
+/// Item 5 (task P7-26): redo brings back the shape and its text in one
+/// step (Ctrl+Y).
+#[test]
+fn redo_of_a_new_text_box_restores_the_shape_and_its_text() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        choose_text_tool(&mut rig, kind);
+        let before = shape_count(&rig);
+        let shape = make_text_object(&mut rig);
+        assert_eq!(shape_text(&rig, shape), "Hi", "{kind:?}: the fixture");
+        press_key(
+            &mut rig,
+            egui::Key::Z,
+            egui::Modifiers {
+                command: true,
+                ..egui::Modifiers::NONE
+            },
+        );
+        assert_eq!(shape_count(&rig), before, "{kind:?}: one undo removes it");
+        press_key(
+            &mut rig,
+            egui::Key::Y,
+            egui::Modifiers {
+                ctrl: true,
+                ..egui::Modifiers::NONE
+            },
+        );
+        assert_eq!(
+            shape_count(&rig),
+            before + 1,
+            "{kind:?}: one redo brings the box back"
+        );
+        let shape = last_shape(&rig);
+        assert_eq!(
+            shape_text(&rig, shape),
+            "Hi",
+            "{kind:?}: and its text comes back with it"
         );
     }
 }
@@ -956,6 +1028,951 @@ fn while_editing_one_outline_shows() {
         assert!(
             shape_edge.iter().all(|c| !near(*c, selection, 8)),
             "{kind:?}: no second outline on the shape"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Item 1 (task P7-26): a text block resize lands where the preview
+// frame put it. The command writes `TxtLocPinX`/`TxtLocPinY` with the
+// pin: without them the renderer reads the cells' documented default,
+// which follows the **shape's** width, and draws the block away from
+// the frame the drag previewed.
+// ---------------------------------------------------------------------------
+
+/// Clicks the first widget labelled `name` whatever its role (the
+/// menu rows of the two layouts draw under different roles).
+fn click_any(rig: &mut ShellRig, name: &str) {
+    rig.run();
+    let root = rig.harness().root();
+    let node = root
+        .query_all_by_label(name)
+        .next()
+        .unwrap_or_else(|| panic!("no widget named {name:?}"));
+    node.click();
+    rig.run();
+}
+
+/// The topmost copy of the button `name`: the Shapes window's tiles
+/// share some labels.
+fn top_face(rig: &mut ShellRig, name: &str) -> egui::Rect {
+    rig.run();
+    rig.harness()
+        .root()
+        .query_all_by_role_and_label(Role::Button, name)
+        .min_by(|a, b| {
+            a.rect()
+                .center()
+                .y
+                .total_cmp(&b.rect().center().y)
+                .then(a.rect().center().x.total_cmp(&b.rect().center().x))
+        })
+        .unwrap_or_else(|| panic!("no button named {name:?}"))
+        .rect()
+}
+
+/// Clicks the topmost copy of the widget `name`: the Shapes window's
+/// tiles and the panes share some labels.
+fn click_top(rig: &mut ShellRig, role: Role, name: &str) {
+    rig.run();
+    let root = rig.harness().root();
+    let node = root
+        .query_all_by_role_and_label(role, name)
+        .min_by(|a, b| {
+            a.rect()
+                .center()
+                .y
+                .total_cmp(&b.rect().center().y)
+                .then(a.rect().center().x.total_cmp(&b.rect().center().x))
+        })
+        .unwrap_or_else(|| panic!("no {role:?} named {name:?}"));
+    node.click();
+    rig.run();
+}
+
+/// Clicks the "More items" arrow nearest `face` (the Panel Modern
+/// split arrows) and returns the face's position.
+fn more_items_near(rig: &mut ShellRig, name: &str) -> egui::Pos2 {
+    let face = top_face(rig, name);
+    let root = rig.harness().root();
+    let best = root
+        .query_all_by_role_and_label(Role::Button, "More items")
+        .min_by(|a, b| {
+            (a.rect().center() - face.center())
+                .length()
+                .total_cmp(&(b.rect().center() - face.center()).length())
+        })
+        .expect("a More items arrow");
+    best.click();
+    rig.run();
+    face.center()
+}
+
+/// Clicks the widget labelled `name` nearest `anchor` among the ones
+/// strictly below it: the popup row under a split, never the split's
+/// own face or a Shapes tile.
+fn click_below(rig: &mut ShellRig, name: &str, anchor: egui::Pos2) {
+    rig.run();
+    let root = rig.harness().root();
+    let node = root
+        .query_all_by_label(name)
+        .filter(|node| node.rect().center().y > anchor.y + 2.0)
+        .min_by(|a, b| {
+            (a.rect().center() - anchor)
+                .length()
+                .total_cmp(&(b.rect().center() - anchor).length())
+        })
+        .unwrap_or_else(|| panic!("no {name:?} below {anchor:?}"));
+    node.click();
+    rig.run();
+}
+
+/// Opens the fill colour picker of `kind` (the P7-24 helper's rule).
+fn open_fill_picker(rig: &mut ShellRig, kind: LayoutKind) {
+    match kind {
+        LayoutKind::PanelClassic => click(rig, Role::Button, "Fill Color menu"),
+        _ => {
+            more_items_near(rig, "Fill");
+        }
+    }
+}
+
+/// Fills the selection white, so the black text ink reads against a
+/// light fill (the picture checks of items 1 and 5).
+fn white_fill(rig: &mut ShellRig, kind: LayoutKind) {
+    open_fill_picker(rig, kind);
+    click(rig, Role::Button, "White #FFFFFF");
+}
+
+/// Takes the line off the selection (its dark border would read as
+/// text ink in the picture checks).
+fn no_line(rig: &mut ShellRig, kind: LayoutKind) {
+    match kind {
+        LayoutKind::PanelClassic => {
+            click(rig, Role::Button, "Line Pattern menu");
+            click(rig, Role::Button, "No Line");
+        }
+        _ => {
+            let anchor = more_items_near(rig, "Line");
+            click_below(rig, "No Line", anchor);
+        }
+    }
+}
+
+/// Chooses the Pointer tool with a real control click.
+fn choose_pointer_tool(rig: &mut ShellRig) {
+    click(rig, Role::Button, "Pointer Tool");
+}
+
+/// The Pointer tool and a click on empty page: no tool marks over the
+/// picture's samples.
+fn deselect(rig: &mut ShellRig) {
+    choose_pointer_tool(rig);
+    click_at(rig, screen(rig, 0.7, 5.0));
+}
+
+/// The rendered frame with the pointer parked on empty page (no tool
+/// cursor over the samples).
+fn quiet_picture(rig: &mut ShellRig) -> image::RgbaImage {
+    let park = screen(rig, 0.7, 5.0);
+    rig.harness().event(egui::Event::PointerMoved(park));
+    rig.run();
+    rig.render()
+}
+
+/// The page point of a screen point (the inverse of `screen`, which is
+/// axis-aligned at any zoom).
+fn to_page(rig: &ShellRig, pos: egui::Pos2) -> (f64, f64) {
+    let origin = screen(rig, 0.0, 0.0);
+    let along_x = screen(rig, 1.0, 0.0);
+    let along_y = screen(rig, 0.0, 1.0);
+    (
+        f64::from(pos.x - origin.x) / f64::from(along_x.x - origin.x),
+        f64::from(pos.y - origin.y) / f64::from(along_y.y - origin.y),
+    )
+}
+
+/// The page-space bounding box `(min, max)` of the dark text ink in
+/// `image` over the page region `bounds` (the picture checks of item
+/// 1 and 5: the page is white and the grid light grey, so the black
+/// text is the only dark ink).
+fn ink_box(
+    rig: &ShellRig,
+    image: &image::RgbaImage,
+    bounds: (f64, f64, f64, f64),
+) -> ((f64, f64), (f64, f64)) {
+    let top_left = screen(rig, bounds.0, bounds.3);
+    let bottom_right = screen(rig, bounds.2, bounds.1);
+    let (px0, py0) = (top_left.x.max(0.0) as u32, top_left.y.max(0.0) as u32);
+    let (px1, py1) = (
+        bottom_right.x.min(image.width() as f32) as u32,
+        bottom_right.y.min(image.height() as f32) as u32,
+    );
+    let mut min = (u32::MAX, u32::MAX);
+    let mut max = (0u32, 0u32);
+    for y in py0..py1 {
+        for x in px0..px1 {
+            let p = image.get_pixel(x, y);
+            if p[0] < 170 && p[1] < 170 && p[2] < 170 {
+                min = (min.0.min(x), min.1.min(y));
+                max = (max.0.max(x), max.1.max(y));
+            }
+        }
+    }
+    assert!(min.0 <= max.0, "no ink in the region {bounds:?}");
+    // The ink must sit clear of the region's own edges: a ruler band
+    // or another control over the region would pollute the measure.
+    assert!(
+        min.0 > px0 + 3 && min.1 > py0 + 3 && max.0 + 3 < px1 && max.1 + 3 < py1,
+        "the ink runs into the region's edge {bounds:?}: screen {min:?}..{max:?}"
+    );
+    // Screen (left, bottom) is page (min x, min y); `y` grows up.
+    let lo = to_page(rig, egui::pos2(min.0 as f32, max.1 as f32));
+    let hi = to_page(rig, egui::pos2(max.0 as f32, min.1 as f32));
+    ((lo.0, lo.1), (hi.0, hi.1))
+}
+
+/// The ink's top-left corner in page inches (`y` grows up: the top of
+/// the ink is its `max.y`), the anchor of a top-left laid out text.
+fn ink_top_left(ink: ((f64, f64), (f64, f64))) -> (f64, f64) {
+    ((ink.0).0, (ink.1).1)
+}
+
+/// Item 1: a block resize on the fixture (explicit `Txt*` cells)
+/// lands where the preview frame put it: the ink keeps its place at
+/// the block's top-left corner and the cells carry the pin's offset
+/// inside the block.
+#[test]
+fn the_text_block_resize_lands_where_the_preview_showed_it() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        let shape = rectangle(&rig.shell.borrow().app);
+        select_shape(&mut rig);
+        white_fill(&mut rig, kind);
+        deselect(&mut rig);
+        let image = quiet_picture(&mut rig);
+        let before = ink_top_left(ink_box(&rig, &image, (2.0, 2.4, 4.0, 3.6)));
+
+        // Drag the block's north-east corner half an inch right and a
+        // quarter up (the block is 1 x 0.5 at (3, 3)).
+        select_shape(&mut rig);
+        choose_text_block(&mut rig, kind);
+        let from = screen(&rig, 3.5, 3.25);
+        let to = screen(&rig, 4.0, 3.5);
+        drag(&mut rig, from, to);
+        // The resize writes the pin's offset inside the block too.
+        assert!(
+            (number(&rig, shape, "TxtWidth") - 1.5).abs() < 1.0e-9,
+            "{kind:?}: TxtWidth grew"
+        );
+        assert!(
+            (number(&rig, shape, "TxtLocPinX") - 0.75).abs() < 1.0e-9,
+            "{kind:?}: TxtLocPinX follows the size"
+        );
+        assert!(
+            (number(&rig, shape, "TxtLocPinY") - 0.375).abs() < 1.0e-9,
+            "{kind:?}: TxtLocPinY follows the size"
+        );
+        // The preview keeps the block's south-west corner (task P7-26
+        // item 8), so only the top edge rises and the ink follows it.
+        deselect(&mut rig);
+        let image = quiet_picture(&mut rig);
+        let after = ink_top_left(ink_box(&rig, &image, (1.8, 2.3, 4.2, 3.7)));
+        let expected = (before.0, before.1 + 0.25);
+        assert!(
+            (after.0 - expected.0).abs() < 0.05 && (after.1 - expected.1).abs() < 0.05,
+            "{kind:?}: the ink sits where the preview showed it: {before:?} to {after:?}"
+        );
+    }
+}
+
+/// Chooses the Rectangle tool with a real control click (task P7-26
+/// item 1: the shape it draws carries no `Txt*` cells at all).
+fn choose_rectangle_tool(rig: &mut ShellRig, kind: LayoutKind) {
+    match kind {
+        LayoutKind::PanelClassic => {
+            // The tool sits on the hidden floating Drawing toolbar
+            // (View > Toolbars > Drawing).
+            click_any(rig, "View");
+            click_any(rig, "Toolbars");
+            click_any(rig, "Drawing");
+            click(rig, Role::Button, "Rectangle Tool");
+        }
+        _ => {
+            // The Home tab's drawing-tools split opens from its arrow.
+            let anchor = more_items_near(rig, "Rectangle");
+            click_below(rig, "Rectangle", anchor);
+        }
+    }
+}
+
+/// Item 1: the same check on a shape drawn with the Rectangle tool,
+/// whose `Txt*` cells hold nothing of their own — the case the review
+/// found: the documented default follows the **shape's** width, so a
+/// resize that writes the pin alone drew the block off the preview.
+#[test]
+fn a_rectangle_tool_shape_resizes_onto_the_preview_too() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        // Draw a rectangle on empty page (the drag snaps to the
+        // grid, so the box is read back from the shape's cells).
+        choose_rectangle_tool(&mut rig, kind);
+        let from = screen(&rig, 3.2, 3.9);
+        let to = screen(&rig, 5.2, 4.9);
+        drag(&mut rig, from, to);
+        let shape = last_shape(&rig);
+        let (pin_x, pin_y) = (number(&rig, shape, "PinX"), number(&rig, shape, "PinY"));
+        let (loc_x, loc_y) = (
+            number(&rig, shape, "LocPinX"),
+            number(&rig, shape, "LocPinY"),
+        );
+        let (width, height) = (number(&rig, shape, "Width"), number(&rig, shape, "Height"));
+        let min = (pin_x - loc_x, pin_y - loc_y);
+        let max = (min.0 + width, min.1 + height);
+        // Give it text: a double click opens the editor, Escape keeps
+        // the text and leaves the shape selected.
+        choose_pointer_tool(&mut rig);
+        let pos = screen(&rig, pin_x, pin_y);
+        double_click_at(&mut rig, pos);
+        assert!(
+            editing(&mut rig),
+            "{kind:?}: the double click opens the editor"
+        );
+        type_text(&mut rig, "Hi");
+        press_key(&mut rig, egui::Key::Escape, egui::Modifiers::NONE);
+        assert_eq!(shape_text(&rig, shape), "Hi", "{kind:?}: the text lands");
+        white_fill(&mut rig, kind);
+        no_line(&mut rig, kind);
+        // The drawn shape carries no `Txt*` values of its own: the
+        // insert's derived-cell pass materialises the documented
+        // defaults, which follow the **shape's** width and height.
+        assert!(
+            (number(&rig, shape, "TxtWidth") - width).abs() < 1.0e-9,
+            "{kind:?}: TxtWidth is the shape's width"
+        );
+        assert!(
+            (number(&rig, shape, "TxtLocPinX") - width / 2.0).abs() < 1.0e-9,
+            "{kind:?}: TxtLocPinX follows the shape's width"
+        );
+        assert!(
+            (number(&rig, shape, "TxtLocPinY") - height / 2.0).abs() < 1.0e-9,
+            "{kind:?}: TxtLocPinY follows the shape's height"
+        );
+        // The ink runs (min - 0.4, max + 0.17) at its lowest: keep
+        // the region over the page area both layouts show.
+        let region = (min.0 - 1.0, min.1 + 0.2, min.0 + 1.5, min.1 + 1.5);
+        deselect(&mut rig);
+        let image = quiet_picture(&mut rig);
+        let before = ink_top_left(ink_box(&rig, &image, region));
+
+        // Resize the text block (the whole shape box) from its
+        // north-east corner: +1 in width and +0.5 in height.
+        let pos = screen(&rig, pin_x, pin_y);
+        click_at(&mut rig, pos);
+        choose_text_block(&mut rig, kind);
+        let from = screen(&rig, max.0, max.1);
+        let to = screen(&rig, max.0 + 1.0, max.1 + 0.5);
+        drag(&mut rig, from, to);
+        assert!(
+            (number(&rig, shape, "TxtWidth") - (width + 1.0)).abs() < 1.0e-9,
+            "{kind:?}: TxtWidth grew"
+        );
+        assert!(
+            (number(&rig, shape, "TxtLocPinX") - (width + 1.0) / 2.0).abs() < 1.0e-9,
+            "{kind:?}: TxtLocPinX is written with the pin"
+        );
+        assert!(
+            (number(&rig, shape, "TxtLocPinY") - (height + 0.5) / 2.0).abs() < 1.0e-9,
+            "{kind:?}: TxtLocPinY is written with the pin"
+        );
+        deselect(&mut rig);
+        let image = quiet_picture(&mut rig);
+        let after = ink_top_left(ink_box(&rig, &image, region));
+        // The preview keeps the block's south-west corner (task P7-26
+        // item 8): the left edge stands still and only the top edge
+        // rises, so the ink follows the top edge alone.
+        let expected = (before.0, before.1 + 0.5);
+        assert!(
+            (after.0 - expected.0).abs() < 0.05 && (after.1 - expected.1).abs() < 0.05,
+            "{kind:?}: the ink sits where the preview showed it: {before:?} to {after:?}"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Item 2 (task P7-26): a typed character starts shape text only while
+// the canvas holds the keyboard. Another widget's field and an open
+// menu keep their own keys.
+// ---------------------------------------------------------------------------
+
+/// Item 2: Tab moves egui's keyboard focus off the canvas (the shell's
+/// focus scope stays `Page`, nothing was pressed) and the typed
+/// character goes to that widget, not to the selected shape.
+#[test]
+fn a_typed_character_keeps_out_of_another_widgets_keyboard() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        let shape = rectangle(&rig.shell.borrow().app);
+        select_shape(&mut rig);
+        press_key(&mut rig, egui::Key::Tab, egui::Modifiers::NONE);
+        rig.run();
+        let focused = rig.harness().ctx.memory(|memory| memory.focused());
+        assert!(
+            focused.is_some(),
+            "{kind:?}: Tab gives another widget the keyboard"
+        );
+        type_text(&mut rig, "Q");
+        assert!(
+            !editing(&mut rig),
+            "{kind:?}: the focused widget keeps its typing"
+        );
+        assert_eq!(
+            shape_text(&rig, shape),
+            "Hello",
+            "{kind:?}: no shape text starts"
+        );
+    }
+}
+
+/// Item 2: the Format menu opened **from the keyboard** keeps its
+/// access letters (they reach the input layer as typed text) and
+/// starts no shape text.
+#[test]
+fn a_keyboard_menu_keeps_its_access_letters_and_starts_no_text() {
+    let kind = LayoutKind::PanelClassic;
+    let mut rig = shell_rig(kind);
+    let shape = rectangle(&rig.shell.borrow().app);
+    select_shape(&mut rig);
+    assert!(
+        !has(&mut rig, Role::MenuItem, "Fill Color"),
+        "the menu is closed"
+    );
+    // Alt+O opens the Format menu; "g" is its Fill Color access key.
+    rig.harness()
+        .key_press_modifiers(egui::Modifiers::ALT, egui::Key::O);
+    rig.run();
+    assert!(
+        has(&mut rig, Role::MenuItem, "Fill Color"),
+        "Alt+O opens the Format menu"
+    );
+    type_text(&mut rig, "g");
+    assert!(
+        has(&mut rig, Role::MenuItem, "Red"),
+        "the access letter opens the Fill Color submenu"
+    );
+    assert!(
+        !editing(&mut rig),
+        "{kind:?}: the access letter starts no shape text"
+    );
+    assert_eq!(
+        shape_text(&rig, shape),
+        "Hello",
+        "{kind:?}: the shape's text is untouched"
+    );
+    press_key(&mut rig, egui::Key::Escape, egui::Modifiers::NONE);
+    press_key(&mut rig, egui::Key::Escape, egui::Modifiers::NONE);
+    assert!(
+        !editing(&mut rig),
+        "Escape closes the menu, not a text edit"
+    );
+}
+
+/// Item 2: a context menu opened from the keyboard (Shift+F10) over the
+/// canvas keeps its own keys too.
+#[test]
+fn a_context_menu_from_the_keyboard_starts_no_text() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        let shape = rectangle(&rig.shell.borrow().app);
+        select_shape(&mut rig);
+        assert!(
+            !has(&mut rig, Role::MenuItem, "Delete"),
+            "{kind:?}: the context menu is closed"
+        );
+        press_key(
+            &mut rig,
+            egui::Key::F10,
+            egui::Modifiers {
+                shift: true,
+                ..egui::Modifiers::NONE
+            },
+        );
+        assert!(
+            has(&mut rig, Role::MenuItem, "Delete"),
+            "{kind:?}: Shift+F10 opens the context menu"
+        );
+        type_text(&mut rig, "x");
+        assert!(!editing(&mut rig), "{kind:?}: the open menu keeps its keys");
+        assert_eq!(
+            shape_text(&rig, shape),
+            "Hello",
+            "{kind:?}: the shape's text is untouched"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Item 3 (task P7-26): a click inside the new text box being typed is
+// a caret move, not a commit and a second box over the first.
+// ---------------------------------------------------------------------------
+
+/// Item 3: the click lower in the outlined box keeps the edit (the box
+/// is still being typed, nothing is inserted early) and no second box
+/// opens; Escape then inserts exactly one box with the typed text.
+#[test]
+fn a_click_inside_the_new_text_box_keeps_editing_it() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        choose_text_tool(&mut rig, kind);
+        let before = shape_count(&rig);
+        // A click on empty page starts a 2 x 0.5 box at (1, 5) as its
+        // lower-left corner.
+        let pos = screen(&rig, 1.0, 5.0);
+        click_at(&mut rig, pos);
+        assert!(editing(&mut rig), "{kind:?}: the click starts a text box");
+        type_text(&mut rig, "Hi");
+        // A click lower in the outlined box, below the first row.
+        let lower = screen(&rig, 2.0, 5.1);
+        click_at(&mut rig, lower);
+        assert!(
+            editing(&mut rig),
+            "{kind:?}: the click inside the box keeps editing"
+        );
+        assert_eq!(
+            shape_count(&rig),
+            before,
+            "{kind:?}: the click neither commits nor opens a second box"
+        );
+        press_key(&mut rig, egui::Key::Escape, egui::Modifiers::NONE);
+        assert_eq!(
+            shape_count(&rig),
+            before + 1,
+            "{kind:?}: exactly one text box"
+        );
+        let shape = last_shape(&rig);
+        assert_eq!(
+            shape_text(&rig, shape),
+            "Hi",
+            "{kind:?}: the typed text survived the click"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Item 8 (task P7-26): a resize drag keeps the opposite edge or corner
+// fixed and is measured along the shape's own axes.
+// ---------------------------------------------------------------------------
+
+/// Rotates the selection one quarter turn right with the layout's own
+/// control (task P7-26 item 8).
+fn rotate_right(rig: &mut ShellRig, kind: LayoutKind) {
+    match kind {
+        LayoutKind::PanelClassic => {
+            click(rig, Role::Button, "Shape");
+            click(rig, Role::MenuItem, "Rotate or Flip");
+            click(rig, Role::MenuItem, "Rotate Right");
+        }
+        _ => {
+            // The Position dropdown opens from its own face; the rows
+            // are its menu.
+            let anchor = top_face(rig, "Position").center();
+            click_top(rig, Role::Button, "Position");
+            click_below(rig, "Rotate Shapes", anchor);
+            click_below(rig, "Rotate Right 90\u{b0}", anchor);
+        }
+    }
+    rig.run();
+}
+
+/// The page-space bounding box of the drawn handle frame in `image`
+/// over the page region `bounds`: the selection-colour outline and
+/// handles (the picture check of item 8). The handle squares stick out
+/// a few pixels, which the checks allow for.
+fn frame_box(
+    rig: &ShellRig,
+    image: &image::RgbaImage,
+    bounds: (f64, f64, f64, f64),
+    kind: LayoutKind,
+) -> ((f64, f64), (f64, f64)) {
+    let colors = larrygram_ui::canvas::CanvasColors::from_theme(&sets().get(kind).theme);
+    let target = (
+        colors.selection.r(),
+        colors.selection.g(),
+        colors.selection.b(),
+    );
+    let top_left = screen(rig, bounds.0, bounds.3);
+    let bottom_right = screen(rig, bounds.2, bounds.1);
+    let (px0, py0) = (top_left.x.max(0.0) as u32, top_left.y.max(0.0) as u32);
+    let (px1, py1) = (
+        bottom_right.x.min(image.width() as f32) as u32,
+        bottom_right.y.min(image.height() as f32) as u32,
+    );
+    let mut min = (u32::MAX, u32::MAX);
+    let mut max = (0u32, 0u32);
+    for y in py0..py1 {
+        for x in px0..px1 {
+            let p = image.get_pixel(x, y);
+            if near((p[0], p[1], p[2]), target, 24) {
+                min = (min.0.min(x), min.1.min(y));
+                max = (max.0.max(x), max.1.max(y));
+            }
+        }
+    }
+    assert!(min.0 <= max.0, "no handle frame in the region {bounds:?}");
+    let lo = to_page(rig, egui::pos2(min.0 as f32, max.1 as f32));
+    let hi = to_page(rig, egui::pos2(max.0 as f32, min.1 as f32));
+    ((lo.0, lo.1), (hi.0, hi.1))
+}
+
+/// The frame's side in the direction `unit` (one of the four unit
+/// vectors: the angles of item 8 are 0 and 90 degrees), as a page
+/// coordinate.
+fn side(frame: ((f64, f64), (f64, f64)), unit: (f64, f64)) -> f64 {
+    if unit.0 > 0.5 {
+        (frame.1).0
+    } else if unit.0 < -0.5 {
+        (frame.0).0
+    } else if unit.1 > 0.5 {
+        (frame.1).1
+    } else {
+        (frame.0).1
+    }
+}
+
+/// The midpoint of the frame's side in the direction `unit` (where its
+/// resize handle sits).
+fn side_mid(frame: ((f64, f64), (f64, f64)), unit: (f64, f64)) -> (f64, f64) {
+    let center = (
+        ((frame.0).0 + (frame.1).0) / 2.0,
+        ((frame.0).1 + (frame.1).1) / 2.0,
+    );
+    if unit.0.abs() > 0.5 {
+        (side(frame, unit), center.1)
+    } else {
+        (center.0, side(frame, unit))
+    }
+}
+
+/// One placed box (the shape's or the text block's placement): the
+/// pin's offset `loc` inside the box, the box size and the turn. The
+/// fixtures carry no flip.
+#[derive(Debug, Clone, Copy)]
+struct PlacedBox {
+    pin: (f64, f64),
+    loc: (f64, f64),
+    size: (f64, f64),
+    angle: f64,
+}
+
+impl PlacedBox {
+    /// The page point of the box's `at` coordinate.
+    fn point(&self, at: (f64, f64)) -> (f64, f64) {
+        let (sin, cos) = self.angle.sin_cos();
+        let (dx, dy) = (at.0 - self.loc.0, at.1 - self.loc.1);
+        (
+            self.pin.0 + dx * cos - dy * sin,
+            self.pin.1 + dx * sin + dy * cos,
+        )
+    }
+
+    /// The unit vector of the box's own x axis (its `east` side).
+    fn east(&self) -> (f64, f64) {
+        let (sin, cos) = self.angle.sin_cos();
+        (cos.round(), sin.round())
+    }
+
+    /// The midpoint of the box's east (`plus`) or west side.
+    fn side(&self, plus: bool) -> (f64, f64) {
+        let x = if plus { self.size.0 } else { 0.0 };
+        self.point((x, self.size.1 / 2.0))
+    }
+}
+
+/// The number value of one cell of `shape`, panicking when absent.
+fn number_of(rig: &ShellRig, shape: ShapeId, name: &str) -> f64 {
+    cell_number(rig, shape, name).unwrap_or_else(|| panic!("no {name} on the shape"))
+}
+
+/// The shape's own placement from its cells (task P7-26 item 8).
+fn shape_box(rig: &ShellRig, shape: ShapeId) -> PlacedBox {
+    PlacedBox {
+        pin: (number_of(rig, shape, "PinX"), number_of(rig, shape, "PinY")),
+        loc: (
+            number_of(rig, shape, "LocPinX"),
+            number_of(rig, shape, "LocPinY"),
+        ),
+        size: (
+            number_of(rig, shape, "Width"),
+            number_of(rig, shape, "Height"),
+        ),
+        angle: number_of(rig, shape, "Angle"),
+    }
+}
+
+/// The text block's placement in page inches: the block's own
+/// placement inside the shape's (the fixtures carry no `TxtAngle` and
+/// no flip).
+fn text_block_box(rig: &ShellRig, shape: ShapeId) -> PlacedBox {
+    let outer = shape_box(rig, shape);
+    let block = PlacedBox {
+        pin: (
+            number_of(rig, shape, "TxtPinX"),
+            number_of(rig, shape, "TxtPinY"),
+        ),
+        loc: (
+            number_of(rig, shape, "TxtLocPinX"),
+            number_of(rig, shape, "TxtLocPinY"),
+        ),
+        size: (
+            number_of(rig, shape, "TxtWidth"),
+            number_of(rig, shape, "TxtHeight"),
+        ),
+        angle: 0.0,
+    };
+    let origin = outer.point(block.pin);
+    PlacedBox {
+        pin: origin,
+        loc: block.loc,
+        size: block.size,
+        angle: outer.angle + block.angle,
+    }
+}
+
+/// One resize drag on the frame's east side (task P7-26 item 8): the
+/// dragged handle follows the pointer and the opposite side stays
+/// put, in the cells and in the rendered frame. `placed` builds the
+/// dragged frame's placement from the cells before and after the drag.
+fn check_resize_drag(
+    rig: &mut ShellRig,
+    kind: LayoutKind,
+    shape: ShapeId,
+    region: (f64, f64, f64, f64),
+    placed: fn(&ShellRig, ShapeId) -> PlacedBox,
+    what: &str,
+) {
+    let before = placed(rig, shape);
+    let unit = before.east();
+    let handle = before.side(true);
+    let fixed_before = before.side(false);
+    let image = quiet_picture(rig);
+    let frame_before = frame_box(rig, &image, region, kind);
+    let to = (handle.0 + 0.5 * unit.0, handle.1 + 0.5 * unit.1);
+    let from = screen(rig, handle.0, handle.1);
+    let to_screen = screen(rig, to.0, to.1);
+    drag(rig, from, to_screen);
+    let after = placed(rig, shape);
+    assert!(
+        (after.size.0 - (before.size.0 + 0.5)).abs() < 1.0e-6,
+        "{kind:?}: the {what} grew by the drag's distance ({:?})",
+        after.size
+    );
+    assert!(
+        (after.size.1 - before.size.1).abs() < 1.0e-6,
+        "{kind:?}: the other axis keeps its size"
+    );
+    let dragged = after.side(true);
+    assert!(
+        (dragged.0 - to.0).abs() < 0.01 && (dragged.1 - to.1).abs() < 0.01,
+        "{kind:?}: the {what} handle follows the pointer: {dragged:?} vs {to:?}"
+    );
+    let fixed_after = after.side(false);
+    assert!(
+        (fixed_after.0 - fixed_before.0).abs() < 1.0e-6
+            && (fixed_after.1 - fixed_before.1).abs() < 1.0e-6,
+        "{kind:?}: the opposite side stays put: {fixed_before:?} to {fixed_after:?}"
+    );
+    // And the rendered frame moves with it (its east and west sides).
+    let image = quiet_picture(rig);
+    let frame_after = frame_box(rig, &image, region, kind);
+    // The side in the `unit` direction moves by the drag along it.
+    let moved = side(frame_after, unit);
+    let stayed = side(frame_after, (-unit.0, -unit.1));
+    assert!(
+        (moved - (side(frame_before, unit) + 0.5 * (unit.0 + unit.1))).abs() < 0.06,
+        "{kind:?}: the drawn frame follows the pointer ({moved})"
+    );
+    assert!(
+        (stayed - side(frame_before, (-unit.0, -unit.1))).abs() < 0.06,
+        "{kind:?}: the drawn frame keeps the opposite side ({stayed})"
+    );
+}
+
+/// Item 8: the Text Block tool's resize drag keeps the opposite edge
+/// fixed and is measured along the block's own axes, at 0 and at 90
+/// degrees.
+#[test]
+fn a_text_block_resize_drag_follows_the_pointer_at_0_and_90_degrees() {
+    for kind in LAYOUTS {
+        for turned in [false, true] {
+            let mut rig = shell_rig(kind);
+            select_shape(&mut rig);
+            if turned {
+                rotate_right(&mut rig, kind);
+            }
+            let shape = rectangle(&rig.shell.borrow().app);
+            let angle = shape_box(&rig, shape).angle;
+            assert!(
+                if turned {
+                    (angle.abs() - core::f64::consts::FRAC_PI_2).abs() < 1.0e-9
+                } else {
+                    angle.abs() < 1.0e-9
+                },
+                "{kind:?}: the shape turned one quarter ({angle})"
+            );
+            choose_text_block(&mut rig, kind);
+            check_resize_drag(
+                &mut rig,
+                kind,
+                shape,
+                (1.4, 1.4, 4.6, 4.6),
+                text_block_box,
+                "text block",
+            );
+        }
+    }
+}
+
+/// Item 8: the pointer tool's resize drag keeps the opposite edge
+/// fixed and is measured along the shape's own axes, at 0 and at 90
+/// degrees.
+#[test]
+fn a_pointer_resize_drag_follows_the_pointer_at_0_and_90_degrees() {
+    for kind in LAYOUTS {
+        for turned in [false, true] {
+            let mut rig = shell_rig(kind);
+            select_shape(&mut rig);
+            if turned {
+                rotate_right(&mut rig, kind);
+            }
+            let shape = rectangle(&rig.shell.borrow().app);
+            let angle = shape_box(&rig, shape).angle;
+            assert!(
+                if turned {
+                    (angle.abs() - core::f64::consts::FRAC_PI_2).abs() < 1.0e-9
+                } else {
+                    angle.abs() < 1.0e-9
+                },
+                "{kind:?}: the shape turned one quarter ({angle})"
+            );
+            check_resize_drag(
+                &mut rig,
+                kind,
+                shape,
+                (1.4, 1.4, 4.6, 4.6),
+                shape_box,
+                "shape",
+            );
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Item 9 (task P7-26): a drag sizes the new text box.
+// ---------------------------------------------------------------------------
+
+/// Item 9: a drag on empty page makes a box of the dragged size at the
+/// dragged place, and a click keeps the default box (task P7-25 item
+/// 9's 2 x 0.5).
+#[test]
+fn a_drag_with_the_text_tool_sizes_the_new_text_box() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        choose_text_tool(&mut rig, kind);
+        let before = shape_count(&rig);
+        // A drag from (1, 5) to (3, 5.4).
+        let from = screen(&rig, 1.0, 5.0);
+        let to = screen(&rig, 3.0, 5.4);
+        drag(&mut rig, from, to);
+        assert!(editing(&mut rig), "{kind:?}: the drag starts a text box");
+        type_text(&mut rig, "Hi");
+        press_key(&mut rig, egui::Key::Escape, egui::Modifiers::NONE);
+        assert_eq!(shape_count(&rig), before + 1, "{kind:?}: one text box");
+        let shape = last_shape(&rig);
+        assert_eq!(shape_text(&rig, shape), "Hi", "{kind:?}: the text lands");
+        // The screen-to-page conversion rounds in f32: a fraction of a
+        // thousandth of an inch is noise.
+        assert!(
+            (number(&rig, shape, "Width") - 2.0).abs() < 1.0e-4
+                && (number(&rig, shape, "Height") - 0.4).abs() < 1.0e-4,
+            "{kind:?}: the box is the dragged size ({:?})",
+            (number(&rig, shape, "Width"), number(&rig, shape, "Height"))
+        );
+        assert!(
+            (number(&rig, shape, "PinX") - 2.0).abs() < 1.0e-4
+                && (number(&rig, shape, "PinY") - 5.2).abs() < 1.0e-4,
+            "{kind:?}: at the dragged place"
+        );
+        // A click keeps the default 2 x 0.5 box.
+        let pos = screen(&rig, 6.0, 5.6);
+        click_at(&mut rig, pos);
+        assert!(editing(&mut rig), "{kind:?}: the click starts a text box");
+        type_text(&mut rig, "A");
+        press_key(&mut rig, egui::Key::Escape, egui::Modifiers::NONE);
+        let shape = last_shape(&rig);
+        assert!(
+            (number(&rig, shape, "Width") - 2.0).abs() < 1.0e-4
+                && (number(&rig, shape, "Height") - 0.5).abs() < 1.0e-4,
+            "{kind:?}: a click keeps the default box"
+        );
+    }
+}
+
+/// Item 2 (task P7-26, master's note): the Format Shape pane stays
+/// open while the user works. With the canvas's keyboard and no pane
+/// field focused, a typed letter still starts the shape's text; a
+/// pane field keeps its own typing.
+#[test]
+fn the_format_shape_pane_keeps_the_typed_character_start() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        let shape = rectangle(&rig.shell.borrow().app);
+        select_shape(&mut rig);
+        // The pane opens from its own control (task P7-28).
+        match kind {
+            LayoutKind::PanelClassic => {
+                click(&mut rig, Role::Button, "View");
+                click(&mut rig, Role::MenuItem, "Toolbars");
+                click(&mut rig, Role::MenuItem, "Format Shape");
+            }
+            _ => click_any(&mut rig, "Format Object..."),
+        }
+        assert!(
+            has(&mut rig, Role::TextInput, "Fill transparency"),
+            "{kind:?}: the Format Shape pane is open"
+        );
+        // The canvas has the keyboard again and no pane field does.
+        select_shape(&mut rig);
+        type_text(&mut rig, "Q");
+        assert!(
+            editing(&mut rig),
+            "{kind:?}: the typed letter starts the shape's text"
+        );
+        press_key(&mut rig, egui::Key::Escape, egui::Modifiers::NONE);
+        assert_eq!(
+            shape_text(&rig, shape),
+            "Q",
+            "{kind:?}: the text lands with the pane open"
+        );
+
+        // A pane field keeps its own typing (the keyboard-focus
+        // guard), and the shape's text is untouched.
+        rig.run();
+        let root = rig.harness().root();
+        let field = root
+            .query_all_by_role_and_label(Role::TextInput, "Fill transparency")
+            .next()
+            .expect("the Fill transparency field");
+        field.click();
+        field.type_text("50");
+        rig.run();
+        assert!(
+            !editing(&mut rig),
+            "{kind:?}: a pane field keeps its own typing"
+        );
+        assert_eq!(
+            shape_text(&rig, shape),
+            "Q",
+            "{kind:?}: the shape's text is untouched"
         );
     }
 }

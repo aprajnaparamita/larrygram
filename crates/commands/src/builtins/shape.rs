@@ -5,7 +5,9 @@
 //!
 //! - `shape.move` takes `dx`, `dy` (deltas in inches);
 //! - `shape.resize` takes `width`, `height` (the target size of each
-//!   selected shape, in inches);
+//!   selected shape, in inches) and, for a resize drag, `edge` (the
+//!   edge or corner the pointer dragged, task P7-26 item 8: the
+//!   opposite one stays fixed);
 //! - `shape.rotate` takes `angle` (the rotation **delta** in radians;
 //!   `shape.set.angle` sets the absolute angle);
 //! - `shape.set.width` / `shape.set.height` take `width` / `height`;
@@ -13,7 +15,9 @@
 //! - `shape.set.angle` takes `angle` (radians, absolute);
 //! - `shape.set.text_block` (task P7-25) takes any of `x`, `y`,
 //!   `width`, `height` (the text block's `TxtPinX`/`TxtPinY`/
-//!   `TxtWidth`/`TxtHeight`), at least one.
+//!   `TxtWidth`/`TxtHeight`) and `loc_x`/`loc_y`
+//!   (`TxtLocPinX`/`TxtLocPinY`, task P7-26 item 1: the pin's offset
+//!   inside the block box), at least one.
 //!
 //! `shape.move`, `shape.resize` and `shape.rotate` work on every
 //! selected shape; the `shape.set.*` pane fields edit the anchor
@@ -213,41 +217,257 @@ pub(super) fn run_move(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, Co
 /// `shape.resize`: gives every selected shape the size (`width`,
 /// `height`), scaling its constant geometry and letting recalc compute
 /// the rows with formulas (ADR 0056).
+///
+/// With the `edge` argument (task P7-26 item 8) the opposite edge or
+/// corner of each shape stays fixed, as in Visio: the run writes the
+/// shape's pin beside the size. The pin's shift is computed after the
+/// size writes, because their derived-cell refresh (ADR 0038 rule 2)
+/// decides where `LocPinX`/`LocPinY` land.
 pub(super) fn run_resize(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError> {
     let width = need_size(&inv.args, "width", "new width in inches")?;
     let height = need_size(&inv.args, "height", "new height in inches")?;
+    let edge = resize_edge(&inv.args)?;
     let (session, targets, mut warnings) = selection_targets(ctx)?;
     let mut edit = CompositeEdit::new(count_label("Resize", targets.len()));
-    {
-        let doc = document_mut(ctx, session)?;
-        for &shape in &targets {
+    for &shape in &targets {
+        let (old_width, old_height, old_loc, old_pin, angle, flip) = {
+            let doc = document_mut(ctx, session)?;
             let (old_width, read) = read_cell_number(doc, shape, "Width")?;
             warnings.extend(read);
             let (old_height, read) = read_cell_number(doc, shape, "Height")?;
             warnings.extend(read);
-            if let Some(step) = scale_edit(
+            let (loc_x, read) = read_cell_number(doc, shape, "LocPinX")?;
+            warnings.extend(read);
+            let (loc_y, read) = read_cell_number(doc, shape, "LocPinY")?;
+            warnings.extend(read);
+            let (pin_x, read) = read_cell_number(doc, shape, "PinX")?;
+            warnings.extend(read);
+            let (pin_y, read) = read_cell_number(doc, shape, "PinY")?;
+            warnings.extend(read);
+            let (angle, read) = read_cell_number(doc, shape, "Angle")?;
+            warnings.extend(read);
+            let flip = (
+                read_cell_boolean(doc, shape, "FlipX"),
+                read_cell_boolean(doc, shape, "FlipY"),
+            );
+            (
+                old_width,
+                old_height,
+                (loc_x, loc_y),
+                (pin_x, pin_y),
+                angle,
+                flip,
+            )
+        };
+        let scaled = {
+            let doc = document_mut(ctx, session)?;
+            scale_edit(
                 doc,
                 session,
                 shape,
                 (old_width, old_height),
                 (width, height),
                 &mut warnings,
-            )? {
-                edit.push(step);
-            }
-            let step = cell_edit(doc, session, "Resize shape", shape, "Width", width);
-            edit.push(step?);
-            let step = cell_edit(doc, session, "Resize shape", shape, "Height", height);
-            edit.push(step?);
+            )?
+        };
+        if let Some(step) = scaled {
+            apply_step(ctx, &mut edit, step)?;
+        }
+        let write_width = {
+            let doc = document_mut(ctx, session)?;
+            cell_edit(doc, session, "Resize shape", shape, "Width", width)?
+        };
+        apply_step(ctx, &mut edit, write_width)?;
+        let write_height = {
+            let doc = document_mut(ctx, session)?;
+            cell_edit(doc, session, "Resize shape", shape, "Height", height)?
+        };
+        apply_step(ctx, &mut edit, write_height)?;
+        if let Some(edge) = edge {
+            // The derived-cell refresh above has landed: read the
+            // `LocPin*` values the size writes left behind (task
+            // P7-26 item 8).
+            let new_loc = {
+                let doc = document_mut(ctx, session)?;
+                let (loc_x, _) = read_cell_number(doc, shape, "LocPinX")?;
+                let (loc_y, _) = read_cell_number(doc, shape, "LocPinY")?;
+                (loc_x, loc_y)
+            };
+            let shift = fixed_edge_shift(
+                edge,
+                (old_width, old_height),
+                (width, height),
+                old_loc,
+                new_loc,
+                angle,
+                flip,
+            );
+            let write_pin_x = {
+                let doc = document_mut(ctx, session)?;
+                cell_edit(
+                    doc,
+                    session,
+                    "Resize shape",
+                    shape,
+                    "PinX",
+                    old_pin.0 + shift.0,
+                )?
+            };
+            apply_step(ctx, &mut edit, write_pin_x)?;
+            let write_pin_y = {
+                let doc = document_mut(ctx, session)?;
+                cell_edit(
+                    doc,
+                    session,
+                    "Resize shape",
+                    shape,
+                    "PinY",
+                    old_pin.1 + shift.1,
+                )?
+            };
+            apply_step(ctx, &mut edit, write_pin_y)?;
         }
     }
-    edit.apply(ctx)?;
     reroute(ctx, active_page(ctx));
     Ok(edit_outcome(
         count_label("Resized", targets.len()),
         warnings,
         Box::new(edit),
     ))
+}
+
+/// The cached boolean of one shape cell, `false` when it holds none
+/// (the flip cells of task P7-26 item 8).
+fn read_cell_boolean(doc: &larrygram_model::Document, shape: ShapeId, name: &str) -> bool {
+    larrygram_model::CellReader::new(doc)
+        .boolean(
+            SheetRef::Shape(shape),
+            &larrygram_model::CellName::new(name),
+        )
+        .unwrap_or(false)
+}
+
+/// Applies one step and pushes it on the undo record (the resize
+/// order of task P7-26 item 8: the size writes land before the pin
+/// shift reads the cells they refresh).
+fn apply_step(
+    ctx: &mut AppCtx,
+    edit: &mut CompositeEdit,
+    mut step: Box<dyn Edit>,
+) -> Result<(), CommandError> {
+    step.apply(ctx)?;
+    edit.push(step);
+    Ok(())
+}
+
+/// The edge or corner one resize drag dragged (task P7-26 item 8):
+/// `shape.resize`'s `edge` argument, named in the rendered frame's
+/// axes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ResizeEdge {
+    North,
+    South,
+    East,
+    West,
+    NorthEast,
+    NorthWest,
+    SouthEast,
+    SouthWest,
+}
+
+impl ResizeEdge {
+    /// The dragged sides in the box's own axes: `1.0` when the frame's
+    /// plus side moved, `-1.0` for the minus side, `0.0` when the axis
+    /// kept its size.
+    fn signs(self) -> (f64, f64) {
+        let x = match self {
+            Self::East | Self::NorthEast | Self::SouthEast => 1.0,
+            Self::West | Self::NorthWest | Self::SouthWest => -1.0,
+            Self::North | Self::South => 0.0,
+        };
+        let y = match self {
+            Self::North | Self::NorthEast | Self::NorthWest => 1.0,
+            Self::South | Self::SouthEast | Self::SouthWest => -1.0,
+            Self::East | Self::West => 0.0,
+        };
+        (x, y)
+    }
+}
+
+/// The optional `edge` argument of `shape.resize` (task P7-26 item 8).
+fn resize_edge(args: &crate::Args) -> Result<Option<ResizeEdge>, CommandError> {
+    let Some(crate::ArgValue::Text(spelling)) = args.get("edge") else {
+        return Ok(None);
+    };
+    let edge = match spelling.as_str() {
+        "north" => ResizeEdge::North,
+        "south" => ResizeEdge::South,
+        "east" => ResizeEdge::East,
+        "west" => ResizeEdge::West,
+        "north_east" => ResizeEdge::NorthEast,
+        "north_west" => ResizeEdge::NorthWest,
+        "south_east" => ResizeEdge::SouthEast,
+        "south_west" => ResizeEdge::SouthWest,
+        other => {
+            return Err(CommandError::invalid_args(format!(
+                "edge must be north, south, east, west, north_east, north_west, south_east or south_west, not {other:?}"
+            )));
+        }
+    };
+    Ok(Some(edge))
+}
+
+/// The pin shift that keeps the opposite edge (or corner) of a resize
+/// drag fixed (task P7-26 item 8), in the pin's own frame.
+///
+/// `from`/`to` are the box sizes, `loc_old`/`loc_new` the pin's offset
+/// inside the box before and after the size writes (the derived-cell
+/// refresh moves it when it follows the documented default), `angle`
+/// the shape's own rotation and `flip` its `FlipX`/`FlipY` cells. The
+/// dragged edge is named in the rendered frame's axes, which are the
+/// box's own axes mirrored into place.
+fn fixed_edge_shift(
+    edge: ResizeEdge,
+    from: (f64, f64),
+    to: (f64, f64),
+    loc_old: (f64, f64),
+    loc_new: (f64, f64),
+    angle: f64,
+    flip: (bool, bool),
+) -> (f64, f64) {
+    let (sx, sy) = edge.signs();
+    // The corner that stays: the minus side when the plus side moved.
+    let corner = |sx: f64, sy: f64, size: (f64, f64)| {
+        (
+            if sx > 0.0 {
+                0.0
+            } else if sx < 0.0 {
+                size.0
+            } else {
+                size.0 / 2.0
+            },
+            if sy > 0.0 {
+                0.0
+            } else if sy < 0.0 {
+                size.1
+            } else {
+                size.1 / 2.0
+            },
+        )
+    };
+    let fixed = corner(sx, sy, from);
+    let moved = corner(sx, sy, to);
+    let mut dx = (fixed.0 - loc_old.0) - (moved.0 - loc_new.0);
+    let mut dy = (fixed.1 - loc_old.1) - (moved.1 - loc_new.1);
+    // The flip mirrors the box into the pin's frame before the turn.
+    if flip.0 {
+        dx = -dx;
+    }
+    if flip.1 {
+        dy = -dy;
+    }
+    let (sin, cos) = angle.sin_cos();
+    (dx * cos - dy * sin, dx * sin + dy * cos)
 }
 
 /// `shape.rotate`: rotates every selected shape by `angle` radians
@@ -368,14 +588,19 @@ pub(super) fn run_set_angle(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcom
 /// `shape.set.text_block` (task P7-25 item 4): writes the anchor
 /// shape's text block cells, any of the optional `x`/`y`
 /// (`TxtPinX`/`TxtPinY`, inches, shape-local) and `width`/`height`
-/// (`TxtWidth`/`TxtHeight`, inches). At least one argument must be
-/// present. The whole run is one undo step (ADR 0040): one text block
-/// drag writes its final values in one command.
+/// (`TxtWidth`/`TxtHeight`, inches), and `loc_x`/`loc_y`
+/// (`TxtLocPinX`/`TxtLocPinY`, inches, shape-local; task P7-26 item
+/// 1: the pin's offset inside the block box, which the tool sends on
+/// a resize so the block lands where its preview showed it — the
+/// cells' default follows the **shape's** width, not `TxtWidth`).
+/// At least one argument must be present. The whole run is one undo
+/// step (ADR 0040): one text block drag writes its final values in
+/// one command.
 pub(super) fn run_set_text_block(
     ctx: &mut AppCtx,
     inv: &Invocation,
 ) -> Result<Outcome, CommandError> {
-    let writes: [(&str, &str, Option<f64>); 4] = [
+    let writes: [(&str, &str, Option<f64>); 6] = [
         ("x", "TxtPinX", optional_number(&inv.args, "x")?),
         ("y", "TxtPinY", optional_number(&inv.args, "y")?),
         (
@@ -388,10 +613,12 @@ pub(super) fn run_set_text_block(
             "TxtHeight",
             optional_non_negative(&inv.args, "height")?,
         ),
+        ("loc_x", "TxtLocPinX", optional_number(&inv.args, "loc_x")?),
+        ("loc_y", "TxtLocPinY", optional_number(&inv.args, "loc_y")?),
     ];
     if writes.iter().all(|(_, _, value)| value.is_none()) {
         return Err(CommandError::invalid_args(
-            "text block needs an x, y, width or height argument",
+            "text block needs an x, y, width, height, loc_x or loc_y argument",
         ));
     }
     let (session, shape, warnings) = anchor_target(ctx)?;
@@ -520,6 +747,222 @@ mod tests {
         (ctx, session, page, shape)
     }
 
+    // --- task P7-26 item 8: the fixed edge of a resize drag ---------
+
+    /// A 2 x 1 shape at (3, 3); `derived_loc` gives its `LocPin*` the
+    /// documented `Width*0.5`/`Height*0.5` formulas (the derived-cell
+    /// refresh follows them) instead of custom literals.
+    fn sized_fixture(derived_loc: bool) -> (AppCtx, SessionId, larrygram_model::PageId, ShapeId) {
+        let mut doc = Document::new();
+        let page = doc.add_page("Page-1").expect("page");
+        let mut shape = larrygram_model::Shape::new(ShapeId { index: 0 }, 1);
+        shape.sheet.cells = vec![
+            number_cell("Width", 2.0),
+            number_cell("Height", 1.0),
+            number_cell("PinX", 3.0),
+            number_cell("PinY", 3.0),
+            number_cell("Angle", 0.0),
+        ];
+        let mut loc_x = number_cell("LocPinX", 1.0);
+        let mut loc_y = number_cell("LocPinY", 0.5);
+        if derived_loc {
+            loc_x.formula = Some("Width*0.5".to_owned());
+            loc_y.formula = Some("Height*0.5".to_owned());
+        }
+        shape.sheet.cells.push(loc_x);
+        shape.sheet.cells.push(loc_y);
+        let shape = doc.insert_shape(page, shape, None).expect("insert");
+        let mut ctx = AppCtx::new(Settings::default());
+        let index = ctx.open_document(DocumentSession::new(doc, None));
+        let session = ctx.documents.get(index).expect("session").id;
+        (ctx, session, page, shape)
+    }
+
+    /// One cell value of `shape`.
+    fn value_of(ctx: &AppCtx, shape: ShapeId, name: &str) -> f64 {
+        let session = ctx.active_document().expect("session");
+        let entry = session.document.shape(shape).expect("shape");
+        entry
+            .sheet
+            .cells
+            .iter()
+            .find(|cell| cell.name.as_str() == name)
+            .and_then(|cell| match cell.value {
+                Some(CellValue::Number(value)) => Some(value),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("no {name} on the shape"))
+    }
+
+    /// Task P7-26 item 8: a resize drag with `edge` keeps the opposite
+    /// edge fixed. The custom-`LocPin*` shape keeps its pin (the box's
+    /// west edge is `PinX - LocPinX`), and the derived one follows the
+    /// refreshed `LocPinX` to the same edge.
+    #[test]
+    fn a_resize_drag_keeps_the_opposite_edge_fixed() {
+        for derived in [false, true] {
+            let (mut ctx, _session, page, shape) = sized_fixture(derived);
+            ctx.selection.shapes = vec![shape];
+            ctx.selection.anchor = Some(shape);
+            ctx.selection.page = Some(page);
+            let inv = Invocation::new(
+                crate::Args::new()
+                    .with("width", crate::ArgValue::Number(2.5))
+                    .with("height", crate::ArgValue::Number(1.0))
+                    .with("edge", crate::ArgValue::Text("east".to_owned())),
+                Source::Test,
+            );
+            run_resize(&mut ctx, &inv).expect("resize");
+            let west = value_of(&ctx, shape, "PinX") - value_of(&ctx, shape, "LocPinX");
+            assert!(
+                (west - 2.0).abs() < 1.0e-9,
+                "derived {derived}: the west edge stayed at 2.0 ({west})"
+            );
+            let east = west + value_of(&ctx, shape, "Width");
+            assert!(
+                (east - 4.5).abs() < 1.0e-9,
+                "derived {derived}: the dragged edge follows the pointer ({east})"
+            );
+        }
+    }
+
+    /// Task P7-26 item 8: the drag is measured along the shape's own
+    /// axes. At 90 degrees the east handle moves on the page's y axis.
+    #[test]
+    fn a_resize_drag_follows_the_shapes_own_axes() {
+        let (mut ctx, session, page, shape) = sized_fixture(false);
+        {
+            let doc = document_mut(&mut ctx, session).expect("doc");
+            let entry = doc.shape_mut(shape).expect("shape");
+            for cell in &mut entry.sheet.cells {
+                if cell.name.as_str() == "Angle" {
+                    cell.value = Some(CellValue::Number(core::f64::consts::FRAC_PI_2));
+                    cell.unit = larrygram_geom::Unit::Radians;
+                }
+            }
+        }
+        ctx.selection.shapes = vec![shape];
+        ctx.selection.anchor = Some(shape);
+        ctx.selection.page = Some(page);
+        let inv = Invocation::new(
+            crate::Args::new()
+                .with("width", crate::ArgValue::Number(2.5))
+                .with("height", crate::ArgValue::Number(1.0))
+                .with("edge", crate::ArgValue::Text("east".to_owned())),
+            Source::Test,
+        );
+        run_resize(&mut ctx, &inv).expect("resize");
+        // The west edge sits at page y = PinY - LocPinX (the box's x
+        // axis points up at 90 degrees) and stays; the pin follows it.
+        let west = value_of(&ctx, shape, "PinY") - value_of(&ctx, shape, "LocPinX");
+        assert!((west - 2.0).abs() < 1.0e-9, "the west edge stayed ({west})");
+        assert!(
+            (value_of(&ctx, shape, "PinX") - 3.0).abs() < 1.0e-9,
+            "the pin only moves along the grown axis"
+        );
+    }
+
+    /// The `edge` argument parses its eight spellings and refuses
+    /// anything else.
+    #[test]
+    fn the_edge_argument_parses_the_eight_spellings() {
+        for (spelling, want) in [
+            ("north", ResizeEdge::North),
+            ("south", ResizeEdge::South),
+            ("east", ResizeEdge::East),
+            ("west", ResizeEdge::West),
+            ("north_east", ResizeEdge::NorthEast),
+            ("north_west", ResizeEdge::NorthWest),
+            ("south_east", ResizeEdge::SouthEast),
+            ("south_west", ResizeEdge::SouthWest),
+        ] {
+            let args = crate::Args::new().with("edge", crate::ArgValue::Text(spelling.to_owned()));
+            assert_eq!(resize_edge(&args).expect("parse"), Some(want), "{spelling}");
+        }
+        assert_eq!(
+            resize_edge(&crate::Args::new()).expect("no edge"),
+            None,
+            "the argument is optional"
+        );
+        let args = crate::Args::new().with("edge", crate::ArgValue::Text("up".to_owned()));
+        let error = resize_edge(&args).expect_err("bad spelling");
+        assert!(error.to_string().contains("edge must be"), "{error}");
+    }
+
+    /// The pin shift of the fixed edge is zero along the axis that kept
+    /// its size, and it mirrors through a flip.
+    #[test]
+    fn the_fixed_edge_shift_follows_the_axis_and_the_flip() {
+        // East drag, custom loc, no turn: the pin does not move.
+        let shift = fixed_edge_shift(
+            ResizeEdge::East,
+            (2.0, 1.0),
+            (2.5, 1.0),
+            (1.0, 0.5),
+            (1.0, 0.5),
+            0.0,
+            (false, false),
+        );
+        assert_eq!(shift, (0.0, 0.0));
+        // The derived loc follows the size: the centre moves half the
+        // growth.
+        let shift = fixed_edge_shift(
+            ResizeEdge::East,
+            (2.0, 1.0),
+            (2.5, 1.0),
+            (1.0, 0.5),
+            (1.25, 0.5),
+            0.0,
+            (false, false),
+        );
+        assert!(
+            (shift.0 - 0.25).abs() < 1.0e-9 && shift.1 == 0.0,
+            "{shift:?}"
+        );
+        // A north-east corner drag moves both axes.
+        let shift = fixed_edge_shift(
+            ResizeEdge::NorthEast,
+            (2.0, 1.0),
+            (2.5, 1.5),
+            (1.0, 0.5),
+            (1.25, 0.75),
+            0.0,
+            (false, false),
+        );
+        assert!(
+            (shift.0 - 0.25).abs() < 1.0e-9 && (shift.1 - 0.25).abs() < 1.0e-9,
+            "{shift:?}"
+        );
+        // At 90 degrees the shift turns with the shape.
+        let shift = fixed_edge_shift(
+            ResizeEdge::East,
+            (2.0, 1.0),
+            (2.5, 1.0),
+            (1.0, 0.5),
+            (1.25, 0.5),
+            core::f64::consts::FRAC_PI_2,
+            (false, false),
+        );
+        assert!(
+            shift.0.abs() < 1.0e-9 && (shift.1 - 0.25).abs() < 1.0e-9,
+            "{shift:?}"
+        );
+        // A flip mirrors the shift before the turn.
+        let shift = fixed_edge_shift(
+            ResizeEdge::East,
+            (2.0, 1.0),
+            (2.5, 1.0),
+            (1.0, 0.5),
+            (1.25, 0.5),
+            0.0,
+            (true, false),
+        );
+        assert!(
+            (shift.0 + 0.25).abs() < 1.0e-9 && shift.1 == 0.0,
+            "{shift:?}"
+        );
+    }
+
     /// The direct-call path of `shape.enter_group` (the enabled-state
     /// predicate blocks it through the registry).
     #[test]
@@ -617,8 +1060,10 @@ mod tests {
         assert!(error.to_string().contains("not finite"), "{error}");
     }
 
-    /// The text block write of task P7-25 item 4: the four cells, one
-    /// undo step whose revert restores them all.
+    /// The text block write of task P7-25 item 4: the cells, one undo
+    /// step whose revert restores them all. Task P7-26 item 1 writes
+    /// `TxtLocPinX`/`TxtLocPinY` beside them: the tool sends the pin's
+    /// offset inside the block box on every resize.
     #[test]
     fn a_text_block_write_lands_in_one_undo_step() {
         let (mut ctx, session, page, shape) = fixture();
@@ -630,7 +1075,9 @@ mod tests {
                 .with("x", crate::ArgValue::Number(0.75))
                 .with("y", crate::ArgValue::Number(1.25))
                 .with("width", crate::ArgValue::Number(3.0))
-                .with("height", crate::ArgValue::Number(0.5)),
+                .with("height", crate::ArgValue::Number(0.5))
+                .with("loc_x", crate::ArgValue::Number(1.5))
+                .with("loc_y", crate::ArgValue::Number(0.25)),
             Source::Test,
         );
         let outcome = run_set_text_block(&mut ctx, &inv).expect("run");
@@ -643,6 +1090,8 @@ mod tests {
                 ("TxtPinY", 1.25),
                 ("TxtWidth", 3.0),
                 ("TxtHeight", 0.5),
+                ("TxtLocPinX", 1.5),
+                ("TxtLocPinY", 0.25),
             ] {
                 let cell = entry
                     .sheet
@@ -657,7 +1106,14 @@ mod tests {
         edit.revert(&mut ctx).expect("revert");
         let doc = document_mut(&mut ctx, session).expect("doc");
         let entry = doc.shape(shape).expect("shape");
-        for name in ["TxtPinX", "TxtPinY", "TxtWidth", "TxtHeight"] {
+        for name in [
+            "TxtPinX",
+            "TxtPinY",
+            "TxtWidth",
+            "TxtHeight",
+            "TxtLocPinX",
+            "TxtLocPinY",
+        ] {
             assert!(
                 entry
                     .sheet
@@ -690,6 +1146,14 @@ mod tests {
             ),
             (
                 crate::Args::new().with("y", crate::ArgValue::Text("left".to_owned())),
+                "must be a number",
+            ),
+            (
+                crate::Args::new().with("loc_x", crate::ArgValue::Number(f64::INFINITY)),
+                "must be finite",
+            ),
+            (
+                crate::Args::new().with("loc_y", crate::ArgValue::Text("0".to_owned())),
                 "must be a number",
             ),
         ] {
