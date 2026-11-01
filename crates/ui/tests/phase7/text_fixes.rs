@@ -989,9 +989,9 @@ fn click_any(rig: &mut ShellRig, name: &str) {
     rig.run();
 }
 
-/// The ribbon's copy of the button `name` (the topmost one): the
-/// Shapes window's tiles share some labels.
-fn ribbon_face(rig: &mut ShellRig, name: &str) -> egui::Rect {
+/// The topmost copy of the button `name`: the Shapes window's tiles
+/// share some labels.
+fn top_face(rig: &mut ShellRig, name: &str) -> egui::Rect {
     rig.run();
     rig.harness()
         .root()
@@ -1010,7 +1010,7 @@ fn ribbon_face(rig: &mut ShellRig, name: &str) -> egui::Rect {
 /// Clicks the "More items" arrow nearest `face` (the Panel Modern
 /// split arrows) and returns the face's position.
 fn more_items_near(rig: &mut ShellRig, name: &str) -> egui::Pos2 {
-    let face = ribbon_face(rig, name);
+    let face = top_face(rig, name);
     let root = rig.harness().root();
     let best = root
         .query_all_by_role_and_label(Role::Button, "More items")
