@@ -715,6 +715,11 @@ const ALLOWED: &[Allow] = &[
         reason: "the window mode is UI state that an AppCtx predicate cannot see",
     },
     Allow {
+        command: "tools.text_block",
+        context: ContextId::ShapesheetWindow,
+        reason: "the window mode is UI state that an AppCtx predicate cannot see",
+    },
+    Allow {
         command: "view.rulers",
         context: ContextId::ShapesheetWindow,
         reason: "the window mode is UI state that an AppCtx predicate cannot see",
