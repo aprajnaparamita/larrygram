@@ -54,7 +54,7 @@ Phase 7: Panel and Classic layouts, the Larrygram rename and the welcome wizard.
 | [P7-25](tasks/P7-25.md) | implementer | P7-22, P7-23 | I | merged (Text Block tool, Text tool icon, double-click, F2 and typing start text, the Text tool's one outline, one-step undo and clicks) | `dac8ed3` |
 | [P7-26](tasks/P7-26.md) | implementer | P7-24, P7-25 | I | ready (review fixes: Text Block resize, keyboard focus, clicks in a new box, Escape and the Format Painter, rotated resize, drag-sized text boxes) | — |
 | [P7-27](tasks/P7-27.md) | implementer | P7-24, P7-25 | I | merged (one page-size resolver, `Document::page_size`, background rung dropped; layout-neutral checked seam; latch follows the selection; one label table; `percent` only for Zoom) | `29ec390` |
-| [P7-28](tasks/P7-28.md) | implementer | P7-24, P7-25 | I | ready (the Fill and Line dialogs and the Format Shape pane; moved from Phase 9 by the user) | — |
+| [P7-28](tasks/P7-28.md) | implementer | P7-24, P7-25 | I | merged (the Fill and Line dialogs, the Format Shape pane as a window, ADR 0083; open: transparency unit, pane docking, dialog defaults) | `c895436` |
 
 Tasks start as soon as their own dependencies merge (no whole-group waits); run at most twelve workers at once across Phase 7 and Phase 8.
 
