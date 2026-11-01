@@ -61,7 +61,9 @@
 //!   `format.line_ends.no_line_ends` clears both;
 //! - `tools.format_painter` — no arguments: copy the format of the
 //!   selection's anchor shape (or, with a copy already recorded, apply
-//!   it to the selection); `apply` (a flag) forces the apply form.
+//!   it to the selection); `apply` (a flag) forces the apply form and
+//!   `cancel` (a flag) drops a recorded copy without applying (task
+//!   P7-24 item 6, Escape on the canvas).
 //!
 //! Every run is one undoable edit ([`FormatEdit`], ADR 0040) and
 //! writes the cells of every selected shape in one step.
@@ -1498,10 +1500,16 @@ fn arrow_index(inv: &Invocation, names: &[&str]) -> Result<Option<f64>, CommandE
 
 /// `tools.format_painter`: with no recorded copy (or a `copy` flag) it
 /// copies the anchor shape's format; with one (or an `apply` flag) it
-/// applies the recorded format to the selection and clears.
+/// applies the recorded format to the selection and clears; a `cancel`
+/// flag drops a recorded copy without applying (task P7-24 item 6).
 fn run_format_painter(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError> {
     let force_apply = inv.args.flag("apply").unwrap_or(false);
     let force_copy = inv.args.flag("copy").unwrap_or(false);
+    if inv.args.flag("cancel").unwrap_or(false) {
+        // Escape on the canvas (task P7-24 item 6): drop the copy.
+        ctx.format_painter = None;
+        return Ok(outcome("Format Painter cancelled", Vec::new()));
+    }
     let recorded = if force_copy {
         None
     } else {
@@ -2153,6 +2161,28 @@ mod tests {
         )
         .expect_err("nothing recorded");
         assert!(error.to_string().contains("no format"), "{error}");
+    }
+
+    #[test]
+    fn the_format_painter_cancel_drops_the_copy_without_applying() {
+        let (mut ctx, _session, shape) = session();
+        call(&mut ctx, "tools.format_painter", Args::new()).expect("copy");
+        assert!(ctx.format_painter.is_some());
+        let outcome = call(
+            &mut ctx,
+            "tools.format_painter",
+            Args::new().with("cancel", ArgValue::Flag(true)),
+        )
+        .expect("cancel");
+        assert!(ctx.format_painter.is_none(), "the copy is dropped");
+        assert_eq!(
+            outcome.message.as_deref(),
+            Some("Format Painter cancelled"),
+            "the cancel reports"
+        );
+        // The shape is untouched: no apply ran.
+        let doc = &ctx.active_document().expect("document").document;
+        assert_eq!(cell_of(doc, shape, "FillForegnd"), None, "nothing applied");
     }
 
     #[test]

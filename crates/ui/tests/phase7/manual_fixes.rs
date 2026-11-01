@@ -784,3 +784,93 @@ fn the_zoom_box_sets_the_zoom_and_offers_presets() {
         "the 50% preset applies ({zoom})"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Goal 6: the Format Painter on the canvas: a click on a shape applies
+// the copied format, Escape cancels (P7-21's open issue).
+// ---------------------------------------------------------------------------
+
+/// The fixture picture shape of `rig`'s document (the second shape).
+fn picture(app: &AppCtx) -> ShapeId {
+    let session = app.active_document().expect("session");
+    let page = session.active_page.expect("page");
+    session.document.page(page).expect("page").shapes[1]
+}
+
+/// Selects the fixture rectangle, colours it with the fill picker and
+/// arms the Format Painter with the button: the copy source.
+fn arm_format_painter(rig: &mut ShellRig, kind: LayoutKind) {
+    select_shape(rig);
+    open_fill_picker(rig, kind);
+    click(rig, Role::Button, "Accent #1F5BC4");
+    click(rig, Role::Button, "Format Painter");
+    assert!(
+        rig.shell.borrow().app.format_painter.is_some(),
+        "{kind:?}: the button records the copy"
+    );
+}
+
+/// After the button, a click on a shape applies the copied format
+/// (goal 6): the fill cell follows the source and the picture shows
+/// it; the copy clears.
+#[test]
+fn the_format_painter_applies_from_a_canvas_click() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        arm_format_painter(&mut rig, kind);
+        let source = rectangle(&rig.shell.borrow().app);
+        let target = picture(&rig.shell.borrow().app);
+
+        // A click on the picture shape at (6, 3).
+        let pos = screen(&rig, 6.0, 3.0);
+        click_at(&mut rig, pos);
+        assert_eq!(
+            selection(&rig),
+            vec![target],
+            "{kind:?}: the click selects the target"
+        );
+        let source_fill = cell_text(&rig, source, "FillForegnd");
+        assert!(source_fill.is_some(), "{kind:?}: the source has a fill");
+        assert_eq!(
+            cell_text(&rig, target, "FillForegnd"),
+            source_fill,
+            "{kind:?}: the copied fill reaches the target"
+        );
+        assert!(
+            rig.shell.borrow().app.format_painter.is_none(),
+            "{kind:?}: the copy clears after applying"
+        );
+        // Beside the placeholder mark at the shape's centre.
+        let (r, g, b) = pixel(&mut rig, 5.5, 3.2);
+        assert!(
+            (r as i32 - 31).abs() <= 4
+                && (g as i32 - 91).abs() <= 4
+                && (b as i32 - 196).abs() <= 4,
+            "{kind:?}: the picture paints the copied fill: got ({r},{g},{b})"
+        );
+    }
+}
+
+/// Escape cancels the Format Painter (goal 6): the copy drops and a
+/// click on a shape applies nothing.
+#[test]
+fn the_escape_cancels_the_format_painter() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        arm_format_painter(&mut rig, kind);
+        press_key(&mut rig, egui::Key::Escape);
+        assert!(
+            rig.shell.borrow().app.format_painter.is_none(),
+            "{kind:?}: Escape drops the copy"
+        );
+        // A click on the picture applies nothing.
+        let target = picture(&rig.shell.borrow().app);
+        let pos = screen(&rig, 6.0, 3.0);
+        click_at(&mut rig, pos);
+        assert_eq!(
+            cell_text(&rig, target, "FillForegnd").as_deref(),
+            None,
+            "{kind:?}: the click after Escape applies nothing"
+        );
+    }
+}
