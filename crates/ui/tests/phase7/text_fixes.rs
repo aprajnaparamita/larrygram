@@ -184,8 +184,16 @@ fn click_at(rig: &mut ShellRig, pos: egui::Pos2) {
     rig.run();
 }
 
-/// A double click at `pos` (two clicks inside one double-click window).
+/// A double click at `pos` (two clicks inside one double-click
+/// window). The wait first drains the window: egui counts the second
+/// click as a triple one when two earlier clicks (a tool drag's
+/// release, a widget click) sit inside it (`click.count == 3`, so
+/// `double_clicked_by` stays false). One harness run steps the clock
+/// 0.25 s, so 60 runs pass any 10 s window.
 fn double_click_at(rig: &mut ShellRig, pos: egui::Pos2) {
+    for _ in 0..60 {
+        rig.run();
+    }
     click_at(rig, pos);
     click_at(rig, pos);
 }
@@ -959,3 +967,356 @@ fn while_editing_one_outline_shows() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Item 1 (task P7-26): a text block resize lands where the preview
+// frame put it. The command writes `TxtLocPinX`/`TxtLocPinY` with the
+// pin: without them the renderer reads the cells' documented default,
+// which follows the **shape's** width, and draws the block away from
+// the frame the drag previewed.
+// ---------------------------------------------------------------------------
+
+/// Clicks the first widget labelled `name` whatever its role (the
+/// menu rows of the two layouts draw under different roles).
+fn click_any(rig: &mut ShellRig, name: &str) {
+    rig.run();
+    let root = rig.harness().root();
+    let node = root
+        .query_all_by_label(name)
+        .next()
+        .unwrap_or_else(|| panic!("no widget named {name:?}"));
+    node.click();
+    rig.run();
+}
+
+/// The ribbon's copy of the button `name` (the topmost one): the
+/// Shapes window's tiles share some labels.
+fn ribbon_face(rig: &mut ShellRig, name: &str) -> egui::Rect {
+    rig.run();
+    rig.harness()
+        .root()
+        .query_all_by_role_and_label(Role::Button, name)
+        .min_by(|a, b| {
+            a.rect()
+                .center()
+                .y
+                .total_cmp(&b.rect().center().y)
+                .then(a.rect().center().x.total_cmp(&b.rect().center().x))
+        })
+        .unwrap_or_else(|| panic!("no button named {name:?}"))
+        .rect()
+}
+
+/// Clicks the "More items" arrow nearest `face` (the Panel Modern
+/// split arrows) and returns the face's position.
+fn more_items_near(rig: &mut ShellRig, name: &str) -> egui::Pos2 {
+    let face = ribbon_face(rig, name);
+    let root = rig.harness().root();
+    let best = root
+        .query_all_by_role_and_label(Role::Button, "More items")
+        .min_by(|a, b| {
+            (a.rect().center() - face.center())
+                .length()
+                .total_cmp(&(b.rect().center() - face.center()).length())
+        })
+        .expect("a More items arrow");
+    best.click();
+    rig.run();
+    face.center()
+}
+
+/// Clicks the widget labelled `name` nearest `anchor` among the ones
+/// strictly below it: the popup row under a split, never the split's
+/// own face or a Shapes tile.
+fn click_below(rig: &mut ShellRig, name: &str, anchor: egui::Pos2) {
+    rig.run();
+    let root = rig.harness().root();
+    let node = root
+        .query_all_by_label(name)
+        .filter(|node| node.rect().center().y > anchor.y + 2.0)
+        .min_by(|a, b| {
+            (a.rect().center() - anchor)
+                .length()
+                .total_cmp(&(b.rect().center() - anchor).length())
+        })
+        .unwrap_or_else(|| panic!("no {name:?} below {anchor:?}"));
+    node.click();
+    rig.run();
+}
+
+/// Opens the fill colour picker of `kind` (the P7-24 helper's rule).
+fn open_fill_picker(rig: &mut ShellRig, kind: LayoutKind) {
+    match kind {
+        LayoutKind::PanelClassic => click(rig, Role::Button, "Fill Color menu"),
+        _ => {
+            more_items_near(rig, "Fill");
+        }
+    }
+}
+
+/// Fills the selection white, so the black text ink reads against a
+/// light fill (the picture checks of items 1 and 5).
+fn white_fill(rig: &mut ShellRig, kind: LayoutKind) {
+    open_fill_picker(rig, kind);
+    click(rig, Role::Button, "White #FFFFFF");
+}
+
+/// Takes the line off the selection (its dark border would read as
+/// text ink in the picture checks).
+fn no_line(rig: &mut ShellRig, kind: LayoutKind) {
+    match kind {
+        LayoutKind::PanelClassic => {
+            click(rig, Role::Button, "Line Pattern menu");
+            click(rig, Role::Button, "No Line");
+        }
+        _ => {
+            let anchor = more_items_near(rig, "Line");
+            click_below(rig, "No Line", anchor);
+        }
+    }
+}
+
+/// Chooses the Pointer tool with a real control click.
+fn choose_pointer_tool(rig: &mut ShellRig) {
+    click(rig, Role::Button, "Pointer Tool");
+}
+
+/// The Pointer tool and a click on empty page: no tool marks over the
+/// picture's samples.
+fn deselect(rig: &mut ShellRig) {
+    choose_pointer_tool(rig);
+    click_at(rig, screen(rig, 0.7, 5.0));
+}
+
+/// The rendered frame with the pointer parked on empty page (no tool
+/// cursor over the samples).
+fn quiet_picture(rig: &mut ShellRig) -> image::RgbaImage {
+    let park = screen(rig, 0.7, 5.0);
+    rig.harness().event(egui::Event::PointerMoved(park));
+    rig.run();
+    rig.render()
+}
+
+/// The page point of a screen point (the inverse of `screen`, which is
+/// axis-aligned at any zoom).
+fn to_page(rig: &ShellRig, pos: egui::Pos2) -> (f64, f64) {
+    let origin = screen(rig, 0.0, 0.0);
+    let along_x = screen(rig, 1.0, 0.0);
+    let along_y = screen(rig, 0.0, 1.0);
+    (
+        f64::from(pos.x - origin.x) / f64::from(along_x.x - origin.x),
+        f64::from(pos.y - origin.y) / f64::from(along_y.y - origin.y),
+    )
+}
+
+/// The page-space bounding box `(min, max)` of the dark text ink in
+/// `image` over the page region `bounds` (the picture checks of item
+/// 1 and 5: the page is white and the grid light grey, so the black
+/// text is the only dark ink).
+fn ink_box(
+    rig: &ShellRig,
+    image: &image::RgbaImage,
+    bounds: (f64, f64, f64, f64),
+) -> ((f64, f64), (f64, f64)) {
+    let top_left = screen(rig, bounds.0, bounds.3);
+    let bottom_right = screen(rig, bounds.2, bounds.1);
+    let (px0, py0) = (
+        top_left.x.max(0.0) as u32,
+        top_left.y.max(0.0) as u32,
+    );
+    let (px1, py1) = (
+        bottom_right.x.min(image.width() as f32) as u32,
+        bottom_right.y.min(image.height() as f32) as u32,
+    );
+    let mut min = (u32::MAX, u32::MAX);
+    let mut max = (0u32, 0u32);
+    for y in py0..py1 {
+        for x in px0..px1 {
+            let p = image.get_pixel(x, y);
+            if p[0] < 170 && p[1] < 170 && p[2] < 170 {
+                min = (min.0.min(x), min.1.min(y));
+                max = (max.0.max(x), max.1.max(y));
+            }
+        }
+    }
+    assert!(min.0 <= max.0, "no ink in the region {bounds:?}");
+    // The ink must sit clear of the region's own edges: a ruler band
+    // or another control over the region would pollute the measure.
+    assert!(
+        min.0 > px0 + 3 && min.1 > py0 + 3 && max.0 + 3 < px1 && max.1 + 3 < py1,
+        "the ink runs into the region's edge {bounds:?}: screen {min:?}..{max:?}"
+    );
+    // Screen (left, bottom) is page (min x, min y); `y` grows up.
+    let lo = to_page(rig, egui::pos2(min.0 as f32, max.1 as f32));
+    let hi = to_page(rig, egui::pos2(max.0 as f32, min.1 as f32));
+    ((lo.0, lo.1), (hi.0, hi.1))
+}
+
+/// The ink's top-left corner in page inches (`y` grows up: the top of
+/// the ink is its `max.y`), the anchor of a top-left laid out text.
+fn ink_top_left(ink: ((f64, f64), (f64, f64))) -> (f64, f64) {
+    ((ink.0).0, (ink.1).1)
+}
+
+/// Item 1: a block resize on the fixture (explicit `Txt*` cells)
+/// lands where the preview frame put it: the ink keeps its place at
+/// the block's top-left corner and the cells carry the pin's offset
+/// inside the block.
+#[test]
+fn the_text_block_resize_lands_where_the_preview_showed_it() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        let shape = rectangle(&rig.shell.borrow().app);
+        select_shape(&mut rig);
+        white_fill(&mut rig, kind);
+        deselect(&mut rig);
+        let image = quiet_picture(&mut rig);
+        let before = ink_top_left(ink_box(&rig, &image, (2.0, 2.4, 4.0, 3.6)));
+
+        // Drag the block's north-east corner half an inch right and a
+        // quarter up (the block is 1 x 0.5 at (3, 3)).
+        select_shape(&mut rig);
+        choose_text_block(&mut rig, kind);
+        let from = screen(&rig, 3.5, 3.25);
+        let to = screen(&rig, 4.0, 3.5);
+        drag(&mut rig, from, to);
+        // The resize writes the pin's offset inside the block too.
+        assert!(
+            (number(&rig, shape, "TxtWidth") - 1.5).abs() < 1.0e-9,
+            "{kind:?}: TxtWidth grew"
+        );
+        assert!(
+            (number(&rig, shape, "TxtLocPinX") - 0.75).abs() < 1.0e-9,
+            "{kind:?}: TxtLocPinX follows the size"
+        );
+        assert!(
+            (number(&rig, shape, "TxtLocPinY") - 0.375).abs() < 1.0e-9,
+            "{kind:?}: TxtLocPinY follows the size"
+        );
+        // The preview keeps the block's centre, so the block's
+        // top-left corner moves to (2.25, 3.375) and the ink keeps its
+        // offset from it.
+        deselect(&mut rig);
+        let image = quiet_picture(&mut rig);
+        let after = ink_top_left(ink_box(&rig, &image, (1.8, 2.3, 4.2, 3.7)));
+        let expected = (before.0 - 0.25, before.1 + 0.125);
+        assert!(
+            (after.0 - expected.0).abs() < 0.05 && (after.1 - expected.1).abs() < 0.05,
+            "{kind:?}: the ink sits where the preview showed it: {before:?} to {after:?}"
+        );
+    }
+}
+
+
+/// Chooses the Rectangle tool with a real control click (task P7-26
+/// item 1: the shape it draws carries no `Txt*` cells at all).
+fn choose_rectangle_tool(rig: &mut ShellRig, kind: LayoutKind) {
+    match kind {
+        LayoutKind::PanelClassic => {
+            // The tool sits on the hidden floating Drawing toolbar
+            // (View > Toolbars > Drawing).
+            click_any(rig, "View");
+            click_any(rig, "Toolbars");
+            click_any(rig, "Drawing");
+            click(rig, Role::Button, "Rectangle Tool");
+        }
+        _ => {
+            // The Home tab's drawing-tools split opens from its arrow.
+            let anchor = more_items_near(rig, "Rectangle");
+            click_below(rig, "Rectangle", anchor);
+        }
+    }
+}
+
+/// Item 1: the same check on a shape drawn with the Rectangle tool,
+/// whose `Txt*` cells hold nothing of their own — the case the review
+/// found: the documented default follows the **shape's** width, so a
+/// resize that writes the pin alone drew the block off the preview.
+#[test]
+fn a_rectangle_tool_shape_resizes_onto_the_preview_too() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        // Draw a rectangle on empty page (the drag snaps to the
+        // grid, so the box is read back from the shape's cells).
+        choose_rectangle_tool(&mut rig, kind);
+        let from = screen(&rig, 3.2, 3.9);
+        let to = screen(&rig, 5.2, 4.9);
+        drag(&mut rig, from, to);
+        let shape = last_shape(&rig);
+        let (pin_x, pin_y) = (number(&rig, shape, "PinX"), number(&rig, shape, "PinY"));
+        let (loc_x, loc_y) = (number(&rig, shape, "LocPinX"), number(&rig, shape, "LocPinY"));
+        let (width, height) = (number(&rig, shape, "Width"), number(&rig, shape, "Height"));
+        let min = (pin_x - loc_x, pin_y - loc_y);
+        let max = (min.0 + width, min.1 + height);
+        // Give it text: a double click opens the editor, Escape keeps
+        // the text and leaves the shape selected.
+        choose_pointer_tool(&mut rig);
+        let pos = screen(&rig, pin_x, pin_y);
+        double_click_at(&mut rig, pos);
+        assert!(
+            editing(&mut rig),
+            "{kind:?}: the double click opens the editor"
+        );
+        type_text(&mut rig, "Hi");
+        press_key(&mut rig, egui::Key::Escape, egui::Modifiers::NONE);
+        assert_eq!(shape_text(&rig, shape), "Hi", "{kind:?}: the text lands");
+        white_fill(&mut rig, kind);
+        no_line(&mut rig, kind);
+        // The drawn shape carries no `Txt*` values of its own: the
+        // insert's derived-cell pass materialises the documented
+        // defaults, which follow the **shape's** width and height.
+        assert!(
+            (number(&rig, shape, "TxtWidth") - width).abs() < 1.0e-9,
+            "{kind:?}: TxtWidth is the shape's width"
+        );
+        assert!(
+            (number(&rig, shape, "TxtLocPinX") - width / 2.0).abs() < 1.0e-9,
+            "{kind:?}: TxtLocPinX follows the shape's width"
+        );
+        assert!(
+            (number(&rig, shape, "TxtLocPinY") - height / 2.0).abs() < 1.0e-9,
+            "{kind:?}: TxtLocPinY follows the shape's height"
+        );
+        // The ink runs (min - 0.4, max + 0.17) at its lowest: keep
+        // the region over the page area both layouts show.
+        let region = (min.0 - 1.0, min.1 + 0.2, min.0 + 1.5, min.1 + 1.5);
+        deselect(&mut rig);
+        let image = quiet_picture(&mut rig);
+        let before = ink_top_left(ink_box(&rig, &image, region));
+
+        // Resize the text block (the whole shape box) from its
+        // north-east corner: +1 in width and +0.5 in height.
+        let pos = screen(&rig, pin_x, pin_y);
+        click_at(&mut rig, pos);
+        choose_text_block(&mut rig, kind);
+        let from = screen(&rig, max.0, max.1);
+        let to = screen(&rig, max.0 + 1.0, max.1 + 0.5);
+        drag(&mut rig, from, to);
+        assert!(
+            (number(&rig, shape, "TxtWidth") - (width + 1.0)).abs() < 1.0e-9,
+            "{kind:?}: TxtWidth grew"
+        );
+        assert!(
+            (number(&rig, shape, "TxtLocPinX") - (width + 1.0) / 2.0).abs() < 1.0e-9,
+            "{kind:?}: TxtLocPinX is written with the pin"
+        );
+        assert!(
+            (number(&rig, shape, "TxtLocPinY") - (height + 0.5) / 2.0).abs() < 1.0e-9,
+            "{kind:?}: TxtLocPinY is written with the pin"
+        );
+        deselect(&mut rig);
+        let image = quiet_picture(&mut rig);
+        let after = ink_top_left(ink_box(&rig, &image, region));
+        // The preview keeps the block's centre: its top-left corner
+        // moves half a inch left and a quarter up, and the ink keeps
+        // its offset from it.
+        let expected = (before.0 - 0.5, before.1 + 0.25);
+        assert!(
+            (after.0 - expected.0).abs() < 0.05 && (after.1 - expected.1).abs() < 0.05,
+            "{kind:?}: the ink sits where the preview showed it: {before:?} to {after:?}"
+        );
+    }
+}
+
+
+
