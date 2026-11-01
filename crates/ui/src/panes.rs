@@ -307,6 +307,111 @@ pub fn show_size_position(ui: &mut Ui, app: &mut AppCtx) -> Result<Vec<Intent>, 
     ))
 }
 
+// ---------------------------------------------------------------------------
+// The Format Shape pane (task P7-28)
+// ---------------------------------------------------------------------------
+
+/// The Format Shape pane's state (task P7-28 goal 3): the Fill and
+/// Line sections built from the forms of [`crate::format_dialogs`],
+/// following the selection anchor.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FormatShape {
+    /// The shape the pane shows (the selection anchor, ADR 0041).
+    pub anchor: Option<ShapeId>,
+    /// The Fill section's fields.
+    pub fill: crate::format_dialogs::FillForm,
+    /// The Line section's fields.
+    pub line: crate::format_dialogs::LineForm,
+}
+
+impl FormatShape {
+    /// The pane over the selection anchor's resolved fill and line
+    /// cells (the forms' own reading).
+    pub fn from_app(app: &AppCtx) -> Self {
+        Self {
+            anchor: anchor_of(app),
+            fill: crate::format_dialogs::FillForm::from_app(app),
+            line: crate::format_dialogs::LineForm::from_app(app),
+        }
+    }
+
+    /// Follows the selection (goal 3): when the anchor changes, the
+    /// fields re-read the new shape's cells. Returns `true` on a
+    /// change.
+    pub fn follow(&mut self, app: &AppCtx) -> bool {
+        let anchor = anchor_of(app);
+        if anchor == self.anchor {
+            return false;
+        }
+        *self = Self::from_app(app);
+        true
+    }
+}
+
+/// The shape the pane shows: the selection anchor (the panes' subject,
+/// ADR 0041), or the first selected shape.
+fn anchor_of(app: &AppCtx) -> Option<ShapeId> {
+    app.selection
+        .anchor
+        .or_else(|| app.selection.shapes.first().copied())
+}
+
+/// Draws the Format Shape pane (task P7-28 goal 3): the Fill and Line
+/// sections of the shared forms, each field applying as it changes —
+/// one `format.fill` / `format.line` run (so one undo step) per
+/// committed field. With no shape selected the pane labels its empty
+/// state (task P7-23's rule); a refused entry records one status line
+/// and writes nothing (ADR 0058). The pane itself never mutates the
+/// document.
+pub fn show_format_shape(ui: &mut Ui, app: &mut AppCtx, state: &mut FormatShape) -> Vec<Intent> {
+    state.follow(app);
+    ui.label(RichText::new("Format Shape").strong());
+    if app.active_document().is_none() {
+        ui.label("No document");
+        return Vec::new();
+    }
+    if state.anchor.is_none() {
+        ui.weak(NO_SHAPE_SELECTED);
+        return Vec::new();
+    }
+    let mut intents = Vec::new();
+    ui.add_space(4.0);
+    ui.label(RichText::new("Fill").strong());
+    for change in crate::format_dialogs::fill_fields(ui, &mut state.fill) {
+        if let Some(intent) = field_intent(app, "format.fill", change) {
+            intents.push(intent);
+        }
+    }
+    ui.add_space(8.0);
+    ui.label(RichText::new("Line").strong());
+    for change in crate::format_dialogs::line_fields(ui, &mut state.line) {
+        if let Some(intent) = field_intent(app, "format.line", change) {
+            intents.push(intent);
+        }
+    }
+    intents
+}
+
+/// One committed field change as the dispatch it becomes: the command
+/// with its one argument, or one status line and nothing else (the
+/// refused entry, [`commit_entry`]'s rule).
+fn field_intent(
+    app: &mut AppCtx,
+    command: &'static str,
+    change: crate::format_dialogs::Change,
+) -> Option<Intent> {
+    let Ok(id) = CommandId::parse(command) else {
+        return None;
+    };
+    match change {
+        Ok(args) => Some(Intent::new(id, Invocation::new(args, Source::Ui))),
+        Err(reason) => {
+            record_line(app, reason);
+            None
+        }
+    }
+}
+
 /// Builds the Shape Data entries (ADR 0058).
 fn shape_data_entries(app: &mut AppCtx) -> Result<Vec<Entry>, UiError> {
     let units = app.settings.units;
@@ -2470,5 +2575,70 @@ mod tests {
         );
         assert_eq!(prop_kind(&CellValue::List(String::from("a;b"))), None);
         assert_eq!(prop_kind(&CellValue::Error(String::from("#VALUE!"))), None);
+    }
+
+    // --- The Format Shape pane (task P7-28) ---
+
+    /// The pane follows the selection anchor (goal 3): a new anchor
+    /// re-reads the fields from the new shape.
+    #[test]
+    fn the_format_shape_pane_follows_the_selection() {
+        let (mut app, first) = selected_document();
+        let second = {
+            let session = app.active_document_mut().expect("session");
+            session
+                .document
+                .add_shape(Shape::new(ShapeId { index: 0 }, 8))
+        };
+        let mut state = FormatShape::from_app(&app);
+        assert_eq!(state.anchor, Some(first));
+        assert!(!state.follow(&app), "the same anchor keeps the fields");
+        app.selection.shapes = vec![second];
+        app.selection.anchor = Some(second);
+        assert!(state.follow(&app), "a new anchor re-reads the fields");
+        assert_eq!(state.anchor, Some(second));
+    }
+
+    /// One committed field change becomes one `format.fill` dispatch
+    /// (goal 3: the pane applies as the user changes a field).
+    #[test]
+    fn a_field_change_becomes_one_format_command() {
+        let (mut app, _shape) = selected_document();
+        let mut args = Args::new();
+        args.set("pattern", ArgValue::Number(2.0));
+        let intent = field_intent(&mut app, "format.fill", Ok(args)).expect("intent");
+        assert_eq!(intent.command.as_str(), "format.fill");
+        assert_eq!(intent.invocation.args.number("pattern"), Some(2.0));
+    }
+
+    /// A refused entry records one status line and dispatches nothing
+    /// (ADR 0058's rule).
+    #[test]
+    fn a_refused_entry_records_the_reason_and_dispatches_nothing() {
+        let (mut app, _shape) = selected_document();
+        let before = app.warnings.len();
+        let change = Err("fill colour must be a #RGB or #RRGGBB value".to_owned());
+        assert!(field_intent(&mut app, "format.fill", change).is_none());
+        assert_eq!(app.warnings.len(), before + 1, "one status line");
+    }
+
+    /// With no document open the pane says so and dispatches nothing.
+    #[test]
+    fn the_format_shape_pane_says_no_document() {
+        let mut app = AppCtx::new(Settings::default());
+        let mut state = FormatShape::from_app(&app);
+        let intents = with_ui(|ui| show_format_shape(ui, &mut app, &mut state));
+        assert!(intents.is_empty());
+    }
+
+    /// With no shape selected the pane labels its empty state and
+    /// dispatches nothing (task P7-23's rule).
+    #[test]
+    fn the_format_shape_pane_labels_its_empty_state() {
+        let mut app = app_with(document(), DisplayUnits::Inches);
+        let mut state = FormatShape::from_app(&app);
+        assert_eq!(state.anchor, None, "no shape, no subject");
+        let intents = with_ui(|ui| show_format_shape(ui, &mut app, &mut state));
+        assert!(intents.is_empty());
     }
 }

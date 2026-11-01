@@ -61,6 +61,7 @@ const NO_ROW: &[&str] = &[
     "file.new.blank.drawing.us",
     "file.render",
     "file.save_as",
+    "format.fill",
     "format.fill_color.no_fill",
     "format.fill_color.use_default",
     "format.line_color.no_line",
@@ -68,6 +69,7 @@ const NO_ROW: &[&str] = &[
     "format.line_ends.no_line_ends",
     "format.line_pattern.no_line",
     "format.set.line.ends",
+    "format.shape.pane",
     "format.text.decrease_size",
     "format.text.increase_size",
     "format.text_color.use_default",
@@ -198,6 +200,21 @@ const ALLOWED: &[Allow] = &[
         command: "arrange.group",
         context: ContextId::ContainerSelected,
         reason: "the manual-pass rule: Group is enabled with two or more shapes selected (task P7-22); the 2007 table also offers it on one group, picture or container",
+    },
+    Allow {
+        command: "format.line",
+        context: ContextId::EmptyPage,
+        reason: "the Line dialog sets the selection's line cells (task P7-28); the 2007 table offers it with nothing selected",
+    },
+    Allow {
+        command: "format.line",
+        context: ContextId::SecondPage,
+        reason: "the Line dialog sets the selection's line cells (task P7-28); the 2007 table offers it with nothing selected",
+    },
+    Allow {
+        command: "format.line",
+        context: ContextId::ShapesheetWindow,
+        reason: "the Line dialog needs a selection (task P7-28); the 2007 table hides it in the ShapeSheet window",
     },
     Allow {
         command: "arrange.align.box",

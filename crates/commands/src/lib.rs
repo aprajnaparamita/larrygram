@@ -420,6 +420,19 @@ pub enum UiRequest {
     /// orientation and units and re-dispatches the command with them
     /// as arguments — its body is task P7-21's).
     ShowPageSetup,
+    /// Show the Fill dialog (task P7-28: `format.fill` with no
+    /// arguments; the dialog collects the fill cells and re-dispatches
+    /// the command with them as arguments — one edit, one undo step).
+    ShowFillDialog,
+    /// Show the Line dialog (task P7-28: `format.line` with no
+    /// arguments; the dialog collects the line cells and re-dispatches
+    /// the command with them).
+    ShowLineDialog,
+    /// Show the Format Shape pane (task P7-28: `format.shape.pane`;
+    /// the pane edits the fill and line cells field by field and
+    /// follows the selection. The command toggles: a second run with
+    /// the pane open closes it).
+    ShowFormatShape,
     /// Ask the user to confirm closing a document.
     ConfirmClose {
         /// The document's display name.
