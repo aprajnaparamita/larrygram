@@ -1,6 +1,7 @@
 //! The formatting pickers (task P7-21): the colour picker, the font
 //! family list, the font size box, the line weight and pattern lists
-//! and the arrowhead list.
+//! and the arrowhead list, plus the zoom box's preset list (task
+//! P7-24 goal 3).
 //!
 //! A picker is the **body** of a host control's popup: the command-bar
 //! splits and combos of Panel Modern and the toolbar splits of Panel
@@ -44,6 +45,8 @@ pub enum PickerKind {
     LinePattern,
     /// `format.set.line.ends`: the arrowhead list.
     LineEnds,
+    /// `shape.draw.zoom`: the zoom box's preset list (task P7-24 goal 3).
+    Zoom,
 }
 
 /// The picker that hosts the popup of a control whose command is
@@ -53,6 +56,7 @@ pub fn picker_for(command: &str) -> Option<PickerKind> {
         "text.font" => Some(PickerKind::Font),
         "text.font.size" => Some(PickerKind::FontSize),
         "text.font.color" => Some(PickerKind::FontColor),
+        "shape.draw.zoom" => Some(PickerKind::Zoom),
         "format.set.fill.color" => Some(PickerKind::FillColor),
         "format.set.line.color" => Some(PickerKind::LineColor),
         "format.set.line.weight" => Some(PickerKind::LineWeight),
@@ -206,6 +210,17 @@ pub const ARROWS: &[(f64, &str)] = &[
 /// The fill transparency rows, in percent.
 pub const TRANSPARENCY: &[f64] = &[0.0, 25.0, 50.0, 75.0, 100.0];
 
+/// The zoom box's drop-down presets (task P7-24 goal 3): the zoom
+/// commands of the View > Zoom submenu, descending.
+pub const ZOOM_PRESETS: &[(&str, &str)] = &[
+    ("400%", "view.view400"),
+    ("200%", "view.view200"),
+    ("150%", "view.view150"),
+    ("100%", "view.view100"),
+    ("75%", "view.view75"),
+    ("50%", "view.view50"),
+];
+
 /// The first row's label of one picker (the host sweeps look for it
 /// to know the picker drew).
 pub fn first_row(kind: PickerKind) -> &'static str {
@@ -216,6 +231,7 @@ pub fn first_row(kind: PickerKind) -> &'static str {
         PickerKind::FillColor => "No Fill",
         PickerKind::LineColor | PickerKind::LineWeight | PickerKind::LinePattern => "No Line",
         PickerKind::LineEnds => "No Line Ends",
+        PickerKind::Zoom => ZOOM_PRESETS.first().map_or("100%", |(label, _)| *label),
     }
 }
 
@@ -247,6 +263,7 @@ pub fn show(ui: &mut Ui, kind: PickerKind, source: Source, out: &mut Vec<Intent>
         PickerKind::LineWeight => weight_list(ui, &mut nav, source, out),
         PickerKind::LinePattern => pattern_list(ui, &mut nav, source, out),
         PickerKind::LineEnds => arrow_list(ui, &mut nav, source, out),
+        PickerKind::Zoom => zoom_list(ui, &mut nav, source, out),
     };
     nav.save(ui, kind);
     chosen
@@ -393,6 +410,21 @@ fn push_size(out: &mut Vec<Intent>, points: f64, source: Source) {
         .with("size", ArgValue::Number(points))
         .with("value", ArgValue::Number(points));
     push(out, "text.font.size", args, source);
+}
+
+/// The zoom box's drop-down: one row per zoom preset, each its
+/// `view.viewNN` command (task P7-24 goal 3).
+fn zoom_list(ui: &mut Ui, nav: &mut Nav, source: Source, out: &mut Vec<Intent>) -> bool {
+    let mut chosen = false;
+    for (label, command) in ZOOM_PRESETS {
+        let highlighted = nav.highlighted();
+        let response = row(ui, RichText::new(*label), label, highlighted);
+        if nav.chosen(highlighted, &response) {
+            push(out, command, Args::new(), source);
+            chosen = true;
+        }
+    }
+    chosen
 }
 
 /// The colour picker: the role's rows, then the theme and standard

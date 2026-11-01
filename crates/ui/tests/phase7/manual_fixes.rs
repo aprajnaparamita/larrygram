@@ -719,3 +719,56 @@ fn the_font_and_size_apply_right_after_adding_text() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Goal 3: the Panel Classic Zoom box. Panel Modern has no zoom box
+// (status-bar slider and the View > Zoom dialog only): not
+// applicable there.
+// ---------------------------------------------------------------------------
+
+/// The Zoom box's typed value sets the zoom (the `shape.draw.zoom`
+/// contract: `percent`) and its drop-down offers the View > Zoom
+/// presets (goal 3, Panel Classic only).
+#[test]
+fn the_zoom_box_sets_the_zoom_and_offers_presets() {
+    let mut rig = shell_rig(LAYOUTS[0]);
+    // A typed percent and Enter.
+    rig.run();
+    {
+        let root = rig.harness().root();
+        let combo = root
+            .query_all_by_role_and_label(Role::ComboBox, "Zoom")
+            .next()
+            .expect("the Zoom box");
+        combo.click();
+        combo.type_text("150");
+    }
+    rig.run();
+    press_key(&mut rig, egui::Key::Enter);
+    let zoom = rig
+        .shell
+        .borrow()
+        .app
+        .active_document()
+        .expect("session")
+        .view
+        .zoom;
+    assert!(
+        (zoom - 1.5).abs() < 1.0e-9,
+        "typing 150 sets the zoom ({zoom})"
+    );
+
+    // The drop-down presets.
+    click(&mut rig, Role::Button, "Zoom menu");
+    assert!(has(&mut rig, Role::Button, "400%"), "the presets draw");
+    click(&mut rig, Role::Button, "50%");
+    let zoom = rig
+        .shell
+        .borrow()
+        .app
+        .active_document()
+        .expect("session")
+        .view
+        .zoom;
+    assert!((zoom - 0.5).abs() < 1.0e-9, "the 50% preset applies ({zoom})");
+}

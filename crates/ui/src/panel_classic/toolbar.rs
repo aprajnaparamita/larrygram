@@ -517,8 +517,8 @@ fn draw_dropdown(
 
 /// An editable combo (font, size, zoom): applies its text on Enter
 /// with the `value` argument, reverts on Esc, and its ▾ button opens
-/// the drop-down list (task P7-24 goal 2: the font and size boxes
-/// get the pickers' lists).
+/// the drop-down list (task P7-24 goals 2 and 3: the font and size
+/// boxes get the pickers' lists and the zoom box the presets).
 fn draw_combo(
     ui: &mut Ui,
     item: &Item,
@@ -585,9 +585,17 @@ fn draw_combo(
     // key press, so the standard `lost_focus` idiom reads the key).
     let lost = response.lost_focus();
     if lost && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-        if let Activation::Intent(intent) =
+        if let Activation::Intent(mut intent) =
             rows::combo_activation(item, input, Source::Ui, buffer.clone())
         {
+            // The typed value also goes as `percent`, the number the
+            // zoom box's `shape.draw.zoom` reads (task P7-24 goal 3).
+            if let Some(number) = typed_number(&buffer) {
+                intent
+                    .invocation
+                    .args
+                    .set("percent", larrygram_commands::ArgValue::Number(number));
+            }
             intents.push(intent);
         }
         state.combo_applied.insert(item.id.clone(), buffer);
@@ -601,14 +609,28 @@ fn draw_combo(
     }
 }
 
-/// Whether one combo's drop-down button draws (task P7-24 goal 2:
-/// the font and size boxes list the pickers' rows).
+/// Whether one combo's drop-down button draws (task P7-24: the font
+/// and size boxes list the pickers' rows and the zoom box the
+/// presets).
 fn combo_list(item: &Item) -> bool {
     item.command
         .as_ref()
         .map(|id| id.as_str())
         .and_then(crate::pickers::picker_for)
         .is_some()
+}
+
+/// The number a combo's typed value stands for: the text with an
+/// optional `pt` or `%` suffix trimmed ("18 pt", "150%").
+fn typed_number(typed: &str) -> Option<f64> {
+    let trimmed = typed.trim();
+    let trimmed = trimmed.strip_suffix('%').unwrap_or(trimmed).trim();
+    let trimmed = trimmed
+        .strip_suffix("pt")
+        .or_else(|| trimmed.strip_suffix("PT"))
+        .unwrap_or(trimmed)
+        .trim();
+    trimmed.parse::<f64>().ok().filter(|n| n.is_finite())
 }
 
 /// The themed width of one toolbar combo (`combo.font.width`,
