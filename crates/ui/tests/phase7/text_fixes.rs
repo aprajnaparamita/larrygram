@@ -1916,3 +1916,63 @@ fn a_drag_with_the_text_tool_sizes_the_new_text_box() {
         );
     }
 }
+
+/// Item 2 (task P7-26, master's note): the Format Shape pane stays
+/// open while the user works. With the canvas's keyboard and no pane
+/// field focused, a typed letter still starts the shape's text; a
+/// pane field keeps its own typing.
+#[test]
+fn the_format_shape_pane_keeps_the_typed_character_start() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        let shape = rectangle(&rig.shell.borrow().app);
+        select_shape(&mut rig);
+        // The pane opens from its own control (task P7-28).
+        match kind {
+            LayoutKind::PanelClassic => {
+                click(&mut rig, Role::Button, "View");
+                click(&mut rig, Role::MenuItem, "Toolbars");
+                click(&mut rig, Role::MenuItem, "Format Shape");
+            }
+            _ => click_any(&mut rig, "Format Object..."),
+        }
+        assert!(
+            has(&mut rig, Role::TextInput, "Fill transparency"),
+            "{kind:?}: the Format Shape pane is open"
+        );
+        // The canvas has the keyboard again and no pane field does.
+        select_shape(&mut rig);
+        type_text(&mut rig, "Q");
+        assert!(
+            editing(&mut rig),
+            "{kind:?}: the typed letter starts the shape's text"
+        );
+        press_key(&mut rig, egui::Key::Escape, egui::Modifiers::NONE);
+        assert_eq!(
+            shape_text(&rig, shape),
+            "Q",
+            "{kind:?}: the text lands with the pane open"
+        );
+
+        // A pane field keeps its own typing (the keyboard-focus
+        // guard), and the shape's text is untouched.
+        rig.run();
+        let root = rig.harness().root();
+        let field = root
+            .query_all_by_role_and_label(Role::TextInput, "Fill transparency")
+            .next()
+            .expect("the Fill transparency field");
+        field.click();
+        field.type_text("50");
+        rig.run();
+        assert!(
+            !editing(&mut rig),
+            "{kind:?}: a pane field keeps its own typing"
+        );
+        assert_eq!(
+            shape_text(&rig, shape),
+            "Q",
+            "{kind:?}: the shape's text is untouched"
+        );
+    }
+}
