@@ -39,8 +39,15 @@ fn finish(response: egui::Response, action: &Action, tip: &str, out: &mut Vec<In
 
 /// The gutter width of this frame (the shared `menu.gutter.width`
 /// token: icons sit in a gutter column, `docs/ui/panel-modern.md`).
+/// The token is read through [`crate::theme`], so Panel Modern never
+/// calls into `panel_classic` (task P7-27 item 2).
 fn gutter(ctx: &egui::Context) -> f32 {
-    crate::panel_classic::metrics::ClassicMetrics::for_ctx(ctx).menu_gutter_width
+    let width = crate::theme::metric_at(ctx, "menu.gutter.width", 24.0);
+    if width.is_finite() && width > 0.0 {
+        width
+    } else {
+        24.0
+    }
 }
 
 /// What the controls draw from: run-time lists, sizes, toggle state
@@ -1081,7 +1088,7 @@ fn latched(toggles: &Toggles, app: &larrygram_commands::app::AppCtx, item: &Item
     item.command
         .as_ref()
         .map(|command| command.as_str())
-        .and_then(|command| crate::panel_classic::text_toggle_checked(app, command))
+        .and_then(|command| crate::checked::text_toggle_checked(app, command))
         .unwrap_or(false)
 }
 

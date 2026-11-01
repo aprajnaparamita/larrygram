@@ -14,6 +14,7 @@
 
 pub mod about;
 pub mod canvas;
+pub mod checked;
 pub mod contexts;
 pub mod dialogs;
 pub mod file_view;

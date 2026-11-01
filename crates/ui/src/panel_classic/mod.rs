@@ -31,7 +31,6 @@ use std::collections::BTreeMap;
 use egui::{Id, Pos2, Rect, Ui, Vec2};
 use larrygram_commands::app::{AppCtx, Settings};
 use larrygram_commands::{CommandId, Registry, Source};
-use larrygram_model::{CellName, SheetRef};
 use larrygram_ui_spec::v2::{ContextId, Item, LayoutV2, Menu, MenuBar};
 
 use crate::Intent;
@@ -236,60 +235,6 @@ impl CheckedState for ToolLatch {
         };
         Some(tool.is_some_and(|tool| app.active_tool() == tool))
     }
-}
-
-/// The checked state of the text toggles (task P7-24 item 10): Bold,
-/// Italic and Underline read the selection anchor's `Character`
-/// `Style` bits (1, 2 and 4) and the alignment rows its `Paragraph`
-/// `HorzAlign` (0 left, 1 centre, 2 right, 3 justify), both through
-/// the model's row resolution (P6-05) so a row the shape inherits
-/// counts. `None` for every other command and with no selection.
-pub fn text_toggle_checked(app: &AppCtx, command: &str) -> Option<bool> {
-    let is_bold = matches!(
-        command,
-        "format.text.bold" | "format.text.italic" | "format.text.underline"
-    );
-    let is_align = matches!(
-        command,
-        "format.text.align_left"
-            | "format.text.align_center"
-            | "format.text.align_right"
-            | "format.text.align_justify"
-    );
-    if !is_bold && !is_align {
-        return None;
-    }
-    let session = app.active_document()?;
-    let shape = app
-        .selection
-        .anchor
-        .or_else(|| app.selection.shapes.first().copied())?;
-    let document = &session.document;
-    let row_number = |section: &str, cell: &str| -> f64 {
-        document
-            .resolve_row_cell(SheetRef::Shape(shape), section, 0, &CellName::new(cell))
-            .ok()
-            .and_then(|resolved| match resolved.value {
-                Some(larrygram_model::CellValue::Number(value)) => Some(*value),
-                _ => None,
-            })
-            .unwrap_or(0.0)
-    };
-    if is_bold {
-        let style = row_number("Character", "Style") as i64;
-        return Some(match command {
-            "format.text.bold" => style & 1 != 0,
-            "format.text.italic" => style & 2 != 0,
-            _ => style & 4 != 0,
-        });
-    }
-    let align = row_number("Paragraph", "HorzAlign") as i64;
-    Some(match command {
-        "format.text.align_left" => align == 0,
-        "format.text.align_center" => align == 1,
-        "format.text.align_right" => align == 2,
-        _ => align == 3,
-    })
 }
 
 /// Everything the widgets read beyond the layout (task P7-06).
