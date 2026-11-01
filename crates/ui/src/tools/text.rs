@@ -31,6 +31,10 @@ pub const TEXT_BOX_WIDTH_IN: f64 = 2.0;
 /// The default height of a new text box, in inches (our own choice).
 pub const TEXT_BOX_HEIGHT_IN: f64 = 0.5;
 
+/// The drag distance below which a release is a click, in screen
+/// pixels (the pointer tool's threshold; task P7-26 item 9).
+const DRAG_THRESHOLD_PX: f64 = 2.0;
+
 /// Where a new text box goes once its text is committed (task P7-25
 /// item 9): the insert command's coordinate rule, `x`/`y` the
 /// lower-left corner in page inches.
@@ -52,6 +56,9 @@ pub struct State {
     /// The new text box a click on empty page started (task P7-25
     /// item 9); the shell consumes it when it opens the editor.
     pub pending: Option<PendingBox>,
+    /// The press of a possible drag (task P7-26 item 9): a drag sizes
+    /// the new box, a click keeps the default one.
+    press: Option<Point>,
 }
 
 impl State {
@@ -78,15 +85,20 @@ pub fn handle(
         return Ok(effect);
     }
     match event {
-        ToolEvent::PointerUp { pos, .. } => click(state, ctx, *pos, &mut effect)?,
+        ToolEvent::PointerDown { pos, .. } => {
+            state.text.press = Some(*pos);
+        }
+        ToolEvent::PointerUp { pos, .. } => {
+            let press = state.text.press.take();
+            release(state, ctx, press, *pos, &mut effect)?;
+        }
         ToolEvent::Cancel => {
             state.text.pending = None;
+            state.text.press = None;
         }
         // The release of the double click's second click decides the
         // click already (task P7-25 item 9).
-        ToolEvent::DoubleClick { .. }
-        | ToolEvent::PointerDown { .. }
-        | ToolEvent::PointerMove { .. } => {}
+        ToolEvent::DoubleClick { .. } | ToolEvent::PointerMove { .. } => {}
     }
     Ok(effect)
 }
@@ -96,6 +108,40 @@ pub fn handle(
 /// The text tool has no drag preview, so it reports no anchor.
 pub fn anchor(_state: &super::ToolMachine) -> Option<Point> {
     None
+}
+
+/// One release (task P7-25 item 9): a click on an existing text
+/// object edits that object's text, a click on empty page starts a new
+/// box. Task P7-26 item 9: a drag on empty page makes a box of the
+/// dragged size, and a click keeps the default one.
+fn release(
+    state: &mut super::ToolMachine,
+    ctx: &larrygram_commands::AppCtx,
+    press: Option<Point>,
+    pos: Point,
+    effect: &mut ToolEffect,
+) -> Result<(), UiError> {
+    if let Some(press) = press {
+        let zoom = ctx
+            .active_document()
+            .map(|session| session.view.zoom)
+            .filter(|zoom| zoom.is_finite() && *zoom > 0.0)
+            .unwrap_or(1.0);
+        let threshold = DRAG_THRESHOLD_PX / (zoom * crate::canvas::POINTS_PER_INCH);
+        let delta = pos.sub(press);
+        if delta.x.hypot(delta.y) >= threshold {
+            let x = press.x.min(pos.x);
+            let y = press.y.min(pos.y);
+            state.text.pending = Some(PendingBox {
+                x,
+                y,
+                width: (pos.x - press.x).abs(),
+                height: (pos.y - press.y).abs(),
+            });
+            return Ok(());
+        }
+    }
+    click(state, ctx, pos, effect)
 }
 
 /// One click (task P7-25 item 9): a click on an existing text object
