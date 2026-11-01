@@ -3771,6 +3771,11 @@
   mapping_confidence: unknown
   visuicmd: null
 - fluent_ids: []
+  id: shape.set.text_block
+  label: Text Block
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
   id: shape.set.width
   label: Width
   mapping_confidence: unknown

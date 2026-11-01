@@ -434,6 +434,8 @@ pub enum ActiveTool {
     Connector,
     /// Draw a text box or edit text.
     Text,
+    /// Move and resize the selected shape's text block.
+    TextBlock,
 }
 
 impl ActiveTool {
@@ -446,6 +448,7 @@ impl ActiveTool {
             ActiveTool::Line => "Line",
             ActiveTool::Connector => "Connector",
             ActiveTool::Text => "Text",
+            ActiveTool::TextBlock => "Text Block",
         }
     }
 }

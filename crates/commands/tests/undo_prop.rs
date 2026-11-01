@@ -644,6 +644,23 @@ fn run_set_angle(ctx: &mut AppCtx, registry: &Registry, id: &'static str, pick: 
     try_dispatch(ctx, registry, id, numbers(&[("angle", jitter(pick, 7))]));
 }
 
+/// `shape.set.text_block` (task P7-25 item 4): the anchor shape's text
+/// block pin and size.
+fn run_set_text_block(ctx: &mut AppCtx, registry: &Registry, id: &'static str, pick: u32) {
+    select_tops(ctx, 1);
+    try_dispatch(
+        ctx,
+        registry,
+        id,
+        numbers(&[
+            ("x", 1.0 + jitter(pick, 8)),
+            ("y", 1.0 + jitter(pick, 9)),
+            ("width", size(pick, 5)),
+            ("height", size(pick, 6)),
+        ]),
+    );
+}
+
 /// `data.set.property`: the anchor shape's `Cost` row, a new number
 /// value of the row's own kind (task P6-18).
 fn run_set_property(ctx: &mut AppCtx, registry: &Registry, id: &'static str, pick: u32) {
@@ -1413,6 +1430,10 @@ const CASES: &[Case] = &[
         run: run_set_angle,
     },
     Case {
+        id: "shape.set.text_block",
+        run: run_set_text_block,
+    },
+    Case {
         id: "data.set.property",
         run: run_set_property,
     },
@@ -1599,6 +1620,7 @@ const NON_EDITING: &[(&str, &str)] = &[
     ("tools.rectangle", "tool choice only (P5-17)"),
     ("tools.ellipse", "tool choice only (P5-17)"),
     ("tools.text", "tool choice only (P5-17)"),
+    ("tools.text_block", "tool choice only (task P7-25 item 4)"),
     ("tools.connector", "tool choice only (P5-17)"),
     ("shape.rectangle", "tool choice only (P5-17)"),
     ("shape.ellipse", "tool choice only (P5-17)"),

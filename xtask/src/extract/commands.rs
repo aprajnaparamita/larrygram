@@ -844,6 +844,7 @@ pub const OUR_COMMANDS: &[(&str, &str)] = &[
     ("shape.set.height", "Height"),
     ("shape.set.pin", "Position"),
     ("shape.set.text", "Shape Text"),
+    ("shape.set.text_block", "Text Block"),
     ("shape.set.width", "Width"),
     ("shape.shape.find_similar_shapes", "Find Similar Shapes"),
     ("shape.stencil.collapse_all_groups", "Collapse All Groups"),

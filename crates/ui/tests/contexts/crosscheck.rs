@@ -102,6 +102,7 @@ const NO_ROW: &[&str] = &[
     "shape.set.height",
     "shape.set.pin",
     "shape.set.text",
+    "shape.set.text_block",
     "shape.set.width",
     "shape.transparency",
     "shape.transparency.dlg",
@@ -710,6 +711,11 @@ const ALLOWED: &[Allow] = &[
     },
     Allow {
         command: "tools.text",
+        context: ContextId::ShapesheetWindow,
+        reason: "the window mode is UI state that an AppCtx predicate cannot see",
+    },
+    Allow {
+        command: "tools.text_block",
         context: ContextId::ShapesheetWindow,
         reason: "the window mode is UI state that an AppCtx predicate cannot see",
     },

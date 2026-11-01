@@ -17,7 +17,10 @@
 //! - `tools.ellipse` and `shape.ellipse` — ellipse tool;
 //! - `shape.line` — line tool (there is no `tools.line` row);
 //! - `tools.connector` — connector tool;
-//! - `tools.text` — text tool.
+//! - `tools.text` — text tool;
+//! - `tools.text_block` — text block tool (task P7-25 item 4): the
+//!   same enablement as the other tools (its `contexts.yaml` row), and
+//!   the drag it leads with acts on the selection's text block.
 //!
 //! The registry has no checked-state seam yet, so a command cannot
 //! report itself as checked; the shell derives the command bar and menu
@@ -43,6 +46,12 @@ pub(crate) const TABLE: CommandTable = &[
         run_connector,
     ),
     ("tools.text", "Text Tool", has_document, run_text),
+    (
+        "tools.text_block",
+        "Text Block Tool",
+        has_document,
+        run_text_block,
+    ),
 ];
 
 /// Sets the active tool and reports it.
@@ -85,4 +94,12 @@ fn run_connector(
 /// `tools.text`.
 fn run_text(ctx: &mut crate::AppCtx, _inv: &Invocation) -> Result<Outcome, super::CommandError> {
     choose(ctx, ActiveTool::Text)
+}
+
+/// `tools.text_block` (task P7-25 item 4).
+fn run_text_block(
+    ctx: &mut crate::AppCtx,
+    _inv: &Invocation,
+) -> Result<Outcome, super::CommandError> {
+    choose(ctx, ActiveTool::TextBlock)
 }

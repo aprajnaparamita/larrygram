@@ -621,7 +621,9 @@ fn child_containing(doc: &Document, sel: ShapeId, hit: ShapeId) -> Option<ShapeI
 
 /// Maps a scene hit to the shape the user selects: the top-level ancestor
 /// at page level, or the direct child of the entered group inside one.
-fn selectable_shape(doc: &Document, hit: ShapeId, entered: Option<ShapeId>) -> ShapeId {
+/// Public to the tool modules (task P7-25: the text tool's click picks
+/// the same shape a pointer press would).
+pub(crate) fn selectable_shape(doc: &Document, hit: ShapeId, entered: Option<ShapeId>) -> ShapeId {
     let mut current = hit;
     let mut seen = Vec::new();
     loop {

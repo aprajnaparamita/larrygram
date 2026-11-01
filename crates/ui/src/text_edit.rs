@@ -37,8 +37,13 @@ struct RunMarkers {
 /// The in-place text editor state (ADR 0044).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct TextEditor {
-    /// The shape being edited, or `None` while idle.
+    /// The shape being edited, or `None` while idle (and while a
+    /// pending text box is being typed, task P7-25 item 9).
     pub shape: Option<ShapeId>,
+    /// The new text box being typed into (task P7-25 item 9): its
+    /// page bounds while the box is not yet in the model. The box and
+    /// its text are inserted as one undo step on commit.
+    pub pending: Option<GeoRect>,
     /// The editable buffer (plain text, ADR 0044).
     pub buffer: String,
     /// The buffer as the edit started (unchanged-buffer detection).
@@ -57,7 +62,7 @@ impl TextEditor {
 
     /// Whether an edit is in progress (the `Text` shortcut scope, ADR 0036).
     pub fn is_active(&self) -> bool {
-        self.shape.is_some()
+        self.shape.is_some() || self.pending.is_some()
     }
 
     /// Opens the editor on `shape` with its current text (ADR 0044).
@@ -68,6 +73,7 @@ impl TextEditor {
     /// can collapse a multi-run text predictably.
     pub fn begin(&mut self, shape: ShapeId, text: &TextContent) -> Result<(), UiError> {
         self.shape = Some(shape);
+        self.pending = None;
         self.buffer = plain_text(text);
         self.original = self.buffer.clone();
         self.markers = RunMarkers {
@@ -86,6 +92,20 @@ impl TextEditor {
         };
         self.focus_requested = true;
         Ok(())
+    }
+
+    /// Opens the editor on a new text box at `rect` (its page bounds;
+    /// task P7-25 item 9).
+    ///
+    /// The box is not in the model yet: the typed text commits through
+    /// one `insert.drawing.text_box` with its `text` argument (one undo
+    /// step, ADR 0040).
+    pub fn begin_new(&mut self, rect: GeoRect) {
+        *self = Self {
+            pending: Some(rect),
+            focus_requested: true,
+            ..Self::default()
+        };
     }
 
     /// Finishes the edit and returns the text to write (one run, ADR
@@ -154,6 +174,9 @@ impl TextEditor {
             .show(ui.ctx(), |ui| {
                 ui.set_min_width(rect.width().max(80.0));
                 let mut output = egui::TextEdit::multiline(&mut self.buffer)
+                    // The one outline of the edit is the text block's,
+                    // painted below (task P7-25 item 9).
+                    .frame(egui::Frame::NONE)
                     .desired_width(rect.width().max(80.0))
                     .desired_rows(1)
                     .hint_text("Text")
@@ -168,6 +191,18 @@ impl TextEditor {
                     commit = true;
                 }
             });
+        // Exactly one outline while editing (task P7-25 item 9): the
+        // text block's, in the selection colour; the tool overlay is
+        // suppressed while the editor is open.
+        let colors = crate::canvas::CanvasColors::active(ui.ctx());
+        ui.painter()
+            .rect_filled(rect, 0.0, ui.visuals().faint_bg_color);
+        ui.painter().rect_stroke(
+            rect,
+            0.0,
+            egui::Stroke::new(1.0, colors.selection),
+            egui::StrokeKind::Inside,
+        );
         if request_focus {
             self.focus_requested = false;
         }
@@ -285,9 +320,38 @@ pub fn editor_rect(
     Some(egui::Rect::from_min_max(min, max))
 }
 
+/// The screen rectangle of a pending text box (task P7-25 item 9):
+/// `bounds` in page inches mapped through the canvas viewport, pan and
+/// zoom — the same mapping as [`editor_rect`].
+pub fn pending_editor_rect(
+    viewport: egui::Rect,
+    pan: Point,
+    zoom: f64,
+    page_height: f64,
+    bounds: GeoRect,
+) -> Option<egui::Rect> {
+    if !zoom.is_finite() || zoom <= 0.0 || !finite_rect(viewport) || !page_height.is_finite() {
+        return None;
+    }
+    let k = 96.0 * zoom;
+    let min = egui::pos2(
+        viewport.min.x + ((pan.x + bounds.min.x) * k) as f32,
+        viewport.min.y + ((pan.y + page_height - bounds.max.y) * k) as f32,
+    );
+    let max = egui::pos2(
+        viewport.min.x + ((pan.x + bounds.max.x) * k) as f32,
+        viewport.min.y + ((pan.y + page_height - bounds.min.y) * k) as f32,
+    );
+    if !min.x.is_finite() || !min.y.is_finite() || !max.x.is_finite() || !max.y.is_finite() {
+        return None;
+    }
+    Some(egui::Rect::from_min_max(min, max))
+}
+
 /// Finds one model shape's node, turning its ancestor transforms into
-/// the shape-local to page transform.
-fn find_shape<'a>(
+/// the shape-local to page transform (the text block tool reads the
+/// transform through it, task P7-25 item 4).
+pub(crate) fn find_shape<'a>(
     nodes: &'a [Node],
     shape: ShapeId,
     path: &larrygram_render::NodePath,
@@ -656,5 +720,77 @@ mod tests {
             editor_id(Some(ShapeId { index: 4 }))
         );
         assert_ne!(editor_id(None), editor_id(Some(ShapeId { index: 3 })));
+    }
+
+    /// Task P7-25 item 9: a pending text box starts empty and its
+    /// commit carries the typed text (the shell inserts the box with
+    /// it, one undo step).
+    #[test]
+    fn a_pending_box_finishes_with_the_typed_text() {
+        let mut editor = TextEditor::new();
+        editor.begin_new(GeoRect::new(Point::new(1.0, 2.0), Point::new(3.0, 2.5)));
+        assert!(editor.is_active());
+        assert_eq!(editor.shape, None);
+        assert_eq!(
+            editor.pending,
+            Some(GeoRect::new(Point::new(1.0, 2.0), Point::new(3.0, 2.5)))
+        );
+        assert_eq!(editor.buffer, "");
+        // Nothing typed: no text, no text object.
+        assert_eq!(editor.finish().expect("finish"), None);
+        assert!(!editor.is_active());
+
+        editor.begin_new(GeoRect::new(Point::new(0.0, 0.0), Point::new(2.0, 0.5)));
+        editor.buffer = "Hi".to_owned();
+        let written = editor.finish().expect("finish").expect("changed");
+        assert_eq!(
+            written.parts,
+            vec![TextPart::Text("Hi".to_owned())],
+            "a new box keeps no run markers"
+        );
+        assert_eq!(editor, TextEditor::new());
+    }
+
+    /// `begin` and `begin_new` replace each other's target.
+    #[test]
+    fn begin_and_begin_new_replace_the_target() {
+        let mut editor = TextEditor::new();
+        editor.begin_new(GeoRect::new(Point::new(0.0, 0.0), Point::new(1.0, 1.0)));
+        editor
+            .begin(
+                ShapeId { index: 2 },
+                &text(vec![TextPart::Text("x".to_owned())]),
+            )
+            .expect("begin");
+        assert_eq!(editor.pending, None);
+        assert_eq!(editor.shape, Some(ShapeId { index: 2 }));
+        editor.begin_new(GeoRect::new(Point::new(1.0, 1.0), Point::new(2.0, 2.0)));
+        assert_eq!(editor.shape, None);
+        assert!(editor.pending.is_some());
+        editor.cancel();
+        assert_eq!(editor, TextEditor::new());
+    }
+
+    /// Task P7-25 item 9: the pending box's page rect maps to the
+    /// screen like an edited shape's text block.
+    #[test]
+    fn a_pending_box_maps_to_a_screen_rectangle() {
+        let bounds = GeoRect::new(Point::new(1.0, 2.0), Point::new(3.0, 2.5));
+        let viewport = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(800.0, 600.0));
+        let rect =
+            pending_editor_rect(viewport, Point::new(0.0, 0.0), 1.0, 11.0, bounds).expect("rect");
+        // x 1..3 maps right; page y 2..2.5 maps down from height 11.
+        assert!((rect.min.x - 106.0).abs() < 0.01, "{rect:?}");
+        assert!((rect.min.y - (20.0 + 8.5 * 96.0)).abs() < 0.01, "{rect:?}");
+        assert!((rect.width() - 192.0).abs() < 0.01, "{rect:?}");
+        assert!((rect.height() - 48.0).abs() < 0.01, "{rect:?}");
+        assert_eq!(
+            pending_editor_rect(viewport, Point::new(0.0, 0.0), 0.0, 11.0, bounds),
+            None
+        );
+        assert_eq!(
+            pending_editor_rect(egui::Rect::NOTHING, Point::new(0.0, 0.0), 1.0, 11.0, bounds),
+            None
+        );
     }
 }
