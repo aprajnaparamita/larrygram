@@ -356,7 +356,13 @@ fn combo(
         .and_then(crate::pickers::picker_for)
     {
         if let Some(inner) = Popup::menu(&response).show(|ui| {
-            if crate::pickers::show(ui, kind, larrygram_commands::Source::CommandBar, out) {
+            if crate::pickers::show(
+                    ui,
+                    kind,
+                    larrygram_commands::Source::CommandBar,
+                    crate::pickers::fill_preview(draw.app),
+                    out,
+                ) {
                 ui.close();
             }
         }) {
@@ -469,7 +475,13 @@ fn split(
         // below it (task P7-24: the Line split's Weight, Dashes and
         // Arrows submenus open from the same menu, like Visio's).
         if let Some(inner) = Popup::menu(&response).show(|ui| -> Result<(), UiError> {
-            if crate::pickers::show(ui, kind, larrygram_commands::Source::CommandBar, out) {
+            if crate::pickers::show(
+                    ui,
+                    kind,
+                    larrygram_commands::Source::CommandBar,
+                    crate::pickers::fill_preview(draw.app),
+                    out,
+                ) {
                 ui.close();
                 return Ok(());
             }
@@ -533,7 +545,13 @@ fn dropdown(
         .and_then(crate::pickers::picker_for)
     {
         if let Some(inner) = Popup::menu(&response).show(|ui| {
-            if crate::pickers::show(ui, kind, larrygram_commands::Source::CommandBar, out) {
+            if crate::pickers::show(
+                    ui,
+                    kind,
+                    larrygram_commands::Source::CommandBar,
+                    crate::pickers::fill_preview(draw.app),
+                    out,
+                ) {
                 ui.close();
             }
         }) {
@@ -709,7 +727,13 @@ fn show_menu_entry(
                 .map(|id| id.as_str())
                 .and_then(crate::pickers::picker_for)
             {
-                if crate::pickers::show(ui, kind, larrygram_commands::Source::CommandBar, out) {
+                if crate::pickers::show(
+                    ui,
+                    kind,
+                    larrygram_commands::Source::CommandBar,
+                    crate::pickers::fill_preview(draw.app),
+                    out,
+                ) {
                     egui::menu::MenuState::from_ui(ui, |state, _| state.open_item = None);
                 }
                 return Ok(());

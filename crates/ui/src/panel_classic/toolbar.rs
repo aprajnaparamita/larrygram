@@ -704,7 +704,13 @@ fn draw_popup(
                         .fixed_pos(state.popup_rect.left_bottom())
                         .show(ui.ctx(), |ui| {
                             egui::Frame::popup(ui.style()).show(ui, |ui| {
-                                chosen = crate::pickers::show(ui, kind, Source::Ui, intents);
+                                chosen = crate::pickers::show(
+                                    ui,
+                                    kind,
+                                    Source::Ui,
+                                    crate::pickers::fill_preview(input.app),
+                                    intents,
+                                );
                             });
                         });
                 state.popup_level_rects = vec![area.response.rect];

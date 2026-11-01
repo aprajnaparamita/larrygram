@@ -874,3 +874,81 @@ fn the_escape_cancels_the_format_painter() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Goal 7: the transparency rows preview the fill colour over a
+// checkerboard at that transparency, and choosing one applies.
+// ---------------------------------------------------------------------------
+
+/// Whether any pixel of the frame inside `rect` is within `tolerance`
+/// of `target`.
+fn row_shows(rig: &mut ShellRig, rect: egui::Rect, target: (i32, i32, i32), tolerance: i32) -> bool {
+    let image = rig.render();
+    let x0 = (rect.min.x.max(0.0) as u32).min(image.width());
+    let x1 = (rect.max.x.max(0.0) as u32).min(image.width());
+    let y0 = (rect.min.y.max(0.0) as u32).min(image.height());
+    let y1 = (rect.max.y.max(0.0) as u32).min(image.height());
+    for x in x0..x1 {
+        for y in y0..y1 {
+            let px = image.get_pixel(x, y);
+            if (i32::from(px[0]) - target.0).abs() <= tolerance
+                && (i32::from(px[1]) - target.1).abs() <= tolerance
+                && (i32::from(px[2]) - target.2).abs() <= tolerance
+            {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// The transparency rows show the fill colour over a checkerboard at
+/// their transparency (goal 7) and choosing one applies it.
+#[test]
+fn the_transparency_rows_preview_and_apply() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        select_shape(&mut rig);
+        let shape = rectangle(&rig.shell.borrow().app);
+        // The accent fill first: the preview tint is the fill colour.
+        open_fill_picker(&mut rig, kind);
+        click(&mut rig, Role::Button, "Accent #1F5BC4");
+        open_fill_picker(&mut rig, kind);
+
+        // The swatch of the opaque row paints the fill colour; the
+        // fully transparent row shows the checkerboard only.
+        let opaque = {
+            rig.run();
+            let root = rig.harness().root();
+            root.query_all_by_role_and_label(Role::Button, "0%")
+                .next()
+                .expect("the 0% row")
+                .rect()
+        };
+        assert!(
+            row_shows(&mut rig, opaque, (31, 91, 196), 6),
+            "{kind:?}: the opaque swatch paints the fill colour"
+        );
+        let clear = {
+            rig.run();
+            let root = rig.harness().root();
+            root.query_all_by_role_and_label(Role::Button, "100%")
+                .next()
+                .expect("the 100% row")
+                .rect()
+        };
+        assert!(
+            !row_shows(&mut rig, clear, (31, 91, 196), 6),
+            "{kind:?}: the transparent swatch shows the checkerboard only"
+        );
+
+        // Choosing a row applies it.
+        click(&mut rig, Role::Button, "50%");
+        let trans = cell_number(&rig, shape, "FillForegndTrans")
+            .unwrap_or_else(|| panic!("{kind:?}: the FillForegndTrans cell"));
+        assert!(
+            (trans - 0.5).abs() < 1.0e-9,
+            "{kind:?}: the 50% row applies ({trans})"
+        );
+    }
+}
