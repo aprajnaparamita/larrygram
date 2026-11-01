@@ -160,11 +160,7 @@ impl TextEditor {
                     .show(ui);
                 // The editor's accessible name (task P7-24: the tests
                 // and screen readers find the field by it).
-                output.response.response = output
-                    .response
-                    .response
-                    .clone()
-                    .accessible_name("Text");
+                output.response.response = output.response.response.clone().accessible_name("Text");
                 if request_focus {
                     output.response.request_focus();
                 }
