@@ -2185,6 +2185,7 @@ impl Shell {
                 .collapsible(false)
                 .resizable(true)
                 .default_width(300.0)
+                .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-12.0, 48.0))
                 .open(&mut open)
                 .show(ui.ctx(), |ui| {
                     produced = panes::show_format_shape(ui, &mut self.app, &mut state);
@@ -2496,7 +2497,13 @@ impl Shell {
                 self.line_dialog = Some(crate::format_dialogs::LineForm::from_app(&self.app));
             }
             Some(UiRequest::ShowFormatShape) => {
-                self.format_shape = Some(panes::FormatShape::from_app(&self.app));
+                // The pane toggles (a second `format.shape.pane` run
+                // closes it), like the Panel Classic toolbar row it
+                // shares its data id with.
+                self.format_shape = match self.format_shape.take() {
+                    Some(_) => None,
+                    None => Some(panes::FormatShape::from_app(&self.app)),
+                };
             }
             Some(UiRequest::ConfirmClose { name }) => self.confirm_close = Some(name.clone()),
             Some(UiRequest::Quit) => self.quit_requested = true,

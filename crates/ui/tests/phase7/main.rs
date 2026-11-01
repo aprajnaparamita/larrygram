@@ -23,6 +23,7 @@ mod combo_fixes;
 mod expect;
 mod first_run;
 mod fit;
+mod format_dialogs;
 mod golden;
 mod interaction;
 mod latch_fixes;

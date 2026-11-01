@@ -1862,9 +1862,9 @@ fn run_line(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError>
 }
 
 /// `format.shape.pane` (task P7-28): requests the Format Shape pane
-/// (`UiRequest::ShowFormatShape`) and changes nothing. The pane edits
-/// the same cells field by field, through `format.fill` and
-/// `format.line`.
+/// (`UiRequest::ShowFormatShape`) and changes nothing; the request
+/// toggles the pane (a second run closes it). The pane edits the same
+/// cells field by field, through `format.fill` and `format.line`.
 fn run_shape_pane(_ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandError> {
     Ok(Outcome {
         message: Some("Format Shape".to_owned()),
