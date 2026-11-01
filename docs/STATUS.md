@@ -52,7 +52,7 @@ Phase 7: Panel and Classic layouts, the Larrygram rename and the welcome wizard.
 | [P7-23](tasks/P7-23.md) | implementer | P7-21, P8-14 | I | merged (menu hints at the pointer, panes, one status message, layout radio items, Options from Tools, File and Cmd+,) | `382b128` |
 | [P7-24](tasks/P7-24.md) | implementer | P7-21, P8-14 | I | merged (formatting from the selection, font and size lists, Zoom box, Format Painter, transparency swatches, toggle state, Page Setup) | `db7627e` |
 | [P7-25](tasks/P7-25.md) | implementer | P7-22, P7-23 | I | merged (Text Block tool, Text tool icon, double-click, F2 and typing start text, the Text tool's one outline, one-step undo and clicks) | `dac8ed3` |
-| [P7-26](tasks/P7-26.md) | implementer | P7-24, P7-25 | I | ready (review fixes: Text Block resize, keyboard focus, clicks in a new box, Escape and the Format Painter, rotated resize, drag-sized text boxes) | — |
+| [P7-26](tasks/P7-26.md) | implementer | P7-24, P7-25 | I | merged (Text Block resize lands on the preview, keyboard focus guards, clicks in a new box, Format Painter Escape and tool change, insert rollback, fixed-edge and rotated resize, drag-sized text boxes, ADR 0044 amended) | `881a4c5` |
 | [P7-27](tasks/P7-27.md) | implementer | P7-24, P7-25 | I | merged (one page-size resolver, `Document::page_size`, background rung dropped; layout-neutral checked seam; latch follows the selection; one label table; `percent` only for Zoom) | `29ec390` |
 | [P7-28](tasks/P7-28.md) | implementer | P7-24, P7-25 | I | merged (the Fill and Line dialogs, the Format Shape pane as a window, ADR 0083; open: transparency unit, pane docking, dialog defaults) | `c895436` |
 
