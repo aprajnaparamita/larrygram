@@ -271,7 +271,7 @@ fn drag_intent(
                 return Ok(None);
             }
             let pin = frame.pin.add(moved);
-            text_block_intent(pin.x, pin.y, None, None)
+            text_block_intent(pin.x, pin.y, None, None, None)
         }
         HandleKind::Resize(edge) => {
             let (w_page, h_page) = resized_size(frame, start, current, edge);
@@ -290,9 +290,12 @@ fn drag_intent(
                 frame.pin.x + (w / 2.0 - frame.loc.x) * cos - (h / 2.0 - frame.loc.y) * sin,
                 frame.pin.y + (w / 2.0 - frame.loc.x) * sin + (h / 2.0 - frame.loc.y) * cos,
             );
-            // The derived `TxtLocPin*` cells follow the size (ADR 0038
-            // rule 2) when they hold their documented default, and
-            // keep their custom offset otherwise.
+            // The `TxtLocPin*` offset follows the size (ADR 0038 rule
+            // 2) when it holds the centre, and keeps its custom offset
+            // otherwise. The drag writes it beside the pin (task P7-26
+            // item 1): the cells' documented default follows the
+            // **shape's** `Width`, not `TxtWidth`, so the pin alone
+            // drew the block away from this preview.
             let default_loc = (w / 2.0, h / 2.0);
             let (loc_x, loc_y) = if (frame.loc.x - default_loc.0).abs() < 1.0e-9
                 && (frame.loc.y - default_loc.1).abs() < 1.0e-9
@@ -305,7 +308,13 @@ fn drag_intent(
                 center.x - ((width / 2.0 - loc_x) * cos - (height / 2.0 - loc_y) * sin),
                 center.y - ((width / 2.0 - loc_x) * sin + (height / 2.0 - loc_y) * cos),
             );
-            text_block_intent(pin.x, pin.y, Some(width), Some(height))
+            text_block_intent(
+                pin.x,
+                pin.y,
+                Some(width),
+                Some(height),
+                Some((loc_x, loc_y)),
+            )
         }
         // A rotate drag never starts (task P7-25 item 4).
         HandleKind::Rotate => Ok(None),
@@ -333,12 +342,15 @@ fn resized_size(frame: &Frame, start: Point, current: Point, edge: ResizeEdge) -
 }
 
 /// The `shape.set.text_block` intent for one finished drag (task
-/// P7-25 item 4).
+/// P7-25 item 4). `loc` is the pin's offset inside the block box
+/// (`TxtLocPinX`/`TxtLocPinY`, task P7-26 item 1): a resize sends it
+/// with the pin so the block lands where the preview showed it.
 fn text_block_intent(
     x: f64,
     y: f64,
     width: Option<f64>,
     height: Option<f64>,
+    loc: Option<(f64, f64)>,
 ) -> Result<Option<crate::Intent>, UiError> {
     let mut args = Args::new()
         .with("x", ArgValue::Number(x))
@@ -348,6 +360,11 @@ fn text_block_intent(
     }
     if let Some(height) = height {
         args = args.with("height", ArgValue::Number(height));
+    }
+    if let Some((loc_x, loc_y)) = loc {
+        args = args
+            .with("loc_x", ArgValue::Number(loc_x))
+            .with("loc_y", ArgValue::Number(loc_y));
     }
     let command = CommandId::parse("shape.set.text_block").map_err(|error| {
         UiError::Command(CommandError::failed(format!(
@@ -687,6 +704,11 @@ mod tests {
         assert_eq!(intent.invocation.args.number("x"), Some(1.5));
         assert_eq!(intent.invocation.args.number("y"), Some(0.75));
         assert_eq!(intent.invocation.args.number("width"), None);
+        assert_eq!(
+            intent.invocation.args.number("loc_x"),
+            None,
+            "a move keeps the block's own offset"
+        );
     }
 
     #[test]
@@ -724,6 +746,11 @@ mod tests {
         assert!((height - 0.75).abs() < 1.0e-9, "{height}");
         assert_eq!(intent.invocation.args.number("x"), Some(1.0));
         assert_eq!(intent.invocation.args.number("y"), Some(0.5));
+        // Task P7-26 item 1: the drag sends the pin's offset inside the
+        // block box (`TxtLocPinX`/`TxtLocPinY`) with the pin, so the
+        // block lands where the preview showed it.
+        assert_eq!(intent.invocation.args.number("loc_x"), Some(0.75));
+        assert_eq!(intent.invocation.args.number("loc_y"), Some(0.375));
     }
 
     #[test]
@@ -802,6 +829,6 @@ mod tests {
 
     #[test]
     fn the_static_command_id_is_valid() {
-        assert!(text_block_intent(0.0, 0.0, None, None).is_ok());
+        assert!(text_block_intent(0.0, 0.0, None, None, None).is_ok());
     }
 }
