@@ -16,7 +16,6 @@
 use egui::{Align, Layout, RichText, Ui};
 use larrygram_commands::app::{AppCtx, DisplayUnits};
 use larrygram_commands::{ArgValue, Args};
-use larrygram_model::{CellName, CellValue, Document, PageId, ValueSource};
 
 use crate::theme;
 
@@ -91,11 +90,12 @@ impl State {
     }
 }
 
-/// The page size as the app renders it (goal 11): `PageWidth` and
-/// `PageHeight` resolved through the model (P6-05: the page's own
-/// cells, then its style chain) with one rung added — a size
-/// inherited from the page's background page. A missing or
-/// non-positive size takes the scene builder's fallback (US Letter).
+/// The page size as the app renders it (goal 11): the one resolver
+/// every reader calls — [`larrygram_model::Document::page_size`], the
+/// P7-27 amendment of ADR 0019 (the page's own sheet, then its style
+/// chain) — falling back to the default Letter size when no document
+/// is open. The scene builder, the canvas and zoom-to-fit call the
+/// same helper, so the dialog and the drawn page cannot disagree.
 fn rendered_size(app: &AppCtx) -> (f64, f64) {
     let fallback = larrygram_render::FALLBACK_PAGE_SIZE;
     let Some(session) = app.active_document() else {
@@ -104,34 +104,7 @@ fn rendered_size(app: &AppCtx) -> (f64, f64) {
     let Some(page) = session.active_page else {
         return fallback;
     };
-    let doc = &session.document;
-    let width = resolved_size_cell(doc, page, "PageWidth", 0).unwrap_or(fallback.0);
-    let height = resolved_size_cell(doc, page, "PageHeight", 0).unwrap_or(fallback.1);
-    (width, height)
-}
-
-/// One positive page-size cell of `page`: its own cell or its style
-/// chain (P6-05), else the same cell of its background page (the
-/// inherited size, goal 11), up to four backgrounds deep (a background
-/// cycle can never recurse forever).
-fn resolved_size_cell(doc: &Document, page: PageId, cell: &str, depth: u32) -> Option<f64> {
-    let resolved = doc.resolve_page_cell(page, &CellName::new(cell)).ok()?;
-    let defined = match resolved.source {
-        ValueSource::Local | ValueSource::Style(_) => match resolved.value {
-            Some(CellValue::Number(value)) if value.is_finite() && *value > 0.0 => Some(*value),
-            _ => None,
-        },
-        _ => None,
-    };
-    if defined.is_some() {
-        return defined;
-    }
-    if depth < 4
-        && let Some(background) = doc.page(page).and_then(|entry| entry.background)
-    {
-        return resolved_size_cell(doc, background, cell, depth + 1);
-    }
-    None
+    session.document.page_size(page)
 }
 
 /// One size field as a positive number of inches.
@@ -226,6 +199,7 @@ mod tests {
     use super::*;
     use egui_kittest::{Harness, kittest::Queryable};
     use larrygram_commands::app::Settings;
+    use larrygram_model::{CellName, CellValue};
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -246,33 +220,47 @@ mod tests {
         cell
     }
 
-    /// Two pages: the first has no size of its own and inherits from
-    /// the second (goal 11's case).
-    fn app_with_background(first: &[(f64, f64)], second: &[(f64, f64)]) -> AppCtx {
+    /// One size cell pair (`PageWidth`, `PageHeight`).
+    fn size_cells(size: (f64, f64)) -> Vec<larrygram_model::Cell> {
+        vec![
+            page_cell("PageWidth", size.0),
+            page_cell("PageHeight", size.1),
+        ]
+    }
+
+    /// A one-page app whose page sheet carries `own` and whose
+    /// `LineStyle` link names a style sheet carrying `styled` (the
+    /// page's size can come from its style, P7-21's open issue).
+    fn app_with_sizes(own: Option<(f64, f64)>, styled: Option<(f64, f64)>) -> AppCtx {
+        use larrygram_model::{Document, QName, Style, StyleId, XmlAttribute};
+
         let mut doc = Document::new();
         doc.add_page("Page-1").expect("page");
-        doc.add_page("Page-2").expect("page");
-        for (index, sizes) in [(0usize, first), (1, second)] {
-            let page = doc.pages.get_mut(index).expect("page");
-            page.sheet.cells = sizes
-                .iter()
-                .flat_map(|(width, height)| {
-                    [
-                        page_cell("PageWidth", *width),
-                        page_cell("PageHeight", *height),
-                    ]
-                })
-                .collect();
+        if let Some(size) = own {
+            doc.pages[0].sheet.cells = size_cells(size);
         }
-        doc.pages[0].background = Some(PageId { index: 1 });
+        doc.pages[0].preserved.attributes.push(XmlAttribute {
+            name: QName {
+                prefix: None,
+                uri: None,
+                local: "LineStyle".to_owned(),
+            },
+            value: "7".to_owned(),
+        });
+        if let Some(size) = styled {
+            let mut style = Style::new(StyleId { index: 0 });
+            style.visio_id = 7;
+            style.sheet.cells = size_cells(size);
+            doc.stylesheet.styles.push(style);
+        }
         let mut app = AppCtx::new(Settings::default());
         app.open_document(larrygram_commands::DocumentSession::new(doc, None));
         app
     }
 
     #[test]
-    fn the_state_reads_a_size_inherited_from_the_background_page() {
-        let app = app_with_background(&[], &[(10.0, 6.0)]);
+    fn the_state_reads_a_size_from_the_style_chain() {
+        let app = app_with_sizes(None, Some((10.0, 6.0)));
         let state = State::from_app(&app);
         assert_eq!(state.width, "10");
         assert_eq!(state.height, "6");
@@ -280,26 +268,33 @@ mod tests {
     }
 
     #[test]
-    fn the_pages_own_size_wins_over_the_background() {
-        let app = app_with_background(&[(3.0, 4.0)], &[(10.0, 6.0)]);
+    fn the_pages_own_size_wins_over_the_style() {
+        let app = app_with_sizes(Some((3.0, 4.0)), Some((10.0, 6.0)));
         let state = State::from_app(&app);
         assert_eq!(state.width, "3");
         assert_eq!(state.height, "4");
     }
 
     #[test]
-    fn a_background_cycle_falls_back_to_letter() {
-        let mut app = app_with_background(&[], &[]);
-        let session = app.active_document_mut().expect("session");
-        session.document.pages[1].background = Some(PageId { index: 0 });
+    fn a_background_page_does_not_give_its_size() {
+        // The background rung is dropped (the P7-27 amendment of ADR
+        // 0019): no allowed source says a foreground page takes its
+        // size from its background page.
+        let mut app = app_with_sizes(None, None);
+        {
+            let session = app.active_document_mut().expect("session");
+            let background = session.document.add_page("Page-2").expect("page");
+            session.document.pages[1].sheet.cells = size_cells((10.0, 6.0));
+            session.document.pages[0].background = Some(background);
+        }
         let state = State::from_app(&app);
         assert_eq!(state.width, "8.5");
         assert_eq!(state.height, "11");
     }
 
     #[test]
-    fn a_non_positive_size_falls_through_to_the_background() {
-        let app = app_with_background(&[(0.0, -1.0)], &[(10.0, 6.0)]);
+    fn a_non_positive_size_falls_through_to_the_style() {
+        let app = app_with_sizes(Some((0.0, -1.0)), Some((10.0, 6.0)));
         let state = State::from_app(&app);
         assert_eq!(state.width, "10");
         assert_eq!(state.height, "6");

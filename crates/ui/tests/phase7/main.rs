@@ -29,6 +29,7 @@ mod manual;
 mod manual_fixes;
 mod menus;
 mod modern;
+mod page_size;
 mod palette;
 mod pickers;
 mod placement;

@@ -227,3 +227,41 @@ Divergences and limits:
   coordinate space: a resized instance whose own cells are all `Inh` draws
   the master's geometry at master coordinates (the instance's snapshots are
   not used, ADR 0013). Formula evaluation (Phase 6) fixes this.
+
+### Amended 2026-11-01, P7-27: the page-size pair, one resolver
+
+`Document::page_size(page)` resolves `PageWidth` and `PageHeight`
+**together**, as one pair, and every reader of the page size calls it: the
+scene builder (`render::build`), the canvas, zoom-to-fit
+(`commands::builtins::view`) and the Page Setup dialog. Each of them had a
+private copy of the rule and the copies disagreed (the P7-24 review, A2).
+
+The rule:
+
+1. **Both axes come from one sheet.** The rungs are *sheets*: the page's
+   own sheet first, then the sheets of its style chain (the page sheet's
+   `LineStyle`/`FillStyle`/`TextStyle` links, each chain followed through
+   the styles' own links of the same kind, cycles cut as in
+   `resolve_page_cell`). The first rung sheet that defines at least one
+   positive finite `PageWidth`/`PageHeight` supplies the pair; the axis it
+   does not supply takes that axis of the default (US Letter, portrait).
+   A width from one sheet and a height from another is therefore
+   impossible.
+2. **No background-page rung.** [MS-VSDX] 2.2.2.4 and 2.2.2.5 describe a
+   foreground page's `BackPage` reference ("the latter drawing page is to
+   be used as the background page for the former") and note that a
+   background page "can have a different drawing scale than a foreground
+   page"; the ShapeSheet reference's `PageWidth`/`PageHeight` cells say
+   nothing about a background page. No allowed source says a foreground
+   page takes its *size* from its background page, so the rung the P7-24
+   dialog added is dropped (it made the dialog and the canvas disagree).
+3. **The default pair** (8.5 x 11 in) answers when no rung supplies a
+   positive size and when the page id is stale. The constant lives in
+   `larrygram_model::DEFAULT_PAGE_SIZE`; `render::FALLBACK_PAGE_SIZE` is
+   the same value.
+
+The pair is deliberately *not* two `resolve_page_cell` calls: that
+function's style rung is selected by the cell's kind, and a `Page
+Properties` cell has none, so a page whose size lives on a style sheet
+would never find it. The pair rule above is the page-size contract; it
+lives beside `resolve_page_cell` and shares its style-walk discipline.

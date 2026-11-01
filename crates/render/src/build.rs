@@ -174,7 +174,7 @@ pub fn build_scene(doc: &Document, page: PageId, options: &BuildOptions) -> Resu
     let entity = doc
         .page(page)
         .ok_or(Error::Model(larrygram_model::Error::UnknownPage(page)))?;
-    let (width, height) = page_size(&mut ctx, page);
+    let (width, height) = ctx.doc.page_size(page);
     let mut scene = Scene::new(width, height);
 
     let mut seen = Vec::new();
@@ -708,33 +708,17 @@ fn shape_content(
     (fill_path, stroke_path, fill, stroke, shadow, text)
 }
 
-/// The page size used when a page has no positive `PageWidth` or
-/// `PageHeight` (US Letter, portrait, in inches). Files without a page
-/// sheet exist in the corpus; a zero-size scene cannot be rasterized.
-/// The view commands and the canvas use the same value.
-pub const FALLBACK_PAGE_SIZE: (f64, f64) = (8.5, 11.0);
-
-/// The page size in inches. A missing, zero, negative or non-finite
-/// `PageWidth` or `PageHeight` takes the [`FALLBACK_PAGE_SIZE`] value (the
-/// reader already records a warning for a missing or bad cell).
-fn page_size(ctx: &mut Ctx<'_>, page: PageId) -> (f64, f64) {
-    let sheet = SheetRef::Page(page);
-    let positive = |value: f64, fallback: f64| {
-        if value.is_finite() && value > 0.0 {
-            value
-        } else {
-            fallback
-        }
-    };
-    let width = positive(ctx.number(sheet, "PageWidth"), FALLBACK_PAGE_SIZE.0);
-    let height = positive(ctx.number(sheet, "PageHeight"), FALLBACK_PAGE_SIZE.1);
-    (width, height)
-}
+/// The page size used when no rung of [`Document::page_size`] supplies a
+/// positive size (US Letter, portrait, in inches): the same value as
+/// [`larrygram_model::DEFAULT_PAGE_SIZE`]. Files without a page sheet
+/// exist in the corpus; a zero-size scene cannot be rasterized. The view
+/// commands and the canvas use the same value.
+pub const FALLBACK_PAGE_SIZE: (f64, f64) = larrygram_model::DEFAULT_PAGE_SIZE;
 
 /// The page rectangle in the shape's local coordinates (the `InfiniteLine`
 /// clip), or `None` when the shape transform cannot be inverted.
 fn page_rect_in_local(ctx: &mut Ctx<'_>, page: PageId, transform: Transform) -> Option<[Point; 4]> {
-    let (width, height) = page_size(ctx, page);
+    let (width, height) = ctx.doc.page_size(page);
     let inverse = transform.invert().ok()?;
     Some([
         inverse.apply(Point::new(0.0, 0.0)),
@@ -2121,8 +2105,8 @@ impl Ctx<'_> {
 #[cfg(test)]
 mod tests {
     use larrygram_model::{
-        Cell, CellValue as Value, Master, MasterId, Page, Row, Section, SectionName,
-        Shape as ModelShape, TextContent, TextPart,
+        Cell, CellValue as Value, Master, MasterId, Page, QName, Row, Section, SectionName,
+        Shape as ModelShape, Style, StyleId, TextContent, TextPart, XmlAttribute,
     };
 
     use super::*;
@@ -3217,6 +3201,33 @@ mod tests {
         }
         let scene = build(&doc);
         assert_eq!((scene.width, scene.height), (11.0, 8.5));
+    }
+
+    #[test]
+    fn the_scene_size_comes_from_the_style_chain() {
+        // The page sheet defines no size; the style it links does (the
+        // P7-27 amendment of ADR 0019: one page-size resolver, called by
+        // the scene builder too).
+        let (mut doc, page, _shape) = document_with_shape();
+        if let Some(entity) = doc.pages.get_mut(page.index as usize) {
+            entity.preserved.attributes.push(XmlAttribute {
+                name: QName {
+                    prefix: None,
+                    uri: None,
+                    local: "LineStyle".to_owned(),
+                },
+                value: "7".to_owned(),
+            });
+        }
+        let mut style = Style::new(StyleId { index: 0 });
+        style.visio_id = 7;
+        style.sheet.cells = vec![
+            number_cell("PageWidth", 10.0),
+            number_cell("PageHeight", 6.0),
+        ];
+        doc.stylesheet.styles.push(style);
+        let scene = build(&doc);
+        assert_eq!((scene.width, scene.height), (10.0, 6.0));
     }
 
     // --- text --------------------------------------------------------

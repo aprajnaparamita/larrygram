@@ -956,15 +956,15 @@ fn apply_page_setup(
 ) -> Result<Outcome, CommandError> {
     let (session_id, page) = active_page(ctx)?;
     let session = ctx.active_document().ok_or_else(super::no_document)?;
-    let entity = session
+    session
         .document
         .page(page)
         .ok_or_else(|| CommandError::failed("the active page is gone"))?;
-    let mut size = setup.size.unwrap_or(page_size(entity));
+    let mut size = setup.size.unwrap_or(page_size(&session.document, page));
     if let Some(orientation) = setup.orientation {
         size = orientation.fit(size);
     }
-    let current = page_size(entity);
+    let current = page_size(&session.document, page);
     let mut edit = CompositeEdit::new(label);
     let mut changed = false;
     if size != current {
@@ -1197,7 +1197,11 @@ mod tests {
         let session = ctx.active_document().expect("session");
         assert_eq!(session.document.pages.len(), 3);
         let copy = &session.document.pages[2];
-        assert_eq!(page_size(copy), (5.0, 7.0), "the copy keeps the page setup");
+        assert_eq!(
+            page_size(&session.document, copy.id),
+            (5.0, 7.0),
+            "the copy keeps the page setup"
+        );
         assert_eq!(copy.background, Some(PageId { index: 1 }));
     }
 
@@ -1397,7 +1401,7 @@ mod tests {
             Some("Page setup: 11.00 x 8.50 in, landscape, Millimeters")
         );
         let session = ctx.active_document().expect("session");
-        let (width, height) = page_size(&session.document.pages[0]);
+        let (width, height) = page_size(&session.document, PageId { index: 0 });
         assert_eq!((width, height), (11.0, 8.5));
         assert_eq!(ctx.settings.units, crate::DisplayUnits::Millimeters);
 
@@ -1407,7 +1411,7 @@ mod tests {
         edit.revert(&mut ctx).expect("undo");
         let session = ctx.active_document().expect("session");
         assert_eq!(
-            page_size(&session.document.pages[0]),
+            page_size(&session.document, PageId { index: 0 }),
             larrygram_render::FALLBACK_PAGE_SIZE,
             "undo restores the size"
         );
@@ -1438,7 +1442,7 @@ mod tests {
         );
         let session = ctx.active_document().expect("session");
         assert_eq!(
-            page_size(&session.document.pages[0]),
+            page_size(&session.document, PageId { index: 0 }),
             (8.5, 11.0),
             "swapped"
         );
@@ -1450,7 +1454,7 @@ mod tests {
         .expect("landscape");
         let session = ctx.active_document().expect("session");
         assert_eq!(
-            page_size(&session.document.pages[0]),
+            page_size(&session.document, PageId { index: 0 }),
             (11.0, 8.5),
             "swapped back"
         );
@@ -1512,7 +1516,10 @@ mod tests {
             Some("Page size: 5.00 x 7.00 in")
         );
         let session = ctx.active_document().expect("session");
-        assert_eq!(page_size(&session.document.pages[0]), (5.0, 7.0));
+        assert_eq!(
+            page_size(&session.document, PageId { index: 0 }),
+            (5.0, 7.0)
+        );
     }
 
     /// The page-setup parser rejects half a size and unknown values
