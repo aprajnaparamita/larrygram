@@ -795,8 +795,10 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | file.render | Render | implemented |
 | file.save | Save | implemented |
 | file.save_as | Save As | implemented |
+| format.fill | Fill | implemented |
 | format.fill_color.no_fill | No Fill | implemented |
 | format.fill_color.use_default | Use Default | implemented |
+| format.line | Line | implemented |
 | format.line_color.no_line | No Line | implemented |
 | format.line_color.use_default | Use Default | implemented |
 | format.line_ends.no_line_ends | No Line Ends | implemented |
@@ -807,6 +809,7 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | format.set.line.pattern | Line Pattern | implemented |
 | format.set.line.weight | Line Weight | implemented |
 | format.set.page.orientation | Page Orientation | implemented |
+| format.shape.pane | Format Shape | implemented |
 | format.text.align_bottom | Bottom-Align Text | implemented |
 | format.text.align_center | Center Text | implemented |
 | format.text.align_justify | Justify Text | implemented |
@@ -1248,11 +1251,9 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | format.decrease.para.spacing | Spacing | stub |
 | format.define.styles | Styles | stub |
 | format.double.click | Click | stub |
-| format.fill | Fill | stub |
 | format.increase.indent | Indent Increase Word | stub |
 | format.increase.para.spacing | Spacing | stub |
 | format.ink.dlg | Dlg | stub |
-| format.line | Line | stub |
 | format.paragraph | Paragraph | stub |
 | format.picture.autobalance | Autobalance | stub |
 | format.picture.compression.dlg | Dlg | stub |
@@ -1278,7 +1279,6 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | format.set.page.size | Size | stub |
 | format.set.theme.behavior | Behavior | stub |
 | format.shadow | Shadow | stub |
-| format.shape.pane | Format Shape | stub |
 | format.special | Special | stub |
 | format.style | Style | stub |
 | format.style.explorer | Style Explorer | stub |
