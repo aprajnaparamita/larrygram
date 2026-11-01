@@ -811,7 +811,7 @@ icons:
     icon: link
     tint: icon.blue
   tools.text:
-    icon: letter-a
+    icon: typeface
   tools.text_block:
     icon: text-resize
     tint: icon.blue

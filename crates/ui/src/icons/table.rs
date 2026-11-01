@@ -546,10 +546,6 @@ pub static ICONS: &[IconDef] = &[
         bytes: include_bytes!("../../assets/icons/tabler/layout-sidebar-right.svg"),
     },
     IconDef {
-        name: "letter-a",
-        bytes: include_bytes!("../../assets/icons/tabler/letter-a.svg"),
-    },
-    IconDef {
         name: "letter-case",
         bytes: include_bytes!("../../assets/icons/tabler/letter-case.svg"),
     },
@@ -952,6 +948,10 @@ pub static ICONS: &[IconDef] = &[
     IconDef {
         name: "triangle",
         bytes: include_bytes!("../../assets/icons/tabler/triangle.svg"),
+    },
+    IconDef {
+        name: "typeface",
+        bytes: include_bytes!("../../assets/icons/tabler/typeface.svg"),
     },
     IconDef {
         name: "typography",
@@ -2710,7 +2710,7 @@ pub static ENTRIES: &[IconEntryDef] = &[
     },
     IconEntryDef {
         key: "tools.text",
-        icon: "letter-a",
+        icon: "typeface",
         tint: None,
     },
     IconEntryDef {

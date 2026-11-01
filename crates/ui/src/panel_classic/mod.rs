@@ -231,6 +231,7 @@ impl CheckedState for ToolLatch {
             "shape.line" => Some(ActiveTool::Line),
             "tools.connector" => Some(ActiveTool::Connector),
             "tools.text" => Some(ActiveTool::Text),
+            "tools.text_block" => Some(ActiveTool::TextBlock),
             _ => return None,
         };
         Some(tool.is_some_and(|tool| app.active_tool() == tool))

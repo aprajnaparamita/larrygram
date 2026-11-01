@@ -12,7 +12,7 @@ use std::rc::Rc;
 
 use egui_kittest::Harness;
 use larrygram_commands::app::{AppCtx, DocumentSession};
-use larrygram_commands::{CommandId, Invocation, Source};
+use larrygram_commands::{ArgValue, Args, CommandId, Invocation, Source};
 use larrygram_model::{
     Document, PageId, Row, Section, SectionName, Shape, ShapeId, TextContent, TextPart,
 };
@@ -216,7 +216,7 @@ fn escape_commits_and_leaves_the_editor_idle() {
 }
 
 #[test]
-fn the_text_tool_emits_insert_then_begin_and_the_registry_selects_the_box() {
+fn the_text_tool_click_defers_the_box_and_the_commit_inserts_it_with_text() {
     let (app, _shape) = fixture();
     let registry = larrygram_commands::builtins::registry().expect("builtins");
     let mut app = app;
@@ -231,29 +231,46 @@ fn the_text_tool_emits_insert_then_begin_and_the_registry_selects_the_box() {
             &app,
         )
         .expect("the text tool handles the release");
+    // Task P7-25 item 9: the click starts a pending text box and
+    // inserts nothing until the text commits (one undo step).
+    assert!(effect.intents.is_empty());
+    let pending = machine.take_pending_text_box().expect("a pending box");
+    assert_eq!((pending.x, pending.y), (2.0, 3.0));
     assert_eq!(
-        effect
-            .intents
-            .iter()
-            .map(|intent| intent.command.as_str())
-            .collect::<Vec<_>>(),
-        ["insert.drawing.text_box", "text.begin"]
+        (pending.width, pending.height),
+        (
+            larrygram_ui::tools::text::TEXT_BOX_WIDTH_IN,
+            larrygram_ui::tools::text::TEXT_BOX_HEIGHT_IN,
+        )
     );
-    for intent in effect.intents {
-        let outcome = dispatch_one(&registry, &mut app, &intent.command, intent.invocation)
-            .expect("the tool intents run");
-        let _ = outcome;
-    }
+    // The commit the shell builds for it (task P7-25 item 9): one
+    // `insert.drawing.text_box` carrying the typed text.
+    let args = Args::new()
+        .with("x", ArgValue::Number(pending.x))
+        .with("y", ArgValue::Number(pending.y))
+        .with("width", ArgValue::Number(pending.width))
+        .with("height", ArgValue::Number(pending.height))
+        .with("text", ArgValue::Text("Hi".to_owned()));
+    let command = CommandId::parse("insert.drawing.text_box").expect("a valid command id");
+    dispatch_one(
+        &registry,
+        &mut app,
+        &command,
+        Invocation::new(args, Source::Test),
+    )
+    .expect("the insert runs");
     // P5-06's `insert.drawing.text_box` selects the new box.
     let shape = app.selection.anchor.expect("the insert selected the box");
     assert_ne!(shape, _shape, "a new shape, not the fixture's");
     assert_eq!(app.selection.shapes, vec![shape]);
-    // The shell would now open the editor on this selected shape.
-    let mut editor = TextEditor::new();
-    editor
-        .begin(shape, &shape_text(&app, shape).unwrap_or_default())
-        .expect("begin");
-    assert!(editor.is_active());
+    let written = shape_text(&app, shape).expect("the new box has text");
+    assert!(
+        written
+            .parts
+            .iter()
+            .any(|part| matches!(part, TextPart::Text(text) if text == "Hi")),
+        "the box is created with its text: {written:?}"
+    );
 }
 
 // ---------------------------------------------------------------------------

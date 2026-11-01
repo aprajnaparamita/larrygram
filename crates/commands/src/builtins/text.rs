@@ -170,6 +170,25 @@ fn one_run(doc: &Document, shape: ShapeId, text: &str) -> TextContent {
     TextContent { parts }
 }
 
+/// The undoable step that writes `literal` as `shape`'s one-run text
+/// (ADR 0044), for a command that writes text beside another edit
+/// (`insert.drawing.text_box`'s `text` argument, task P7-25 item 9:
+/// one text object is one undo step). The caller applies and pushes
+/// the step.
+pub(crate) fn text_edit_step(
+    doc: &Document,
+    session: SessionId,
+    shape: ShapeId,
+    literal: &str,
+) -> Result<Box<dyn Edit>, CommandError> {
+    Ok(Box::new(TextEdit::new(
+        doc,
+        session,
+        shape,
+        one_run(doc, shape, literal),
+    )))
+}
+
 /// One undoable text replacement (ADR 0044): `apply` writes the one-run
 /// text through `Document::set_shape_text`; `revert` restores the exact
 /// prior `TextContent` and preserved element, including a shape that had

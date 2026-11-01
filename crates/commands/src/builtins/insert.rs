@@ -14,7 +14,9 @@
 //!   `insert.drawing.line`, `insert.drawing.text_box` — `x`, `y`,
 //!   `width`, `height` in inches. The rectangle, ellipse and text box
 //!   use `x`/`y` as the lower-left corner; the line uses them as its
-//!   start and `width`/`height` as the signed delta.
+//!   start and `width`/`height` as the signed delta. The text box
+//!   takes an optional `text` (task P7-25 item 9): the text is written
+//!   in the same undo step as the insertion.
 //!
 //! Every command creates exactly one shape and returns exactly one
 //! [`CompositeEdit`](crate::CompositeEdit) step ([`StructuralEdit::insertion`],
@@ -320,16 +322,45 @@ fn insert_drawing(
         ));
     }
     let (session, page) = active_page(ctx)?;
+    // The text of a text box (task P7-25 item 9): one undo step with
+    // its insertion, so one undo removes the new text object with its
+    // text. The other drawing commands take no `text`.
+    let literal = match inv.args.get("text") {
+        None => None,
+        Some(crate::ArgValue::Text(text)) if drawing == Drawing::TextBox => {
+            Some(text.clone()).filter(|text| !text.is_empty())
+        }
+        Some(crate::ArgValue::Text(_)) => {
+            return Err(CommandError::invalid_args(
+                "text is only an argument of insert.drawing.text_box",
+            ));
+        }
+        Some(_) => return Err(CommandError::invalid_args("text must be a string")),
+    };
     let (label, shape) = {
         let doc = document_mut(ctx, session)?;
         let shape = drawing_shape(drawing, x, y, width, height);
         let shape = doc.insert_shape(page, shape, None).map_err(model_error)?;
         (drawing.label().to_owned(), shape)
     };
-    let edit = {
+    let mut edit = CompositeEdit::new(label.clone());
+    {
         let doc = document_mut(ctx, session)?;
-        StructuralEdit::insertion(doc, session, label.clone(), shape)?
-    };
+        edit.push(Box::new(StructuralEdit::insertion(
+            doc,
+            session,
+            label.clone(),
+            shape,
+        )?));
+    }
+    if let Some(literal) = &literal {
+        let mut step = {
+            let doc = document_mut(ctx, session)?;
+            super::text::text_edit_step(doc, session, shape, literal)?
+        };
+        step.apply(ctx)?;
+        edit.push(step);
+    }
     select_new(ctx, session, page, shape)?;
     ctx.touch_session(session);
     Ok(edit_outcome(label, Vec::new(), Box::new(edit)))
@@ -801,8 +832,8 @@ fn optional_row(args: &crate::Args, name: &str) -> Result<Option<usize>, Command
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Source;
     use crate::app::{DocumentSession, Settings};
+    use crate::{ArgValue, Args, Source};
 
     /// A session with one page and one 2x1 rectangle on it.
     fn fixture() -> (AppCtx, SessionId, larrygram_model::PageId, ShapeId) {
@@ -963,5 +994,74 @@ mod tests {
         let error = run_text_box_horizontal(&mut ctx, &Invocation::empty(Source::Ui))
             .expect_err("no document");
         assert!(error.to_string().contains("no open document"), "{error}");
+    }
+
+    /// Task P7-25 item 9: `insert.drawing.text_box` writes its `text`
+    /// argument in the same undo step as the insertion, so one undo
+    /// removes the new text object with its text.
+    #[test]
+    fn a_text_box_with_text_is_one_undo_step() {
+        let (mut ctx, _session, page, _shape) = fixture();
+        let inv = Invocation::new(
+            Args::new()
+                .with("x", ArgValue::Number(1.0))
+                .with("y", ArgValue::Number(1.0))
+                .with("width", ArgValue::Number(2.0))
+                .with("height", ArgValue::Number(0.5))
+                .with("text", ArgValue::Text("Hi".to_owned())),
+            Source::Ui,
+        );
+        let outcome = run_text_box(&mut ctx, &inv).expect("box");
+        let mut edit = outcome.edit.expect("one undo step");
+        {
+            let doc = &ctx.active_document().expect("session").document;
+            let entry = doc.page(page).expect("page");
+            let id = *entry.shapes.last().expect("the new shape");
+            let shape = doc.shape(id).expect("shape");
+            let text: String = shape
+                .text
+                .as_ref()
+                .map(|text| {
+                    text.parts
+                        .iter()
+                        .filter_map(|part| match part {
+                            larrygram_model::TextPart::Text(literal) => Some(literal.as_str()),
+                            _ => None,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            assert_eq!(text, "Hi", "the text lands on the new shape");
+        }
+        // One revert removes the text object with its text.
+        edit.revert(&mut ctx).expect("revert");
+        let doc = &ctx.active_document().expect("session").document;
+        let entry = doc.page(page).expect("page");
+        assert_eq!(entry.shapes.len(), 1, "only the fixture shape stays");
+    }
+
+    /// The `text` argument contract of the drawing commands.
+    #[test]
+    fn the_drawing_commands_validate_their_text_argument() {
+        let (mut ctx, _session, _page, _shape) = fixture();
+        let args = || {
+            Args::new()
+                .with("x", ArgValue::Number(1.0))
+                .with("y", ArgValue::Number(1.0))
+                .with("width", ArgValue::Number(2.0))
+                .with("height", ArgValue::Number(0.5))
+        };
+        let inv = Invocation::new(
+            args().with("text", ArgValue::Text("Hi".to_owned())),
+            Source::Ui,
+        );
+        let error = run_rectangle(&mut ctx, &inv).expect_err("rectangle takes no text");
+        assert!(error.to_string().contains("only an argument"), "{error}");
+        let inv = Invocation::new(args().with("text", ArgValue::Integer(3)), Source::Ui);
+        let error = run_text_box(&mut ctx, &inv).expect_err("text must be a string");
+        assert!(
+            error.to_string().contains("text must be a string"),
+            "{error}"
+        );
     }
 }

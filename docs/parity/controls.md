@@ -72,6 +72,7 @@ A row listed in `ui-spec/out-of-scope.txt` stays `out-of-scope` even when a comm
 | TextAlignBottom | toggleButton | TextAlignBottom | tab/TabHome/GroupParagraph | implemented |
 | TextAlignMiddle | toggleButton | TextAlignMiddle | tab/TabHome/GroupParagraph | implemented |
 | TextAlignTop | toggleButton | TextAlignTop | tab/TabHome/GroupParagraph | implemented |
+| TextBlockTool | toggleButton | TextBlockTool | tab/TabHome/GroupTools | implemented |
 | TextBoxInsertHorizontal | toggleButton | TextBoxInsertHorizontal | tab/TabInsert/GroupTextBoxText | implemented |
 | TextBoxInsertMenu | splitButton | TextBoxInsertMenu | tab/TabInsert/GroupTextBoxText | implemented |
 | TextBoxInsertVertical | toggleButton | TextBoxInsertVertical | tab/TabInsert/GroupTextBoxText | implemented |
@@ -658,7 +659,6 @@ A row listed in `ui-spec/out-of-scope.txt` stays `out-of-scope` even when a comm
 | TabView | tab | TabView | tab/TabView | stub |
 | TaskPanesMenuVisio | menu | TaskPanesMenuVisio | tab/TabView/GroupViewShowHide | stub |
 | TextAllCaps | toggleButton | TextAllCaps | tab/TabHome/GroupFont | stub |
-| TextBlockTool | toggleButton | TextBlockTool | tab/TabHome/GroupTools | stub |
 | TextDirectionLeftToRight | toggleButton | TextDirectionLeftToRight | tab/TabHome/GroupParagraph | stub |
 | TextDirectionRightToLeft | toggleButton | TextDirectionRightToLeft | tab/TabHome/GroupParagraph | stub |
 | TextDirectionVertical | button | TextDirectionVertical | tab/TabHome/GroupParagraph | stub |
@@ -855,6 +855,7 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | shape.set.height | Height | implemented |
 | shape.set.pin | Position | implemented |
 | shape.set.text | Shape Text | implemented |
+| shape.set.text_block | Text Block | implemented |
 | shape.set.width | Width | implemented |
 | shape.transparency | Transparency | implemented |
 | shape.transparency.dlg | Dlg | implemented |
@@ -883,6 +884,7 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | tools.rectangle | Rectangle | implemented |
 | tools.strikethrough | Strikethrough | implemented |
 | tools.text | Text Tool | implemented |
+| tools.text_block | Text Block Tool | implemented |
 | view.custom | Custom | implemented |
 | view.fit.in.window | Window | implemented |
 | view.full_screen_mode | Full Screen | implemented |
@@ -1715,7 +1717,6 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | tools.subprocess.edit.link | Subprocess Edit Link | stub |
 | tools.subprocess.link.to.existing | Subprocess Link To Existing | stub |
 | tools.symbols.dialog | Symbols Dialog | stub |
-| tools.text_block | Text Block Tool | stub |
 | tools.theme.colors.gallery.visio | Theme Colors Gallery Visio | stub |
 | tools.theme.connectors | Theme Connectors | stub |
 | tools.theme.effects.gallery.visio | Theme Effects Gallery Visio | stub |
