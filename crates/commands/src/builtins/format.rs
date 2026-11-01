@@ -844,13 +844,15 @@ fn need_text(inv: &Invocation, names: &[&str], prompt: &str) -> Result<String, C
 }
 
 /// The text of a numeric argument without its optional trailing `pt`
-/// (the picker labels spell points: "0.25 pt").
+/// in any case (the picker labels spell points: "0.25 pt", and a typed
+/// value may be "0.25 PT" or "0.25 Pt"; `typed_number` trims the same
+/// suffix).
 fn strip_pt(text: &str) -> &str {
     let trimmed = text.trim();
-    trimmed
-        .strip_suffix("pt")
-        .map(|rest| rest.trim_end())
-        .unwrap_or(trimmed)
+    match trimmed.split_at_checked(trimmed.len().saturating_sub(2)) {
+        Some((head, tail)) if tail.eq_ignore_ascii_case("pt") => head.trim_end(),
+        _ => trimmed,
+    }
 }
 
 /// The first argument present under any of `names`, spelled as text.
@@ -1378,6 +1380,43 @@ fn run_line_weight(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, Comman
     })
 }
 
+/// The line patterns: `(index, label)`, one row per pattern the
+/// pickers list (1 is solid; the rest dash the stroke). This is the
+/// one table the commands and the pickers share (the P7-27 review
+/// A6): `format.set.line.pattern` parses these labels and
+/// [`crate::builtins`] re-exports the table for the pickers to draw.
+pub const LINE_PATTERNS: &[(f64, &str)] = &[
+    (1.0, "Solid"),
+    (2.0, "Dashed"),
+    (3.0, "Dotted"),
+    (4.0, "Dash-dot"),
+    (5.0, "Dash-dot-dot"),
+    (6.0, "Dot-dash-dash"),
+    (7.0, "Long dash"),
+    (8.0, "Long-short dash"),
+];
+
+/// The arrowheads: `(index, label)`, one row per arrowhead the pickers
+/// list (0 is no arrowhead). The one table (the P7-27 review A6), as
+/// [`LINE_PATTERNS`].
+pub const LINE_ARROWS: &[(f64, &str)] = &[
+    (0.0, "None"),
+    (1.0, "Arrow"),
+    (2.0, "Open"),
+    (3.0, "Stealth"),
+    (4.0, "Diamond"),
+    (5.0, "Dot"),
+];
+
+/// The index of `key` (trimmed, any case) among the `labels` of one
+/// label table.
+fn label_index(key: &str, labels: &[(f64, &str)]) -> Option<f64> {
+    labels
+        .iter()
+        .find(|(_, label)| label.eq_ignore_ascii_case(key))
+        .map(|(index, _)| *index)
+}
+
 /// `format.set.line.pattern`: the stroke pattern index (1 is solid).
 fn run_line_pattern(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError> {
     let index = pattern_index(inv)?;
@@ -1390,29 +1429,24 @@ fn run_line_pattern(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, Comma
 }
 
 /// The pattern index of the `value`/`pattern` argument: a number, the
-/// name `none` (0) / `solid` (1), or one of the pattern labels the
-/// pickers show ("Dashed", "Dotted", ...).
+/// name `none` (0), or one of the [`LINE_PATTERNS`] labels the pickers
+/// show ("Dashed", "Dotted", ...), in any case.
 fn pattern_index(inv: &Invocation) -> Result<f64, CommandError> {
     if let Some(text) = arg_text(inv, &["pattern", "value"]) {
         let key = text.trim().to_ascii_lowercase();
         return match key.as_str() {
             "none" | "no line" | "noline" => Ok(0.0),
-            "solid" => Ok(1.0),
-            "dashed" => Ok(2.0),
-            "dotted" => Ok(3.0),
-            "dash-dot" => Ok(4.0),
-            "dash-dot-dot" => Ok(5.0),
-            "dot-dash-dash" => Ok(6.0),
-            "long dash" => Ok(7.0),
-            "long-short dash" => Ok(8.0),
-            _ => match key.parse::<f64>() {
-                Ok(value) if value.is_finite() && (0.0..=24.0).contains(&value) => Ok(value),
-                Ok(_) => Err(CommandError::invalid_args(
-                    "line pattern must be between 0 and 24",
-                )),
-                Err(_) => Err(CommandError::invalid_args(
-                    "line pattern must be a number or a pattern name",
-                )),
+            _ => match label_index(&key, LINE_PATTERNS) {
+                Some(index) => Ok(index),
+                None => match key.parse::<f64>() {
+                    Ok(value) if value.is_finite() && (0.0..=24.0).contains(&value) => Ok(value),
+                    Ok(_) => Err(CommandError::invalid_args(
+                        "line pattern must be between 0 and 24",
+                    )),
+                    Err(_) => Err(CommandError::invalid_args(
+                        "line pattern must be a number or a pattern name",
+                    )),
+                },
             },
         };
     }
@@ -1467,27 +1501,28 @@ fn run_line_no_ends(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, Comm
     })
 }
 
-/// The arrowhead index of the `value`/`begin`/`end` argument: a number,
-/// the name `none` (0), or one of the arrowhead labels the pickers
-/// show ("Arrow", "Open", "Stealth", "Diamond", "Dot").
+/// The arrowhead index of the `value`/`begin`/`end` argument: a
+/// number, the name `none` (0), or one of the [`LINE_ARROWS`] labels
+/// the pickers show ("Arrow", "Open", "Stealth", "Diamond", "Dot"), in
+/// any case.
 fn arrow_index(inv: &Invocation, names: &[&str]) -> Result<Option<f64>, CommandError> {
     if let Some(text) = arg_text(inv, names) {
         let key = text.trim().to_ascii_lowercase();
         return match key.as_str() {
             "none" | "no line ends" | "nolineends" => Ok(Some(0.0)),
-            "arrow" => Ok(Some(1.0)),
-            "open" => Ok(Some(2.0)),
-            "stealth" => Ok(Some(3.0)),
-            "diamond" => Ok(Some(4.0)),
-            "dot" => Ok(Some(5.0)),
-            _ => match key.parse::<f64>() {
-                Ok(value) if value.is_finite() && (0.0..=24.0).contains(&value) => Ok(Some(value)),
-                Ok(_) => Err(CommandError::invalid_args(
-                    "arrowhead must be between 0 and 24",
-                )),
-                Err(_) => Err(CommandError::invalid_args(
-                    "arrowhead must be a number or a name",
-                )),
+            _ => match label_index(&key, LINE_ARROWS) {
+                Some(index) => Ok(Some(index)),
+                None => match key.parse::<f64>() {
+                    Ok(value) if value.is_finite() && (0.0..=24.0).contains(&value) => {
+                        Ok(Some(value))
+                    }
+                    Ok(_) => Err(CommandError::invalid_args(
+                        "arrowhead must be between 0 and 24",
+                    )),
+                    Err(_) => Err(CommandError::invalid_args(
+                        "arrowhead must be a number or a name",
+                    )),
+                },
             },
         };
     }
@@ -2018,6 +2053,59 @@ mod tests {
             Some(larrygram_model::CellValue::Number(5.0)),
             "dot is 5"
         );
+    }
+
+    #[test]
+    fn the_labels_and_the_pt_suffix_parse_in_any_case() {
+        // The one label table serves both the picker rows and the menu
+        // `options` labels; the case of the argument is the user's (the
+        // P7-27 review A6).
+        let (mut ctx, _session, shape) = session();
+        call(
+            &mut ctx,
+            "format.set.line.pattern",
+            Args::new().with("value", ArgValue::Text("DASHED".to_owned())),
+        )
+        .expect("upper-case pattern label");
+        call(
+            &mut ctx,
+            "format.set.line.ends",
+            Args::new().with("value", ArgValue::Text("sTeAlTh".to_owned())),
+        )
+        .expect("mixed-case arrow label");
+        call(
+            &mut ctx,
+            "format.set.line.weight",
+            Args::new().with("value", ArgValue::Text("1.5 Pt".to_owned())),
+        )
+        .expect("mixed-case pt suffix");
+        let doc = &ctx.active_document().expect("document").document;
+        assert_eq!(
+            cell_of(doc, shape, "LinePattern").and_then(|cell| cell.value),
+            Some(larrygram_model::CellValue::Number(2.0)),
+            "DASHED is the table's Dashed"
+        );
+        assert_eq!(
+            cell_of(doc, shape, "BeginArrow").and_then(|cell| cell.value),
+            Some(larrygram_model::CellValue::Number(3.0)),
+            "sTeAlTh is the table's Stealth"
+        );
+        assert_eq!(
+            cell_of(doc, shape, "LineWeight").and_then(|cell| cell.value),
+            Some(larrygram_model::CellValue::Number(1.5 / 72.0)),
+            "1.5 Pt parses like 1.5 pt"
+        );
+    }
+
+    #[test]
+    fn strip_pt_trims_any_case_and_nothing_else() {
+        assert_eq!(strip_pt("0.25 pt"), "0.25");
+        assert_eq!(strip_pt("0.25 PT"), "0.25");
+        assert_eq!(strip_pt("0.25 Pt"), "0.25");
+        assert_eq!(strip_pt("0.25pT"), "0.25");
+        assert_eq!(strip_pt("  12  "), "12");
+        assert_eq!(strip_pt("12%"), "12%");
+        assert_eq!(strip_pt("pt"), "");
     }
 
     #[test]
