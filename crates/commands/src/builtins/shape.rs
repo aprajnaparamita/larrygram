@@ -10,7 +10,10 @@
 //!   `shape.set.angle` sets the absolute angle);
 //! - `shape.set.width` / `shape.set.height` take `width` / `height`;
 //! - `shape.set.pin` takes `x`, `y` (the absolute pin position);
-//! - `shape.set.angle` takes `angle` (radians, absolute).
+//! - `shape.set.angle` takes `angle` (radians, absolute);
+//! - `shape.set.text_block` (task P7-25) takes any of `x`, `y`,
+//!   `width`, `height` (the text block's `TxtPinX`/`TxtPinY`/
+//!   `TxtWidth`/`TxtHeight`), at least one.
 //!
 //! `shape.move`, `shape.resize` and `shape.rotate` work on every
 //! selected shape; the `shape.set.*` pane fields edit the anchor
@@ -53,6 +56,12 @@ pub(crate) const TABLE: CommandTable = &[
     ("shape.set.height", "Height", has_selection, run_set_height),
     ("shape.set.pin", "Position", has_selection, run_set_pin),
     ("shape.set.angle", "Angle", has_selection, run_set_angle),
+    (
+        "shape.set.text_block",
+        "Text Block",
+        has_selection,
+        run_set_text_block,
+    ),
     (
         "shape.enter_group",
         "Enter Group",
@@ -356,6 +365,82 @@ pub(super) fn run_set_angle(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcom
     Ok(edit_outcome("Angle set", warnings, Box::new(edit)))
 }
 
+/// `shape.set.text_block` (task P7-25 item 4): writes the anchor
+/// shape's text block cells, any of the optional `x`/`y`
+/// (`TxtPinX`/`TxtPinY`, inches, shape-local) and `width`/`height`
+/// (`TxtWidth`/`TxtHeight`, inches). At least one argument must be
+/// present. The whole run is one undo step (ADR 0040): one text block
+/// drag writes its final values in one command.
+pub(super) fn run_set_text_block(
+    ctx: &mut AppCtx,
+    inv: &Invocation,
+) -> Result<Outcome, CommandError> {
+    let writes: [(&str, &str, Option<f64>); 4] = [
+        ("x", "TxtPinX", optional_number(&inv.args, "x")?),
+        ("y", "TxtPinY", optional_number(&inv.args, "y")?),
+        (
+            "width",
+            "TxtWidth",
+            optional_non_negative(&inv.args, "width")?,
+        ),
+        (
+            "height",
+            "TxtHeight",
+            optional_non_negative(&inv.args, "height")?,
+        ),
+    ];
+    if writes.iter().all(|(_, _, value)| value.is_none()) {
+        return Err(CommandError::invalid_args(
+            "text block needs an x, y, width or height argument",
+        ));
+    }
+    let (session, shape, warnings) = anchor_target(ctx)?;
+    let mut edit = CompositeEdit::new("Set Text Block");
+    {
+        let doc = document_mut(ctx, session)?;
+        for (_, cell, value) in writes {
+            if let Some(value) = value {
+                edit.push(cell_edit(
+                    doc,
+                    session,
+                    "Set Text Block",
+                    shape,
+                    cell,
+                    value,
+                )?);
+            }
+        }
+    }
+    edit.apply(ctx)?;
+    Ok(edit_outcome("Text block set", warnings, Box::new(edit)))
+}
+
+/// One optional finite number argument (task P7-25 item 4).
+fn optional_number(args: &crate::Args, name: &str) -> Result<Option<f64>, CommandError> {
+    match args.get(name) {
+        None => Ok(None),
+        Some(crate::ArgValue::Number(value)) if value.is_finite() => Ok(Some(*value)),
+        Some(crate::ArgValue::Number(_)) => {
+            Err(CommandError::invalid_args(format!("{name} must be finite")))
+        }
+        Some(crate::ArgValue::Integer(value)) => Ok(Some(*value as f64)),
+        Some(_) => Err(CommandError::invalid_args(format!(
+            "{name} must be a number"
+        ))),
+    }
+}
+
+/// One optional non-negative size argument (task P7-25 item 4).
+fn optional_non_negative(args: &crate::Args, name: &str) -> Result<Option<f64>, CommandError> {
+    match optional_number(args, name)? {
+        None => Ok(None),
+        Some(value) if value >= 0.0 => Ok(Some(value)),
+        Some(_) => Err(CommandError::invalid_args(format!(
+            "{name} must not be negative"
+        ))),
+    }
+}
+
 /// `shape.enter_group`: enters the anchor group (ADR 0041); the
 /// selection becomes its members.
 ///
@@ -530,5 +615,87 @@ mod tests {
         );
         let error = run_move(&mut ctx, &inv).expect_err("non-finite pin");
         assert!(error.to_string().contains("not finite"), "{error}");
+    }
+
+    /// The text block write of task P7-25 item 4: the four cells, one
+    /// undo step whose revert restores them all.
+    #[test]
+    fn a_text_block_write_lands_in_one_undo_step() {
+        let (mut ctx, session, page, shape) = fixture();
+        ctx.selection.shapes = vec![shape];
+        ctx.selection.anchor = Some(shape);
+        ctx.selection.page = Some(page);
+        let inv = Invocation::new(
+            crate::Args::new()
+                .with("x", crate::ArgValue::Number(0.75))
+                .with("y", crate::ArgValue::Number(1.25))
+                .with("width", crate::ArgValue::Number(3.0))
+                .with("height", crate::ArgValue::Number(0.5)),
+            Source::Test,
+        );
+        let outcome = run_set_text_block(&mut ctx, &inv).expect("run");
+        let mut edit = outcome.edit.expect("one undo step");
+        {
+            let doc = document_mut(&mut ctx, session).expect("doc");
+            let entry = doc.shape(shape).expect("shape");
+            for (name, want) in [
+                ("TxtPinX", 0.75),
+                ("TxtPinY", 1.25),
+                ("TxtWidth", 3.0),
+                ("TxtHeight", 0.5),
+            ] {
+                let cell = entry
+                    .sheet
+                    .cells
+                    .iter()
+                    .find(|cell| cell.name.as_str() == name)
+                    .unwrap_or_else(|| panic!("no {name}"));
+                assert_eq!(cell.value, Some(CellValue::Number(want)), "{name}");
+            }
+        }
+        // One revert restores every cell the run wrote.
+        edit.revert(&mut ctx).expect("revert");
+        let doc = document_mut(&mut ctx, session).expect("doc");
+        let entry = doc.shape(shape).expect("shape");
+        for name in ["TxtPinX", "TxtPinY", "TxtWidth", "TxtHeight"] {
+            assert!(
+                entry
+                    .sheet
+                    .cells
+                    .iter()
+                    .all(|cell| cell.name.as_str() != name),
+                "{name} was restored away"
+            );
+        }
+    }
+
+    /// `shape.set.text_block` refuses an empty run and bad values.
+    #[test]
+    fn a_text_block_write_validates_its_arguments() {
+        let (mut ctx, _session, page, shape) = fixture();
+        ctx.selection.shapes = vec![shape];
+        ctx.selection.anchor = Some(shape);
+        ctx.selection.page = Some(page);
+        let error = run_set_text_block(&mut ctx, &Invocation::empty(Source::Test))
+            .expect_err("no arguments");
+        assert!(error.to_string().contains("text block needs"), "{error}");
+        for (args, want) in [
+            (
+                crate::Args::new().with("width", crate::ArgValue::Number(-1.0)),
+                "must not be negative",
+            ),
+            (
+                crate::Args::new().with("x", crate::ArgValue::Number(f64::NAN)),
+                "must be finite",
+            ),
+            (
+                crate::Args::new().with("y", crate::ArgValue::Text("left".to_owned())),
+                "must be a number",
+            ),
+        ] {
+            let inv = Invocation::new(args, Source::Test);
+            let error = run_set_text_block(&mut ctx, &inv).expect_err("bad argument");
+            assert!(error.to_string().contains(want), "{error}");
+        }
     }
 }

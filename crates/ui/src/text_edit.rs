@@ -283,8 +283,9 @@ pub fn editor_rect(
 }
 
 /// Finds one model shape's node, turning its ancestor transforms into
-/// the shape-local to page transform.
-fn find_shape<'a>(
+/// the shape-local to page transform (the text block tool reads the
+/// transform through it, task P7-25 item 4).
+pub(crate) fn find_shape<'a>(
     nodes: &'a [Node],
     shape: ShapeId,
     path: &larrygram_render::NodePath,

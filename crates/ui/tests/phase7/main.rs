@@ -34,6 +34,7 @@ mod placement;
 mod popups;
 mod review;
 mod surfaces;
+mod text_fixes;
 mod windows;
 
 use std::cell::RefCell;

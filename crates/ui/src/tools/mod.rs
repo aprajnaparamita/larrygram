@@ -2,7 +2,7 @@
 //! seam.
 //!
 //! One tool is active at a time (pointer, rectangle, ellipse, line,
-//! connector, text). Each tool consumes [`ToolEvent`]s and returns a
+//! connector, text, text block). Each tool consumes [`ToolEvent`]s and returns a
 //! [`ToolEffect`]: [`Intent`]s to dispatch through the command registry
 //! (never a direct model mutation, ADR 0028) plus the transient
 //! [`Overlay`] marks of this frame (ADR 0042). The state machine never
@@ -15,6 +15,7 @@
 //! - [`mod@draw`] — rectangle, ellipse and line drawing tools (P5-06);
 //! - [`mod@stencil`] — drag from the Shapes window, drop on the page (P5-06);
 //! - [`mod@text`] — the text tool and the in-place editor hand-off (P5-07);
+//! - [`mod@text_block`] — the text block tool's move and resize (P7-25);
 //! - [`mod@connector`] — the dynamic connector tool (P5-08).
 
 pub mod connector;
@@ -22,6 +23,7 @@ pub mod draw;
 pub mod pointer;
 pub mod stencil;
 pub mod text;
+pub mod text_block;
 
 use larrygram_commands::AppCtx;
 use larrygram_geom::Point;
@@ -46,6 +48,8 @@ pub enum Tool {
     Connector,
     /// Draw a text box (ADR 0044).
     Text,
+    /// Move and resize the selected shape's text block (task P7-25).
+    TextBlock,
 }
 
 /// The modifier keys held during an event (ADR 0042).
@@ -135,6 +139,8 @@ pub struct ToolMachine {
     pub(crate) stencil: stencil::State,
     /// The connector tool's drag state (P5-08).
     pub(crate) connector: connector::ConnectorState,
+    /// The text block tool's drag state (task P7-25 item 4).
+    pub(crate) text_block: text_block::State,
 }
 
 impl ToolMachine {
@@ -154,6 +160,7 @@ impl ToolMachine {
             Tool::Rectangle | Tool::Ellipse | Tool::Line => draw::handle(self, &event, ctx),
             Tool::Connector => connector::handle(self, &event, ctx),
             Tool::Text => text::handle(self, &event, ctx),
+            Tool::TextBlock => text_block::handle(self, &event, ctx),
         }
     }
 
@@ -163,6 +170,7 @@ impl ToolMachine {
     pub fn idle_overlay(&mut self, ctx: &AppCtx) -> Result<Option<Overlay>, UiError> {
         match self.tool {
             Tool::Pointer => pointer::idle_overlay(self, ctx),
+            Tool::TextBlock => text_block::idle_overlay(self, ctx),
             _ => Ok(None),
         }
     }
