@@ -3142,7 +3142,10 @@ mod tests {
         let (mut ctx, _session, _shape) = session();
         for (name, value, mentions) in [
             ("cap", "bent", "cap"),
+            ("cap", "3", "cap"),
             ("end_size", "huge", "arrow size"),
+            ("end_size", "9", "arrow size"),
+            ("weight", "150", "line weight"),
             ("rounding", "-1", "rounding"),
             ("begin", "twisty", "arrowhead"),
         ] {
