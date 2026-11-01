@@ -544,13 +544,20 @@ fn transparency_row(
             egui::StrokeKind::Inside,
         );
     }
-    response.on_hover_text(label.as_str()).accessible_name(label)
+    response
+        .on_hover_text(label.as_str())
+        .accessible_name(label)
 }
 
 /// The preview swatch of one transparency row: `fill` at the row's
 /// transparency over a checkerboard, so both fully opaque and fully
 /// transparent rows read at a glance (task P7-24 item 7).
-fn paint_transparency(painter: &egui::Painter, rect: egui::Rect, fill: egui::Color32, percent: f64) {
+fn paint_transparency(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    fill: egui::Color32,
+    percent: f64,
+) {
     const CELL: f32 = 4.0;
     let light = egui::Color32::from_rgb(0xf2, 0xf2, 0xf2);
     let dark = egui::Color32::from_rgb(0xcc, 0xcc, 0xcc);
@@ -853,7 +860,13 @@ mod tests {
             .build_ui({
                 let out = Rc::clone(&out);
                 move |ui| {
-                    show(ui, kind, Source::Test, egui::Color32::GRAY, &mut out.borrow_mut());
+                    show(
+                        ui,
+                        kind,
+                        Source::Test,
+                        egui::Color32::GRAY,
+                        &mut out.borrow_mut(),
+                    );
                 }
             });
         (harness, out)

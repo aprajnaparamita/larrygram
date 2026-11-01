@@ -118,7 +118,7 @@ fn button(
         draw.metrics,
     );
     let widget = Button::new(atoms)
-        .selected(latched(draw.toggles, item))
+        .selected(latched(draw.toggles, draw.app, item))
         .min_size(Vec2::new(placed.rect.width().min(MAX_W), 0.0));
     let response = put(ui, placed.rect, enabled(&action), widget, item, "main");
     let response = response.accessible_name(label.as_str());
@@ -137,7 +137,7 @@ fn check(
 ) -> Result<(), UiError> {
     let label = display_label(item, draw.app);
     let action = resolve(item);
-    let mut checked = latched(draw.toggles, item);
+    let mut checked = latched(draw.toggles, draw.app, item);
     let response = ui
         .push_id((item.id.as_str(), "check"), |ui| {
             ui.add_enabled_ui(enabled(&action), |ui| {
@@ -357,12 +357,12 @@ fn combo(
     {
         if let Some(inner) = Popup::menu(&response).show(|ui| {
             if crate::pickers::show(
-                    ui,
-                    kind,
-                    larrygram_commands::Source::CommandBar,
-                    crate::pickers::fill_preview(draw.app),
-                    out,
-                ) {
+                ui,
+                kind,
+                larrygram_commands::Source::CommandBar,
+                crate::pickers::fill_preview(draw.app),
+                out,
+            ) {
                 ui.close();
             }
         }) {
@@ -476,12 +476,12 @@ fn split(
         // Arrows submenus open from the same menu, like Visio's).
         if let Some(inner) = Popup::menu(&response).show(|ui| -> Result<(), UiError> {
             if crate::pickers::show(
-                    ui,
-                    kind,
-                    larrygram_commands::Source::CommandBar,
-                    crate::pickers::fill_preview(draw.app),
-                    out,
-                ) {
+                ui,
+                kind,
+                larrygram_commands::Source::CommandBar,
+                crate::pickers::fill_preview(draw.app),
+                out,
+            ) {
                 ui.close();
                 return Ok(());
             }
@@ -546,12 +546,12 @@ fn dropdown(
     {
         if let Some(inner) = Popup::menu(&response).show(|ui| {
             if crate::pickers::show(
-                    ui,
-                    kind,
-                    larrygram_commands::Source::CommandBar,
-                    crate::pickers::fill_preview(draw.app),
-                    out,
-                ) {
+                ui,
+                kind,
+                larrygram_commands::Source::CommandBar,
+                crate::pickers::fill_preview(draw.app),
+                out,
+            ) {
                 ui.close();
             }
         }) {
@@ -774,7 +774,7 @@ fn show_menu_entry(
                 .accessible_name(label.as_str());
             let tip = match item.kind {
                 ItemKind::Check | ItemKind::Toggle => {
-                    let mark = if latched(draw.toggles, item) {
+                    let mark = if latched(draw.toggles, draw.app, item) {
                         "on, "
                     } else {
                         "off, "
@@ -792,7 +792,7 @@ fn show_menu_entry(
             let response = response.on_hover_text(shown);
             if response.clicked() {
                 if matches!(item.kind, ItemKind::Check | ItemKind::Toggle) {
-                    set_latched(draw.toggles, item, !latched(draw.toggles, item));
+                    set_latched(draw.toggles, item, !latched(draw.toggles, draw.app, item));
                 }
                 if let Action::Emit(intent) = &action {
                     out.push(intent.clone());
@@ -1072,8 +1072,17 @@ fn enabled(action: &Action) -> bool {
 }
 
 /// Whether a `check` or `toggle` draws latched (display-only state).
-fn latched(toggles: &Toggles, item: &Item) -> bool {
-    toggles.contains(item.id.as_str())
+fn latched(toggles: &Toggles, app: &larrygram_commands::app::AppCtx, item: &Item) -> bool {
+    if toggles.contains(item.id.as_str()) {
+        return true;
+    }
+    // The text toggles (Bold, Italic, Underline and the alignments)
+    // latch from the selection's cells (task P7-24 item 10).
+    item.command
+        .as_ref()
+        .map(|command| command.as_str())
+        .and_then(|command| crate::panel_classic::text_toggle_checked(app, command))
+        .unwrap_or(false)
 }
 
 /// Records the display-only latch of one control.
@@ -1224,12 +1233,13 @@ mod tests {
     #[test]
     fn latching_round_trips_through_the_toggle_set() {
         let mut toggles = Toggles::default();
+        let app = AppCtx::new(Settings::default());
         let target = item("check", ItemKind::Check, "Check");
-        assert!(!latched(&toggles, &target));
+        assert!(!latched(&toggles, &app, &target));
         set_latched(&mut toggles, &target, true);
-        assert!(latched(&toggles, &target));
+        assert!(latched(&toggles, &app, &target));
         set_latched(&mut toggles, &target, false);
-        assert!(!latched(&toggles, &target));
+        assert!(!latched(&toggles, &app, &target));
     }
 
     #[test]

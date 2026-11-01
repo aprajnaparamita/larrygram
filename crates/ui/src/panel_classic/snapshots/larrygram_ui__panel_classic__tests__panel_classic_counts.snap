@@ -10,8 +10,8 @@ surface: menu_bars
   options: items 5 (hidden 0) widgets 5
   submenu: items 36 (hidden 1) widgets 35
 surface: toolbars
-  button: items 243 (hidden 3) widgets 240
-  check: items 7 (hidden 0) widgets 7
+  button: items 238 (hidden 3) widgets 235
+  check: items 12 (hidden 0) widgets 12
   combo: items 3 (hidden 0) widgets 3
   dropdown: items 1 (hidden 0) widgets 1
   heading: items 12 (hidden 0) widgets 12

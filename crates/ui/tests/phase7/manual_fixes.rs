@@ -148,6 +148,21 @@ fn disabled(rig: &mut ShellRig, role: Role, name: &str) -> bool {
         .is_disabled()
 }
 
+/// The checked (toggled) state of the first widget with `role` and
+/// `name` (the toggle buttons' latch, goal 10).
+fn toggled(rig: &mut ShellRig, role: Role, name: &str) -> Option<bool> {
+    rig.run();
+    rig.harness()
+        .root()
+        .query_all_by_role_and_label(role, name)
+        .next()
+        .unwrap_or_else(|| panic!("no {role:?} named {name:?}"))
+        .accesskit_node()
+        .data()
+        .toggled()
+        .map(|state| state == egui::accesskit::Toggled::True)
+}
+
 /// The tooltip (accesskit description) of the first widget with
 /// `role` and `name`.
 fn tooltip(rig: &mut ShellRig, role: Role, name: &str) -> Option<String> {
@@ -877,9 +892,7 @@ fn the_format_painter_applies_from_a_canvas_click() {
         // Beside the placeholder mark at the shape's centre.
         let (r, g, b) = pixel(&mut rig, 5.5, 3.2);
         assert!(
-            (r as i32 - 31).abs() <= 4
-                && (g as i32 - 91).abs() <= 4
-                && (b as i32 - 196).abs() <= 4,
+            (r as i32 - 31).abs() <= 4 && (g as i32 - 91).abs() <= 4 && (b as i32 - 196).abs() <= 4,
             "{kind:?}: the picture paints the copied fill: got ({r},{g},{b})"
         );
     }
@@ -916,7 +929,12 @@ fn the_escape_cancels_the_format_painter() {
 
 /// Whether any pixel of the frame inside `rect` is within `tolerance`
 /// of `target`.
-fn row_shows(rig: &mut ShellRig, rect: egui::Rect, target: (i32, i32, i32), tolerance: i32) -> bool {
+fn row_shows(
+    rig: &mut ShellRig,
+    rect: egui::Rect,
+    target: (i32, i32, i32),
+    tolerance: i32,
+) -> bool {
     let image = rig.render();
     let x0 = (rect.min.x.max(0.0) as u32).min(image.width());
     let x1 = (rect.max.x.max(0.0) as u32).min(image.width());
@@ -1058,6 +1076,91 @@ fn the_text_controls_stay_enabled_on_an_empty_shape_and_apply_to_later_text() {
         assert!(
             after > before * 2,
             "{kind:?}: the later text paints at the recorded format ({before} to {after})"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Goal 10: the toggle buttons show the current state (the selection's
+// Character Style bits and Paragraph HorzAlign).
+// ---------------------------------------------------------------------------
+
+/// Bold, Italic, Underline and the alignment buttons show which
+/// setting is on, in both layouts (goal 10).
+#[test]
+fn the_toggle_buttons_show_the_current_state() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        select_shape(&mut rig);
+        let shape = rectangle(&rig.shell.borrow().app);
+        // The alignment default is left; no style bits are on.
+        assert_eq!(
+            toggled(&mut rig, Role::Button, "Align Left"),
+            Some(true),
+            "{kind:?}: Align Left starts on"
+        );
+        assert_eq!(
+            toggled(&mut rig, Role::Button, "Bold"),
+            Some(false),
+            "{kind:?}: Bold starts off"
+        );
+        assert_eq!(
+            toggled(&mut rig, Role::Button, "Italic"),
+            Some(false),
+            "{kind:?}"
+        );
+        assert_eq!(
+            toggled(&mut rig, Role::Button, "Underline"),
+            Some(false),
+            "{kind:?}"
+        );
+
+        // Bold latches from a real click and the cell follows.
+        click(&mut rig, Role::Button, "Bold");
+        assert_eq!(
+            toggled(&mut rig, Role::Button, "Bold"),
+            Some(true),
+            "{kind:?}: Bold shows on"
+        );
+        assert_eq!(
+            row_number(&rig, shape, "Character", "Style"),
+            Some(1.0),
+            "{kind:?}: the bold bit records"
+        );
+        click(&mut rig, Role::Button, "Bold");
+        assert_eq!(
+            toggled(&mut rig, Role::Button, "Bold"),
+            Some(false),
+            "{kind:?}: Bold shows off again"
+        );
+
+        // The alignment buttons are a radio row (the centre button is
+        // "Align Center" in Panel Classic and "Center" in Panel
+        // Modern).
+        let centre = match kind {
+            LayoutKind::PanelClassic => "Align Center",
+            _ => "Center",
+        };
+        click(&mut rig, Role::Button, centre);
+        assert_eq!(
+            toggled(&mut rig, Role::Button, centre),
+            Some(true),
+            "{kind:?}: {centre} shows on"
+        );
+        assert_eq!(
+            toggled(&mut rig, Role::Button, "Align Left"),
+            Some(false),
+            "{kind:?}: Align Left shows off"
+        );
+        assert_eq!(
+            toggled(&mut rig, Role::Button, "Align Right"),
+            Some(false),
+            "{kind:?}: Align Right shows off"
+        );
+        assert_eq!(
+            row_number(&rig, shape, "Paragraph", "HorzAlign"),
+            Some(1.0),
+            "{kind:?}: the HorzAlign cell records"
         );
     }
 }

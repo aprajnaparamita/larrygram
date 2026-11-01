@@ -3242,20 +3242,20 @@ toolbars:
     label: Font Size
     command: text.font.size
   - id: toolbar.formatting.bold
-    kind: button
+    kind: check
     label: Bold
     command: format.text.bold
     shortcut: Ctrl+B
     icon: format.text.bold
     begin_group: true
   - id: toolbar.formatting.italic
-    kind: button
+    kind: check
     label: Italic
     command: format.text.italic
     shortcut: Ctrl+I
     icon: format.text.italic
   - id: toolbar.formatting.underline
-    kind: button
+    kind: check
     label: Underline
     command: format.text.underline
     shortcut: Ctrl+U
@@ -3268,13 +3268,13 @@ toolbars:
     icon: format.text.align_left
     begin_group: true
   - id: toolbar.formatting.align_center
-    kind: button
+    kind: check
     label: Align Center
     command: format.text.align_center
     shortcut: Shift+Ctrl+C
     icon: format.text.align_center
   - id: toolbar.formatting.align_right
-    kind: button
+    kind: check
     label: Align Right
     command: format.text.align_right
     shortcut: Shift+Ctrl+R

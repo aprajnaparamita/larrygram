@@ -7,7 +7,7 @@
 //! [`Intent`]s (ADR 0028): it never mutates the model or the selection
 //! itself, and every event order is a no-op, never a panic.
 
-use larrygram_commands::{ArgValue, Args, AppCtx, CommandError, CommandId, Invocation, Source};
+use larrygram_commands::{AppCtx, ArgValue, Args, CommandError, CommandId, Invocation, Source};
 use larrygram_geom::Point;
 use larrygram_model::ShapeId;
 use larrygram_render::HitOptions;
@@ -57,11 +57,7 @@ pub fn handle(
 
 /// The topmost shape under `pos`, the pointer tool's hit rule (task
 /// P7-24 item 6: the click targets one shape).
-fn shape_at(
-    state: &mut ToolMachine,
-    ctx: &AppCtx,
-    pos: Point,
-) -> Result<Option<ShapeId>, UiError> {
+fn shape_at(state: &mut ToolMachine, ctx: &AppCtx, pos: Point) -> Result<Option<ShapeId>, UiError> {
     let zoom = ctx
         .active_document()
         .map(|session| session.view.zoom)
@@ -103,12 +99,10 @@ fn intent(id: &'static str, args: Args) -> Result<Intent, UiError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use larrygram_commands::DocumentSession;
     use larrygram_commands::Settings;
     use larrygram_commands::app::PaintSource;
-    use larrygram_commands::DocumentSession;
-    use larrygram_model::{
-        Cell, CellName, CellValue, Document, Row, Section, SectionName, Shape,
-    };
+    use larrygram_model::{Cell, CellName, CellValue, Document, Row, Section, SectionName, Shape};
 
     /// One fixture cell: a literal number.
     fn number(name: &'static str, value: f64) -> Cell {
