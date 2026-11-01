@@ -43,7 +43,11 @@ fn shell_rig(kind: LayoutKind) -> ShellRig {
     // Centre the fixture shape in the viewport (the `interaction`
     // rig's pan rule): zoom 1, pan puts (3, 3) mid-canvas.
     {
-        let viewport = rig.shell.borrow().canvas_viewport().expect("the canvas drew");
+        let viewport = rig
+            .shell
+            .borrow()
+            .canvas_viewport()
+            .expect("the canvas drew");
         let mut shell = rig.shell.borrow_mut();
         let session = shell.app.active_document_mut().expect("session");
         let k = 96.0;
@@ -244,7 +248,11 @@ fn the_picker_click_keeps_the_selection_and_applies() {
         open_fill_picker(&mut rig, kind);
         assert!(has(&mut rig, Role::Button, "Accent #1F5BC4"), "{kind:?}");
         click(&mut rig, Role::Button, "Accent #1F5BC4");
-        assert_eq!(selection(&rig), vec![shape], "{kind:?}: the selection stays");
+        assert_eq!(
+            selection(&rig),
+            vec![shape],
+            "{kind:?}: the selection stays"
+        );
         assert_eq!(
             cell_text(&rig, shape, "FillForegnd").as_deref(),
             Some("RGB(31,91,196)"),
@@ -253,9 +261,7 @@ fn the_picker_click_keeps_the_selection_and_applies() {
         // The picture: the shape's centre paints the new fill.
         let (r, g, b) = pixel(&mut rig, SHAPE.0, SHAPE.1);
         assert!(
-            (r as i32 - 31).abs() <= 4
-                && (g as i32 - 91).abs() <= 4
-                && (b as i32 - 196).abs() <= 4,
+            (r as i32 - 31).abs() <= 4 && (g as i32 - 91).abs() <= 4 && (b as i32 - 196).abs() <= 4,
             "{kind:?}: the picture shows the fill: got ({r},{g},{b})"
         );
     }
@@ -517,7 +523,8 @@ fn ink(rig: &mut ShellRig, x0: f64, y0: f64, x1: f64, y1: f64) -> usize {
     let xmax = (a.x.max(b.x).max(0.0) as u32).min(width);
     let ymin = (a.y.min(b.y).max(0.0) as u32).min(height.saturating_sub(1));
     let ymax = (a.y.max(b.y).max(0.0) as u32).min(height);
-    let mut counts: std::collections::HashMap<(u8, u8, u8), usize> = std::collections::HashMap::new();
+    let mut counts: std::collections::HashMap<(u8, u8, u8), usize> =
+        std::collections::HashMap::new();
     for x in xmin..xmax {
         for y in ymin..ymax {
             let px = image.get_pixel(x, y);
@@ -534,7 +541,9 @@ fn ink(rig: &mut ShellRig, x0: f64, y0: f64, x1: f64, y1: f64) -> usize {
         for y in ymin..ymax {
             let px = image.get_pixel(x, y);
             let far = i32::from(px[0]) - i32::from(background.0);
-            let far = far.abs().max((i32::from(px[1]) - i32::from(background.1)).abs());
+            let far = far
+                .abs()
+                .max((i32::from(px[1]) - i32::from(background.1)).abs());
             let far = far.max((i32::from(px[2]) - i32::from(background.2)).abs());
             if far > 40 {
                 inked += 1;
@@ -770,5 +779,8 @@ fn the_zoom_box_sets_the_zoom_and_offers_presets() {
         .expect("session")
         .view
         .zoom;
-    assert!((zoom - 0.5).abs() < 1.0e-9, "the 50% preset applies ({zoom})");
+    assert!(
+        (zoom - 0.5).abs() < 1.0e-9,
+        "the 50% preset applies ({zoom})"
+    );
 }
