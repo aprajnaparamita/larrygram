@@ -13,7 +13,9 @@
 //! - `shape.set.angle` takes `angle` (radians, absolute);
 //! - `shape.set.text_block` (task P7-25) takes any of `x`, `y`,
 //!   `width`, `height` (the text block's `TxtPinX`/`TxtPinY`/
-//!   `TxtWidth`/`TxtHeight`), at least one.
+//!   `TxtWidth`/`TxtHeight`) and `loc_x`/`loc_y`
+//!   (`TxtLocPinX`/`TxtLocPinY`, task P7-26 item 1: the pin's offset
+//!   inside the block box), at least one.
 //!
 //! `shape.move`, `shape.resize` and `shape.rotate` work on every
 //! selected shape; the `shape.set.*` pane fields edit the anchor
@@ -368,14 +370,19 @@ pub(super) fn run_set_angle(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcom
 /// `shape.set.text_block` (task P7-25 item 4): writes the anchor
 /// shape's text block cells, any of the optional `x`/`y`
 /// (`TxtPinX`/`TxtPinY`, inches, shape-local) and `width`/`height`
-/// (`TxtWidth`/`TxtHeight`, inches). At least one argument must be
-/// present. The whole run is one undo step (ADR 0040): one text block
-/// drag writes its final values in one command.
+/// (`TxtWidth`/`TxtHeight`, inches), and `loc_x`/`loc_y`
+/// (`TxtLocPinX`/`TxtLocPinY`, inches, shape-local; task P7-26 item
+/// 1: the pin's offset inside the block box, which the tool sends on
+/// a resize so the block lands where its preview showed it — the
+/// cells' default follows the **shape's** width, not `TxtWidth`).
+/// At least one argument must be present. The whole run is one undo
+/// step (ADR 0040): one text block drag writes its final values in
+/// one command.
 pub(super) fn run_set_text_block(
     ctx: &mut AppCtx,
     inv: &Invocation,
 ) -> Result<Outcome, CommandError> {
-    let writes: [(&str, &str, Option<f64>); 4] = [
+    let writes: [(&str, &str, Option<f64>); 6] = [
         ("x", "TxtPinX", optional_number(&inv.args, "x")?),
         ("y", "TxtPinY", optional_number(&inv.args, "y")?),
         (
@@ -388,10 +395,12 @@ pub(super) fn run_set_text_block(
             "TxtHeight",
             optional_non_negative(&inv.args, "height")?,
         ),
+        ("loc_x", "TxtLocPinX", optional_number(&inv.args, "loc_x")?),
+        ("loc_y", "TxtLocPinY", optional_number(&inv.args, "loc_y")?),
     ];
     if writes.iter().all(|(_, _, value)| value.is_none()) {
         return Err(CommandError::invalid_args(
-            "text block needs an x, y, width or height argument",
+            "text block needs an x, y, width, height, loc_x or loc_y argument",
         ));
     }
     let (session, shape, warnings) = anchor_target(ctx)?;
@@ -617,8 +626,10 @@ mod tests {
         assert!(error.to_string().contains("not finite"), "{error}");
     }
 
-    /// The text block write of task P7-25 item 4: the four cells, one
-    /// undo step whose revert restores them all.
+    /// The text block write of task P7-25 item 4: the cells, one undo
+    /// step whose revert restores them all. Task P7-26 item 1 writes
+    /// `TxtLocPinX`/`TxtLocPinY` beside them: the tool sends the pin's
+    /// offset inside the block box on every resize.
     #[test]
     fn a_text_block_write_lands_in_one_undo_step() {
         let (mut ctx, session, page, shape) = fixture();
@@ -630,7 +641,9 @@ mod tests {
                 .with("x", crate::ArgValue::Number(0.75))
                 .with("y", crate::ArgValue::Number(1.25))
                 .with("width", crate::ArgValue::Number(3.0))
-                .with("height", crate::ArgValue::Number(0.5)),
+                .with("height", crate::ArgValue::Number(0.5))
+                .with("loc_x", crate::ArgValue::Number(1.5))
+                .with("loc_y", crate::ArgValue::Number(0.25)),
             Source::Test,
         );
         let outcome = run_set_text_block(&mut ctx, &inv).expect("run");
@@ -643,6 +656,8 @@ mod tests {
                 ("TxtPinY", 1.25),
                 ("TxtWidth", 3.0),
                 ("TxtHeight", 0.5),
+                ("TxtLocPinX", 1.5),
+                ("TxtLocPinY", 0.25),
             ] {
                 let cell = entry
                     .sheet
@@ -657,7 +672,14 @@ mod tests {
         edit.revert(&mut ctx).expect("revert");
         let doc = document_mut(&mut ctx, session).expect("doc");
         let entry = doc.shape(shape).expect("shape");
-        for name in ["TxtPinX", "TxtPinY", "TxtWidth", "TxtHeight"] {
+        for name in [
+            "TxtPinX",
+            "TxtPinY",
+            "TxtWidth",
+            "TxtHeight",
+            "TxtLocPinX",
+            "TxtLocPinY",
+        ] {
             assert!(
                 entry
                     .sheet
@@ -690,6 +712,14 @@ mod tests {
             ),
             (
                 crate::Args::new().with("y", crate::ArgValue::Text("left".to_owned())),
+                "must be a number",
+            ),
+            (
+                crate::Args::new().with("loc_x", crate::ArgValue::Number(f64::INFINITY)),
+                "must be finite",
+            ),
+            (
+                crate::Args::new().with("loc_y", crate::ArgValue::Text("0".to_owned())),
                 "must be a number",
             ),
         ] {
