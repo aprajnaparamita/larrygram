@@ -1120,10 +1120,7 @@ fn ink_box(
 ) -> ((f64, f64), (f64, f64)) {
     let top_left = screen(rig, bounds.0, bounds.3);
     let bottom_right = screen(rig, bounds.2, bounds.1);
-    let (px0, py0) = (
-        top_left.x.max(0.0) as u32,
-        top_left.y.max(0.0) as u32,
-    );
+    let (px0, py0) = (top_left.x.max(0.0) as u32, top_left.y.max(0.0) as u32);
     let (px1, py1) = (
         bottom_right.x.min(image.width() as f32) as u32,
         bottom_right.y.min(image.height() as f32) as u32,
@@ -1207,7 +1204,6 @@ fn the_text_block_resize_lands_where_the_preview_showed_it() {
     }
 }
 
-
 /// Chooses the Rectangle tool with a real control click (task P7-26
 /// item 1: the shape it draws carries no `Txt*` cells at all).
 fn choose_rectangle_tool(rig: &mut ShellRig, kind: LayoutKind) {
@@ -1244,7 +1240,10 @@ fn a_rectangle_tool_shape_resizes_onto_the_preview_too() {
         drag(&mut rig, from, to);
         let shape = last_shape(&rig);
         let (pin_x, pin_y) = (number(&rig, shape, "PinX"), number(&rig, shape, "PinY"));
-        let (loc_x, loc_y) = (number(&rig, shape, "LocPinX"), number(&rig, shape, "LocPinY"));
+        let (loc_x, loc_y) = (
+            number(&rig, shape, "LocPinX"),
+            number(&rig, shape, "LocPinY"),
+        );
         let (width, height) = (number(&rig, shape, "Width"), number(&rig, shape, "Height"));
         let min = (pin_x - loc_x, pin_y - loc_y);
         let max = (min.0 + width, min.1 + height);
@@ -1318,5 +1317,114 @@ fn a_rectangle_tool_shape_resizes_onto_the_preview_too() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Item 2 (task P7-26): a typed character starts shape text only while
+// the canvas holds the keyboard. Another widget's field and an open
+// menu keep their own keys.
+// ---------------------------------------------------------------------------
 
+/// Item 2: Tab moves egui's keyboard focus off the canvas (the shell's
+/// focus scope stays `Page`, nothing was pressed) and the typed
+/// character goes to that widget, not to the selected shape.
+#[test]
+fn a_typed_character_keeps_out_of_another_widgets_keyboard() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        let shape = rectangle(&rig.shell.borrow().app);
+        select_shape(&mut rig);
+        press_key(&mut rig, egui::Key::Tab, egui::Modifiers::NONE);
+        rig.run();
+        let focused = rig.harness().ctx.memory(|memory| memory.focused());
+        assert!(
+            focused.is_some(),
+            "{kind:?}: Tab gives another widget the keyboard"
+        );
+        type_text(&mut rig, "Q");
+        assert!(
+            !editing(&mut rig),
+            "{kind:?}: the focused widget keeps its typing"
+        );
+        assert_eq!(
+            shape_text(&rig, shape),
+            "Hello",
+            "{kind:?}: no shape text starts"
+        );
+    }
+}
 
+/// Item 2: the Format menu opened **from the keyboard** keeps its
+/// access letters (they reach the input layer as typed text) and
+/// starts no shape text.
+#[test]
+fn a_keyboard_menu_keeps_its_access_letters_and_starts_no_text() {
+    let kind = LayoutKind::PanelClassic;
+    let mut rig = shell_rig(kind);
+    let shape = rectangle(&rig.shell.borrow().app);
+    select_shape(&mut rig);
+    assert!(
+        !has(&mut rig, Role::MenuItem, "Fill Color"),
+        "the menu is closed"
+    );
+    // Alt+O opens the Format menu; "g" is its Fill Color access key.
+    rig.harness()
+        .key_press_modifiers(egui::Modifiers::ALT, egui::Key::O);
+    rig.run();
+    assert!(
+        has(&mut rig, Role::MenuItem, "Fill Color"),
+        "Alt+O opens the Format menu"
+    );
+    type_text(&mut rig, "g");
+    assert!(
+        has(&mut rig, Role::MenuItem, "Red"),
+        "the access letter opens the Fill Color submenu"
+    );
+    assert!(
+        !editing(&mut rig),
+        "{kind:?}: the access letter starts no shape text"
+    );
+    assert_eq!(
+        shape_text(&rig, shape),
+        "Hello",
+        "{kind:?}: the shape's text is untouched"
+    );
+    press_key(&mut rig, egui::Key::Escape, egui::Modifiers::NONE);
+    press_key(&mut rig, egui::Key::Escape, egui::Modifiers::NONE);
+    assert!(
+        !editing(&mut rig),
+        "Escape closes the menu, not a text edit"
+    );
+}
+
+/// Item 2: a context menu opened from the keyboard (Shift+F10) over the
+/// canvas keeps its own keys too.
+#[test]
+fn a_context_menu_from_the_keyboard_starts_no_text() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        let shape = rectangle(&rig.shell.borrow().app);
+        select_shape(&mut rig);
+        assert!(
+            !has(&mut rig, Role::MenuItem, "Delete"),
+            "{kind:?}: the context menu is closed"
+        );
+        press_key(
+            &mut rig,
+            egui::Key::F10,
+            egui::Modifiers {
+                shift: true,
+                ..egui::Modifiers::NONE
+            },
+        );
+        assert!(
+            has(&mut rig, Role::MenuItem, "Delete"),
+            "{kind:?}: Shift+F10 opens the context menu"
+        );
+        type_text(&mut rig, "x");
+        assert!(!editing(&mut rig), "{kind:?}: the open menu keeps its keys");
+        assert_eq!(
+            shape_text(&rig, shape),
+            "Hello",
+            "{kind:?}: the shape's text is untouched"
+        );
+    }
+}
