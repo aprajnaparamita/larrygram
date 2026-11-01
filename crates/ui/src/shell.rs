@@ -2469,7 +2469,7 @@ impl panel_classic::CheckedState for ShellChecks {
             .or_else(|| ToolLatch.is_checked(command, app))
             // The text toggles read the selection's cells (task P7-24
             // item 10).
-            .or_else(|| panel_classic::text_toggle_checked(app, command))
+            .or_else(|| crate::checked::text_toggle_checked(app, command))
     }
 }
 

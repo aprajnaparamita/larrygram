@@ -46,7 +46,7 @@ pub use geometry::{
 };
 pub use id::{MasterId, PageId, ShapeId, StyleId};
 pub use layer::Layer;
-pub use lookup::{CellLookup, Resolved, ValueSource};
+pub use lookup::{CellLookup, DEFAULT_PAGE_SIZE, Resolved, ValueSource};
 pub use master::Master;
 pub use mutate::{CellWrite, DetachedShapes};
 pub use name::{CellName, SectionName};

@@ -33,7 +33,7 @@ use larrygram_commands::{
     AppCtx, CommandId, DisplayUnits, DocumentSession, Invocation, SessionId, Source,
 };
 use larrygram_geom::{Angle, Point, Rect as PageRect};
-use larrygram_model::{CellName, CellReader, Document, Page, PageId, SheetRef};
+use larrygram_model::{Document, Page, PageId};
 use larrygram_render::{
     BuildOptions, MAX_DEVICE_EXTENT, Overlay, OverlayMark, RasterImage, RasterOptions, build_scene,
     render_raster,
@@ -1146,26 +1146,12 @@ fn active_page_label(session: &DocumentSession) -> String {
         .unwrap_or_else(|| "No page".to_owned())
 }
 
-/// The page size in inches: `PageWidth`/`PageHeight` when positive, the
-/// scene builder's fallback otherwise.
+/// The page size in inches: [`larrygram_model::Document::page_size`],
+/// the one resolver every reader calls (the P7-27 amendment of ADR
+/// 0019: the page's own sheet, then its style chain, then US Letter).
+/// No active page takes the scene builder's fallback.
 pub fn page_size(doc: &Document, page: Option<PageId>) -> (f64, f64) {
-    let Some(page) = page else {
-        return FALLBACK_PAGE_SIZE;
-    };
-    let mut reader = CellReader::new(doc);
-    let width = positive(
-        reader
-            .number(SheetRef::Page(page), &CellName::new("PageWidth"))
-            .ok(),
-        FALLBACK_PAGE_SIZE.0,
-    );
-    let height = positive(
-        reader
-            .number(SheetRef::Page(page), &CellName::new("PageHeight"))
-            .ok(),
-        FALLBACK_PAGE_SIZE.1,
-    );
-    (width, height)
+    page.map_or(FALLBACK_PAGE_SIZE, |page| doc.page_size(page))
 }
 
 /// The value when it is finite and positive, `fallback` otherwise.
@@ -1470,7 +1456,7 @@ fn render_error(error: larrygram_render::Error) -> UiError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use larrygram_model::{Cell, CellValue, Row, Section, SectionName, Shape, ShapeId};
+    use larrygram_model::{Cell, CellName, CellValue, Row, Section, SectionName, Shape, ShapeId};
 
     /// Runs one frame over `f` on `ctx` and drops the texture deltas
     /// safely (epaint panics on unapplied deltas).

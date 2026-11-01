@@ -1709,7 +1709,7 @@ mod tests {
             run_new_blank_metric(&mut ctx, &Invocation::empty(Source::Test)).expect("metric");
         assert_eq!(outcome.message.as_deref(), Some("New drawing (Metric)"));
         let session = ctx.active_document().expect("session");
-        let (width, height) = page_size(&session.document.pages[0]);
+        let (width, height) = page_size(&session.document, session.document.pages[0].id);
         assert!((width - 8.2677).abs() < 0.001, "A4 width, got {width}");
         assert!((height - 11.6929).abs() < 0.001, "A4 height, got {height}");
 
@@ -1717,7 +1717,7 @@ mod tests {
         let outcome = run_new_blank_us(&mut ctx, &Invocation::empty(Source::Test)).expect("us");
         assert_eq!(outcome.message.as_deref(), Some("New drawing (US Units)"));
         let session = ctx.active_document().expect("session");
-        let (width, height) = page_size(&session.document.pages[0]);
+        let (width, height) = page_size(&session.document, session.document.pages[0].id);
         assert!((width - 8.5).abs() < 0.001, "Letter width, got {width}");
         assert!((height - 11.0).abs() < 0.001, "Letter height, got {height}");
     }
