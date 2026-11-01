@@ -640,10 +640,16 @@ fn the_text_block_tool_resizes_the_text_block_in_one_undo_step() {
             (number(&rig, shape, "TxtHeight") - 0.75).abs() < 1.0e-9,
             "{kind:?}: TxtHeight grew"
         );
-        // The centre stayed put: the pin keeps its place.
+        // The opposite corner stays put (task P7-26 item 8): the
+        // south-west corner of the block keeps its place and the pin
+        // follows the grown sides.
         assert!(
-            (number(&rig, shape, "TxtPinX") - 1.0).abs() < 1.0e-9,
-            "{kind:?}: the centre stayed"
+            (number(&rig, shape, "TxtPinX") - 1.25).abs() < 1.0e-9,
+            "{kind:?}: the pin follows the grown sides"
+        );
+        assert!(
+            (number(&rig, shape, "TxtPinY") - 0.625).abs() < 1.0e-9,
+            "{kind:?}: the pin follows the grown sides"
         );
         // One undo removes the whole resize.
         press_key(
@@ -1065,6 +1071,25 @@ fn top_face(rig: &mut ShellRig, name: &str) -> egui::Rect {
         .rect()
 }
 
+/// Clicks the topmost copy of the widget `name`: the Shapes window's
+/// tiles and the panes share some labels.
+fn click_top(rig: &mut ShellRig, role: Role, name: &str) {
+    rig.run();
+    let root = rig.harness().root();
+    let node = root
+        .query_all_by_role_and_label(role, name)
+        .min_by(|a, b| {
+            a.rect()
+                .center()
+                .y
+                .total_cmp(&b.rect().center().y)
+                .then(a.rect().center().x.total_cmp(&b.rect().center().x))
+        })
+        .unwrap_or_else(|| panic!("no {role:?} named {name:?}"));
+    node.click();
+    rig.run();
+}
+
 /// Clicks the "More items" arrow nearest `face` (the Panel Modern
 /// split arrows) and returns the face's position.
 fn more_items_near(rig: &mut ShellRig, name: &str) -> egui::Pos2 {
@@ -1248,13 +1273,12 @@ fn the_text_block_resize_lands_where_the_preview_showed_it() {
             (number(&rig, shape, "TxtLocPinY") - 0.375).abs() < 1.0e-9,
             "{kind:?}: TxtLocPinY follows the size"
         );
-        // The preview keeps the block's centre, so the block's
-        // top-left corner moves to (2.25, 3.375) and the ink keeps its
-        // offset from it.
+        // The preview keeps the block's south-west corner (task P7-26
+        // item 8), so only the top edge rises and the ink follows it.
         deselect(&mut rig);
         let image = quiet_picture(&mut rig);
         let after = ink_top_left(ink_box(&rig, &image, (1.8, 2.3, 4.2, 3.7)));
-        let expected = (before.0 - 0.25, before.1 + 0.125);
+        let expected = (before.0, before.1 + 0.25);
         assert!(
             (after.0 - expected.0).abs() < 0.05 && (after.1 - expected.1).abs() < 0.05,
             "{kind:?}: the ink sits where the preview showed it: {before:?} to {after:?}"
@@ -1364,10 +1388,10 @@ fn a_rectangle_tool_shape_resizes_onto_the_preview_too() {
         deselect(&mut rig);
         let image = quiet_picture(&mut rig);
         let after = ink_top_left(ink_box(&rig, &image, region));
-        // The preview keeps the block's centre: its top-left corner
-        // moves half a inch left and a quarter up, and the ink keeps
-        // its offset from it.
-        let expected = (before.0 - 0.5, before.1 + 0.25);
+        // The preview keeps the block's south-west corner (task P7-26
+        // item 8): the left edge stands still and only the top edge
+        // rises, so the ink follows the top edge alone.
+        let expected = (before.0, before.1 + 0.5);
         assert!(
             (after.0 - expected.0).abs() < 0.05 && (after.1 - expected.1).abs() < 0.05,
             "{kind:?}: the ink sits where the preview showed it: {before:?} to {after:?}"
@@ -1531,5 +1555,313 @@ fn a_click_inside_the_new_text_box_keeps_editing_it() {
             "Hi",
             "{kind:?}: the typed text survived the click"
         );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Item 8 (task P7-26): a resize drag keeps the opposite edge or corner
+// fixed and is measured along the shape's own axes.
+// ---------------------------------------------------------------------------
+
+/// Rotates the selection one quarter turn right with the layout's own
+/// control (task P7-26 item 8).
+fn rotate_right(rig: &mut ShellRig, kind: LayoutKind) {
+    match kind {
+        LayoutKind::PanelClassic => {
+            click(rig, Role::Button, "Shape");
+            click(rig, Role::MenuItem, "Rotate or Flip");
+            click(rig, Role::MenuItem, "Rotate Right");
+        }
+        _ => {
+            // The Position dropdown opens from its own face; the rows
+            // are its menu.
+            let anchor = top_face(rig, "Position").center();
+            click_top(rig, Role::Button, "Position");
+            click_below(rig, "Rotate Shapes", anchor);
+            click_below(rig, "Rotate Right 90\u{b0}", anchor);
+        }
+    }
+    rig.run();
+}
+
+/// The page-space bounding box of the drawn handle frame in `image`
+/// over the page region `bounds`: the selection-colour outline and
+/// handles (the picture check of item 8). The handle squares stick out
+/// a few pixels, which the checks allow for.
+fn frame_box(
+    rig: &ShellRig,
+    image: &image::RgbaImage,
+    bounds: (f64, f64, f64, f64),
+    kind: LayoutKind,
+) -> ((f64, f64), (f64, f64)) {
+    let colors = larrygram_ui::canvas::CanvasColors::from_theme(&sets().get(kind).theme);
+    let target = (
+        colors.selection.r(),
+        colors.selection.g(),
+        colors.selection.b(),
+    );
+    let top_left = screen(rig, bounds.0, bounds.3);
+    let bottom_right = screen(rig, bounds.2, bounds.1);
+    let (px0, py0) = (top_left.x.max(0.0) as u32, top_left.y.max(0.0) as u32);
+    let (px1, py1) = (
+        bottom_right.x.min(image.width() as f32) as u32,
+        bottom_right.y.min(image.height() as f32) as u32,
+    );
+    let mut min = (u32::MAX, u32::MAX);
+    let mut max = (0u32, 0u32);
+    for y in py0..py1 {
+        for x in px0..px1 {
+            let p = image.get_pixel(x, y);
+            if near((p[0], p[1], p[2]), target, 24) {
+                min = (min.0.min(x), min.1.min(y));
+                max = (max.0.max(x), max.1.max(y));
+            }
+        }
+    }
+    assert!(min.0 <= max.0, "no handle frame in the region {bounds:?}");
+    let lo = to_page(rig, egui::pos2(min.0 as f32, max.1 as f32));
+    let hi = to_page(rig, egui::pos2(max.0 as f32, min.1 as f32));
+    ((lo.0, lo.1), (hi.0, hi.1))
+}
+
+/// The frame's side in the direction `unit` (one of the four unit
+/// vectors: the angles of item 8 are 0 and 90 degrees), as a page
+/// coordinate.
+fn side(frame: ((f64, f64), (f64, f64)), unit: (f64, f64)) -> f64 {
+    if unit.0 > 0.5 {
+        (frame.1).0
+    } else if unit.0 < -0.5 {
+        (frame.0).0
+    } else if unit.1 > 0.5 {
+        (frame.1).1
+    } else {
+        (frame.0).1
+    }
+}
+
+/// The midpoint of the frame's side in the direction `unit` (where its
+/// resize handle sits).
+fn side_mid(frame: ((f64, f64), (f64, f64)), unit: (f64, f64)) -> (f64, f64) {
+    let center = (
+        ((frame.0).0 + (frame.1).0) / 2.0,
+        ((frame.0).1 + (frame.1).1) / 2.0,
+    );
+    if unit.0.abs() > 0.5 {
+        (side(frame, unit), center.1)
+    } else {
+        (center.0, side(frame, unit))
+    }
+}
+
+/// One placed box (the shape's or the text block's placement): the
+/// pin's offset `loc` inside the box, the box size and the turn. The
+/// fixtures carry no flip.
+#[derive(Debug, Clone, Copy)]
+struct PlacedBox {
+    pin: (f64, f64),
+    loc: (f64, f64),
+    size: (f64, f64),
+    angle: f64,
+}
+
+impl PlacedBox {
+    /// The page point of the box's `at` coordinate.
+    fn point(&self, at: (f64, f64)) -> (f64, f64) {
+        let (sin, cos) = self.angle.sin_cos();
+        let (dx, dy) = (at.0 - self.loc.0, at.1 - self.loc.1);
+        (
+            self.pin.0 + dx * cos - dy * sin,
+            self.pin.1 + dx * sin + dy * cos,
+        )
+    }
+
+    /// The unit vector of the box's own x axis (its `east` side).
+    fn east(&self) -> (f64, f64) {
+        let (sin, cos) = self.angle.sin_cos();
+        (cos.round(), sin.round())
+    }
+
+    /// The midpoint of the box's east (`plus`) or west side.
+    fn side(&self, plus: bool) -> (f64, f64) {
+        let x = if plus { self.size.0 } else { 0.0 };
+        self.point((x, self.size.1 / 2.0))
+    }
+}
+
+/// The number value of one cell of `shape`, panicking when absent.
+fn number_of(rig: &ShellRig, shape: ShapeId, name: &str) -> f64 {
+    cell_number(rig, shape, name).unwrap_or_else(|| panic!("no {name} on the shape"))
+}
+
+/// The shape's own placement from its cells (task P7-26 item 8).
+fn shape_box(rig: &ShellRig, shape: ShapeId) -> PlacedBox {
+    PlacedBox {
+        pin: (number_of(rig, shape, "PinX"), number_of(rig, shape, "PinY")),
+        loc: (
+            number_of(rig, shape, "LocPinX"),
+            number_of(rig, shape, "LocPinY"),
+        ),
+        size: (
+            number_of(rig, shape, "Width"),
+            number_of(rig, shape, "Height"),
+        ),
+        angle: number_of(rig, shape, "Angle"),
+    }
+}
+
+/// The text block's placement in page inches: the block's own
+/// placement inside the shape's (the fixtures carry no `TxtAngle` and
+/// no flip).
+fn text_block_box(rig: &ShellRig, shape: ShapeId) -> PlacedBox {
+    let outer = shape_box(rig, shape);
+    let block = PlacedBox {
+        pin: (
+            number_of(rig, shape, "TxtPinX"),
+            number_of(rig, shape, "TxtPinY"),
+        ),
+        loc: (
+            number_of(rig, shape, "TxtLocPinX"),
+            number_of(rig, shape, "TxtLocPinY"),
+        ),
+        size: (
+            number_of(rig, shape, "TxtWidth"),
+            number_of(rig, shape, "TxtHeight"),
+        ),
+        angle: 0.0,
+    };
+    let origin = outer.point(block.pin);
+    PlacedBox {
+        pin: origin,
+        loc: block.loc,
+        size: block.size,
+        angle: outer.angle + block.angle,
+    }
+}
+
+/// One resize drag on the frame's east side (task P7-26 item 8): the
+/// dragged handle follows the pointer and the opposite side stays
+/// put, in the cells and in the rendered frame. `placed` builds the
+/// dragged frame's placement from the cells before and after the drag.
+fn check_resize_drag(
+    rig: &mut ShellRig,
+    kind: LayoutKind,
+    shape: ShapeId,
+    region: (f64, f64, f64, f64),
+    placed: fn(&ShellRig, ShapeId) -> PlacedBox,
+    what: &str,
+) {
+    let before = placed(rig, shape);
+    let unit = before.east();
+    let handle = before.side(true);
+    let fixed_before = before.side(false);
+    let image = quiet_picture(rig);
+    let frame_before = frame_box(rig, &image, region, kind);
+    let to = (handle.0 + 0.5 * unit.0, handle.1 + 0.5 * unit.1);
+    let from = screen(rig, handle.0, handle.1);
+    let to_screen = screen(rig, to.0, to.1);
+    drag(rig, from, to_screen);
+    let after = placed(rig, shape);
+    assert!(
+        (after.size.0 - (before.size.0 + 0.5)).abs() < 1.0e-6,
+        "{kind:?}: the {what} grew by the drag's distance ({:?})",
+        after.size
+    );
+    assert!(
+        (after.size.1 - before.size.1).abs() < 1.0e-6,
+        "{kind:?}: the other axis keeps its size"
+    );
+    let dragged = after.side(true);
+    assert!(
+        (dragged.0 - to.0).abs() < 0.01 && (dragged.1 - to.1).abs() < 0.01,
+        "{kind:?}: the {what} handle follows the pointer: {dragged:?} vs {to:?}"
+    );
+    let fixed_after = after.side(false);
+    assert!(
+        (fixed_after.0 - fixed_before.0).abs() < 1.0e-6
+            && (fixed_after.1 - fixed_before.1).abs() < 1.0e-6,
+        "{kind:?}: the opposite side stays put: {fixed_before:?} to {fixed_after:?}"
+    );
+    // And the rendered frame moves with it (its east and west sides).
+    let image = quiet_picture(rig);
+    let frame_after = frame_box(rig, &image, region, kind);
+    // The side in the `unit` direction moves by the drag along it.
+    let moved = side(frame_after, unit);
+    let stayed = side(frame_after, (-unit.0, -unit.1));
+    assert!(
+        (moved - (side(frame_before, unit) + 0.5 * (unit.0 + unit.1))).abs() < 0.06,
+        "{kind:?}: the drawn frame follows the pointer ({moved})"
+    );
+    assert!(
+        (stayed - side(frame_before, (-unit.0, -unit.1))).abs() < 0.06,
+        "{kind:?}: the drawn frame keeps the opposite side ({stayed})"
+    );
+}
+
+/// Item 8: the Text Block tool's resize drag keeps the opposite edge
+/// fixed and is measured along the block's own axes, at 0 and at 90
+/// degrees.
+#[test]
+fn a_text_block_resize_drag_follows_the_pointer_at_0_and_90_degrees() {
+    for kind in LAYOUTS {
+        for turned in [false, true] {
+            let mut rig = shell_rig(kind);
+            select_shape(&mut rig);
+            if turned {
+                rotate_right(&mut rig, kind);
+            }
+            let shape = rectangle(&rig.shell.borrow().app);
+            let angle = shape_box(&rig, shape).angle;
+            assert!(
+                if turned {
+                    (angle.abs() - core::f64::consts::FRAC_PI_2).abs() < 1.0e-9
+                } else {
+                    angle.abs() < 1.0e-9
+                },
+                "{kind:?}: the shape turned one quarter ({angle})"
+            );
+            choose_text_block(&mut rig, kind);
+            check_resize_drag(
+                &mut rig,
+                kind,
+                shape,
+                (1.4, 1.4, 4.6, 4.6),
+                text_block_box,
+                "text block",
+            );
+        }
+    }
+}
+
+/// Item 8: the pointer tool's resize drag keeps the opposite edge
+/// fixed and is measured along the shape's own axes, at 0 and at 90
+/// degrees.
+#[test]
+fn a_pointer_resize_drag_follows_the_pointer_at_0_and_90_degrees() {
+    for kind in LAYOUTS {
+        for turned in [false, true] {
+            let mut rig = shell_rig(kind);
+            select_shape(&mut rig);
+            if turned {
+                rotate_right(&mut rig, kind);
+            }
+            let shape = rectangle(&rig.shell.borrow().app);
+            let angle = shape_box(&rig, shape).angle;
+            assert!(
+                if turned {
+                    (angle.abs() - core::f64::consts::FRAC_PI_2).abs() < 1.0e-9
+                } else {
+                    angle.abs() < 1.0e-9
+                },
+                "{kind:?}: the shape turned one quarter ({angle})"
+            );
+            check_resize_drag(
+                &mut rig,
+                kind,
+                shape,
+                (1.4, 1.4, 4.6, 4.6),
+                shape_box,
+                "shape",
+            );
+        }
     }
 }
