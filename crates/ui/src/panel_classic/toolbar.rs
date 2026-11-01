@@ -516,7 +516,9 @@ fn draw_dropdown(
 }
 
 /// An editable combo (font, size, zoom): applies its text on Enter
-/// with the `value` argument, reverts on Esc.
+/// with the `value` argument, reverts on Esc, and its ▾ button opens
+/// the drop-down list (task P7-24 goal 2: the font and size boxes
+/// get the pickers' lists).
 fn draw_combo(
     ui: &mut Ui,
     item: &Item,
@@ -535,10 +537,18 @@ fn draw_combo(
         .width
         .map(|width| width as f32)
         .unwrap_or_else(|| combo_width(&item.id, &m));
+    // The drop-down button sits inside the box's width (Visio's
+    // combos are one box with an attached ▾ strip).
+    let list = combo_list(item);
+    let arrow_width = if list {
+        m.toolbar_split_arrow_width
+    } else {
+        0.0
+    };
     let response = ui
         .add_enabled_ui(enabled, |ui| {
             ui.add_sized(
-                Vec2::new(width, m.toolbar_button.y),
+                Vec2::new(width - arrow_width, m.toolbar_button.y),
                 egui::TextEdit::singleline(&mut buffer).hint_text(label.clone()),
             )
         })
@@ -546,6 +556,30 @@ fn draw_combo(
     response.widget_info(|| {
         WidgetInfo::labeled(egui::accesskit::Role::ComboBox, enabled, label.clone())
     });
+    if list {
+        let arrow = ui
+            .scope(|ui| {
+                ui.spacing_mut().button_padding = Vec2::ZERO;
+                let arrow = egui::Button::new(icons::dropdown_arrow(
+                    (m.toolbar_split_arrow_width - 2.0).max(4.0),
+                ))
+                .min_size(Vec2::new(m.toolbar_split_arrow_width, m.toolbar_button.y));
+                ui.add_enabled_ui(enabled, |ui| {
+                    ui.add_sized(
+                        Vec2::new(m.toolbar_split_arrow_width, m.toolbar_button.y),
+                        arrow,
+                    )
+                })
+            })
+            .inner
+            .inner;
+        arrow.widget_info(|| {
+            WidgetInfo::labeled(egui::accesskit::Role::Button, true, format!("{label} menu"))
+        });
+        if arrow.clicked() {
+            toggle_popup(state, item, arrow.rect);
+        }
+    }
     state.combo_text.insert(item.id.clone(), buffer.clone());
     // Enter applies and Esc reverts (egui surrenders text focus on the
     // key press, so the standard `lost_focus` idiom reads the key).
@@ -565,6 +599,16 @@ fn draw_combo(
             .unwrap_or_default();
         state.combo_text.insert(item.id.clone(), applied);
     }
+}
+
+/// Whether one combo's drop-down button draws (task P7-24 goal 2:
+/// the font and size boxes list the pickers' rows).
+fn combo_list(item: &Item) -> bool {
+    item.command
+        .as_ref()
+        .map(|id| id.as_str())
+        .and_then(crate::pickers::picker_for)
+        .is_some()
 }
 
 /// The themed width of one toolbar combo (`combo.font.width`,
