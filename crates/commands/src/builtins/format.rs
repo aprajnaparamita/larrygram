@@ -3017,7 +3017,10 @@ mod tests {
         let mut edit = outcome.edit.expect("edit");
         edit.revert(&mut ctx).expect("revert");
         let doc = &ctx.active_document().expect("document").document;
-        assert!(cell_of(doc, shape, "FillForegnd").is_none(), "undo restores");
+        assert!(
+            cell_of(doc, shape, "FillForegnd").is_none(),
+            "undo restores"
+        );
         assert!(cell_of(doc, shape, "FillPattern").is_none());
     }
 
