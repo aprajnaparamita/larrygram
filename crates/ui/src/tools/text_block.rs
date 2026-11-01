@@ -283,13 +283,6 @@ fn drag_intent(
             if (width - w).abs() < f64::EPSILON && (height - h).abs() < f64::EPSILON {
                 return Ok(None);
             }
-            // The box centre stays put (the pointer tool's resize
-            // rule); the pin follows it in shape-local inches.
-            let (sin, cos) = frame.block_angle.sin_cos();
-            let center = Point::new(
-                frame.pin.x + (w / 2.0 - frame.loc.x) * cos - (h / 2.0 - frame.loc.y) * sin,
-                frame.pin.y + (w / 2.0 - frame.loc.x) * sin + (h / 2.0 - frame.loc.y) * cos,
-            );
             // The `TxtLocPin*` offset follows the size (ADR 0038 rule
             // 2) when it holds the centre, and keeps its custom offset
             // otherwise. The drag writes it beside the pin (task P7-26
@@ -304,10 +297,9 @@ fn drag_intent(
             } else {
                 (frame.loc.x, frame.loc.y)
             };
-            let pin = Point::new(
-                center.x - ((width / 2.0 - loc_x) * cos - (height / 2.0 - loc_y) * sin),
-                center.y - ((width / 2.0 - loc_x) * sin + (height / 2.0 - loc_y) * cos),
-            );
+            // The opposite edge or corner stays put (task P7-26 item
+            // 8), so the pin follows the block's own axes.
+            let pin = resized_pin(frame, edge, width, height, loc_x, loc_y);
             text_block_intent(
                 pin.x,
                 pin.y,
@@ -321,11 +313,33 @@ fn drag_intent(
     }
 }
 
-/// The new `(width, height)` of a resize drag in page inches (the
-/// pointer tool's `resized_size`, clamped positive).
+/// The dragged sides of one resize edge (`1.0` when the frame's plus
+/// side moved, `-1.0` for the minus side, `0.0` on an axis that kept
+/// its size). The side that **stays** is the opposite one (task P7-26
+/// item 8).
+fn fixed_signs(edge: ResizeEdge) -> (f64, f64) {
+    let x = match edge {
+        ResizeEdge::East | ResizeEdge::NorthEast | ResizeEdge::SouthEast => 1.0,
+        ResizeEdge::West | ResizeEdge::NorthWest | ResizeEdge::SouthWest => -1.0,
+        _ => 0.0,
+    };
+    let y = match edge {
+        ResizeEdge::North | ResizeEdge::NorthEast | ResizeEdge::NorthWest => 1.0,
+        ResizeEdge::South | ResizeEdge::SouthEast | ResizeEdge::SouthWest => -1.0,
+        _ => 0.0,
+    };
+    (x, y)
+}
+
+/// The new `(width, height)` of a resize drag along the frame's own
+/// axes, in the frame's inches (clamped positive). Task P7-26 item 8:
+/// the pointer's delta is projected on those axes, so a rotated block
+/// resizes when its handle is dragged along the page's other axis.
 fn resized_size(frame: &Frame, start: Point, current: Point, edge: ResizeEdge) -> (f64, f64) {
-    let dx = current.x - start.x;
-    let dy = current.y - start.y;
+    let (sin, cos) = frame.angle.radians().sin_cos();
+    let delta = current.sub(start);
+    let dx = delta.x * cos + delta.y * sin;
+    let dy = delta.y * cos - delta.x * sin;
     let mut width = frame.bounds.width();
     let mut height = frame.bounds.height();
     match edge {
@@ -339,6 +353,50 @@ fn resized_size(frame: &Frame, start: Point, current: Point, edge: ResizeEdge) -
         _ => {}
     }
     (width.max(MIN_SIZE_IN), height.max(MIN_SIZE_IN))
+}
+
+/// The `shape.set.text_block` pin of a resize drag: the opposite edge
+/// or corner stays put (task P7-26 item 8), so the pin follows the
+/// block's own axes.
+fn resized_pin(
+    frame: &Frame,
+    edge: ResizeEdge,
+    width: f64,
+    height: f64,
+    loc_x: f64,
+    loc_y: f64,
+) -> Point {
+    let (sx, sy) = fixed_signs(edge);
+    // The corner that stays, in box coordinates: the minus side when
+    // the plus side moved.
+    let corner = |sx: f64, sy: f64, w: f64, h: f64| {
+        (
+            if sx > 0.0 {
+                0.0
+            } else if sx < 0.0 {
+                w
+            } else {
+                w / 2.0
+            },
+            if sy > 0.0 {
+                0.0
+            } else if sy < 0.0 {
+                h
+            } else {
+                h / 2.0
+            },
+        )
+    };
+    let (w, h) = frame.size;
+    let (fx, fy) = corner(sx, sy, w, h);
+    let (tx, ty) = corner(sx, sy, width, height);
+    let dx = (fx - frame.loc.x) - (tx - loc_x);
+    let dy = (fy - frame.loc.y) - (ty - loc_y);
+    let (sin, cos) = frame.block_angle.sin_cos();
+    Point::new(
+        frame.pin.x + dx * cos - dy * sin,
+        frame.pin.y + dx * sin + dy * cos,
+    )
 }
 
 /// The `shape.set.text_block` intent for one finished drag (task
@@ -528,7 +586,17 @@ fn drag_overlay(mode: &Mode) -> Result<Overlay, UiError> {
             }
             HandleKind::Resize(edge) => {
                 let (w_page, h_page) = resized_size(frame, *start, *current, *edge);
-                let center = rect_center(frame.bounds);
+                // The opposite edge or corner stays put (task P7-26
+                // item 8): the frame's centre follows the grown side,
+                // along the frame's own axes.
+                let (sx, sy) = fixed_signs(*edge);
+                let (sin, cos) = frame.angle.radians().sin_cos();
+                let along_x = sx * (w_page - frame.bounds.width()) / 2.0;
+                let along_y = sy * (h_page - frame.bounds.height()) / 2.0;
+                let center = rect_center(frame.bounds).add(Point::new(
+                    along_x * cos - along_y * sin,
+                    along_x * sin + along_y * cos,
+                ));
                 let bounds = Rect::new(
                     Point::new(center.x - w_page / 2.0, center.y - h_page / 2.0),
                     Point::new(center.x + w_page / 2.0, center.y + h_page / 2.0),
@@ -738,14 +806,21 @@ mod tests {
         assert_eq!(effect.intents.len(), 1);
         let intent = &effect.intents[0];
         assert_eq!(intent.command.as_str(), "shape.set.text_block");
-        // The size grew by 0.5 x 0.25 (one scale unit) and the centre
-        // stayed at (1, 0.5) in shape-local inches.
+        // The size grew by 0.5 x 0.25 (one scale unit) and the
+        // opposite corner (the block's south-west) stays put (task
+        // P7-26 item 8): the pin follows the grown sides in
+        // shape-local inches.
         let width = intent.invocation.args.number("width").expect("width");
         let height = intent.invocation.args.number("height").expect("height");
         assert!((width - 1.5).abs() < 1.0e-9, "{width}");
         assert!((height - 0.75).abs() < 1.0e-9, "{height}");
-        assert_eq!(intent.invocation.args.number("x"), Some(1.0));
-        assert_eq!(intent.invocation.args.number("y"), Some(0.5));
+        assert_eq!(intent.invocation.args.number("x"), Some(1.25));
+        assert_eq!(intent.invocation.args.number("y"), Some(0.625));
+        // The block's origin (pin - loc) keeps its place.
+        let loc_x = intent.invocation.args.number("loc_x").expect("loc_x");
+        let loc_y = intent.invocation.args.number("loc_y").expect("loc_y");
+        assert!((1.25 - loc_x - 0.5).abs() < 1.0e-9, "{loc_x}");
+        assert!((0.625 - loc_y - 0.25).abs() < 1.0e-9, "{loc_y}");
         // Task P7-26 item 1: the drag sends the pin's offset inside the
         // block box (`TxtLocPinX`/`TxtLocPinY`) with the pin, so the
         // block lands where the preview showed it.

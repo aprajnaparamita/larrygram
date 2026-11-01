@@ -746,8 +746,18 @@ fn preview_frame(
         }
         HandleKind::Resize(edge) => {
             let point = snapper.snap_point(ctx, scene, current, zoom, alt)?;
-            let (width, height) = resized_size(bounds, start, point.point, edge);
-            let center = rect_center(bounds);
+            let (width, height) = resized_size(bounds, angle, start, point.point, edge);
+            // The opposite edge or corner stays put (task P7-26 item
+            // 8): the frame's centre follows the grown side, along the
+            // frame's own axes.
+            let (sx, sy) = fixed_signs(edge);
+            let (sin, cos) = angle.radians().sin_cos();
+            let along_x = sx * (width - bounds.width()) / 2.0;
+            let along_y = sy * (height - bounds.height()) / 2.0;
+            let center = rect_center(bounds).add(Point::new(
+                along_x * cos - along_y * sin,
+                along_x * sin + along_y * cos,
+            ));
             let resized = Rect::new(
                 Point::new(center.x - width / 2.0, center.y - height / 2.0),
                 Point::new(center.x + width / 2.0, center.y + height / 2.0),
@@ -764,10 +774,39 @@ fn preview_frame(
     }
 }
 
-/// The size a resize drag produces, clamped positive.
-fn resized_size(bounds: Rect, start: Point, current: Point, edge: ResizeEdge) -> (f64, f64) {
-    let dx = current.x - start.x;
-    let dy = current.y - start.y;
+/// The dragged sides of one resize edge (`1.0` when the frame's plus
+/// side moved, `-1.0` for the minus side, `0.0` on an axis that kept
+/// its size). The side that **stays** is the opposite one (task P7-26
+/// item 8).
+fn fixed_signs(edge: ResizeEdge) -> (f64, f64) {
+    let x = match edge {
+        ResizeEdge::East | ResizeEdge::NorthEast | ResizeEdge::SouthEast => 1.0,
+        ResizeEdge::West | ResizeEdge::NorthWest | ResizeEdge::SouthWest => -1.0,
+        _ => 0.0,
+    };
+    let y = match edge {
+        ResizeEdge::North | ResizeEdge::NorthEast | ResizeEdge::NorthWest => 1.0,
+        ResizeEdge::South | ResizeEdge::SouthEast | ResizeEdge::SouthWest => -1.0,
+        _ => 0.0,
+    };
+    (x, y)
+}
+
+/// The size a resize drag produces along the frame's own axes, in the
+/// frame's inches, clamped positive (task P7-26 item 8: the pointer's
+/// delta is projected on those axes, so a rotated shape resizes when
+/// its handle is dragged along the page's other axis).
+fn resized_size(
+    bounds: Rect,
+    angle: Angle,
+    start: Point,
+    current: Point,
+    edge: ResizeEdge,
+) -> (f64, f64) {
+    let (sin, cos) = angle.radians().sin_cos();
+    let delta = current.sub(start);
+    let dx = delta.x * cos + delta.y * sin;
+    let dy = delta.y * cos - delta.x * sin;
     let mut width = bounds.width();
     let mut height = bounds.height();
     match edge {
@@ -781,6 +820,21 @@ fn resized_size(bounds: Rect, start: Point, current: Point, edge: ResizeEdge) ->
         _ => {}
     }
     (width.max(MIN_SIZE_IN), height.max(MIN_SIZE_IN))
+}
+
+/// The `edge` spelling of `shape.resize` (task P7-26 item 8): the
+/// command keeps the opposite edge or corner of each target fixed.
+fn edge_name(edge: ResizeEdge) -> &'static str {
+    match edge {
+        ResizeEdge::North => "north",
+        ResizeEdge::South => "south",
+        ResizeEdge::East => "east",
+        ResizeEdge::West => "west",
+        ResizeEdge::NorthEast => "north_east",
+        ResizeEdge::NorthWest => "north_west",
+        ResizeEdge::SouthEast => "south_east",
+        ResizeEdge::SouthWest => "south_west",
+    }
 }
 
 /// The command intent of one completed drag (one undo step, ADR 0040).
@@ -817,17 +871,20 @@ fn drag_intent(
         }
         HandleKind::Resize(edge) => {
             let point = snapper.snap_point(ctx, scene, current, zoom, alt)?;
-            let (width, height) = resized_size(frame.0, start, point.point, edge);
+            let (width, height) = resized_size(frame.0, frame.1, start, point.point, edge);
             if (width - frame.0.width()).abs() < f64::EPSILON
                 && (height - frame.0.height()).abs() < f64::EPSILON
             {
                 return Ok(None);
             }
+            // The `edge` argument (task P7-26 item 8) makes the command
+            // keep the opposite edge or corner fixed.
             intent(
                 "shape.resize",
                 Args::new()
                     .with("width", ArgValue::Number(width))
-                    .with("height", ArgValue::Number(height)),
+                    .with("height", ArgValue::Number(height))
+                    .with("edge", ArgValue::Text(edge_name(edge).to_owned())),
             )
             .map(Some)
         }
@@ -1387,17 +1444,62 @@ mod tests {
     fn every_resize_edge_changes_its_axis() {
         let bounds = Rect::new(Point::new(0.0, 0.0), Point::new(2.0, 1.0));
         let start = Point::new(1.0, 0.5);
+        let flat = Angle::from_radians(0.0);
         assert_eq!(
-            resized_size(bounds, start, Point::new(3.0, 2.0), ResizeEdge::NorthEast),
+            resized_size(
+                bounds,
+                flat,
+                start,
+                Point::new(3.0, 2.0),
+                ResizeEdge::NorthEast
+            ),
             (4.0, 2.5)
         );
         assert_eq!(
-            resized_size(bounds, start, Point::new(3.0, 2.0), ResizeEdge::SouthWest),
+            resized_size(
+                bounds,
+                flat,
+                start,
+                Point::new(3.0, 2.0),
+                ResizeEdge::SouthWest
+            ),
             (0.0_f64.max(MIN_SIZE_IN), 0.0_f64.max(MIN_SIZE_IN))
         );
         assert_eq!(
-            resized_size(bounds, start, Point::new(1.0, 0.5), ResizeEdge::North),
+            resized_size(bounds, flat, start, Point::new(1.0, 0.5), ResizeEdge::North),
             (2.0, 1.0)
+        );
+    }
+
+    /// Task P7-26 item 8: the drag is measured along the frame's own
+    /// axes, so a rotated shape resizes when its handle moves on the
+    /// page's other axis.
+    #[test]
+    fn a_resize_drag_follows_the_frames_own_axes() {
+        let bounds = Rect::new(Point::new(0.0, 0.0), Point::new(2.0, 1.0));
+        let start = Point::new(1.0, 0.5);
+        let turned = Angle::from_radians(core::f64::consts::FRAC_PI_2);
+        // At 90 degrees the east handle moves on the page's y axis.
+        assert_eq!(
+            resized_size(
+                bounds,
+                turned,
+                start,
+                Point::new(1.0, 1.5),
+                ResizeEdge::East
+            ),
+            (3.0, 1.0)
+        );
+        // The frame's north edge moves on the page's x axis.
+        assert_eq!(
+            resized_size(
+                bounds,
+                turned,
+                start,
+                Point::new(0.0, 0.5),
+                ResizeEdge::North
+            ),
+            (2.0, 2.0)
         );
     }
 
