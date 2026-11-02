@@ -26,9 +26,7 @@
 //! [`helpers`], which the gate runs.
 
 // The never-crash lints apply to non-test code only (clippy.toml);
-// these helpers are test code and use `expect`/`panic` freely. The
-// shared rig and flowchart helpers are used by several shots.
-#![allow(dead_code)]
+// these helpers are test code and use `expect`/`panic` freely.
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
 mod flowchart;
@@ -139,6 +137,12 @@ fn target_dir() -> PathBuf {
 fn render_shot(id: &str) {
     let spec = spec(id);
     let image = helpers::capture(|scale| shots::build(id, scale), spec.aspect, spec.min);
+    // Every pixel is painted: an unpainted margin (the harness frame
+    // the rig draws over) would show as a transparent edge.
+    assert!(
+        image.pixels().all(|pixel| pixel.0[3] == 255),
+        "{id}: the shot has transparent pixels"
+    );
     let out = out_dir();
     std::fs::create_dir_all(&out).expect("the output directory exists");
     let path = out.join(format!("{id}.png"));

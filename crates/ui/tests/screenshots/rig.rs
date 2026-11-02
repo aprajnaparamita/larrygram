@@ -3,7 +3,6 @@
 //! helpers the shot states need (clicks, right-clicks, double clicks,
 //! drags with the pointer held down, typing).
 
-#![allow(dead_code)]
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
 use std::cell::RefCell;
@@ -96,8 +95,15 @@ impl Rig {
                 });
             })
             .build_ui(move |ui| {
+                // `build_ui` hosts the closure in a frame with an 8 px
+                // outer margin that nothing paints (transparent in the
+                // PNG). The app's root ui is the whole window, so the
+                // shell draws into a child ui over the whole screen.
+                let screen = ui.ctx().viewport_rect();
+                let mut child = ui.new_child(egui::UiBuilder::new().max_rect(screen));
+                child.set_clip_rect(screen);
                 let mut shell = harness_shell.borrow_mut();
-                let intents = shell.show_in(ui).expect("the frame renders");
+                let intents = shell.show_in(&mut child).expect("the frame renders");
                 shell.dispatch(&intents).expect("the intents dispatch");
             });
         Self { shell, harness }
@@ -178,6 +184,66 @@ impl Rig {
         drop(shell);
         self.run();
         self.run();
+    }
+
+    /// Stops the text caret from blinking. `egui_kittest` turns the
+    /// blink off when the harness starts, but the app's theme (applied
+    /// in the first frames) installs visuals with the blink back on,
+    /// and one harness frame steps the clock far enough to land in the
+    /// caret's hidden phase. Call after the theme has applied.
+    pub fn steady_caret(&mut self) {
+        self.run();
+        self.harness()
+            .ctx
+            .global_style_mut(|style| style.visuals.text_cursor.blink = false);
+        self.run();
+    }
+
+    /// Clears the status line, so no message from the build steps
+    /// shows in a shot (the shot's own clicks may set a new one). The
+    /// shell has no public setter for the status; `note_error` with an
+    /// empty message is the one public way to set it, and the empty
+    /// warning it records is taken back off the list at once.
+    pub fn clear_status(&mut self) {
+        {
+            let mut shell = self.shell.borrow_mut();
+            let before = shell.app.warnings.len();
+            shell.note_error("");
+            if shell.app.warnings.len() > before {
+                shell.app.warnings.pop();
+            }
+        }
+        self.settle(2);
+        assert_eq!(self.shell.borrow().status(), "", "the status is clear");
+    }
+
+    /// The rect of every widget named `name` on screen this frame.
+    pub fn rects_named(&mut self, name: &str) -> Vec<egui::Rect> {
+        self.run();
+        self.harness()
+            .query_all_by_label(name)
+            .map(|node| node.rect())
+            .collect()
+    }
+
+    /// Whether a widget named `name` is on screen this frame.
+    pub fn has(&mut self, name: &str) -> bool {
+        !self.rects_named(name).is_empty()
+    }
+
+    /// The Visio id of the selection's primary shape, if any.
+    pub fn anchor_visio_id(&self) -> Option<i32> {
+        let shell = self.shell.borrow();
+        let session = shell.app.active_document()?;
+        let anchor = shell.app.selection.anchor?;
+        session.document.shape(anchor).map(|shape| shape.visio_id)
+    }
+
+    /// Whether the primary pointer button is held down.
+    pub fn pointer_down(&mut self) -> bool {
+        self.harness()
+            .ctx
+            .input(|input| input.pointer.primary_down())
     }
 
     /// Clicks the first widget named `name` (the widget seam).
@@ -279,13 +345,4 @@ pub fn wheel_lines(rig: &mut Rig, pos: egui::Pos2, lines: f32) {
         modifiers: egui::Modifiers::NONE,
     });
     rig.run();
-}
-
-/// Types `text` one character at a time (the real key events).
-pub fn type_text(rig: &mut Rig, text: &str) {
-    for character in text.chars() {
-        rig.harness()
-            .event(egui::Event::Text(character.to_string()));
-        rig.run();
-    }
 }

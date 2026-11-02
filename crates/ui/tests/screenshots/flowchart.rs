@@ -121,15 +121,11 @@ fn glued_connector(
     connector
 }
 
-/// One flowchart shape (Visio id + master `NameU`).
+/// One flowchart shape (the shots find their shapes by Visio id).
 #[derive(Debug, Clone, Copy)]
 pub struct ShapeRef {
-    /// The page's list position.
-    pub page: usize,
-    /// The shape's Visio `ID`.
+    /// The shape's Visio `ID` (per page).
     pub visio_id: i32,
-    /// The master's `NameU`.
-    pub master: &'static str,
 }
 
 /// What the build step created.
@@ -149,6 +145,10 @@ pub struct Flowchart {
 /// connectors are drawn with `connector.draw` and two with
 /// `insert.shape` + `connector.glue_begin`/`connector.glue_end`.
 pub fn build_flowchart(rig: &mut Rig) -> Flowchart {
+    // Every x sits `DX` right of the exit-test drawing's, so the flow
+    // stands near the middle of the page (the shots crop around its
+    // shapes without showing the grey beyond the page edge).
+    const DX: f64 = 1.5;
     run(rig, "file.new", Args::new());
     run(
         rig,
@@ -161,44 +161,38 @@ pub fn build_flowchart(rig: &mut Rig) -> Flowchart {
     // label must be written while its page is active).
     let mut shapes = Vec::new();
     for ((master, x, y), label) in [
-        (("Terminator", 2.0, 9.0), "Start order"),
-        (("Process", 2.0, 7.0), "Review order"),
-        (("Decision", 2.0, 5.0), "Order valid?"),
-        (("Process", 5.5, 5.0), "Fix order"),
-        (("Process", 2.0, 3.0), "Fill order"),
-        (("Terminator", 2.0, 1.0), "Done"),
+        (("Terminator", 2.0 + DX, 9.0), "Start order"),
+        (("Process", 2.0 + DX, 7.0), "Review order"),
+        (("Decision", 2.0 + DX, 5.0), "Order valid?"),
+        (("Process", 5.5 + DX, 5.0), "Fix order"),
+        (("Process", 2.0 + DX, 3.0), "Fill order"),
+        (("Terminator", 2.0 + DX, 1.0), "Done"),
     ] {
         let visio_id = insert_shape(rig, master, x, y);
         label_shape(rig, visio_id, label);
-        shapes.push(ShapeRef {
-            page: 0,
-            visio_id,
-            master,
-        });
+        shapes.push(ShapeRef { visio_id });
     }
 
     // Page one: three connectors.
-    let first = draw_connector(
+    draw_connector(
         rig,
-        4.0,
+        4.0 + DX,
         8.0,
         Some((shapes[0].visio_id, None)),
         Some((shapes[1].visio_id, None)),
     );
-    let _ = first;
     let begin_point = point_ix(rig, shapes[1].visio_id, None);
     let end_point = point_ix(rig, shapes[2].visio_id, Some(0));
-    let second = draw_connector(
+    draw_connector(
         rig,
-        4.0,
+        4.0 + DX,
         6.0,
         Some((shapes[1].visio_id, Some(begin_point))),
         Some((shapes[2].visio_id, Some(end_point))),
     );
-    let _ = second;
-    let third = glued_connector(
+    glued_connector(
         rig,
-        4.0,
+        4.0 + DX,
         4.0,
         (
             shapes[2].visio_id,
@@ -209,7 +203,6 @@ pub fn build_flowchart(rig: &mut Rig) -> Flowchart {
             Some(point_ix(rig, shapes[3].visio_id, None)),
         ),
     );
-    let _ = third;
 
     // Page two: four shapes and two connectors.
     run(
@@ -218,23 +211,19 @@ pub fn build_flowchart(rig: &mut Rig) -> Flowchart {
         Args::new().with("name", ArgValue::Text("Detail".to_owned())),
     );
     for ((master, x, y), label) in [
-        (("Process", 2.0, 7.0), "Check stock"),
-        (("Decision", 2.0, 5.0), "In stock?"),
-        (("Process", 5.5, 5.0), "Order part"),
-        (("Terminator", 2.0, 3.0), "Close"),
+        (("Process", 2.0 + DX, 7.0), "Check stock"),
+        (("Decision", 2.0 + DX, 5.0), "In stock?"),
+        (("Process", 5.5 + DX, 5.0), "Order part"),
+        (("Terminator", 2.0 + DX, 3.0), "Close"),
     ] {
         let visio_id = insert_shape(rig, master, x, y);
         label_shape(rig, visio_id, label);
-        shapes.push(ShapeRef {
-            page: 1,
-            visio_id,
-            master,
-        });
+        shapes.push(ShapeRef { visio_id });
     }
 
-    let fourth = draw_connector(
+    draw_connector(
         rig,
-        4.0,
+        4.0 + DX,
         6.0,
         Some((
             shapes[6].visio_id,
@@ -245,15 +234,13 @@ pub fn build_flowchart(rig: &mut Rig) -> Flowchart {
             Some(point_ix(rig, shapes[7].visio_id, None)),
         )),
     );
-    let _ = fourth;
-    let fifth = glued_connector(
+    glued_connector(
         rig,
-        4.0,
+        4.0 + DX,
         4.0,
         (shapes[7].visio_id, None),
         (shapes[8].visio_id, None),
     );
-    let _ = fifth;
 
     Flowchart { shapes }
 }
@@ -279,6 +266,8 @@ pub fn label_shape(rig: &mut Rig, visio_id: i32, text: &str) {
 pub struct ThreeShapes {
     /// The middle shape's Visio id (the one the shot drags).
     pub middle: i32,
+    /// The connector into the middle shape and the one out of it.
+    pub connectors: [i32; 2],
 }
 
 /// Builds the drawing on the active document's first page.
@@ -292,10 +281,13 @@ pub fn build_three_connected(rig: &mut Rig) -> ThreeShapes {
     let left = insert_shape(rig, "Process", 1.5, 6.0);
     let middle = insert_shape(rig, "Process", 4.25, 6.0);
     let right = insert_shape(rig, "Process", 7.0, 6.0);
-    draw_connector(rig, 2.875, 6.0, Some((left, None)), Some((middle, None)));
-    draw_connector(rig, 5.625, 6.0, Some((middle, None)), Some((right, None)));
+    let into = draw_connector(rig, 2.875, 6.0, Some((left, None)), Some((middle, None)));
+    let out = draw_connector(rig, 5.625, 6.0, Some((middle, None)), Some((right, None)));
     label_shape(rig, left, "Get order");
     label_shape(rig, middle, "Check stock");
     label_shape(rig, right, "Ship order");
-    ThreeShapes { middle }
+    ThreeShapes {
+        middle,
+        connectors: [into, out],
+    }
 }
