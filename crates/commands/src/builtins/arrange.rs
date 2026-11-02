@@ -1802,6 +1802,36 @@ mod tests {
     }
 
     #[test]
+    fn the_position_gallery_reads_middles_numbers_and_refusals() {
+        let (mut ctx, session, _page, id) = context();
+        let middle = second_shape(&mut ctx, session, 0.0, 2.0);
+        let end = second_shape(&mut ctx, session, 0.0, 3.0);
+        ctx.selection.shapes = vec![id, middle, end];
+        let run = |ctx: &mut AppCtx, value: crate::ArgValue| {
+            run_position(
+                ctx,
+                &Invocation::new(crate::Args::new().with("value", value), Source::Test),
+            )
+        };
+        run(
+            &mut ctx,
+            crate::ArgValue::Text("distribute middle".to_owned()),
+        )
+        .expect("middle");
+        assert!(
+            run(
+                &mut ctx,
+                crate::ArgValue::Text("distribute sideways".to_owned())
+            )
+            .is_err()
+        );
+        // A number or an integer value is read as its text: neither
+        // names an alignment.
+        assert!(run(&mut ctx, crate::ArgValue::Number(1.5)).is_err());
+        assert!(run(&mut ctx, crate::ArgValue::Integer(2)).is_err());
+    }
+
+    #[test]
     fn distribute_middle_spaces_the_vertical_centres() {
         let (mut ctx, session, _page, id) = context();
         let middle = second_shape(&mut ctx, session, 0.0, 2.0);

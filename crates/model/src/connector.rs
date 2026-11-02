@@ -186,12 +186,8 @@ impl Document {
         };
         self.write_cell(SheetRef::Shape(shape), &CellName::new(x_cell), &x_write)?;
         self.write_cell(SheetRef::Shape(shape), &CellName::new(y_cell), &y_write)?;
-        self.write_cell(
-            SheetRef::Shape(shape),
-            &CellName::new(trigger),
-            &trigger_write,
-        )?;
-        Ok(())
+        let trigger = CellName::new(trigger);
+        self.write_cell(SheetRef::Shape(shape), &trigger, &trigger_write)
     }
 
     /// Moves a 1-D shape's ends to `begin` and `end` (parent
