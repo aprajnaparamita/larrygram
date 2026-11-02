@@ -131,7 +131,10 @@ const MAX_WALK: usize = 1 << 16;
 /// `F='Inh'` is expressed by *not* writing the cell.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CellWrite {
-    /// The formula text, e.g. `"2.5"` or `"Width*0.5"`.
+    /// The formula text, e.g. `"2.5"` or `"Width*0.5"`. An **empty**
+    /// text writes the cached value only: a literal cell with no
+    /// formula (`CellWrite::value_only`, the "unglued" row of ADR 0084
+    /// rule 2).
     pub formula: String,
     /// The cached value to store alongside the formula.
     pub value: CellValue,
@@ -142,6 +145,15 @@ impl CellWrite {
     pub fn new(formula: impl Into<String>, value: CellValue) -> Self {
         Self {
             formula: formula.into(),
+            value,
+        }
+    }
+
+    /// A write of the cached value only: the cell keeps no formula (a
+    /// literal cell).
+    pub fn value_only(value: CellValue) -> Self {
+        Self {
+            formula: String::new(),
             value,
         }
     }
@@ -293,18 +305,21 @@ fn write_sheet_cell(sheet: &mut crate::sheet::Sheet, cell: &CellName, write: &Ce
 /// (the ShapeSheet table's kind for a sheet cell, the unit the row
 /// records for a Shape Data value).
 fn write_entry(cells: &mut Vec<Cell>, cell: &CellName, write: &CellWrite, unit: Unit) {
+    // An empty formula text writes the cached value only (a literal
+    // cell with no `F`, `CellWrite::value_only`).
+    let formula = (!write.formula.is_empty()).then(|| write.formula.clone());
     match cells
         .iter_mut()
         .find(|existing| existing.name.as_str() == cell.as_str())
     {
         Some(existing) => {
-            existing.formula = Some(write.formula.clone());
+            existing.formula = formula;
             existing.value = Some(write.value.clone());
             existing.unit = unit;
         }
         None => cells.push(Cell {
             name: cell.clone(),
-            formula: Some(write.formula.clone()),
+            formula,
             value: Some(write.value.clone()),
             unit,
             preserved: Preserved::new(),
@@ -1569,6 +1584,16 @@ impl Document {
     /// lands in the shape's own `Geometry` section (the row union rules of
     /// ADR 0019).
     ///
+    /// For a 1-D shape (task P7-31 goal 2, [`Document::is_connector`])
+    /// the write keeps the endpoint cells true as well: `BeginX`/`BeginY`
+    /// take the path's first point and `EndX`/`EndY` its last (a glued
+    /// end keeps its glue formula, only the cached `V` refreshes), and
+    /// `PinX`, `PinY`, `Width`, `Height` and the local pins are
+    /// refreshed through the formulas of ADR 0084 rule 1. `Width` is
+    /// negative when the path runs right to left. A shape without the
+    /// endpoint cells (a legacy record-only connector) gets its
+    /// geometry rows only: nothing migrates it.
+    ///
     /// The routed path **replaces** the connector's geometry: the rows go
     /// into the first `Geometry` section and any further `Geometry`
     /// sections are dropped (task P5-19 review F7, recorded in ADR 0045).
@@ -1592,6 +1617,14 @@ impl Document {
             if !point.x.is_finite() || !point.y.is_finite() {
                 return Err(Error::BadCell("non-finite path point"));
             }
+        }
+        let (begin, end) = match (path.first(), path.last()) {
+            (Some(begin), Some(end)) => (*begin, *end),
+            _ => return Err(Error::BadCell("empty connector path")),
+        };
+        if self.is_connector(connector) {
+            self.write_connector_ends(connector, begin, end)?;
+            self.write_connector_pins(connector, begin, end)?;
         }
         let frame = self.frame_of(connector)?;
         let inverse = frame
