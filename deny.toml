@@ -19,13 +19,6 @@ ignore = [
     { id = "RUSTSEC-2026-0370", reason = "zvariant via eframe/accesskit_unix (Linux a11y); unmaintained, no fix available" },
     { id = "RUSTSEC-2026-0371", reason = "zbus_names via eframe/accesskit_unix (Linux a11y); unmaintained, no fix available" },
     { id = "RUSTSEC-2026-0372", reason = "zvariant_derive via eframe/accesskit_unix (Linux a11y); unmaintained, no fix available" },
-    # zip 8.6 remains only through calamine in xtask (a dev tool that reads
-    # the downloaded .xlsx sources). The three advisories concern
-    # ZipArchive::extract and ZipStreamReader::extract, which neither
-    # calamine nor xtask calls. The runtime crates use zip 9 (fixed).
-    { id = "RUSTSEC-2026-0367", reason = "zip 8.6 via calamine in xtask only; extract() is never called" },
-    { id = "RUSTSEC-2026-0368", reason = "zip 8.6 via calamine in xtask only; extract() is never called" },
-    { id = "RUSTSEC-2026-0369", reason = "zip 8.6 via calamine in xtask only; extract() is never called" },
 ]
 
 [licenses]
