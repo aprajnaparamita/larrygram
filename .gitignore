@@ -33,3 +33,6 @@ tools/libvisio-oracle/bin/
 
 # pi harness local state
 /.pi/
+
+# Local secrets (API keys); never committed.
+.env
