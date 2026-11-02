@@ -1205,6 +1205,15 @@ pub(super) fn run_delete(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome,
             let step = StructuralEdit::removal(doc, session, "Delete shape", root);
             edit.push(Box::new(step?));
         }
+        // The glue formulas of every end glued to a removed shape clear
+        // in the same edit (ADR 0084 rule 2, task P7-31): the end keeps
+        // its last point as a literal. The records go with the removal
+        // above.
+        if let Some(page) = page
+            && let Some(step) = super::connector::GlueClearEdit::new(doc, session, page, &targets)
+        {
+            edit.push(step);
+        }
     }
     edit.apply(ctx)?;
     if let Some(page) = page {
