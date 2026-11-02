@@ -61,18 +61,8 @@ pub(super) fn connector_cells(width: f64, height: f64) -> Vec<Cell> {
         formula_cell("PinY", "GUARD((BeginY+EndY)/2)", 0.0, Unit::Inches),
         formula_cell("Width", "GUARD(EndX-BeginX)", width, Unit::Inches),
         formula_cell("Height", "GUARD(0.2DL)", height, Unit::Inches),
-        formula_cell(
-            "LocPinX",
-            "GUARD(Width*0.5)",
-            width * 0.5,
-            Unit::Inches,
-        ),
-        formula_cell(
-            "LocPinY",
-            "GUARD(Height*0.5)",
-            height * 0.5,
-            Unit::Inches,
-        ),
+        formula_cell("LocPinX", "GUARD(Width*0.5)", width * 0.5, Unit::Inches),
+        formula_cell("LocPinY", "GUARD(Height*0.5)", height * 0.5, Unit::Inches),
         formula_cell("Angle", "GUARD(0DA)", 0.0, Unit::Radians),
         // A routable 1-D shape with walking glue (ADR 0084 rule 1).
         number_cell("ObjType", 2.0, Unit::Unitsless),
@@ -264,11 +254,17 @@ mod tests {
             find("PinX").formula.as_deref(),
             Some("GUARD((BeginX+EndX)/2)")
         );
-        assert_eq!(find("PinY").formula.as_deref(), Some("GUARD((BeginY+EndY)/2)"));
+        assert_eq!(
+            find("PinY").formula.as_deref(),
+            Some("GUARD((BeginY+EndY)/2)")
+        );
         assert_eq!(find("Width").formula.as_deref(), Some("GUARD(EndX-BeginX)"));
         assert_eq!(find("Height").formula.as_deref(), Some("GUARD(0.2DL)"));
         assert_eq!(find("LocPinX").formula.as_deref(), Some("GUARD(Width*0.5)"));
-        assert_eq!(find("LocPinY").formula.as_deref(), Some("GUARD(Height*0.5)"));
+        assert_eq!(
+            find("LocPinY").formula.as_deref(),
+            Some("GUARD(Height*0.5)")
+        );
         assert_eq!(find("Angle").formula.as_deref(), Some("GUARD(0DA)"));
         // The kinds and the right-angle defaults.
         assert_eq!(find("ObjType").value, Some(CellValue::Number(2.0)));

@@ -69,8 +69,8 @@ pub struct MasterDef {
     pub connection_points: Vec<(f64, f64)>,
     /// True for a 1-D connector master (ADR 0084 rule 1): the master's
     /// shape carries the endpoint cells and the pin, size and lock
-    /// formulas of [`basic_flowchart::connector_cells`], not the 2-D
-    /// transform cells of [`transform_cells`].
+    /// formulas of `basic_flowchart::connector_cells`, not the 2-D
+    /// transform cells of `transform_cells`.
     pub connector_1d: bool,
 }
 

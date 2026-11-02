@@ -1200,17 +1200,9 @@ mod tests {
     /// nothing: the evaluator computes no replacement value for it.
     #[test]
     fn a_visio_owned_call_without_a_cached_value_writes_nothing() {
-        let (mut doc, shape) = doc_with(vec![cell(
-            "BeginX",
-            Some("_XFTRIGGER(EventXFMod)"),
-            None,
-        )]);
-        let outcome = recalc(
-            &mut doc,
-            &[address(shape, "BeginX")],
-            &RecalcOptions::new(),
-        )
-        .expect("recalc");
+        let (mut doc, shape) = doc_with(vec![cell("BeginX", Some("_XFTRIGGER(EventXFMod)"), None)]);
+        let outcome =
+            recalc(&mut doc, &[address(shape, "BeginX")], &RecalcOptions::new()).expect("recalc");
         assert!(outcome.warnings.is_empty(), "{:?}", outcome.warnings);
         assert!(outcome.updates.is_empty(), "{:?}", outcome.updates);
         assert_eq!(value_of(&doc, &address(shape, "BeginX")), None);

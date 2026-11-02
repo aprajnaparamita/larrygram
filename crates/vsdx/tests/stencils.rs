@@ -106,7 +106,11 @@ fn the_shape_data_and_connection_rows_survive() {
         if def.connector_1d {
             // The 1-D connector carries neither section (ADR 0084
             // rule 1): no Shape Data rows and no connection points.
-            assert!(sections("Property").is_none(), "{}: no Property", def.name_u);
+            assert!(
+                sections("Property").is_none(),
+                "{}: no Property",
+                def.name_u
+            );
             assert!(
                 sections("Connection").is_none(),
                 "{}: no Connection",

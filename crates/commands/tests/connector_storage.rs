@@ -288,9 +288,11 @@ fn an_unglue_writes_the_literal_point() {
             "the trigger names the end's own sheet"
         );
         // The other end keeps its glue.
-        assert!(formula(&doc, drawn, "BeginX")
-            .expect("begin formula")
-            .starts_with("PAR(PNT("));
+        assert!(
+            formula(&doc, drawn, "BeginX")
+                .expect("begin formula")
+                .starts_with("PAR(PNT(")
+        );
         let records = connects(&ctx, page);
         assert_eq!(records.len(), 1, "one record left: {records:?}");
     }
@@ -308,9 +310,7 @@ fn deleting_a_target_clears_the_formulas_in_the_same_edit() {
     let drawn = connector(&doc, page);
 
     // Delete box 1 (the begin end's target).
-    let box1 = doc
-        .shape_by_visio_id(page, 1)
-        .expect("box 1");
+    let box1 = doc.shape_by_visio_id(page, 1).expect("box 1");
     ctx.selection.shapes = vec![box1];
     ctx.selection.anchor = Some(box1);
     ctx.selection.page = Some(page);
@@ -328,11 +328,16 @@ fn deleting_a_target_clears_the_formulas_in_the_same_edit() {
         assert!((number(&doc, drawn, "BeginX") - 2.0).abs() < 1e-9);
         assert!((number(&doc, drawn, "BeginY") - 2.5).abs() < 1e-9);
         let records = connects(&ctx, page);
-        assert!(records.iter().all(|record| record.to_sheet != 1), "{records:?}");
+        assert!(
+            records.iter().all(|record| record.to_sheet != 1),
+            "{records:?}"
+        );
         // The end glued to box 2 keeps its glue.
-        assert!(formula(&doc, drawn, "EndX")
-            .expect("end formula")
-            .starts_with("_WALKGLUE("));
+        assert!(
+            formula(&doc, drawn, "EndX")
+                .expect("end formula")
+                .starts_with("_WALKGLUE(")
+        );
     }
 
     // One undo restores the cells and the records exactly.
@@ -393,14 +398,26 @@ fn endpoint_cells(document: &Document) -> Vec<(i32, String, Option<String>, Opti
         let Some(entity) = document.shape(shape) else {
             continue;
         };
-        for name in ["BeginX", "BeginY", "EndX", "EndY", "BegTrigger", "EndTrigger"] {
+        for name in [
+            "BeginX",
+            "BeginY",
+            "EndX",
+            "EndY",
+            "BegTrigger",
+            "EndTrigger",
+        ] {
             if let Some(cell) = entity
                 .sheet
                 .cells
                 .iter()
                 .find(|cell| cell.name.as_str() == name)
             {
-                out.push((entity.visio_id, name.to_owned(), cell.formula.clone(), cell.value.clone()));
+                out.push((
+                    entity.visio_id,
+                    name.to_owned(),
+                    cell.formula.clone(),
+                    cell.value.clone(),
+                ));
             }
         }
     }

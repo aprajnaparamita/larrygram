@@ -82,15 +82,11 @@ fn number(doc: &Document, shape: ShapeId, name: &str) -> f64 {
 fn any_formula_contains(doc: &Document, shape: ShapeId, needle: &str) -> bool {
     doc.shape(shape)
         .map(|entity| {
-            entity
-                .sheet
-                .cells
-                .iter()
-                .any(|cell| {
-                    cell.formula
-                        .as_deref()
-                        .is_some_and(|formula| formula.contains(needle))
-                })
+            entity.sheet.cells.iter().any(|cell| {
+                cell.formula
+                    .as_deref()
+                    .is_some_and(|formula| formula.contains(needle))
+            })
         })
         .unwrap_or(false)
 }
@@ -121,11 +117,17 @@ fn the_connector_master_is_a_1d_shape() {
         find("PinX").formula.as_deref(),
         Some("GUARD((BeginX+EndX)/2)")
     );
-    assert_eq!(find("PinY").formula.as_deref(), Some("GUARD((BeginY+EndY)/2)"));
+    assert_eq!(
+        find("PinY").formula.as_deref(),
+        Some("GUARD((BeginY+EndY)/2)")
+    );
     assert_eq!(find("Width").formula.as_deref(), Some("GUARD(EndX-BeginX)"));
     assert_eq!(find("Height").formula.as_deref(), Some("GUARD(0.2DL)"));
     assert_eq!(find("LocPinX").formula.as_deref(), Some("GUARD(Width*0.5)"));
-    assert_eq!(find("LocPinY").formula.as_deref(), Some("GUARD(Height*0.5)"));
+    assert_eq!(
+        find("LocPinY").formula.as_deref(),
+        Some("GUARD(Height*0.5)")
+    );
     assert_eq!(find("Angle").formula.as_deref(), Some("GUARD(0DA)"));
     // The kinds and the right-angle defaults.
     assert_eq!(find("ObjType").value, Some(CellValue::Number(2.0)));
@@ -151,9 +153,7 @@ fn the_connector_master_is_a_1d_shape() {
         "no Connection section"
     );
     // One straight geometry path.
-    let geometry = document
-        .shape_geometry(master.shapes[0])
-        .expect("geometry");
+    let geometry = document.shape_geometry(master.shapes[0]).expect("geometry");
     assert_eq!(geometry.paths.len(), 1);
     assert_eq!(geometry.paths[0].rows.len(), 2, "MoveTo and LineTo");
 }
@@ -172,13 +172,17 @@ fn is_connector_tells_a_1d_shape_from_the_rest() {
     let (mut doc, instance) = with_connector();
     assert!(doc.is_connector(instance), "an instance inherits the cells");
 
-    let ordinary = doc.insert_shape(PageId { index: 0 }, plain_box(2), None).expect("insert");
+    let ordinary = doc
+        .insert_shape(PageId { index: 0 }, plain_box(2), None)
+        .expect("insert");
     assert!(!doc.is_connector(ordinary), "an ordinary shape");
 
     // A legacy record-only connector: a `Connects` record names it as a
     // connector end, but it has no endpoint cells (a file saved by an
     // earlier Larrygram). It is not a connector and nothing migrates it.
-    let legacy = doc.insert_shape(PageId { index: 0 }, plain_box(3), None).expect("insert");
+    let legacy = doc
+        .insert_shape(PageId { index: 0 }, plain_box(3), None)
+        .expect("insert");
     let mut record = Connect::new();
     record.from_sheet = 3;
     record.from_cell = "BeginX".to_owned();
@@ -186,7 +190,8 @@ fn is_connector_tells_a_1d_shape_from_the_rest() {
     record.to_sheet = 2;
     record.to_cell = "PinX".to_owned();
     record.to_part = 3;
-    doc.add_connect(PageId { index: 0 }, record).expect("record");
+    doc.add_connect(PageId { index: 0 }, record)
+        .expect("record");
     assert!(!doc.is_connector(legacy), "a record-only connector");
     assert!(!doc.is_connector(ShapeId { index: 999 }), "a stale id");
 }
@@ -205,8 +210,14 @@ fn the_rule_2_rows_write_and_read_back() {
     )
     .expect("point glue");
     let expected = "PAR(PNT(Sheet.5!Connections.X5,Sheet.5!Connections.Y5))";
-    assert_eq!(formula(&doc, connector, "BeginX"), Some(expected.to_owned()));
-    assert_eq!(formula(&doc, connector, "BeginY"), Some(expected.to_owned()));
+    assert_eq!(
+        formula(&doc, connector, "BeginX"),
+        Some(expected.to_owned())
+    );
+    assert_eq!(
+        formula(&doc, connector, "BeginY"),
+        Some(expected.to_owned())
+    );
     assert_eq!(number(&doc, connector, "BeginX"), 2.5);
     assert_eq!(number(&doc, connector, "BeginY"), 3.5);
     assert_eq!(
@@ -282,17 +293,17 @@ fn a_reglue_replaces_a_visio_formula() {
         formula(&doc, connector, "BegTrigger"),
         Some("_XFTRIGGER(Sheet.2!EventXFMod)".to_owned())
     );
-    assert!(!any_formula_contains(&doc, connector, "Sheet.1"), "no stale");
+    assert!(
+        !any_formula_contains(&doc, connector, "Sheet.1"),
+        "no stale"
+    );
 }
 
 #[test]
 fn the_cells_after_a_path_write_follow_the_formulas() {
     let (mut doc, connector) = with_connector();
-    doc.write_connector_path(
-        connector,
-        &[Point::new(2.0, 3.0), Point::new(5.0, 4.5)],
-    )
-    .expect("path");
+    doc.write_connector_path(connector, &[Point::new(2.0, 3.0), Point::new(5.0, 4.5)])
+        .expect("path");
     assert_eq!(number(&doc, connector, "BeginX"), 2.0);
     assert_eq!(number(&doc, connector, "BeginY"), 3.0);
     assert_eq!(number(&doc, connector, "EndX"), 5.0);
@@ -352,8 +363,14 @@ fn a_right_to_left_path_keeps_its_pixels() {
     // The written rows map back to the same page pixels.
     let mapped = map_back(&doc, connector);
     assert_eq!(mapped.len(), 2, "{mapped:?}");
-    assert!((mapped[0].x - 4.0).abs() < 1e-12 && (mapped[0].y - 3.0).abs() < 1e-12, "{mapped:?}");
-    assert!((mapped[1].x - 1.0).abs() < 1e-12 && (mapped[1].y - 3.0).abs() < 1e-12, "{mapped:?}");
+    assert!(
+        (mapped[0].x - 4.0).abs() < 1e-12 && (mapped[0].y - 3.0).abs() < 1e-12,
+        "{mapped:?}"
+    );
+    assert!(
+        (mapped[1].x - 1.0).abs() < 1e-12 && (mapped[1].y - 3.0).abs() < 1e-12,
+        "{mapped:?}"
+    );
 
     // The same connector drawn left to right covers the same segment.
     let (mut doc2, back) = with_connector();
@@ -368,7 +385,10 @@ fn a_right_to_left_path_keeps_its_pixels() {
 /// The written geometry rows mapped back through the shape's transform
 /// (the render's rule: `Pin + local - LocPin`, no rotation or flip).
 fn map_back(doc: &Document, connector: ShapeId) -> Vec<Point> {
-    let pin = Point::new(number(doc, connector, "PinX"), number(doc, connector, "PinY"));
+    let pin = Point::new(
+        number(doc, connector, "PinX"),
+        number(doc, connector, "PinY"),
+    );
     let loc = Point::new(
         number(doc, connector, "LocPinX"),
         number(doc, connector, "LocPinY"),
@@ -396,11 +416,8 @@ fn a_glued_end_keeps_its_formula_across_a_path_write() {
         EndGlue::Point { sheet: 2, ix: 0 },
     )
     .expect("glue");
-    doc.write_connector_path(
-        connector,
-        &[Point::new(2.0, 3.0), Point::new(5.0, 4.5)],
-    )
-    .expect("path");
+    doc.write_connector_path(connector, &[Point::new(2.0, 3.0), Point::new(5.0, 4.5)])
+        .expect("path");
     // The glue formula survives the path write; only its cached `V`
     // follows the routed point.
     assert_eq!(
@@ -417,9 +434,7 @@ fn a_glued_end_keeps_its_formula_across_a_path_write() {
 fn a_legacy_connector_gets_geometry_rows_only() {
     let mut doc = Document::new();
     let page = doc.add_page("Page-1").expect("page");
-    let legacy = doc
-        .insert_shape(page, plain_box(4), None)
-        .expect("insert");
+    let legacy = doc.insert_shape(page, plain_box(4), None).expect("insert");
     doc.write_connector_path(legacy, &[Point::new(0.0, 0.0), Point::new(1.0, 1.0)])
         .expect("path");
     assert!(own(&doc, legacy, "BeginX").is_none(), "no endpoint cells");
