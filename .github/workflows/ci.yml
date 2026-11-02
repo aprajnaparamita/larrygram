@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Also runnable by hand (task R9 goal 4).
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -42,6 +44,15 @@ jobs:
       # Fetch the third-party test corpus before the gate (ADR 0005).
       - name: Fetch test corpus
         run: cargo xtask corpus
+
+      # The egui_kittest wgpu tests need a Vulkan adapter; the hosted
+      # Ubuntu runners have none, so install Mesa's software Vulkan
+      # (lavapipe) before the gate (task R9 goal 4). The Windows runner
+      # ships WARP (software Direct3D 12) instead; that is checked on
+      # the first real run and noted in the R9 Result.
+      - name: Install Mesa software Vulkan
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers
 
       # cargo-fuzz (libFuzzer) does not support Windows/MSVC; fuzz builds run on Linux and macOS.
       - name: Gate
