@@ -108,6 +108,7 @@ fn git_short_sha() -> Option<String> {
 
 /// The trimmed stdout of a successful `git rev-parse`, else [`None`]
 /// (task R11 goal 1).
+#[cfg(not(target_arch = "wasm32"))]
 fn sha_from(success: bool, stdout: &[u8]) -> Option<String> {
     if !success {
         return None;
