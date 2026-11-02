@@ -12,8 +12,8 @@
 //!   `--check`. See ADR 0037.
 //! - `coverage [--update-ratchet]`: coverage only; optionally record the ratchet.
 //! - `layers`: check crate layering rules.
-//! - `dist mac`: build the macOS `Larrygram.app` and `.dmg` under
-//!   `/Volumes/Dara/larrygram/dist` (task R7).
+//! - `dist <mac|windows|linux>`: build the release package for one
+//!   platform under `<target dir>/dist` (tasks R7 and R9).
 //! - `corpus [--verify-only] [--offline <dir>]`: fetch and verify the test corpus.
 //! - `scout fetch <csv> [--out <dir>]` / `scout classify [--out <dir>]
 //!   [--clamav <log>]` / `scout select [--out <dir>]`: the wide corpus
@@ -32,7 +32,7 @@
 mod codegen;
 mod corpus;
 mod coverage;
-mod dist_mac;
+mod dist;
 mod extract;
 mod gate;
 mod layers;
@@ -59,9 +59,12 @@ tasks:
                                        --check fails when the committed file is stale
   coverage [--update-ratchet]          run coverage and check thresholds
   layers                               check crate layering rules
-  dist mac                             build the macOS Larrygram.app and
-                                       Larrygram-<version>.dmg under
-                                       /Volumes/Dara/larrygram/dist (task R7)
+  dist <mac|windows|linux>             build the release package for one
+                                       platform under <target dir>/dist
+                                       (tasks R7 and R9):
+                                       mac     Larrygram-<v>-macos-arm64.dmg
+                                       windows Larrygram-<v>-windows-x64.zip
+                                       linux   Larrygram-<v>-linux-x64.tar.gz
   corpus [--verify-only] [--offline d] fetch and verify the test corpus (ADR 0005)
                                        --offline copies from a local dir instead of the network
   scout fetch <csv> [--out d]          fetch and pin the wide corpus of a BigQuery export
@@ -98,7 +101,7 @@ enum Task {
     /// `cargo xtask layers`.
     Layers,
     /// `cargo xtask dist` with its parsed options.
-    Dist(dist_mac::Options),
+    Dist(dist::Options),
     /// `cargo xtask corpus`.
     Corpus(corpus::Options),
     /// `cargo xtask scout`.
@@ -139,7 +142,7 @@ fn parse_task(args: &[String]) -> Result<Task, String> {
             }
         }
         "corpus" => Ok(Task::Corpus(corpus::parse_args(rest)?)),
-        "dist" => Ok(Task::Dist(dist_mac::parse_args(rest)?)),
+        "dist" => Ok(Task::Dist(dist::parse_args(rest)?)),
         "scout" => Ok(Task::Scout(scout::parse_args(rest)?)),
         "extract" => Ok(Task::Extract(extract::parse_args(rest)?)),
         "oracle" => {
@@ -174,7 +177,7 @@ fn run_task(task: Task) -> Result<(), String> {
         Task::Parity(options) => parity::run(&options),
         Task::Coverage { update_ratchet } => coverage::run(update_ratchet),
         Task::Layers => layers::run(),
-        Task::Dist(options) => dist_mac::run(&options),
+        Task::Dist(options) => dist::run(&options),
         Task::Corpus(opts) => corpus::run_opts(&opts),
         Task::Scout(opts) => scout::run(&opts),
         Task::Extract(parsed) => extract_dispatch(&parsed),
@@ -375,8 +378,20 @@ mod tests {
         ));
         assert!(matches!(
             parse_task(&args(&["dist", "mac"])).unwrap(),
-            Task::Dist(dist_mac::Options {
-                platform: dist_mac::Platform::Mac
+            Task::Dist(dist::Options {
+                platform: dist::Platform::Mac
+            })
+        ));
+        assert!(matches!(
+            parse_task(&args(&["dist", "windows"])).unwrap(),
+            Task::Dist(dist::Options {
+                platform: dist::Platform::Windows
+            })
+        ));
+        assert!(matches!(
+            parse_task(&args(&["dist", "linux"])).unwrap(),
+            Task::Dist(dist::Options {
+                platform: dist::Platform::Linux
             })
         ));
     }
