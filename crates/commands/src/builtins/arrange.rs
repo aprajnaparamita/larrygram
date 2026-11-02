@@ -35,7 +35,7 @@ use crate::{Invocation, Outcome};
 use super::connector::reroute_quietly;
 use super::edit::{
     CellEdit, PageKey, count_label, document_mut, number_literal, page_key, resolve_page,
-    selection_targets,
+    selection_targets, without_one_d,
 };
 use super::{CommandTable, edit_outcome, has_selection, model_error, warning_line};
 
@@ -371,6 +371,9 @@ fn distribute(ctx: &mut AppCtx, axis: Axis) -> Result<Outcome, CommandError> {
 /// on.
 fn targets(ctx: &AppCtx) -> Result<(SessionId, Vec<Target>, Vec<String>), CommandError> {
     let (session, ids, mut warnings) = selection_targets(ctx)?;
+    // Align and distribute leave 1-D shapes where they are (ADR 0084
+    // rule 1, amended).
+    let ids = without_one_d(ctx, ids, &mut warnings, "Align and distribute")?;
     let doc = ctx
         .documents
         .iter()
@@ -1189,6 +1192,7 @@ fn run_rotate_counterclockwise(
 /// as a local literal cell (ADR 0038).
 fn rotate(ctx: &mut AppCtx, delta: f64, label: &str) -> Result<Outcome, CommandError> {
     let (session, targets, mut warnings) = selection_targets(ctx)?;
+    let targets = without_one_d(ctx, targets, &mut warnings, "Rotate")?;
     let mut edit = CompositeEdit::new(count_label("Rotate", targets.len()));
     {
         let doc = document_mut(ctx, session)?;
@@ -1234,7 +1238,8 @@ fn run_flip_vertical(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, Com
 /// cell is written and the shape draws unmirrored (the P7-21 Result,
 /// Open issues).
 fn flip(ctx: &mut AppCtx, cell: &'static str, label: &str) -> Result<Outcome, CommandError> {
-    let (session, targets, warnings) = selection_targets(ctx)?;
+    let (session, targets, mut warnings) = selection_targets(ctx)?;
+    let targets = without_one_d(ctx, targets, &mut warnings, "Flip")?;
     let fresh = {
         let doc = ctx
             .documents

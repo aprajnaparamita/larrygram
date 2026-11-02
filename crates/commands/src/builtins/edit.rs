@@ -1107,6 +1107,40 @@ pub(super) fn selection_targets(
     Ok((session.id, targets, warnings))
 }
 
+/// The targets without their 1-D shapes (ADR 0084 rule 1, amended
+/// 2026-11-03): resize, rotate and flip refuse a 1-D shape until its
+/// end handles exist, and align and distribute leave it in place.
+///
+/// Each skipped shape adds one warning line. When nothing is left the
+/// run fails with one status message (`what` names the operation), so
+/// no undo step is pushed for an edit that changes nothing.
+pub(super) fn without_one_d(
+    ctx: &AppCtx,
+    targets: Vec<ShapeId>,
+    warnings: &mut Vec<String>,
+    what: &str,
+) -> Result<Vec<ShapeId>, CommandError> {
+    let doc = &ctx.active_document().ok_or_else(no_document)?.document;
+    let (one_d, kept): (Vec<ShapeId>, Vec<ShapeId>) = targets
+        .into_iter()
+        .partition(|shape| doc.is_connector(*shape));
+    if kept.is_empty() && !one_d.is_empty() {
+        return Err(CommandError::failed(format!(
+            "{what} does not apply to a connector or a line; drag its ends instead"
+        )));
+    }
+    for shape in one_d {
+        let visio_id = doc
+            .shape(shape)
+            .map(|entity| entity.visio_id)
+            .unwrap_or_default();
+        warnings.push(format!(
+            "shape {visio_id} is a connector or a line; {what} skipped it"
+        ));
+    }
+    Ok(kept)
+}
+
 /// Whether any shape of `targets` is a strict ancestor of `id`: such a
 /// target is deleted with its ancestor (one subtree, one undo step,
 /// task P5-19 review F1). The parent walk is bounded (AGENTS.md section
