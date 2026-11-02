@@ -57,13 +57,14 @@ Phase 7: Panel and Classic layouts, the Larrygram rename and the welcome wizard.
 | [P7-28](tasks/P7-28.md) | implementer | P7-24, P7-25 | I | merged (the Fill and Line dialogs, the Format Shape pane as a window, ADR 0083; open: transparency unit, pane docking, dialog defaults) | `c895436` |
 | [P7-29](tasks/P7-29.md) | implementer | P7-26, P7-27, P7-28 | I | merged (text controls follow the text, reversing P7-24 item 8; the Text tool on a selected shape; Edit Text in both context menus; follow-ups in P7-37) | `f8494d0` |
 | [P7-30](tasks/P7-30.md) | architect (Opus 5.5 or Fable 5.1) | P7-26 | A | merged (connector spec `docs/ui/connectors.md`, ADR 0084, the audit; the master revised ADR 0084 and the drafts after the Opus review: 1-D connector, glue formulas, pair resolution, scoped re-route) | `4d5e5e9` |
-| [P7-31](tasks/P7-31.md) | implementer | P7-30 | I | ready, parallel with P7-29 (the 1-D connector master, Visio's glue formulas, right angle by default) | — |
+| [P7-31](tasks/P7-31.md) | implementer | P7-30 | I | handed off at `6c56a67`; Opus review: approve after fixes, which P7-39 makes on the same branch (1-D move and copy, group delete, routability) | — |
 | [P7-32](tasks/P7-32.md) | implementer | P7-31 | I | waits for P7-31 (glue lands on a sensible point: `larrygram_geom::glue`, exit directions, scoped re-route) | — |
 | [P7-33](tasks/P7-33.md) | implementer | P7-32 | I | waits for P7-32 (end handles, re-glue, unglue, hover feedback, arrow-key unglue); parallel with P7-36 | — |
 | [P7-34](tasks/P7-34.md) | implementer | P7-33 | I | waits for P7-33 (connection points: view check, tool, type, glue renumbering); parallel with P7-35 | — |
 | [P7-35](tasks/P7-35.md) | implementer | P7-33, P7-36 | I | waits (segment drags, Reset Connector, reroute options) | — |
 | [P7-36](tasks/P7-36.md) | implementer | P7-32 | I | waits for P7-32 (right angle, straight and curved styles, the controls, the storage round trip); parallel with P7-33 | — |
 | [P7-37](tasks/P7-37.md) | implementer | P7-29 | I | ready, parallel with P7-31 (format a new text box while typing, inherited text counts, one allowlist rule) | — |
+| [P7-39](tasks/P7-39.md) | implementer | P7-31 | I | ready, on `agent/P7-31` (the P7-31 review fixes; P7-31 merges with them); parallel with P7-37 | — |
 | [P7-38](tasks/P7-38.md) | test-engineer | P7-31–P7-37 | I | waits for the connector and text tasks to merge (the website's screenshots rendered offscreen, `cargo xtask screenshots --to`, copied to the site) | — |
 
 Tasks start as soon as their own dependencies merge (no whole-group waits); run at most twelve workers at once across Phase 7 and Phase 8.
