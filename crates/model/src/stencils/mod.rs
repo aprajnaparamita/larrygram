@@ -63,7 +63,15 @@ pub struct MasterDef {
     /// `(label, value)` pairs.
     pub shape_data: Vec<(&'static str, &'static str)>,
     /// Connection points in local coordinates (Phase 5 glues to these).
+    ///
+    /// A master with no points gets **no** `Connection` section at all:
+    /// a connector is not a glue target in the alpha (ADR 0084 rule 1).
     pub connection_points: Vec<(f64, f64)>,
+    /// True for a 1-D connector master (ADR 0084 rule 1): the master's
+    /// shape carries the endpoint cells and the pin, size and lock
+    /// formulas of [`basic_flowchart::connector_cells`], not the 2-D
+    /// transform cells of [`transform_cells`].
+    pub connector_1d: bool,
 }
 
 /// The line defaults of a master (ADR 0023): our own values, not
@@ -230,7 +238,11 @@ fn first_page(target: &mut Document) -> PageId {
 /// and fill cells and the geometry, Shape Data and connection sections.
 fn master_sheet(def: &MasterDef) -> Sheet {
     let mut sheet = Sheet::new();
-    sheet.cells = transform_cells(def.width, def.height, def.width * 0.5, def.height * 0.5);
+    if def.connector_1d {
+        sheet.cells = basic_flowchart::connector_cells(def.width, def.height);
+    } else {
+        sheet.cells = transform_cells(def.width, def.height, def.width * 0.5, def.height * 0.5);
+    }
     sheet
         .cells
         .push(number_cell("LineWeight", def.line.weight, Unit::Inches));
@@ -260,10 +272,14 @@ fn master_sheet(def: &MasterDef) -> Sheet {
         Unit::Unitsless,
     ));
     sheet.sections.push(geometry_section(&def.geometry));
-    sheet.sections.push(property_section(&def.shape_data));
-    sheet
-        .sections
-        .push(connection_section(&def.connection_points));
+    if !def.shape_data.is_empty() {
+        sheet.sections.push(property_section(&def.shape_data));
+    }
+    if !def.connection_points.is_empty() {
+        sheet
+            .sections
+            .push(connection_section(&def.connection_points));
+    }
     sheet
 }
 
@@ -471,10 +487,23 @@ fn push_number(row: &mut Row, name: &'static str, value: f64, unit: Unit) {
 }
 
 /// A cell with a cached number in `unit`.
-fn number_cell(name: &'static str, value: f64, unit: Unit) -> Cell {
+pub(super) fn number_cell(name: &'static str, value: f64, unit: Unit) -> Cell {
     let mut cell = Cell::new(CellName::from_static(name));
     cell.value = Some(CellValue::Number(value));
     cell.unit = unit;
+    cell
+}
+
+/// A cell with a formula and its cached value (ADR 0011): the master's
+/// documented formula and the number it computes.
+pub(super) fn formula_cell(
+    name: &'static str,
+    formula: &'static str,
+    value: f64,
+    unit: Unit,
+) -> Cell {
+    let mut cell = number_cell(name, value, unit);
+    cell.formula = Some(formula.to_owned());
     cell
 }
 
@@ -652,11 +681,19 @@ mod tests {
                         master.name_u
                     );
                 }
-                assert!(
-                    (2..=4).contains(&master.shape_data.len()),
-                    "{}: 2-4 Shape Data rows",
-                    master.name_u
-                );
+                if master.connector_1d {
+                    assert!(
+                        master.shape_data.is_empty(),
+                        "{}: a connector carries no Shape Data rows",
+                        master.name_u
+                    );
+                } else {
+                    assert!(
+                        (2..=4).contains(&master.shape_data.len()),
+                        "{}: 2-4 Shape Data rows",
+                        master.name_u
+                    );
+                }
             }
         }
     }
