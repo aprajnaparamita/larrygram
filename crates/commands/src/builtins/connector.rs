@@ -1954,6 +1954,35 @@ mod tests {
     }
 
     #[test]
+    fn the_style_falls_through_to_the_page_and_to_right_angle() {
+        let (mut ctx, session, page, connector, _left, _right) = fixture();
+        // No local style and no page value: right angle (ADR 0084 rule 8).
+        let doc = ctx.active_document().expect("session").document.clone();
+        assert_eq!(connector_style(&doc, connector), RouteStyle::RightAngle);
+        // A missing or 0 cell value falls through to the page's
+        // `RouteStyle`.
+        let doc = document_mut(&mut ctx, session).expect("session");
+        doc.write_cell(
+            SheetRef::Page(page),
+            &CellName::new("RouteStyle"),
+            &CellWrite::new("2", CellValue::Number(2.0)),
+        )
+        .expect("page style");
+        let doc = ctx.active_document().expect("session").document.clone();
+        assert_eq!(connector_style(&doc, connector), RouteStyle::Straight);
+        // A local value of 16 (center-to-centre) routes as right angle.
+        let doc = document_mut(&mut ctx, session).expect("session");
+        doc.write_cell(
+            SheetRef::Shape(connector),
+            &CellName::new("ShapeRouteStyle"),
+            &CellWrite::new("16", CellValue::Number(16.0)),
+        )
+        .expect("local style");
+        let doc = ctx.active_document().expect("session").document.clone();
+        assert_eq!(connector_style(&doc, connector), RouteStyle::RightAngle);
+    }
+
+    #[test]
     fn a_glue_and_unglue_round_trip_the_connects() {
         let (mut ctx, _session, page, connector, left, right) = fixture();
         let before = ctx.active_document().expect("session").document.clone();
