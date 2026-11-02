@@ -289,30 +289,6 @@ pub fn render_png(svg: &str, size: u32) -> Result<Vec<u8>> {
         .map_err(|e| format!("cannot encode the {size}x{size} PNG: {e}"))
 }
 
-/// Copies one directory tree from `src` into `dst` (created).
-pub fn copy_dir(src: &Path, dst: &Path) -> Result<()> {
-    std::fs::create_dir_all(dst).map_err(|e| format!("cannot create {}: {e}", dst.display()))?;
-    let entries =
-        std::fs::read_dir(src).map_err(|e| format!("cannot read {}: {e}", src.display()))?;
-    for entry in entries {
-        let entry = entry.map_err(|e| format!("cannot read {}: {e}", src.display()))?;
-        let from = entry.path();
-        let to = dst.join(entry.file_name());
-        if from.is_dir() {
-            copy_dir(&from, &to)?;
-        } else {
-            std::fs::copy(&from, &to)
-                .map_err(|e| format!("cannot copy {} -> {}: {e}", from.display(), to.display()))?;
-        }
-    }
-    Ok(())
-}
-
-/// The argument spelling of a path (a `&str` for the command line).
-pub fn path_arg(path: &Path) -> String {
-    path.to_string_lossy().into_owned()
-}
-
 /// `cargo xtask dist` entry point: the real layout and the real system
 /// tools. Each platform pipeline checks the host itself before it
 /// builds anything.
@@ -507,18 +483,5 @@ mod tests {
     fn render_png_reports_a_broken_svg() {
         let err = render_png("not an svg", 32).unwrap_err();
         assert!(err.contains("cannot parse"), "{err}");
-    }
-
-    /// `copy_dir` copies a tree, files and subdirectories.
-    #[test]
-    fn copy_dir_copies_trees() {
-        let tmp = TempDir::new("dist-copy");
-        std::fs::create_dir_all(tmp.join("src/inner")).unwrap();
-        std::fs::write(tmp.join("src/inner/file.txt"), "x").unwrap();
-        copy_dir(&tmp.join("src"), &tmp.join("dst")).unwrap();
-        assert_eq!(
-            std::fs::read_to_string(tmp.join("dst/inner/file.txt")).unwrap(),
-            "x"
-        );
     }
 }

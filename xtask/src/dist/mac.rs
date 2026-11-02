@@ -35,8 +35,8 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use super::{
-    BINARIES, ICON_SVG, Layout, MAC_TARGET, Sys, copy_dir, licence_files, package_name, path_arg,
-    render_png, version_from_root,
+    BINARIES, ICON_SVG, Layout, MAC_TARGET, Sys, licence_files, package_name, render_png,
+    version_from_root,
 };
 use crate::util::Result;
 
@@ -283,6 +283,30 @@ fn make_dmg(sys: &mut dyn Sys, staging: &Path, dmg: &Path) -> Result<()> {
     std::fs::remove_dir_all(staging)
         .map_err(|e| format!("cannot remove {}: {e}", staging.display()))?;
     Ok(())
+}
+
+/// Copies one directory tree from `src` into `dst` (created).
+pub fn copy_dir(src: &Path, dst: &Path) -> Result<()> {
+    std::fs::create_dir_all(dst).map_err(|e| format!("cannot create {}: {e}", dst.display()))?;
+    let entries =
+        std::fs::read_dir(src).map_err(|e| format!("cannot read {}: {e}", src.display()))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("cannot read {}: {e}", src.display()))?;
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        if from.is_dir() {
+            copy_dir(&from, &to)?;
+        } else {
+            std::fs::copy(&from, &to)
+                .map_err(|e| format!("cannot copy {} -> {}: {e}", from.display(), to.display()))?;
+        }
+    }
+    Ok(())
+}
+
+/// The argument spelling of a path (a `&str` for the command line).
+pub fn path_arg(path: &Path) -> String {
+    path.to_string_lossy().into_owned()
 }
 
 /// The whole build through `sys`: release binaries, bundle, ad-hoc
@@ -653,6 +677,19 @@ mod tests {
         assert!(staging.join("Larrygram.app/Contents/Info.plist").is_file());
         let link = std::fs::read_link(staging.join("Applications")).unwrap();
         assert_eq!(link, PathBuf::from("/Applications"));
+    }
+
+    /// `copy_dir` copies a tree, files and subdirectories.
+    #[test]
+    fn copy_dir_copies_trees() {
+        let tmp = TempDir::new("dist-copy");
+        std::fs::create_dir_all(tmp.join("src/inner")).unwrap();
+        std::fs::write(tmp.join("src/inner/file.txt"), "x").unwrap();
+        copy_dir(&tmp.join("src"), &tmp.join("dst")).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(tmp.join("dst/inner/file.txt")).unwrap(),
+            "x"
+        );
     }
 
     /// The whole pipeline on hand-built inputs: the bundle tree, the
