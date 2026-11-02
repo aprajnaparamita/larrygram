@@ -302,7 +302,7 @@ impl GlueEdit {
             .shape(connector)
             .map(|entity| entity.sheet.clone())
             .unwrap_or_default();
-        let glue = end_glue_of(new.as_ref());
+        let glue = end_glue_of(new.as_ref())?;
         let dirty = end_cells(end)
             .iter()
             .map(|name| CellAddress::new(SheetRef::Shape(connector), CellName::new(*name)))
@@ -429,19 +429,21 @@ fn end_cells(end: End) -> [&'static str; 3] {
 /// The glue kind of a record (ADR 0084 rule 2's table): point glue for
 /// a `Connections.X<n>` row (`ToPart` 100 + the row index), dynamic
 /// glue for a shape's pin, free when there is no record.
-fn end_glue_of(record: Option<&Connect>) -> EndGlue {
+fn end_glue_of(record: Option<&Connect>) -> Result<EndGlue, CommandError> {
     let Some(connect) = record else {
-        return EndGlue::Free;
+        return Ok(EndGlue::Free);
     };
-    match connection_index(connect) {
+    Ok(match connection_index(connect) {
         Some(ix) => EndGlue::Point {
             sheet: connect.to_sheet,
-            ix: u32::try_from(ix).unwrap_or(0),
+            ix: u32::try_from(ix).map_err(|_| {
+                CommandError::invalid_args("the connection row index is out of range")
+            })?,
         },
         None => EndGlue::Dynamic {
             sheet: connect.to_sheet,
         },
-    }
+    })
 }
 
 /// One undoable clear of the glue formulas of every end glued to a
@@ -478,48 +480,79 @@ impl GlueClearEdit {
         page: PageId,
         targets: &[ShapeId],
     ) -> Option<Box<dyn Edit>> {
-        let removed: Vec<i32> = targets
-            .iter()
-            .filter_map(|shape| doc.shape(*shape).map(|entity| entity.visio_id))
-            .collect();
+        // Every shape the delete removes, members of a removed group
+        // included (P7-31 review finding 3).
+        let removed = subtree_visio_ids(doc, targets);
         let entity = doc.page(page)?;
         // The ends glued to a removed target, in file order, grouped by
-        // connector (one connector may lose both ends).
-        let mut grouped: Vec<(i32, Vec<(End, Point)>)> = Vec::new();
+        // connector (one connector may lose both ends). A record whose
+        // connector is gone (a dangling record) is skipped; it is no
+        // reason to clear nothing (review finding 5).
+        let mut grouped: Vec<(ShapeId, Vec<(End, Point)>)> = Vec::new();
         for connect in &entity.connects {
             if !is_connector_end(connect) || !removed.contains(&connect.to_sheet) {
                 continue;
             }
-            let end = End::of(connect);
-            let at = doc
-                .shape_by_visio_id(page, connect.from_sheet)
-                .map(|connector| {
-                    end_point_for(doc, page, connector, end, Some(connect), &mut Vec::new())
-                })
-                .unwrap_or(Point::new(0.0, 0.0));
-            match grouped
-                .iter_mut()
-                .find(|(visio, _)| *visio == connect.from_sheet)
-            {
-                Some((_, ends)) => ends.push((end, at)),
-                None => grouped.push((connect.from_sheet, vec![(end, at)])),
-            }
-        }
-        let mut items = Vec::new();
-        for (visio, ends) in grouped {
-            let connector = doc.shape_by_visio_id(page, visio)?;
+            let Some(connector) = doc.shape_by_visio_id(page, connect.from_sheet) else {
+                continue;
+            };
             if !doc.is_connector(connector) {
                 continue;
             }
-            let old_sheet = doc.shape(connector)?.sheet.clone();
-            items.push(ClearedConnector {
-                connector,
-                ends,
-                old_sheet,
-            });
+            let end = End::of(connect);
+            // The freed end keeps its stored point (review finding 6),
+            // not a fresh resolution of the glue.
+            let Some(at) = stored_end_point(doc, connector, end) else {
+                continue;
+            };
+            match grouped.iter_mut().find(|(shape, _)| *shape == connector) {
+                Some((_, ends)) => ends.push((end, at)),
+                None => grouped.push((connector, vec![(end, at)])),
+            }
         }
+        let items: Vec<ClearedConnector> = grouped
+            .into_iter()
+            .filter_map(|(connector, ends)| {
+                let old_sheet = doc.shape(connector)?.sheet.clone();
+                Some(ClearedConnector {
+                    connector,
+                    ends,
+                    old_sheet,
+                })
+            })
+            .collect();
         (!items.is_empty()).then(|| Box::new(Self { session, items }) as Box<dyn Edit>)
     }
+}
+
+/// The Visio ids of every shape in the subtrees rooted at `roots` (the
+/// roots and all their members), bounded and cycle-safe.
+pub(crate) fn subtree_visio_ids(doc: &Document, roots: &[ShapeId]) -> Vec<i32> {
+    let mut ids = Vec::new();
+    let mut seen: std::collections::HashSet<ShapeId> = std::collections::HashSet::new();
+    let mut stack: Vec<ShapeId> = roots.to_vec();
+    while let Some(shape) = stack.pop() {
+        if seen.len() >= MAX_SUBTREE_WALK {
+            break;
+        }
+        if !seen.insert(shape) {
+            continue;
+        }
+        if let Some(entity) = doc.shape(shape) {
+            ids.push(entity.visio_id);
+            stack.extend(entity.children.iter().copied());
+        }
+    }
+    ids
+}
+
+/// The most shapes [`subtree_visio_ids`] visits.
+const MAX_SUBTREE_WALK: usize = 1 << 16;
+
+/// One end's stored point: its endpoint cells or, without them, its
+/// geometry path's end (then the pin as the last resort).
+fn stored_end_point(doc: &Document, connector: ShapeId, end: End) -> Option<Point> {
+    current_end_point(doc, connector, end).or_else(|| fallback_point(doc, connector))
 }
 
 impl Edit for GlueClearEdit {
@@ -1384,9 +1417,9 @@ fn is_connector_end(connect: &Connect) -> bool {
 }
 
 /// The distinct connector Visio ids the pass routes: the connector
-/// ends the page's `Connect` records name (a legacy record-only
-/// connector keeps re-routing as today) plus every shape with the 1-D
-/// endpoint cells ([`Document::is_connector`], ADR 0084 rule 1).
+/// ends the page's `Connect` records name, in file order (connector
+/// ends only, [`is_connector_end`]). A connector with no record has no
+/// glued end and nothing to re-route.
 fn connector_visio_ids(doc: &Document, page: PageId) -> Result<Vec<i32>, CommandError> {
     let entity = doc
         .page(page)
@@ -1395,23 +1428,6 @@ fn connector_visio_ids(doc: &Document, page: PageId) -> Result<Vec<i32>, Command
     for connect in &entity.connects {
         if is_connector_end(connect) && !ids.contains(&connect.from_sheet) {
             ids.push(connect.from_sheet);
-        }
-    }
-    let mut stack: Vec<ShapeId> = entity.shapes.clone();
-    let mut walked = 0usize;
-    while let Some(shape) = stack.pop() {
-        walked = walked.saturating_add(1);
-        if walked > (1 << 16) {
-            break;
-        }
-        if let Some(found) = doc.shape(shape) {
-            stack.extend(found.children.iter().copied());
-            if doc.is_connector(shape) {
-                let visio_id = found.visio_id;
-                if !ids.contains(&visio_id) {
-                    ids.push(visio_id);
-                }
-            }
         }
     }
     Ok(ids)
