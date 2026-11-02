@@ -24,8 +24,35 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # First: on a tag, the tag must be `v` plus the workspace version, so
+  # the release title and the package names agree (task R10 item 4). A
+  # run started by hand on a branch has no tag: the check is skipped and
+  # no release is made (the release job runs on tags only).
+  version:
+    name: tag matches the workspace version
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Check the tag against the workspace version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          version=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "larrygram") | .version')
+          if [ -z "$version" ]; then
+            echo "::error::cargo metadata reports no version for the larrygram package"
+            exit 1
+          fi
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match the workspace version $version; tag the commit v$version or bump [workspace.package] version"
+            exit 1
+          fi
+          echo "tag $GITHUB_REF_NAME matches the workspace version $version"
+
   build:
     name: dist (${{ matrix.platform }})
+    needs: version
     strategy:
       fail-fast: false
       matrix:
@@ -45,7 +72,14 @@ jobs:
       - name: Install pinned toolchain
         run: rustup show active-toolchain || rustup toolchain install
 
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      # No build cache here (task R10 item 9): shipped builds start
+      # clean. ci.yml keeps its cache.
+
+      # The archive timestamps are the commit time, not the build time
+      # (task R10 item 6; read by `cargo xtask dist linux`).
+      - name: Set SOURCE_DATE_EPOCH from the commit
+        shell: bash
+        run: echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)" >> "$GITHUB_ENV"
 
       # Each platform builds its own package on its native runner
       # (task R9 goal 5); `cargo xtask dist` refuses any other host.
@@ -79,12 +113,16 @@ jobs:
           sha256sum Larrygram-* > SHA256SUMS
           cat SHA256SUMS
 
-      # The release-notes template (task R9 goal 5): our own words,
-      # with the tag filled in. Kept in this file on purpose.
+      # The release-notes template (task R9 goal 5): our own words. The
+      # quoted heredoc keeps the text literal; sed then fills in the tag
+      # and the full commit SHA, which testers quote in bug reports
+      # (task R10 item 3).
       - name: Write the release notes
         run: |
           cat > notes.md <<'EOF'
-          # Larrygram alpha build
+          # Larrygram alpha build @TAG@
+
+          Built from commit `@SHA@`.
 
           Unsigned, no installer. Download the package for your system and
           check it against `SHA256SUMS` before opening it:
@@ -93,12 +131,17 @@ jobs:
           - `Larrygram-<version>-windows-x64.zip`
           - `Larrygram-<version>-linux-x64.tar.gz`
 
+          When you report a bug, name this release: copy the tag `@TAG@`
+          from this page into the report.
+
           How to verify the checksum, open an unsigned build and report a
           bug: `docs/building/testers.md` in the repository.
 
           Known limits of this alpha: Visio `.vsd` import is read-only, and
           the brand art is all rights reserved (README "License").
           EOF
+          sed -i -e "s/@TAG@/${GITHUB_REF_NAME}/g" -e "s/@SHA@/${GITHUB_SHA}/g" notes.md
+          cat notes.md
 
       - name: Create the GitHub pre-release
         env:
