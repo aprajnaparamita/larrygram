@@ -126,6 +126,11 @@ fn box_shape(x: f64, y: f64) -> Shape {
         connection.rows.push(row);
     }
     shape.sheet.sections.push(connection);
+    // Every fixture shape carries text (task P7-29: the text
+    // formatting commands follow the text and disable without it).
+    shape.text = Some(larrygram_model::TextContent {
+        parts: vec![larrygram_model::TextPart::Text("x".to_owned())],
+    });
     shape
 }
 
@@ -154,6 +159,11 @@ fn connector_shape(x: f64, y: f64) -> Shape {
         geometry.rows.push(row);
     }
     shape.sheet.sections.push(geometry);
+    // Every fixture shape carries text (task P7-29: the text
+    // formatting commands follow the text and disable without it).
+    shape.text = Some(larrygram_model::TextContent {
+        parts: vec![larrygram_model::TextPart::Text("x".to_owned())],
+    });
     shape
 }
 

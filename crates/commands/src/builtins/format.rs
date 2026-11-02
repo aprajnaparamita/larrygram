@@ -102,44 +102,44 @@ use super::{CommandTable, edit_outcome, model_error, outcome};
 
 /// The implemented formatting commands (task P7-21).
 pub(crate) const TABLE: CommandTable = &[
-    ("text.font", "Font", can_format, run_font),
-    ("text.font.size", "Font Size", can_format, run_font_size),
+    ("text.font", "Font", can_format_text, run_font),
+    ("text.font.size", "Font Size", can_format_text, run_font_size),
     (
         "text.font.size.increase",
         "Increase Font Size",
-        can_format,
+        can_format_text,
         run_font_grow,
     ),
     (
         "text.font.size.decrease",
         "Decrease Font Size",
-        can_format,
+        can_format_text,
         run_font_shrink,
     ),
     (
         "format.text.increase_size",
         "Increase Font Size",
-        can_format,
+        can_format_text,
         run_font_grow,
     ),
     (
         "format.text.decrease_size",
         "Decrease Font Size",
-        can_format,
+        can_format_text,
         run_font_shrink,
     ),
-    ("format.text.bold", "Bold", can_format, run_bold),
-    ("format.text.italic", "Italic", can_format, run_italic),
+    ("format.text.bold", "Bold", can_format_text, run_bold),
+    ("format.text.italic", "Italic", can_format_text, run_italic),
     (
         "format.text.underline",
         "Underline",
-        can_format,
+        can_format_text,
         run_underline,
     ),
     (
         "tools.strikethrough",
         "Strikethrough",
-        can_format,
+        can_format_text,
         run_strikethrough,
     ),
     // The Panel Classic Format Text toolbar's strikethrough id (task
@@ -147,59 +147,59 @@ pub(crate) const TABLE: CommandTable = &[
     (
         "text.strike.through",
         "Strikethrough",
-        can_format,
+        can_format_text,
         run_strikethrough,
     ),
-    ("text.font.color", "Font Color", can_format, run_font_color),
+    ("text.font.color", "Font Color", can_format_text, run_font_color),
     (
         "format.text_color.use_default",
         "Use Default Font Color",
-        can_format,
+        can_format_text,
         run_font_color_default,
     ),
     (
         "format.text.align_left",
         "Align Text Left",
-        can_format,
+        can_format_text,
         run_align_left,
     ),
     (
         "format.text.align_center",
         "Center Text",
-        can_format,
+        can_format_text,
         run_align_center,
     ),
     (
         "format.text.align_right",
         "Align Text Right",
-        can_format,
+        can_format_text,
         run_align_right,
     ),
     (
         "format.text.align_justify",
         "Justify Text",
-        can_format,
+        can_format_text,
         run_align_justify,
     ),
     (
         "format.text.align_top",
         "Align Text Top",
-        can_format,
+        can_format_text,
         run_align_top,
     ),
     (
         "format.text.align_middle",
         "Align Text Middle",
-        can_format,
+        can_format_text,
         run_align_middle,
     ),
     (
         "format.text.align_bottom",
         "Align Text Bottom",
-        can_format,
+        can_format_text,
         run_align_bottom,
     ),
-    ("text.bullets", "Bullets", can_format, run_bullets),
+    ("text.bullets", "Bullets", can_format_text, run_bullets),
     (
         "format.set.fill.color",
         "Fill Color",
@@ -820,6 +820,33 @@ fn can_paint(ctx: &AppCtx) -> crate::Enabled {
         return can_format(ctx);
     }
     can_format(ctx)
+}
+
+/// The disabled hint of the text formatting controls (task P7-29):
+/// how to give the shape text, in our own words.
+const ADD_TEXT_HINT: &str = "Add text first: double-click the shape or start typing.";
+
+/// The text formatting controls follow the text (task P7-29): they
+/// enable when some selected shape has text, or when one is being
+/// edited (the format applies to the text being typed). The shape
+/// controls stay on [`can_format`].
+fn can_format_text(ctx: &AppCtx) -> crate::Enabled {
+    let verdict = can_format(ctx);
+    if !verdict.is_enabled() {
+        return verdict;
+    }
+    let editing = ctx.editing_text;
+    let has_text = ctx.active_document().is_some_and(|session| {
+        ctx.selection
+            .shapes
+            .iter()
+            .any(|id| editing == Some(*id) || super::text::shape_has_text(&session.document, *id))
+    });
+    if has_text {
+        crate::Enabled::yes()
+    } else {
+        crate::Enabled::no(ADD_TEXT_HINT)
+    }
 }
 
 /// Builds the writes for every selected shape and runs them as one
@@ -2682,6 +2709,71 @@ mod tests {
         assert!(can_paint(&ctx).is_enabled());
         ctx.selection.shapes.clear();
         assert_eq!(can_format(&ctx).reason.as_deref(), Some("no selection"));
+    }
+
+    /// One extra shape on the fixture page, selected beside `shape`.
+    fn second_shape(ctx: &mut AppCtx, session: SessionId, shape: ShapeId) -> ShapeId {
+        let doc = document_mut(ctx, session).expect("document");
+        let page = doc.page_of(shape).expect("page");
+        let other = doc
+            .insert_shape(page, Shape::new(ShapeId { index: 0 }, 2), None)
+            .expect("shape");
+        ctx.selection.shapes.push(other);
+        other
+    }
+
+    #[test]
+    fn the_text_controls_follow_the_text() {
+        // Task P7-29 item 1: a selection without text disables the
+        // text controls with the "add text" hint; the shape controls
+        // stay on `can_format`.
+        let (mut ctx, session, shape) = session();
+        assert!(can_format(&ctx).is_enabled(), "the shape controls");
+        assert_eq!(
+            can_format_text(&ctx).reason.as_deref(),
+            Some(ADD_TEXT_HINT),
+            "no text on the selection"
+        );
+
+        // While the shape's text is being edited the controls enable:
+        // the format applies to the text being typed.
+        ctx.editing_text = Some(shape);
+        assert!(can_format_text(&ctx).is_enabled(), "being edited");
+        ctx.editing_text = Some(ShapeId { index: 99 });
+        assert_eq!(
+            can_format_text(&ctx).reason.as_deref(),
+            Some(ADD_TEXT_HINT),
+            "an edit on another shape does not count"
+        );
+        ctx.editing_text = None;
+
+        // As soon as the shape has text they enable.
+        {
+            let doc = document_mut(&mut ctx, session).expect("document");
+            let entry = doc.shape_mut(shape).expect("shape");
+            entry.text = Some(larrygram_model::TextContent {
+                parts: vec![larrygram_model::TextPart::Text("hi".to_owned())],
+            });
+        }
+        assert!(can_format_text(&ctx).is_enabled(), "the shape has text");
+
+        // With several shapes selected the rule is any-of.
+        let other = second_shape(&mut ctx, session, shape);
+        assert!(
+            can_format_text(&ctx).is_enabled(),
+            "one selected shape with text enables"
+        );
+        ctx.selection.shapes = vec![other];
+        assert_eq!(
+            can_format_text(&ctx).reason.as_deref(),
+            Some(ADD_TEXT_HINT),
+            "only the text-less shape selected"
+        );
+        ctx.editing_text = Some(other);
+        assert!(
+            can_format_text(&ctx).is_enabled(),
+            "editing the text-less shape enables"
+        );
     }
 
     #[test]

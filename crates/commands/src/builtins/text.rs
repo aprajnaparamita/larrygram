@@ -141,6 +141,20 @@ fn run_set_text(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandEr
     Ok(edit_outcome("Wrote shape text", Vec::new(), Box::new(edit)))
 }
 
+/// Whether the shape has text (task P7-29): at least one non-empty
+/// literal part. Run and paragraph markers alone are not text; a
+/// field's cached display text follows as a literal, so a field counts.
+pub(crate) fn shape_has_text(doc: &Document, shape: ShapeId) -> bool {
+    doc.shape(shape).is_some_and(|entry| {
+        entry.text.as_ref().is_some_and(|text| {
+            text.parts.iter().any(|part| match part {
+                TextPart::Text(literal) => !literal.is_empty(),
+                _ => false,
+            })
+        })
+    })
+}
+
 /// Whether the shape has at least one undeleted row in `section`.
 fn has_rows(doc: &Document, shape: ShapeId, section: &str) -> bool {
     doc.shape(shape).is_some_and(|entry| {
@@ -328,6 +342,30 @@ mod tests {
             one_run(&doc, shape, "x").parts,
             vec![TextPart::Text("x".to_owned())]
         );
+    }
+
+    #[test]
+    fn shape_has_text_reads_the_literal_parts() {
+        let (mut doc, _page, shape) = document();
+        assert!(!shape_has_text(&doc, shape), "no text element");
+        {
+            let entry = doc.shape_mut(shape).expect("shape");
+            entry.text = Some(TextContent {
+                parts: vec![TextPart::CharRun { ix: 0 }],
+            });
+        }
+        assert!(
+            !shape_has_text(&doc, shape),
+            "a run marker alone is not text"
+        );
+        {
+            let entry = doc.shape_mut(shape).expect("shape");
+            entry.text = Some(TextContent {
+                parts: vec![TextPart::Text("hello".to_owned())],
+            });
+        }
+        assert!(shape_has_text(&doc, shape), "a literal counts");
+        assert!(!shape_has_text(&doc, ShapeId { index: 99 }), "stale id");
     }
 
     #[test]
