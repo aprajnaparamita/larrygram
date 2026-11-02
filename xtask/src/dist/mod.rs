@@ -463,6 +463,41 @@ mod tests {
         );
     }
 
+    /// `Layout::real` puts the output under the cargo target
+    /// directory's `dist` (task R9 goal 1).
+    #[test]
+    fn layout_real_lives_under_the_target_dir() {
+        let layout = Layout::real();
+        assert_eq!(layout.root, util::root());
+        assert!(layout.target.ends_with("target"), "{:?}", layout.target);
+        assert_eq!(layout.dist, layout.target.join("dist"));
+    }
+
+    /// `StdSys` runs the real command and reports a failing one
+    /// cleanly (the pipeline's one error mapping).
+    #[test]
+    fn std_sys_runs_and_reports_commands() {
+        let mut sys = StdSys;
+        assert!(sys.run(&util::cargo(), &["--version"]).is_ok());
+        let err = sys
+            .run(&util::cargo(), &["definitely-not-a-cargo-subcommand"])
+            .unwrap_err();
+        assert!(err.contains("exited with"), "{err}");
+    }
+
+    /// `run` refuses the platform this host cannot build before
+    /// anything runs (task R9 goal 1).
+    #[test]
+    fn run_refuses_the_platform_this_host_cannot_build() {
+        let other = if cfg!(target_os = "windows") {
+            Platform::Linux
+        } else {
+            Platform::Windows
+        };
+        let err = run(&Options { platform: other }).unwrap_err();
+        assert!(err.contains("only"), "{err}");
+    }
+
     /// The rasteriser writes one square PNG of the requested size
     /// (the Linux package icon comes from it).
     #[test]

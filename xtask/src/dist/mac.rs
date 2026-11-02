@@ -692,6 +692,67 @@ mod tests {
         );
     }
 
+    /// `stage_dmg` replaces a stale staging directory.
+    #[test]
+    fn stage_dmg_clears_a_stale_staging_dir() {
+        let tmp = TempDir::new("stage-stale");
+        let app = tmp.join("Larrygram.app/Contents");
+        std::fs::create_dir_all(&app).unwrap();
+        std::fs::write(app.join("Info.plist"), "<plist/>").unwrap();
+        let staging = tmp.join("staging");
+        std::fs::create_dir_all(&staging).unwrap();
+        std::fs::write(staging.join("stale.txt"), "old").unwrap();
+        stage_dmg(&staging, tmp.join("Larrygram.app").as_path()).unwrap();
+        assert!(!staging.join("stale.txt").exists());
+        assert!(staging.join("Larrygram.app/Contents/Info.plist").is_file());
+    }
+
+    /// A fake [`Sys`] that records the calls and produces nothing.
+    struct BareSys(Vec<String>);
+
+    impl Sys for BareSys {
+        fn run(&mut self, program: &str, args: &[&str]) -> Result<()> {
+            self.0.push(format!("{program} {}", args.join(" ")));
+            Ok(())
+        }
+    }
+
+    /// The pipeline reports a cargo build that produces no binary and
+    /// an iconutil that produces no icon (the two clean error paths).
+    #[test]
+    fn dist_mac_reports_missing_build_outputs() {
+        let tmp = workspace();
+        let layout = Layout::under(tmp.path());
+        let mut sys = BareSys(Vec::new());
+        let err = dist_mac(&mut sys, &layout, "macos", "aarch64").unwrap_err();
+        assert!(err.contains("cargo built no release binary"), "{err}");
+
+        // Now let the fake cargo produce the binaries, but nothing
+        // else: iconutil must then produce the .icns and fails to.
+        let mut sys = FakeSys::new(tmp.path());
+        let err = with_empty_iconutil(&mut sys, &layout).unwrap_err();
+        assert!(err.contains("iconutil produced no"), "{err}");
+    }
+
+    /// Runs the pipeline with a fake whose iconutil writes nothing.
+    fn with_empty_iconutil(sys: &mut FakeSys, layout: &Layout) -> Result<PathBuf> {
+        struct EmptyIconutil<'a>(&'a mut FakeSys);
+        impl Sys for EmptyIconutil<'_> {
+            fn run(&mut self, program: &str, args: &[&str]) -> Result<()> {
+                let is_iconutil = Path::new(program)
+                    .file_name()
+                    .map(|n| n == "iconutil")
+                    .unwrap_or(false);
+                if is_iconutil {
+                    self.0.calls.push(format!("{program} {}", args.join(" ")));
+                    return Ok(());
+                }
+                self.0.run(program, args)
+            }
+        }
+        dist_mac(&mut EmptyIconutil(sys), layout, "macos", "aarch64")
+    }
+
     /// The whole pipeline on hand-built inputs: the bundle tree, the
     /// rendered plist, the `.dmg`, and the tool calls in order (task R7
     /// checks).
