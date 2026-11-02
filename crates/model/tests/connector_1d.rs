@@ -11,8 +11,8 @@
 
 use larrygram_geom::Point;
 use larrygram_model::{
-    Cell, CellName, CellValue, Connect, Document, GeometryRow, PageId, Preserved, Shape, ShapeId,
-    stencils,
+    Cell, CellName, CellValue, CellWrite, Connect, Document, GeometryRow, PageId, Preserved, Shape,
+    ShapeId, SheetRef, stencils,
 };
 use larrygram_model::{ConnectorEnd, EndGlue};
 
@@ -487,6 +487,42 @@ fn the_writes_refuse_impossible_input() {
     );
     assert!(doc.connector_end(stale, ConnectorEnd::Begin).is_err());
     assert!(doc.connector_end(connector, ConnectorEnd::End).is_ok());
+    // An endpoint that is not a number has no point to read.
+    let ordinary = doc
+        .insert_shape(PageId { index: 0 }, plain_box(7), None)
+        .expect("insert");
+    doc.write_cell(
+        SheetRef::Shape(ordinary),
+        &CellName::new("BeginX"),
+        &CellWrite::new("x", CellValue::Str("x".to_owned())),
+    )
+    .expect("cell");
+    assert!(doc.connector_end(ordinary, ConnectorEnd::Begin).is_err());
+    // An empty path is refused.
+    assert!(doc.write_connector_path(connector, &[]).is_err());
+}
+
+#[test]
+fn a_trigger_without_a_numeric_event_xf_mod_caches_zero() {
+    let (mut doc, connector) = with_connector();
+    // An `EventXFMod` that is not a number falls back to 0.
+    doc.write_cell(
+        SheetRef::Shape(connector),
+        &CellName::new("EventXFMod"),
+        &CellWrite::new("x", CellValue::Str("x".to_owned())),
+    )
+    .expect("event");
+    doc.write_connector_end(
+        connector,
+        ConnectorEnd::Begin,
+        Point::new(1.0, 2.0),
+        EndGlue::Free,
+    )
+    .expect("free");
+    match own(&doc, connector, "BegTrigger").and_then(|cell| cell.value) {
+        Some(CellValue::Number(value)) => assert_eq!(value, 0.0),
+        other => panic!("expected a number: {other:?}"),
+    }
 }
 
 #[test]

@@ -1607,9 +1607,10 @@ impl Document {
         if self.shape(connector).is_none() {
             return Err(Error::UnknownShape(connector));
         }
-        if path.is_empty() {
-            return Err(Error::BadCell("empty connector path"));
-        }
+        let (begin, end) = match (path.first(), path.last()) {
+            (Some(begin), Some(end)) => (*begin, *end),
+            _ => return Err(Error::BadCell("empty connector path")),
+        };
         if path.len() > MAX_PATH_POINTS {
             return Err(Error::BadCell("connector path too long"));
         }
@@ -1618,10 +1619,6 @@ impl Document {
                 return Err(Error::BadCell("non-finite path point"));
             }
         }
-        let (begin, end) = match (path.first(), path.last()) {
-            (Some(begin), Some(end)) => (*begin, *end),
-            _ => return Err(Error::BadCell("empty connector path")),
-        };
         if self.is_connector(connector) {
             self.write_connector_ends(connector, begin, end)?;
             self.write_connector_pins(connector, begin, end)?;
