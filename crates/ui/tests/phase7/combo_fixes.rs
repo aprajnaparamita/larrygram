@@ -17,6 +17,16 @@ use crate::{RichApp, ShellRig};
 fn shell_rig() -> ShellRig {
     let mut app = RichApp::rich().0;
     app.settings.ui_layout = LayoutKind::PanelClassic;
+    // The fixture rectangle carries text (task P7-29 item 1: the text
+    // controls follow the text and disable without it).
+    let session = app.active_document_mut().expect("session");
+    let page = session.active_page.expect("page");
+    let shape = session.document.page(page).expect("page").shapes[0];
+    if let Some(entry) = session.document.shape_mut(shape) {
+        entry.text = Some(larrygram_model::TextContent {
+            parts: vec![larrygram_model::TextPart::Text("x".to_owned())],
+        });
+    }
     ShellRig::with_app(app)
 }
 
