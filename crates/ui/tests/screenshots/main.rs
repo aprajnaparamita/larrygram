@@ -6,8 +6,9 @@
 //! with the wgpu renderer, crops it to the shot's aspect and writes
 //! `<out>/<id>.png`.
 //!
-//! `<out>` is `$LARRYGRAM_SCREENSHOTS_DIR`, or `<workspace>/target/
-//! screenshots` when it is unset. The normal way to run them is
+//! `<out>` is `$LARRYGRAM_SCREENSHOTS_DIR`, or `<target dir>/
+//! screenshots` when it is unset (the target dir from `cargo
+//! metadata`). The normal way to run them is
 //!
 //! ```sh
 //! cargo xtask screenshots [--only <id>]... [--to <dir>]
@@ -101,16 +102,37 @@ pub fn spec(id: &str) -> &'static ShotSpec {
 }
 
 /// The output directory: `$LARRYGRAM_SCREENSHOTS_DIR`, or
-/// `<workspace>/target/screenshots` when it is unset.
+/// `<target dir>/screenshots` when it is unset (the target dir as
+/// [`target_dir`] asks cargo for it, the same rule as the xtask).
 fn out_dir() -> PathBuf {
     if let Some(dir) = std::env::var_os("LARRYGRAM_SCREENSHOTS_DIR") {
         return PathBuf::from(dir);
     }
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("target")
-        .join("screenshots")
+    target_dir().join("screenshots")
+}
+
+/// The cargo target directory as `cargo metadata` reports it, which
+/// honours `CARGO_TARGET_DIR`, `CARGO_BUILD_TARGET_DIR` and
+/// `build.target-dir` (`$CARGO` is the cargo that runs the tests).
+fn target_dir() -> PathBuf {
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let output = std::process::Command::new(cargo)
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .args(["metadata", "--format-version", "1", "--no-deps"])
+        .output()
+        .expect("cargo metadata runs");
+    assert!(
+        output.status.success(),
+        "cargo metadata failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("cargo metadata prints JSON");
+    PathBuf::from(
+        json["target_directory"]
+            .as_str()
+            .expect("cargo metadata names the target directory"),
+    )
 }
 
 /// Builds, renders, crops and writes one shot.
@@ -128,6 +150,19 @@ fn render_shot(id: &str) {
         path.display(),
         image.width(),
         image.height()
+    );
+}
+
+#[test]
+fn the_default_output_is_under_the_target_dir() {
+    // This test binary lives in `<target dir>/<profile>/deps/`.
+    let exe = std::env::current_exe().expect("the test binary's path");
+    let target = target_dir();
+    assert!(
+        exe.starts_with(&target),
+        "{} is under {}",
+        exe.display(),
+        target.display()
     );
 }
 
