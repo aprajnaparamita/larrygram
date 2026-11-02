@@ -17,6 +17,7 @@
 #![forbid(unsafe_code)]
 
 pub mod app;
+pub mod build;
 pub mod builtins;
 pub mod clipboard;
 pub mod edit;
