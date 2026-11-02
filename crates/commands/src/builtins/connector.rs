@@ -27,7 +27,7 @@ use larrygram_geom::{Point, Rect, RouteOptions, RouteStyle, Transform, route};
 use larrygram_model::CellReader;
 use larrygram_model::{
     CellLookup, CellName, CellValue, CellWrite, Connect, ConnectorEnd, Document, EndGlue, PageId,
-    Resolved, RowTarget, Section, ShapeId, Sheet, SheetRef, mutate,
+    Resolved, RowTarget, ShapeId, Sheet, SheetRef, mutate,
 };
 use larrygram_shapesheet::CellAddress;
 
@@ -773,6 +773,9 @@ pub(super) fn run_style(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, C
             .iter()
             .copied()
             .filter(|shape| doc.page_of(*shape) == Some(page))
+            // A 1-D shape that is not routable (a line or a 1-D arrow)
+            // takes no style cells (ADR 0084 rule 1, amended).
+            .filter(|shape| !doc.is_connector(*shape) || doc.is_routable(*shape))
             .collect()
     };
     if targets.is_empty() {
@@ -852,6 +855,18 @@ fn connector_style(doc: &Document, connector: ShapeId) -> RouteStyle {
         return style_from_value(value);
     }
     RouteStyle::RightAngle
+}
+
+/// The style one connector's path takes (ADR 0084 rule 1, amended): a
+/// 1-D shape that is not routable stays a straight line from begin to
+/// end; a routable one (or a legacy record-only connector) follows
+/// [`connector_style`].
+fn route_style_for(doc: &Document, connector: ShapeId) -> RouteStyle {
+    if doc.is_connector(connector) && !doc.is_routable(connector) {
+        RouteStyle::Straight
+    } else {
+        connector_style(doc, connector)
+    }
 }
 
 /// The finite non-zero number a resolution carries, or `None` for a
@@ -989,7 +1004,7 @@ fn run_draw(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError>
             let points = route(
                 start,
                 end,
-                &RouteOptions::new(connector_style(doc, connector)),
+                &RouteOptions::new(route_style_for(doc, connector)),
             )
             .map_err(|error| CommandError::failed(format!("cannot route connector: {error}")))?;
             PathEdit::new(doc, session, connector, points)?
@@ -1170,7 +1185,10 @@ fn optional_free_point(
 struct PathEdit {
     session: SessionId,
     connector: ShapeId,
-    old_sections: Vec<Section>,
+    /// The connector's sheet before the write: a 1-D path write also
+    /// moves its endpoint, pin and size cells, so `revert` restores the
+    /// whole sheet.
+    old_sheet: Sheet,
     points: Vec<Point>,
     /// The row cells the path write replaces (ADR 0056's dirty set).
     dirty: Vec<CellAddress>,
@@ -1183,11 +1201,10 @@ impl PathEdit {
         connector: ShapeId,
         points: Vec<Point>,
     ) -> Result<Self, CommandError> {
-        let old_sections = doc
+        let old_sheet = doc
             .shape(connector)
             .ok_or_else(|| CommandError::failed("the connector shape is missing"))?
             .sheet
-            .sections
             .clone();
         let mut dirty = Vec::new();
         for (position, _) in points.iter().enumerate() {
@@ -1208,7 +1225,7 @@ impl PathEdit {
             // The 1-D cells the path write refreshes (task P7-31).
             for cell in [
                 "BeginX", "BeginY", "EndX", "EndY", "PinX", "PinY", "Width", "Height", "LocPinX",
-                "LocPinY",
+                "LocPinY", "Angle",
             ] {
                 dirty.push(CellAddress::new(
                     SheetRef::Shape(connector),
@@ -1219,7 +1236,7 @@ impl PathEdit {
         Ok(Self {
             session,
             connector,
-            old_sections,
+            old_sheet,
             points,
             dirty,
         })
@@ -1246,14 +1263,287 @@ impl Edit for PathEdit {
 
     fn revert(&mut self, ctx: &mut AppCtx) -> Result<(), CommandError> {
         let session = self.session;
-        let sections = self.old_sections.clone();
+        let sheet = self.old_sheet.clone();
         let doc = document_mut(ctx, session)?;
         if let Some(entity) = doc.shape_mut(self.connector) {
-            entity.sheet.sections = sections;
+            entity.sheet = sheet;
         }
         ctx.touch_session(session);
         Ok(())
     }
+}
+
+// ---------------------------------------------------------------------------
+// Moving and copying 1-D shapes (ADR 0084 rule 1, amended 2026-11-03)
+// ---------------------------------------------------------------------------
+
+/// A 1-D shape's drawn path in page inches: its geometry rows through
+/// its page transform, or, when the rows are formula-driven or give
+/// fewer than two points, its two endpoint cells through its parent's
+/// transform.
+fn one_d_page_path(doc: &Document, shape: ShapeId) -> Result<Vec<Point>, CommandError> {
+    if !crate::recalc::geometry_is_formula_driven(doc, shape) {
+        let transform = page_transform(doc, shape)?;
+        let points: Vec<Point> = doc
+            .shape_geometry(shape)
+            .ok()
+            .and_then(|geometry| geometry.paths.into_iter().next())
+            .map(|path| {
+                path.rows
+                    .iter()
+                    .filter_map(row_point)
+                    .map(|point| transform.apply(point))
+                    .collect()
+            })
+            .unwrap_or_default();
+        if points.len() >= 2 {
+            return Ok(points);
+        }
+    }
+    let parent = parent_transform(doc, shape)?;
+    let begin = doc
+        .connector_end(shape, ConnectorEnd::Begin)
+        .map_err(model_error)?;
+    let end = doc
+        .connector_end(shape, ConnectorEnd::End)
+        .map_err(model_error)?;
+    Ok(vec![parent.apply(begin), parent.apply(end)])
+}
+
+/// The page transform of a shape's parent (identity on the page).
+fn parent_transform(doc: &Document, shape: ShapeId) -> Result<Transform, CommandError> {
+    match doc
+        .shape(shape)
+        .ok_or_else(|| CommandError::failed("the shape is gone"))?
+        .parent
+    {
+        Some(parent) => page_transform(doc, parent),
+        None => Ok(Transform::identity()),
+    }
+}
+
+/// Translates one 1-D shape by (`dx`, `dy`) page inches: its endpoint
+/// cells move and its path is re-written (or, for formula-driven
+/// geometry, its ends and box move and recalc redraws the rows). A
+/// glued end keeps its formula here; the caller frees it first when it
+/// must come loose.
+pub(crate) fn translate_one_d(
+    doc: &mut Document,
+    shape: ShapeId,
+    dx: f64,
+    dy: f64,
+) -> Result<(), CommandError> {
+    let path: Vec<Point> = one_d_page_path(doc, shape)?
+        .into_iter()
+        .map(|point| Point::new(point.x + dx, point.y + dy))
+        .collect();
+    if crate::recalc::geometry_is_formula_driven(doc, shape) {
+        let inverse = parent_transform(doc, shape)?
+            .invert()
+            .map_err(|_| CommandError::failed("singular parent transform"))?;
+        let (Some(begin), Some(end)) = (path.first(), path.last()) else {
+            return Err(CommandError::failed("the 1-D shape has no ends"));
+        };
+        doc.write_connector_box(shape, inverse.apply(*begin), inverse.apply(*end))
+            .map_err(model_error)
+    } else {
+        write_path(doc, shape, &path)
+    }
+}
+
+/// The cells a 1-D move or copy writes (the recalc dirty set, ADR 0056).
+fn one_d_dirty(shape: ShapeId) -> Vec<CellAddress> {
+    [
+        "BeginX",
+        "BeginY",
+        "EndX",
+        "EndY",
+        "BegTrigger",
+        "EndTrigger",
+        "PinX",
+        "PinY",
+        "Width",
+        "Height",
+        "LocPinX",
+        "LocPinY",
+        "Angle",
+    ]
+    .iter()
+    .map(|name| CellAddress::new(SheetRef::Shape(shape), CellName::new(*name)))
+    .collect()
+}
+
+/// One 1-D shape a [`OneDMoveEdit`] moves.
+#[derive(Debug)]
+struct MovedOneD {
+    shape: ShapeId,
+    visio_id: i32,
+    /// The ends that come loose (their target does not move) and the
+    /// stored point each keeps before the translation.
+    freed: Vec<End>,
+    /// The shape's sheet before the move (restored on `revert`).
+    old_sheet: Sheet,
+}
+
+/// One undoable move of 1-D shapes (ADR 0084 rule 1, amended): the
+/// endpoint cells move with the path, and a glued end comes loose,
+/// formula and record together, unless its target moves in the same
+/// edit.
+#[derive(Debug)]
+pub(crate) struct OneDMoveEdit {
+    session: SessionId,
+    page: PageId,
+    dx: f64,
+    dy: f64,
+    items: Vec<MovedOneD>,
+    /// The page's records before the move (restored on `revert`).
+    old_connects: Vec<Connect>,
+    dirty: Vec<CellAddress>,
+}
+
+impl OneDMoveEdit {
+    /// Stages the move of `shapes` (1-D shapes on `page`) by (`dx`,
+    /// `dy`) page inches; `moving` is every shape the whole edit moves
+    /// (an end glued to one of them, or to a member of one, stays
+    /// glued). `None` when `shapes` holds no 1-D shape.
+    pub(crate) fn stage(
+        doc: &Document,
+        session: SessionId,
+        page: PageId,
+        shapes: &[ShapeId],
+        moving: &[ShapeId],
+        (dx, dy): (f64, f64),
+    ) -> Result<Option<Self>, CommandError> {
+        let moved = subtree_visio_ids(doc, moving);
+        let entity = doc
+            .page(page)
+            .ok_or_else(|| CommandError::failed("the page is gone"))?;
+        let mut items = Vec::new();
+        let mut dirty = Vec::new();
+        for &shape in shapes {
+            if !doc.is_connector(shape) {
+                continue;
+            }
+            let Some(found) = doc.shape(shape) else {
+                continue;
+            };
+            let visio_id = found.visio_id;
+            let freed: Vec<End> = entity
+                .connects
+                .iter()
+                .filter(|connect| {
+                    connect.from_sheet == visio_id
+                        && is_connector_end(connect)
+                        && !moved.contains(&connect.to_sheet)
+                })
+                .map(End::of)
+                .fold(Vec::new(), |mut ends, end| {
+                    if !ends.contains(&end) {
+                        ends.push(end);
+                    }
+                    ends
+                });
+            dirty.extend(one_d_dirty(shape));
+            items.push(MovedOneD {
+                shape,
+                visio_id,
+                freed,
+                old_sheet: found.sheet.clone(),
+            });
+        }
+        if items.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(Self {
+            session,
+            page,
+            dx,
+            dy,
+            items,
+            old_connects: entity.connects.clone(),
+            dirty,
+        }))
+    }
+}
+
+impl Edit for OneDMoveEdit {
+    fn label(&self) -> &str {
+        "Move 1-D shape"
+    }
+
+    fn dirty_cells(&self) -> &[CellAddress] {
+        &self.dirty
+    }
+
+    fn apply(&mut self, ctx: &mut AppCtx) -> Result<(), CommandError> {
+        let session = self.session;
+        let doc = document_mut(ctx, session)?;
+        for item in &self.items {
+            for end in &item.freed {
+                let at = doc
+                    .connector_end(item.shape, end.connector_end())
+                    .map_err(model_error)?;
+                doc.write_connector_end(item.shape, end.connector_end(), at, EndGlue::Free)
+                    .map_err(model_error)?;
+                if let Some(entity) = doc.pages.get_mut(self.page.index as usize) {
+                    entity.connects.retain(|connect| {
+                        !(connect.from_sheet == item.visio_id
+                            && is_connector_end(connect)
+                            && End::of(connect) == *end)
+                    });
+                }
+            }
+            translate_one_d(doc, item.shape, self.dx, self.dy)?;
+        }
+        ctx.touch_session(session);
+        Ok(())
+    }
+
+    fn revert(&mut self, ctx: &mut AppCtx) -> Result<(), CommandError> {
+        let session = self.session;
+        let doc = document_mut(ctx, session)?;
+        for item in &self.items {
+            if let Some(entity) = doc.shape_mut(item.shape) {
+                entity.sheet = item.old_sheet.clone();
+            }
+        }
+        if let Some(entity) = doc.pages.get_mut(self.page.index as usize) {
+            entity.connects = self.old_connects.clone();
+        }
+        ctx.touch_session(session);
+        Ok(())
+    }
+}
+
+/// The glue of one copied 1-D shape (ADR 0084 rule 1, amended): an end
+/// glued to a shape copied in the same operation re-glues to the copy,
+/// as the renumbered record in `records` names it (the caller adds the
+/// records); every other end becomes free at its stored point, so no
+/// formula names the source's targets.
+pub(crate) fn rebind_copied_glue(
+    doc: &mut Document,
+    shape: ShapeId,
+    records: &[Connect],
+) -> Result<(), CommandError> {
+    if !doc.is_connector(shape) {
+        return Ok(());
+    }
+    let visio_id = doc
+        .shape(shape)
+        .map(|entity| entity.visio_id)
+        .unwrap_or_default();
+    for end in [End::Begin, End::End] {
+        let Ok(at) = doc.connector_end(shape, end.connector_end()) else {
+            continue;
+        };
+        let record = records.iter().find(|connect| {
+            connect.from_sheet == visio_id && is_connector_end(connect) && End::of(connect) == end
+        });
+        let glue = end_glue_of(record)?;
+        doc.write_connector_end(shape, end.connector_end(), at, glue)
+            .map_err(model_error)?;
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -1389,7 +1679,7 @@ fn reroute_document(
         let (Some(start), Some(end)) = (begin, end) else {
             continue;
         };
-        let style = connector_style(doc, connector);
+        let style = route_style_for(doc, connector);
         let points = route(start, end, &RouteOptions::new(style)).map_err(|error| {
             CommandError::failed(format!("cannot route connector {visio_id}: {error}"))
         })?;

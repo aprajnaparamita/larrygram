@@ -42,10 +42,10 @@ use crate::error::CommandError;
 use crate::undo::Edit;
 use crate::{Invocation, Outcome};
 
-use super::connector::reroute_quietly_on;
+use super::connector::{OneDMoveEdit, reroute_quietly_on};
 use super::edit::{
     CellEdit, GeometryEdit, count_label, document_mut, number_literal, read_cell_number,
-    selection_targets,
+    selection_targets, without_one_d,
 };
 use super::{
     CommandTable, edit_outcome, has_selection, need_finite, need_size, no_document, outcome,
@@ -106,6 +106,50 @@ fn reroute(ctx: &mut AppCtx, page: Option<larrygram_model::PageId>) {
     if let Some(page) = page {
         reroute_quietly_on(ctx, page);
     }
+}
+
+/// The staged 1-D moves of `one_d` by `delta` page inches, one edit per
+/// page (ADR 0084 rule 1, amended); `moving` is every shape the whole
+/// command moves.
+fn stage_one_d_moves(
+    doc: &larrygram_model::Document,
+    session: SessionId,
+    one_d: &[ShapeId],
+    moving: &[ShapeId],
+    delta: (f64, f64),
+) -> Result<Vec<Box<dyn Edit>>, CommandError> {
+    let mut pages: Vec<larrygram_model::PageId> = Vec::new();
+    for shape in one_d {
+        if let Some(page) = doc.page_of(*shape)
+            && !pages.contains(&page)
+        {
+            pages.push(page);
+        }
+    }
+    let mut steps: Vec<Box<dyn Edit>> = Vec::new();
+    for page in pages {
+        let on_page: Vec<ShapeId> = one_d
+            .iter()
+            .copied()
+            .filter(|shape| doc.page_of(*shape) == Some(page))
+            .collect();
+        if let Some(step) = OneDMoveEdit::stage(doc, session, page, &on_page, moving, delta)? {
+            steps.push(Box::new(step));
+        }
+    }
+    Ok(steps)
+}
+
+/// Refuses a `shape.set.*` size or angle edit of a 1-D anchor (ADR
+/// 0084 rule 1, amended): one status message, no undo step.
+fn refuse_one_d_anchor(ctx: &AppCtx, shape: ShapeId, what: &str) -> Result<(), CommandError> {
+    let doc = &ctx.active_document().ok_or_else(no_document)?.document;
+    if doc.is_connector(shape) {
+        return Err(CommandError::failed(format!(
+            "{what} does not apply to a connector or a line; drag its ends instead"
+        )));
+    }
+    Ok(())
 }
 
 /// The panes' subject: the anchor, or the last selected shape when
@@ -194,7 +238,18 @@ pub(super) fn run_move(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, Co
     let mut edit = CompositeEdit::new(count_label("Move", targets.len()));
     {
         let doc = document_mut(ctx, session)?;
-        for &shape in &targets {
+        // A 1-D shape moves by its endpoint cells (ADR 0084 rule 1,
+        // amended): one staged edit per page, its glued ends coming
+        // loose unless their target moves too.
+        let one_d: Vec<ShapeId> = targets
+            .iter()
+            .copied()
+            .filter(|shape| doc.is_connector(*shape))
+            .collect();
+        for step in stage_one_d_moves(doc, session, &one_d, &targets, (dx, dy))? {
+            edit.push(step);
+        }
+        for &shape in targets.iter().filter(|shape| !one_d.contains(shape)) {
             let (x, read) = read_cell_number(doc, shape, "PinX")?;
             warnings.extend(read);
             let (y, read) = read_cell_number(doc, shape, "PinY")?;
@@ -228,6 +283,7 @@ pub(super) fn run_resize(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, 
     let height = need_size(&inv.args, "height", "new height in inches")?;
     let edge = resize_edge(&inv.args)?;
     let (session, targets, mut warnings) = selection_targets(ctx)?;
+    let targets = without_one_d(ctx, targets, &mut warnings, "Resize")?;
     let mut edit = CompositeEdit::new(count_label("Resize", targets.len()));
     for &shape in &targets {
         let (old_width, old_height, old_loc, old_pin, angle, flip) = {
@@ -475,6 +531,7 @@ fn fixed_edge_shift(
 pub(super) fn run_rotate(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError> {
     let delta = need_finite(&inv.args, "angle", "rotation in radians")?;
     let (session, targets, mut warnings) = selection_targets(ctx)?;
+    let targets = without_one_d(ctx, targets, &mut warnings, "Rotate")?;
     let mut edit = CompositeEdit::new(count_label("Rotate", targets.len()));
     {
         let doc = document_mut(ctx, session)?;
@@ -523,6 +580,7 @@ fn set_size(ctx: &mut AppCtx, inv: &Invocation, axis: Axis) -> Result<Outcome, C
     };
     let value = need_size(&inv.args, name, prompt)?;
     let (session, shape, mut warnings) = anchor_target(ctx)?;
+    refuse_one_d_anchor(ctx, shape, "Setting the size")?;
     let mut edit = CompositeEdit::new(match axis {
         Axis::Width => "Set Width",
         Axis::Height => "Set Height",
@@ -558,12 +616,25 @@ fn set_size(ctx: &mut AppCtx, inv: &Invocation, axis: Axis) -> Result<Outcome, C
 pub(super) fn run_set_pin(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError> {
     let x = need_finite(&inv.args, "x", "pin x in inches")?;
     let y = need_finite(&inv.args, "y", "pin y in inches")?;
-    let (session, shape, warnings) = anchor_target(ctx)?;
+    let (session, shape, mut warnings) = anchor_target(ctx)?;
     let mut edit = CompositeEdit::new("Set Pin");
     {
         let doc = document_mut(ctx, session)?;
-        edit.push(cell_edit(doc, session, "Set Pin", shape, "PinX", x)?);
-        edit.push(cell_edit(doc, session, "Set Pin", shape, "PinY", y)?);
+        if doc.is_connector(shape) {
+            // A 1-D shape's pin is its ends' midpoint: the ends move by
+            // the pin's offset (ADR 0084 rule 1, amended).
+            let (pin_x, read) = read_cell_number(doc, shape, "PinX")?;
+            warnings.extend(read);
+            let (pin_y, read) = read_cell_number(doc, shape, "PinY")?;
+            warnings.extend(read);
+            for step in stage_one_d_moves(doc, session, &[shape], &[shape], (x - pin_x, y - pin_y))?
+            {
+                edit.push(step);
+            }
+        } else {
+            edit.push(cell_edit(doc, session, "Set Pin", shape, "PinX", x)?);
+            edit.push(cell_edit(doc, session, "Set Pin", shape, "PinY", y)?);
+        }
     }
     edit.apply(ctx)?;
     reroute(ctx, active_page(ctx));
@@ -575,6 +646,7 @@ pub(super) fn run_set_pin(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome,
 pub(super) fn run_set_angle(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError> {
     let angle = need_finite(&inv.args, "angle", "angle in radians")?;
     let (session, shape, warnings) = anchor_target(ctx)?;
+    refuse_one_d_anchor(ctx, shape, "Setting the angle")?;
     let mut edit = CompositeEdit::new("Set Angle");
     {
         let doc = document_mut(ctx, session)?;

@@ -194,6 +194,36 @@ impl Document {
         Ok(())
     }
 
+    /// Moves a 1-D shape's ends to `begin` and `end` (parent
+    /// coordinates) without touching its geometry rows: the endpoint
+    /// cells (a glue formula is kept, its cached `V` refreshed) and the
+    /// pin, size and `Angle` cells, as a path write refreshes them. For
+    /// a shape whose geometry is formula-driven (recalc owns its rows);
+    /// [`Document::write_connector_path`] is the write for every other
+    /// 1-D shape. A shape without the endpoint cells is
+    /// [`Error::BadCell`].
+    pub fn write_connector_box(
+        &mut self,
+        shape: ShapeId,
+        begin: Point,
+        end: Point,
+    ) -> Result<(), Error> {
+        if self.shape(shape).is_none() {
+            return Err(Error::UnknownShape(shape));
+        }
+        if !self.is_connector(shape) {
+            return Err(Error::BadCell("not a 1-D shape"));
+        }
+        if ![begin.x, begin.y, end.x, end.y]
+            .iter()
+            .all(|value| value.is_finite())
+        {
+            return Err(Error::BadCell("non-finite connector end"));
+        }
+        self.write_connector_ends(shape, begin, end)?;
+        self.write_connector_pins(shape, begin, end)
+    }
+
     /// The trigger write of one end: the formula naming the glue
     /// target's `EventXFMod` (or the end's own sheet when unglued) and
     /// the cached value that cell carries.
