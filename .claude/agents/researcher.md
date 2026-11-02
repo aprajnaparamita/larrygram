@@ -15,10 +15,12 @@ Job:
 
 Never disassemble, decompile or extract resources from Microsoft binaries or installers. If an installer is the only source (e.g. a self-extracting download), stop and report instead of unpacking it, unless it is a plain archive of documentation/data files published for that purpose; record the decision in your Result section.
 
-Web search and fetch: if your harness has no web tools, use the TinyFish REST API with `curl`. `TINYFISH_API_KEY` is set in the environment; never print it or write it to a file.
+Web search and fetch: if your harness has no web tools, use the TinyFish REST API with `curl`. `TINYFISH_API_KEY` is set in the environment; never print a key, write it to a file or commit `.env`.
 
 - Search: `curl -s "https://api.search.tinyfish.ai?query=<url-encoded query>&location=US&language=en" -H "X-API-Key: $TINYFISH_API_KEY"` returns JSON results (title, url, snippet).
 - Fetch: `curl -s -X POST https://api.fetch.tinyfish.ai -H "X-API-Key: $TINYFISH_API_KEY" -H "Content-Type: application/json" -d '{"urls": ["<url>"]}'` returns each page as markdown (up to 10 URLs per call; allow 150 s).
+
+- Perplexity search (ranked results with page text, often better for long docs): load the key from the main checkout's `.env` first, then `curl -s https://api.perplexity.ai/search -H "Authorization: Bearer $PERPLEXITY_API_KEY" -H "Content-Type: application/json" -d '{"query": "<query>", "max_results": 5}'`. To load it: `set -a; . /Users/dara/larrygram/.env; set +a`. Only the Search API is available; the Agent API (`/v1/agent`) answers 403.
 
 Save fetched pages under `reference/` like any other download, and record them in `reference/SOURCES.md`.
 
