@@ -139,16 +139,19 @@ fn test_name(id: &str) -> String {
     id.replace('-', "_")
 }
 
-/// The output directory: `<workspace>/target/screenshots` (the tests
-/// write there when `LARRYGRAM_SCREENSHOTS_DIR` is unset too).
-pub fn out_dir(root: &Path) -> PathBuf {
-    root.join("target").join("screenshots")
+/// The output directory: `<target dir>/screenshots`, with the cargo
+/// target directory as `cargo metadata` reports it (the test target
+/// asks cargo the same way when `LARRYGRAM_SCREENSHOTS_DIR` is unset).
+pub fn out_dir(target: &Path) -> PathBuf {
+    target.join("screenshots")
 }
 
-/// The `cargo test` invocation that renders `only` (all shots when
-/// empty) into `out`.
-fn test_command(root: &Path, out: &Path, only: &[String]) -> std::process::Command {
-    let mut command = std::process::Command::new("cargo");
+/// The `cargo test` invocation that renders `shots` into `out`. Each
+/// shot's full test name is passed with `--exact`, so a name never
+/// matches a longer one and a renamed test runs nothing (which
+/// [`ran_every_test`] then reports).
+fn test_command(root: &Path, out: &Path, shots: &[&Shot]) -> std::process::Command {
+    let mut command = std::process::Command::new(crate::util::cargo());
     command
         .current_dir(root)
         .env("LARRYGRAM_SCREENSHOTS_DIR", out)
@@ -161,11 +164,49 @@ fn test_command(root: &Path, out: &Path, only: &[String]) -> std::process::Comma
             "--",
             "--ignored",
             "--test-threads=1",
+            "--exact",
         ]);
-    for id in only {
-        command.arg(test_name(id));
+    for shot in shots {
+        command.arg(test_name(shot.id));
     }
     command
+}
+
+/// Checks that the test run's output reports every shot's test as
+/// passed: a filter that ran zero tests (or skipped one) is an error,
+/// not a quiet success over last run's PNGs.
+fn ran_every_test(stdout: &str, shots: &[&Shot]) -> Result<(), String> {
+    let missing: Vec<String> = shots
+        .iter()
+        .map(|shot| test_name(shot.id))
+        .filter(|name| {
+            let passed = format!("test {name} ... ok");
+            !stdout.lines().any(|line| line.trim() == passed)
+        })
+        .collect();
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "the screenshot test run did not pass {} (no test by that name ran)",
+            missing.join(", ")
+        ))
+    }
+}
+
+/// Deletes each selected shot's PNG in `out` before the run, so a shot
+/// that is not rendered again can never pass the check with an old
+/// file. Files of other names are kept.
+fn remove_stale(out: &Path, shots: &[&Shot]) -> Result<(), String> {
+    for shot in shots {
+        let path = out.join(format!("{}.png", shot.id));
+        match std::fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(format!("{}: {error}", path.display())),
+        }
+    }
+    Ok(())
 }
 
 /// Checks every expected PNG in `dir`: it exists, decodes, and meets
@@ -221,20 +262,31 @@ pub fn copy(to: &Path, out: &Path, checked: &[(String, u32, u32)]) -> Result<Vec
     Ok(lines)
 }
 
+/// What a test run reports: whether it succeeded, and its standard
+/// output (the per-test result lines).
+pub struct RunOutput {
+    /// The exit status was a success.
+    pub success: bool,
+    /// Everything the run printed to standard output.
+    pub stdout: String,
+}
+
 /// The whole command with an injected `spawn` (the unit tests pass a
-/// fake one; [`run`] passes `cargo test`'s exit status).
+/// fake one; [`run`] runs `cargo test` and streams its output).
 fn run_with(
     root: &Path,
     out: &Path,
     options: &Options,
-    mut spawn: impl FnMut(&mut std::process::Command) -> Result<bool, String>,
+    mut spawn: impl FnMut(&mut std::process::Command) -> Result<RunOutput, String>,
 ) -> Result<Vec<String>, String> {
     let shots = selected(&options.only);
-    let mut command = test_command(root, out, &options.only);
-    let passed = spawn(&mut command)?;
-    if !passed {
+    remove_stale(out, &shots)?;
+    let mut command = test_command(root, out, &shots);
+    let output = spawn(&mut command)?;
+    if !output.success {
         return Err("the screenshot tests failed (see the test output above)".to_owned());
     }
+    ran_every_test(&output.stdout, &shots)?;
     let checked = check(out, &shots)?;
     let mut lines = vec![format!(
         "{} screenshot(s) rendered into {}:",
@@ -250,18 +302,43 @@ fn run_with(
     Ok(lines)
 }
 
+/// Runs `command` with its standard output piped: every line is
+/// printed as it arrives (a full run takes minutes) and collected for
+/// [`ran_every_test`]. Standard error (the build progress) passes
+/// straight through.
+fn spawn_streaming(command: &mut std::process::Command) -> Result<RunOutput, String> {
+    use std::io::BufRead;
+    let mut child = command
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("cannot run cargo test: {error}"))?;
+    let mut stdout = String::new();
+    if let Some(pipe) = child.stdout.take() {
+        for line in std::io::BufReader::new(pipe).lines() {
+            let line = line.map_err(|error| format!("cargo test output: {error}"))?;
+            println!("{line}");
+            stdout.push_str(&line);
+            stdout.push('\n');
+        }
+    }
+    let status = child
+        .wait()
+        .map_err(|error| format!("cargo test: {error}"))?;
+    Ok(RunOutput {
+        success: status.success(),
+        stdout,
+    })
+}
+
 /// `cargo xtask screenshots`: runs the screenshot tests, checks every
 /// PNG and (with `--to`) copies the shots into the given directory.
 pub fn run(options: &Options) -> Result<(), String> {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
-    let out = out_dir(&root);
+    let root = crate::util::root();
+    let target =
+        crate::dist::metadata_target_dir(&mut std::process::Command::new(crate::util::cargo()))?;
+    let out = out_dir(&target);
     std::fs::create_dir_all(&out).map_err(|error| format!("{}: {error}", out.display()))?;
-    let lines = run_with(&root, &out, options, |command| {
-        command
-            .status()
-            .map(|status| status.success())
-            .map_err(|error| error.to_string())
-    })?;
+    let lines = run_with(&root, &out, options, spawn_streaming)?;
     for line in lines {
         println!("{line}");
     }
@@ -433,9 +510,37 @@ mod tests {
         );
     }
 
-    /// A fake `spawn` result.
-    fn spawn_ok(_command: &mut std::process::Command) -> Result<bool, String> {
-        Ok(true)
+    /// The stdout of a run that passed the tests `ids`.
+    fn passed(ids: &[&str]) -> String {
+        ids.iter()
+            .map(|id| format!("test {} ... ok\n", test_name(id)))
+            .collect()
+    }
+
+    /// A fake `spawn` that renders `ids` (writes their synthetic PNGs
+    /// at their minimum size into the command's output directory) and
+    /// reports them passed.
+    fn fake_render(
+        ids: &'static [&'static str],
+    ) -> impl FnMut(&mut std::process::Command) -> Result<RunOutput, String> {
+        move |command| {
+            let out = command
+                .get_envs()
+                .find(|(key, _)| *key == "LARRYGRAM_SCREENSHOTS_DIR")
+                .and_then(|(_, value)| value)
+                .map(PathBuf::from)
+                .expect("the output directory is set");
+            for id in ids {
+                let shot = SHOTS.iter().find(|shot| shot.id == *id).expect("a shot");
+                image::RgbaImage::from_pixel(shot.min.0, shot.min.1, image::Rgba([0, 0, 0, 255]))
+                    .save(out.join(format!("{id}.png")))
+                    .expect("the synthetic PNG");
+            }
+            Ok(RunOutput {
+                success: true,
+                stdout: passed(ids),
+            })
+        }
     }
 
     #[test]
@@ -443,15 +548,13 @@ mod tests {
         let root = TempDir::new("run-root");
         let out = root.path.join("out");
         std::fs::create_dir_all(&out).expect("the out directory");
-        image::RgbaImage::from_pixel(2560, 1600, image::Rgba([0, 0, 0, 255]))
-            .save(out.join("about-window.png"))
-            .expect("the synthetic PNG");
         let to = root.path.join("site");
         let options = Options {
             only: vec!["about-window".to_owned()],
             to: Some(to.clone()),
         };
-        let lines = run_with(&root.path, &out, &options, spawn_ok).expect("the run");
+        let lines =
+            run_with(&root.path, &out, &options, fake_render(&["about-window"])).expect("the run");
         assert!(
             lines
                 .iter()
@@ -477,8 +580,13 @@ mod tests {
             only: Vec::new(),
             to: None,
         };
-        let error = run_with(&root.path, &root.path, &options, |_command| Ok(false))
-            .expect_err("the tests failed");
+        let error = run_with(&root.path, &root.path, &options, |_command| {
+            Ok(RunOutput {
+                success: false,
+                stdout: String::new(),
+            })
+        })
+        .expect_err("the tests failed");
         assert!(error.contains("screenshot tests failed"), "{error}");
     }
 
@@ -489,9 +597,139 @@ mod tests {
             only: vec!["about-window".to_owned()],
             to: None,
         };
-        let error =
-            run_with(&root.path, &root.path, &options, spawn_ok).expect_err("no PNG was written");
+        let error = run_with(&root.path, &root.path, &options, |_command| {
+            Ok(RunOutput {
+                success: true,
+                stdout: passed(&["about-window"]),
+            })
+        })
+        .expect_err("no PNG was written");
         assert!(error.contains("about-window.png"), "{error}");
+    }
+
+    #[test]
+    fn run_with_deletes_stale_pngs_before_the_run() {
+        // Last run's PNG is valid, but this run renders nothing: the
+        // check must fail on the missing file, not pass the old one.
+        let root = TempDir::new("run-stale");
+        let stale = root.png("about-window.png", (2560, 1600));
+        let other = root.png("notes.png", (3, 3));
+        let options = Options {
+            only: vec!["about-window".to_owned()],
+            to: None,
+        };
+        let error = run_with(&root.path, &root.path, &options, |_command| {
+            Ok(RunOutput {
+                success: true,
+                stdout: passed(&["about-window"]),
+            })
+        })
+        .expect_err("the stale PNG is gone");
+        assert!(error.contains("cannot decode"), "{error}");
+        assert!(!stale.exists(), "the selected shot's old PNG was deleted");
+        assert!(other.exists(), "other files are kept");
+    }
+
+    #[test]
+    fn run_with_rejects_a_filter_that_ran_no_test() {
+        // A renamed test: cargo test succeeds with "running 0 tests".
+        let root = TempDir::new("run-zero");
+        let options = Options {
+            only: vec!["about-window".to_owned()],
+            to: None,
+        };
+        let error = run_with(&root.path, &root.path, &options, |_command| {
+            Ok(RunOutput {
+                success: true,
+                stdout: "running 0 tests\n\ntest result: ok. 0 passed\n".to_owned(),
+            })
+        })
+        .expect_err("zero tests ran");
+        assert!(
+            error.contains("did not pass about_window"),
+            "the error names the test: {error}"
+        );
+    }
+
+    #[test]
+    fn ran_every_test_needs_each_name_exactly() {
+        let shots = one("about-window");
+        assert!(ran_every_test("test about_window ... ok\n", &shots).is_ok());
+        assert!(
+            ran_every_test("test about_window_large ... ok\n", &shots).is_err(),
+            "a longer name is not the test"
+        );
+        assert!(
+            ran_every_test("test about_window ... FAILED\n", &shots).is_err(),
+            "a failed test is not a pass"
+        );
+    }
+
+    #[test]
+    fn test_command_passes_exact_full_names_and_the_output_dir() {
+        let shots = selected(&["pages-tabs".to_owned(), "about-window".to_owned()]);
+        let command = test_command(Path::new("/root"), Path::new("/out"), &shots);
+        let args: Vec<String> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        let tail: Vec<&str> = args
+            .iter()
+            .skip_while(|arg| *arg != "--")
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            tail,
+            [
+                "--",
+                "--ignored",
+                "--test-threads=1",
+                "--exact",
+                "pages_tabs",
+                "about_window"
+            ],
+            "{args:?}"
+        );
+        assert!(
+            command
+                .get_envs()
+                .any(|(key, value)| key == "LARRYGRAM_SCREENSHOTS_DIR"
+                    && value == Some(std::ffi::OsStr::new("/out"))),
+            "the output directory is passed"
+        );
+        let all = test_command(Path::new("/root"), Path::new("/out"), &selected(&[]));
+        assert_eq!(
+            all.get_args().filter(|arg| *arg == "--exact").count(),
+            1,
+            "a full run also filters exactly"
+        );
+        assert_eq!(
+            all.get_args().count(),
+            9 + SHOTS.len(),
+            "a full run names every shot"
+        );
+    }
+
+    #[test]
+    fn spawn_streaming_collects_the_output() {
+        let mut command = std::process::Command::new("sh");
+        command.args(["-c", "echo 'test about_window ... ok'; exit 0"]);
+        let output = spawn_streaming(&mut command).expect("sh runs");
+        assert!(output.success);
+        assert_eq!(output.stdout, "test about_window ... ok\n");
+        let mut failing = std::process::Command::new("sh");
+        failing.args(["-c", "exit 3"]);
+        assert!(!spawn_streaming(&mut failing).expect("sh runs").success);
+        let mut missing = std::process::Command::new("/nonexistent/larrygram-no-such-binary");
+        assert!(spawn_streaming(&mut missing).is_err());
+    }
+
+    #[test]
+    fn out_dir_is_under_the_target_dir() {
+        assert_eq!(
+            out_dir(Path::new("/vol/target/main")),
+            PathBuf::from("/vol/target/main/screenshots")
+        );
     }
 
     #[test]
