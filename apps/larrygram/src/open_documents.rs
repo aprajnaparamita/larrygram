@@ -46,6 +46,8 @@ impl OpenQueue {
     ///
     /// Never panics (AGENTS.md section 6): a poisoned mutex is
     /// recovered.
+    // Only the macOS delegate fills the queue outside tests.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub(crate) fn queue_paths(&self, paths: impl IntoIterator<Item = PathBuf>) {
         self.lock().extend(paths);
     }
@@ -83,6 +85,7 @@ pub(crate) fn set_wake(hook: Box<dyn Fn() + Send + Sync>) {
 
 /// Queues `paths` for the next frame and wakes the UI (task R8 Goal
 /// 2). Never panics (AGENTS.md section 6).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) fn queue_paths(paths: impl IntoIterator<Item = PathBuf>) {
     QUEUED.queue_paths(paths);
     let hook = WAKE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
