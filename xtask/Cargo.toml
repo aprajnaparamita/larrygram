@@ -37,10 +37,20 @@ serde-saphyr = "1.3"     # MIT; pure-Rust YAML (replaces archived serde_yaml and
                          # advisory-flagged serde_yml; see ADR 0007)
 # The same zip major as crates/vsdx (calamine 0.38 uses zip 9 too). Default
 # features off: they pull in bzip2/zstd support whose licences are not in
-# deny.toml. Used by the P1-08 fixture builder (tiny .xlsx workbooks for
-# the extract --check tests) and by `cargo xtask scout classify`, which
-# reads `docProps` and `[Content_Types].xml` of the wide corpus.
-zip = { version = "9", default-features = false }
+# deny.toml. The `deflate-flate2` feature (the same one crates/vsdx uses)
+# compresses the Windows package (task R9). Used by the P1-08 fixture builder
+# (tiny .xlsx workbooks for the extract --check tests), by
+# `cargo xtask scout classify`, which reads `docProps` and
+# `[Content_Types].xml` of the wide corpus, and by `cargo xtask dist
+# windows`.
+zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
+# R9: the Linux package is a .tar.gz written by the pure-Rust `tar` and
+# `flate2` crates (task R9 goal 1: no `tar` or `7z` binaries). Both are
+# MIT OR Apache-2.0; flate2's pure-Rust miniz_oxide backend is the same
+# one crates/vsdx uses (ADR 0014). Writing archives only: default
+# features off (`xattr` is not needed).
+tar = { version = "0.4", default-features = false }
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
 
 # R7: the macOS `.icns` rasteriser (`cargo xtask dist mac`). The same
 # resvg 0.45 the desktop app rasterises its window icon with (ADR 0067,
