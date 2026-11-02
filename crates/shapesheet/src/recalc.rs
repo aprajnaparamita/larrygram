@@ -150,6 +150,10 @@ pub struct CellWriteOp {
 pub struct Evaluation {
     /// The cached value to store for the cell.
     pub value: CellValue,
+    /// Whether the evaluation stood back **silently** (a
+    /// [`crate::FunctionKind::VisioOwned`] call, task P7-31): the cell
+    /// keeps its cached value and nothing is reported.
+    pub kept_cached: bool,
     /// What the evaluation could not do. A [`RecalcWarningKind::UnknownFunction`]
     /// or [`RecalcWarningKind::Syntax`] warning means the cell keeps its
     /// cached value (ADR 0053).
@@ -213,7 +217,7 @@ impl FormulaEngine for DocumentEngine {
         formula: &Formula,
         sheet: SheetRef,
     ) -> Result<Evaluation, Error> {
-        let (value, traced, raw_writes, nested) = {
+        let (value, traced, raw_writes, nested, kept_cached) = {
             // The resolver records `SETF` writes and attributes warnings
             // to the cell whose formula raised them (ADR 0056, P6-12
             // reviews F1 and F16); nothing writes the document here.
@@ -228,6 +232,7 @@ impl FormulaEngine for DocumentEngine {
                         // Never written: the warning keeps the cell's
                         // cached value.
                         value: CellValue::Error(String::from("#VALUE!")),
+                        kept_cached: false,
                         warnings: vec![RecalcWarning {
                             target: None,
                             kind: RecalcWarningKind::Syntax(kind),
@@ -239,8 +244,9 @@ impl FormulaEngine for DocumentEngine {
                 Err(error) => return Err(error),
             };
             let nested = resolver.evaluations();
+            let kept_cached = resolver.kept_cached();
             let (traced, raw_writes) = resolver.into_parts();
-            (value, traced, raw_writes, nested)
+            (value, traced, raw_writes, nested, kept_cached)
         };
         let cached = value.to_cached()?;
         let mut warnings: Vec<RecalcWarning> = Vec::new();
@@ -273,6 +279,7 @@ impl FormulaEngine for DocumentEngine {
         }
         Ok(Evaluation {
             value: cached.value,
+            kept_cached,
             warnings,
             writes,
             evaluations: nested.saturating_add(1),
@@ -433,12 +440,13 @@ pub fn recalc_with(
         // The budget counts every evaluation the call ran, nested ones
         // included (ADR 0055, P6-12 review F7).
         evaluations = evaluations.saturating_add(evaluation.evaluations.max(1));
-        let keep_cached = evaluation.warnings.iter().any(|warning| {
-            matches!(
-                warning.kind,
-                RecalcWarningKind::UnknownFunction(_) | RecalcWarningKind::Syntax(_)
-            )
-        });
+        let keep_cached = evaluation.kept_cached
+            || evaluation.warnings.iter().any(|warning| {
+                matches!(
+                    warning.kind,
+                    RecalcWarningKind::UnknownFunction(_) | RecalcWarningKind::Syntax(_)
+                )
+            });
         for mut warning in evaluation.warnings {
             if warning.target.is_none() {
                 warning.target = Some(address.clone());
@@ -617,6 +625,7 @@ pub(crate) mod testing {
             self.evaluated.push(formula.as_str().to_owned());
             if self.warn_unknown {
                 return Ok(Evaluation {
+                    kept_cached: false,
                     value: CellValue::Number(0.0),
                     warnings: vec![RecalcWarning {
                         target: None,
@@ -683,6 +692,7 @@ pub(crate) mod testing {
             let target = graph::resolve_write_address(document, sheet, &reference)
                 .unwrap_or_else(|| CellAddress::new(sheet, CellName::new(name.trim().to_owned())));
             return Evaluation {
+                kept_cached: false,
                 value: value.clone(),
                 warnings: Vec::new(),
                 writes: vec![CellWriteOp {
@@ -701,6 +711,7 @@ pub(crate) mod testing {
             text.parse::<f64>().ok()
         };
         Evaluation {
+            kept_cached: false,
             value: CellValue::Number(number.unwrap_or_else(|| read_operand(document, sheet, text))),
             warnings: Vec::new(),
             writes: Vec::new(),
@@ -1136,6 +1147,75 @@ mod tests {
         );
     }
 
+    /// The glue formulas a Visio-written file carries (ADR 0084 rule 2,
+    /// `docs/ui/connectors.md` section 8): the Visio-owned calls keep
+    /// the cell's cached value and report nothing (task P7-31 item 4).
+    #[test]
+    fn the_visio_owned_glue_functions_keep_the_cached_value_silently() {
+        let (mut doc, shape) = doc_with(vec![
+            cell(
+                "BeginX",
+                Some("PAR(PNT(Sheet.2!Connections.X1,Sheet.2!Connections.Y1))"),
+                Some(num(1.5)),
+            ),
+            cell(
+                "BegTrigger",
+                Some("_XFTRIGGER(Sheet.2!EventXFMod)"),
+                Some(num(2.0)),
+            ),
+            cell(
+                "EndX",
+                Some("_WALKGLUE(BegTrigger,EndTrigger,WalkPreference)"),
+                Some(num(3.5)),
+            ),
+        ]);
+        let dirty = [
+            address(shape, "BeginX"),
+            address(shape, "BegTrigger"),
+            address(shape, "EndX"),
+        ];
+        let outcome = recalc(&mut doc, &dirty, &RecalcOptions::new()).expect("recalc");
+        assert!(
+            outcome.warnings.is_empty(),
+            "no warning, no UnknownFunction entry: {:?}",
+            outcome.warnings
+        );
+        assert!(outcome.updates.is_empty(), "{:?}", outcome.updates);
+        assert_eq!(value_of(&doc, &address(shape, "BeginX")), Some(num(1.5)));
+        assert_eq!(
+            value_of(&doc, &address(shape, "BegTrigger")),
+            Some(num(2.0))
+        );
+        assert_eq!(value_of(&doc, &address(shape, "EndX")), Some(num(3.5)));
+        assert_eq!(
+            formula_of(&doc, &address(shape, "BeginX")),
+            Some(String::from(
+                "PAR(PNT(Sheet.2!Connections.X1,Sheet.2!Connections.Y1))"
+            )),
+            "the glue formula is not replaced"
+        );
+    }
+
+    /// A Visio-owned formula on a cell that caches nothing writes
+    /// nothing: the evaluator computes no replacement value for it.
+    #[test]
+    fn a_visio_owned_call_without_a_cached_value_writes_nothing() {
+        let (mut doc, shape) = doc_with(vec![cell(
+            "BeginX",
+            Some("_XFTRIGGER(EventXFMod)"),
+            None,
+        )]);
+        let outcome = recalc(
+            &mut doc,
+            &[address(shape, "BeginX")],
+            &RecalcOptions::new(),
+        )
+        .expect("recalc");
+        assert!(outcome.warnings.is_empty(), "{:?}", outcome.warnings);
+        assert!(outcome.updates.is_empty(), "{:?}", outcome.updates);
+        assert_eq!(value_of(&doc, &address(shape, "BeginX")), None);
+    }
+
     #[test]
     fn fill_missing_only_recomputes_cells_without_a_cached_value() {
         let (mut doc, shape) = doc_with(vec![
@@ -1504,6 +1584,7 @@ mod tests {
                 _sheet: SheetRef,
             ) -> Result<Evaluation, Error> {
                 Ok(Evaluation {
+                    kept_cached: false,
                     value: num(1.0),
                     warnings: Vec::new(),
                     writes: vec![CellWriteOp {

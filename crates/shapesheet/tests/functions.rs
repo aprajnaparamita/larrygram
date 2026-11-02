@@ -68,9 +68,26 @@ const REFERENCE: &[(&str, u8, Option<u8>)] = &[
     ("TRUNC", 2, Some(2)),
 ];
 
+/// The Visio-owned glue functions (task P7-31, ADR 0084 rule 2): the
+/// calls a Visio-written file's endpoint and trigger formulas carry
+/// (`docs/ui/connectors.md` section 8). Their arities record the
+/// observed spellings; the evaluator keeps the cached value for them
+/// and computes nothing, so they are in [`FUNCTIONS`] but not in
+/// [`REFERENCE`] and not [`is_supported`].
+const VISIO_OWNED: &[(&str, u8, Option<u8>)] = &[
+    ("PAR", 1, Some(1)),
+    ("PNT", 2, Some(2)),
+    ("_WALKGLUE", 3, Some(3)),
+    ("_XFTRIGGER", 1, Some(1)),
+];
+
 #[test]
 fn the_table_holds_every_reference_name_with_its_arity() {
-    assert_eq!(FUNCTIONS.len(), REFERENCE.len());
+    assert_eq!(
+        FUNCTIONS.len(),
+        REFERENCE.len() + VISIO_OWNED.len(),
+        "the evaluated set plus the Visio-owned glue functions"
+    );
     for (name, min, max) in REFERENCE {
         let found = lookup_function(name)
             .expect("lookup has no failure path")
@@ -78,6 +95,25 @@ fn the_table_holds_every_reference_name_with_its_arity() {
         assert_eq!(found.name, *name, "{name} spelled differently");
         assert_eq!(found.min_args, *min, "{name} min_args");
         assert_eq!(found.max_args, *max, "{name} max_args");
+    }
+    for (name, min, max) in VISIO_OWNED {
+        let found = lookup_function(name)
+            .expect("lookup has no failure path")
+            .unwrap_or_else(|| panic!("{name} missing from FUNCTIONS"));
+        assert_eq!(found.kind, FunctionKind::VisioOwned, "{name} kind");
+        assert_eq!(found.min_args, *min, "{name} min_args");
+        assert_eq!(found.max_args, *max, "{name} max_args");
+    }
+}
+
+/// The Visio-owned glue functions are tabled (they must not warn as
+/// unknown) but never computed: `is_supported` is false for them (task
+/// P7-31 item 4).
+#[test]
+fn the_visio_owned_functions_are_tabled_but_not_supported() {
+    for (name, _, _) in VISIO_OWNED {
+        assert!(lookup_function(name).expect("lookup").is_some(), "{name}");
+        assert!(!is_supported(name), "{name} keeps the cached value");
     }
 }
 
@@ -136,6 +172,7 @@ fn every_row_has_a_kind_of_the_documented_set() {
                 | FunctionKind::Color
                 | FunctionKind::Reference
                 | FunctionKind::Guard
+                | FunctionKind::VisioOwned
         );
         assert!(kinded, "{} has an unexpected kind", def.name);
     }
