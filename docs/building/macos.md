@@ -60,13 +60,17 @@ no notarisation (the user's decision, 2026-10-25). macOS runs such an
 app on this Mac and on the testers' Macs, but Gatekeeper has no
 Developer ID to check, so **the first launch needs an explicit OK**:
 
-- Right-click (or Control-click) the app, then **Open**, then **Open**
-  in the dialog. Or:
 - Try to open it once, then go to **System Settings > Privacy &
   Security**, scroll down and click **Open Anyway**.
+- On macOS 14 and earlier only: right-click (or Control-click) the
+  app, then **Open**, then **Open** in the dialog.
+- If neither works: `xattr -dr com.apple.quarantine
+  /Applications/Larrygram.app` removes the download mark that makes
+  macOS check the app.
 
 After that the app opens normally. Replacing the app with a new build
-may ask again.
+may ask again. `docs/building/testers.md` has the same steps for the
+testers.
 
 ## Opening documents (task R8)
 
@@ -110,8 +114,9 @@ check and the first-launch note. Do this on the mounted `.dmg`,
 before copying the app anywhere:
 
 - [ ] Mount `Larrygram-<version>-macos-arm64.dmg` (double-click).
-- [ ] Open `Larrygram.app` from the mounted image (right-click, Open,
-      the first time; see "Signing" above).
+- [ ] Open `Larrygram.app` from the mounted image (the first time
+      through **Privacy & Security > Open Anyway**; see "Signing"
+      above).
 - [ ] Open a `.vsdx` drawing by double-clicking it in Finder: the app
       comes to the front with the drawing on the page. (If another app
       owns the `.vsdx` extension on your Mac, choose **Open With >
