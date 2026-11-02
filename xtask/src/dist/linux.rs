@@ -84,6 +84,7 @@ NOTICE and ATTRIBUTION.md describe the rest of the package.
 
 /// One file in the package: its entry name (relative to the top
 /// directory), its unix mode and where its bytes come from.
+#[derive(Debug)]
 pub struct Entry {
     /// The entry name inside the package directory.
     pub name: String,
@@ -94,6 +95,7 @@ pub struct Entry {
 }
 
 /// Where a package entry's bytes come from.
+#[derive(Debug)]
 pub enum Source {
     /// A file on disk (a built binary, a licence, the desktop entry).
     File(PathBuf),
@@ -467,6 +469,24 @@ mod tests {
         let mut sys = FakeSys::new(&layout.release_dir(TARGET), &["larrygram", "larrygram-cli"]);
         let err = dist_linux(&mut sys, &layout, "linux", "x86_64").unwrap_err();
         assert!(err.contains("cannot read"), "{err}");
+    }
+
+    /// `write_tar_gz` reports an output path it cannot create (a
+    /// directory in the way).
+    #[test]
+    fn write_tar_gz_reports_an_unwritable_output() {
+        let tmp = TempDir::new("dist-tar-out");
+        let err = write_tar_gz(tmp.path(), "Larrygram-1", &[]).unwrap_err();
+        assert!(err.contains("cannot create"), "{err}");
+    }
+
+    /// `package_sources` reports a broken icon source cleanly.
+    #[test]
+    fn package_sources_reports_a_broken_icon() {
+        let tmp = workspace();
+        let layout = Layout::under(tmp.path());
+        let err = package_sources(tmp.path(), &layout, "not an svg").unwrap_err();
+        assert!(err.contains("cannot parse"), "{err}");
     }
 
     /// `read_tar_gz` reports a missing file cleanly.

@@ -309,6 +309,15 @@ mod tests {
         assert!(err.contains("cannot read"), "{err}");
     }
 
+    /// `write_zip` reports an output path it cannot create (a
+    /// directory in the way).
+    #[test]
+    fn write_zip_reports_an_unwritable_output() {
+        let tmp = TempDir::new("dist-zip-out");
+        let err = write_zip(tmp.path(), "Larrygram-1", &[]).unwrap_err();
+        assert!(err.contains("cannot create"), "{err}");
+    }
+
     /// `read_zip` reports a missing file cleanly.
     #[test]
     fn read_zip_reports_a_missing_file() {
