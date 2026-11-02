@@ -644,6 +644,77 @@ impl AppCtx {
         self.undo_suspended
     }
 
+    /// Opens an undo group on the undo stack of `session` (ADR 0040,
+    /// amendment 2026-11-03): every edit pushed until
+    /// [`AppCtx::end_group`] or [`AppCtx::cancel_group`] collects into
+    /// one step labelled `label` instead of its own step.
+    ///
+    /// Only the shell opens a group (the shell always closes it), so
+    /// programmatic sources never see one. Groups do not nest: a second
+    /// `begin_group` on the same session is an error.
+    pub fn begin_group(
+        &mut self,
+        session: SessionId,
+        label: impl Into<String>,
+    ) -> Result<(), CommandError> {
+        let label = label.into();
+        let unsaved = self
+            .documents
+            .iter()
+            .find(|slot| slot.id == session)
+            .map(|slot| slot.dirty)
+            .ok_or_else(|| CommandError::failed("no document session for the undo group"))?;
+        self.with_stack(session, |stack, _ctx| stack.begin_group(label, unsaved))??;
+        Ok(())
+    }
+
+    /// Closes the open group of `session` as one undo step (ADR 0040,
+    /// amendment 2026-11-03), labelled as the interaction's first act.
+    /// An empty group pushes nothing; without an open group this does
+    /// nothing.
+    pub fn end_group(&mut self, session: SessionId) -> Result<(), CommandError> {
+        self.with_stack(session, |stack, _ctx| stack.end_group())?;
+        Ok(())
+    }
+
+    /// Cancels the open group of `session` (ADR 0040, amendment
+    /// 2026-11-03): the collected edits are reverted in reverse order
+    /// and the document's unsaved-changes state is restored to what it
+    /// was when the group opened. Without an open group this does
+    /// nothing.
+    pub fn cancel_group(&mut self, session: SessionId) -> Result<(), CommandError> {
+        let unsaved = self.with_stack(session, |stack, ctx| stack.cancel_group(ctx))??;
+        if let Some(unsaved) = unsaved
+            && let Some(slot) = self.documents.iter_mut().find(|slot| slot.id == session)
+        {
+            slot.dirty = unsaved;
+        }
+        Ok(())
+    }
+
+    /// Runs `step` on the undo stack of `session` (the `with_undo`
+    /// borrow split of `builtins::view`): the stack lives inside the
+    /// session while the steps need `&mut AppCtx`, so it is taken out
+    /// for the call and put back by [`SessionId`] afterwards. The
+    /// placeholder is an explicit zero-capacity stack (P4-15 review
+    /// minor 2). When the step closed its own session, the stack dies
+    /// with it.
+    fn with_stack<R>(
+        &mut self,
+        session: SessionId,
+        step: impl FnOnce(&mut UndoStack, &mut AppCtx) -> R,
+    ) -> Result<R, CommandError> {
+        let Some(index) = self.documents.iter().position(|slot| slot.id == session) else {
+            return Err(CommandError::failed("no document session for the undo group"));
+        };
+        let mut stack = std::mem::replace(&mut self.documents[index].undo, UndoStack::new(0));
+        let out = step(&mut stack, self);
+        if let Some(slot) = self.documents.iter_mut().find(|slot| slot.id == session) {
+            slot.undo = stack;
+        }
+        Ok(out)
+    }
+
     /// Sets the recording gate and returns its previous value.
     ///
     /// The gate is a flag, not a counter: the outermost runner restores
@@ -1107,5 +1178,80 @@ mod tests {
         ctx.active = Some(0);
         assert!(ctx.close_document(2).is_some());
         assert_eq!(ctx.active, Some(0), "the active document keeps its index");
+    }
+
+    // --- ADR 0040, amendment 2026-11-03: the undo-group wrappers -----
+
+    /// The wrappers fold the group's pushes into one step on the
+    /// session's stack (the shell's new-text-box interaction).
+    #[test]
+    fn the_undo_group_wrappers_fold_the_pushes_into_one_step() {
+        let mut ctx = AppCtx::new(Settings::default());
+        let index = ctx.open_document(DocumentSession::new(Document::new(), None));
+        let id = ctx.documents.get(index).expect("session").id;
+        ctx.begin_group(id, "Insert Text Box").expect("begin");
+        ctx.push_edit(id, Box::new(LabelEdit("one"))).expect("push");
+        ctx.push_edit(id, Box::new(LabelEdit("two"))).expect("push");
+        let session = ctx.documents.get(index).expect("session");
+        assert_eq!(session.undo.len(), 0, "the pushes collect in the group");
+        ctx.end_group(id).expect("end");
+        let session = ctx.documents.get(index).expect("session");
+        assert_eq!(session.undo.undo_labels(), vec!["Insert Text Box"]);
+    }
+
+    /// `cancel_group` restores the document's unsaved-changes state to
+    /// what it was when the group opened (ADR 0040, amendment
+    /// 2026-11-03).
+    #[test]
+    fn cancel_group_restores_the_unsaved_changes_state() {
+        let mut ctx = AppCtx::new(Settings::default());
+        let index = ctx.open_document(DocumentSession::new(Document::new(), None));
+        let id = ctx.documents.get(index).expect("session").id;
+        ctx.active_document_mut().expect("session").dirty = true;
+        ctx.begin_group(id, "Insert Text Box").expect("begin");
+        ctx.push_edit(id, Box::new(LabelEdit("one"))).expect("push");
+        // Something in the group marked the document saved again.
+        ctx.active_document_mut().expect("session").dirty = false;
+
+        ctx.cancel_group(id).expect("cancel");
+        let session = ctx.documents.get(index).expect("session");
+        assert!(
+            session.dirty,
+            "the unsaved-changes state the group saw is restored"
+        );
+        assert!(session.undo.is_empty(), "no undo entry stays behind");
+    }
+
+    /// The wrappers find their session by identity; a stale one is an
+    /// error, and `end_group`/`cancel_group` without a group are quiet
+    /// no-ops.
+    #[test]
+    fn the_group_wrappers_name_their_session() {
+        let mut ctx = AppCtx::new(Settings::default());
+        let stale = SessionId(u64::MAX);
+        let error = ctx
+            .begin_group(stale, "Insert Text Box")
+            .expect_err("no session");
+        assert!(error.to_string().contains("no document session"), "{error}");
+        assert!(ctx.end_group(stale).is_err());
+        assert!(ctx.cancel_group(stale).is_err());
+
+        let index = ctx.open_document(DocumentSession::new(Document::new(), None));
+        let id = ctx.documents.get(index).expect("session").id;
+        ctx.end_group(id).expect("nothing to end");
+        ctx.cancel_group(id).expect("nothing to cancel");
+        let session = ctx.documents.get(index).expect("session");
+        assert!(!session.dirty, "a no-op cancel touches nothing");
+    }
+
+    /// Groups do not nest through the wrappers either.
+    #[test]
+    fn the_group_wrappers_refuse_to_nest() {
+        let mut ctx = AppCtx::new(Settings::default());
+        let index = ctx.open_document(DocumentSession::new(Document::new(), None));
+        let id = ctx.documents.get(index).expect("session").id;
+        ctx.begin_group(id, "outer").expect("begin");
+        let error = ctx.begin_group(id, "inner").expect_err("nested");
+        assert!(error.to_string().contains("already open"), "{error}");
     }
 }
