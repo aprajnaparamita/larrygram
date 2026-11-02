@@ -99,9 +99,8 @@ corpus files.
   `X`, `Y` (the point in the shape's local coordinates), `DirX`,
   `DirY`, `Type`, and a scratch `D` cell. Row names appear as
   `Connections.<name>`; unnamed rows are `Connections.Row_<n>`. [ss:conn-section]
-- The documented default: "most connection points (all connection
-  points created through the user interface) are non-extended" with
-  row type `visTagCnnctPt` or `visTagCnnctNamed`; extended
+- The documented default: points made through the user interface,
+  which is most of them, are plain (non-extended) rows with row type `visTagCnnctPt` or `visTagCnnctNamed`; extended
   `A/B/C/D` rows are uncommon. [ss:conn-row] The sources do not state
   which points a shape has before the user adds any: see the open
   questions.
@@ -128,8 +127,8 @@ corpus files.
 
 - **Reroute by dragging**: to reroute a connector, select it and drag
   a midpoint to a new location. [edit-connectors]
-- The default **Dynamic connector** "can automatically re-route
-  itself around other shapes"; connector shapes from the Visio Extras
+- The default **Dynamic connector** re-routes itself around other
+  shapes on its own; connector shapes from the Visio Extras
   > Connectors stencil mostly do not. [edit-connectors]
 - When a connector re-routes after an edit is governed per connector
   by the `ConFixedCode` cell: reroute freely (0), reroute as needed,
@@ -204,8 +203,8 @@ corpus files.
   jumps, neither jumps) and `ConLineJumpStyle`, and set the jump
   direction with `ConLineJumpDirX`/`ConLineJumpDirY`. [ss:linejumpcode]
   [ss:conlinejumpcode] [ss:conlinejumpstyle]
-- Routing around shapes: the Dynamic connector "can automatically
-  re-route itself around other shapes" [edit-connectors]; the page
+- Routing around shapes: the Dynamic connector routes around other
+  shapes by itself [edit-connectors]; the page
   layout cells (`AvenueSizeX`/`AvenueSizeY`, `BlockSizeX`/`BlockSizeY`,
   `PageShapeSplit`) parameterise the layout and routing engine, and
   shape-level `Shape Layout` cells override page defaults.
@@ -248,17 +247,49 @@ corpus files.
   Service subset as "unused and MUST be ignored" there (2.3.4.2.12),
   while the full schema (section 3) keeps the six attributes; the
   records exist for interoperability either way. [ms-vsdx]
-- Open question: what Visio itself recomputes from `Connects` records
-  versus the glue formulas when it opens a file (see below).
+- **What Visio-written files carry** (corpus and wide corpus, counted
+  over the first 800 wide-corpus `.vsdx` files; derived structure
+  only) [corpus] [wide-corpus]:
+  - every point-glued end has an endpoint formula
+    `BeginX` = `PAR(PNT(Sheet.<n>!Connections.X<k>,Sheet.<n>!Connections.Y<k>))`
+    (and the same for `EndX`, with `BeginY`/`EndY` alongside), the
+    target sheet and row named in the formula;
+  - every dynamically glued end has `BeginX` = `_WALKGLUE(BegTrigger,EndTrigger,WalkPreference)`
+    and `EndX` = `_WALKGLUE(EndTrigger,BegTrigger,WalkPreference)`;
+  - every glued end has a trigger, `BegTrigger`/`EndTrigger` =
+    `_XFTRIGGER(Sheet.<n>!EventXFMod)` naming the target; an unglued
+    end's trigger is `_XFTRIGGER(EventXFMod)` (its own sheet);
+  - the `Connects` records sit alongside the formulas.
+  So the glue lives in the endpoint and trigger formulas; the records
+  are the cross-reference. A file that writes records alone is very
+  likely to open unglued, and a re-glue that leaves an old
+  `PAR(PNT(Sheet.<old>…))` formula in place glues back to the old
+  shape.
+- **The Dynamic connector master as Visio's files carry it** [corpus]
+  [wide-corpus]: a 1-D shape (`BeginX`/`BeginY`/`EndX`/`EndY`
+  present) with `PinX` = `GUARD((BeginX+EndX)/2)`, `PinY` =
+  `GUARD((BeginY+EndY)/2)`, `Width` = `GUARD(EndX-BeginX)`, a small
+  constant `Height` (0.2 in, `GUARD(0.2DL)`), `LocPinX`/`LocPinY` at
+  half the width and height, `Angle` 0; `ObjType` 2 (routable),
+  `GlueType` 2, `ShapeRouteStyle` 16, `ShapeSplittable` 1, and **no
+  `Connection` section**. No `ConFixedCode` cell (the default, 0).
+  Its geometry is drawn in the box's local coordinates and leaves the
+  box for bent routes; `Width` is negative when the end lies left of
+  the begin.
+- Value counts in the same sample, for the cells the alpha writes:
+  `ShapeRouteStyle` 16, 1, 6, 3, 2, 0 (most to least common);
+  `ConLineRouteExt` 1, 2, 0; the page's `RouteStyle` 1, 6, 2, 5;
+  `ConFixedCode` 3, 6, 4, 5 on instances.
 
 ## 9. Open questions for black-box observation
 
 Questions about Visio's behaviour that the allowed sources do not
 answer:
 
-1. When Visio opens a file whose `Connects` records describe a glue
-   but whose `BeginX`/`EndX`/`GlueInfo` cells carry no glue formulas,
-   does Visio show the shapes as glued and re-route accordingly?
+1. (Answered by the corpus, section 8: Visio keeps glue in the
+   endpoint and trigger formulas, so we write both.) Does a file with
+   the formulas and the records, written by us, open in Visio with the
+   same glue and the same route?
 2. When Visio opens a file whose glue formulas exist but whose
    `Connects` records are missing, is the glue intact?
 3. Which connection points does a freshly drawn shape have before the
@@ -282,11 +313,20 @@ answer:
 8. Does the green hover box appear for any 2-D shape, or only for
    shapes that accept glue, and does it show during a drag from
    anywhere on the shape or only near the center?
-9. What is the default `ConFixedCode` of a connector drawn with the
-   Connector tool, and does dragging a midpoint change the cell?
+9. The stock master carries no `ConFixedCode` (default 0, section 8).
+   Does dragging a midpoint change the cell, and to which value?
 10. What does the page-level "Show Line Jumps" switch write to the
     page sheet, and do files from us with our jump values draw the
     same jumps in Visio?
+11. The stock Dynamic connector carries `ShapeRouteStyle` 16 (the
+    center-to-center value) yet draws right-angle routes with a
+    default page. Which page and shape cells decide the drawn style
+    of a new connector, and which value should a connector we draw
+    carry to route the same way?
+12. Which `ShapeRouteStyle`, `ConLineRouteExt` and page
+    `RouteStyle`/`LineRouteExt` values does each choice of the
+    Connectors dropdown (Right Angle, Straight Lines, Curved Lines)
+    write, with a connector selected and with nothing selected?
 
 ## Sources
 
@@ -340,7 +380,11 @@ answer:
   definitions.
 - [corpus] Derived facts from the licensed corpus files
   (`corpus/vsdx/`, per `corpus/PROVENANCE.md`): the `Connect` record
-  spellings observed in saved files.
+  spellings, endpoint and trigger formulas, and the Dynamic connector
+  master's cells, observed in saved files.
+- [wide-corpus] The wide corpus (`docs/sources.md` row 26): the same
+  formula spellings and cell-value counts, as aggregates; no file is
+  named.
 
 Raw pages are kept under `reference/` (never committed) and
 recorded in `docs/sources.md` row 30 and `reference/SOURCES.md`.

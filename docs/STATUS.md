@@ -56,7 +56,13 @@ Phase 7: Panel and Classic layouts, the Larrygram rename and the welcome wizard.
 | [P7-27](tasks/P7-27.md) | implementer | P7-24, P7-25 | I | merged (one page-size resolver, `Document::page_size`, background rung dropped; layout-neutral checked seam; latch follows the selection; one label table; `percent` only for Zoom) | `29ec390` |
 | [P7-28](tasks/P7-28.md) | implementer | P7-24, P7-25 | I | merged (the Fill and Line dialogs, the Format Shape pane as a window, ADR 0083; open: transparency unit, pane docking, dialog defaults) | `c895436` |
 | [P7-29](tasks/P7-29.md) | implementer | P7-26, P7-27, P7-28 | I | ready (text controls disabled on a shape without text, the Text tool on a selected shape, Edit Text) | — |
-| [P7-30](tasks/P7-30.md) | architect (Opus 5.5 or Fable 5.1) | P7-26 | A | ready (connectors: Microsoft's documented behaviour, our gaps, ADR, draft tasks P7-31 onward) | — |
+| [P7-30](tasks/P7-30.md) | architect (Opus 5.5 or Fable 5.1) | P7-26 | A | merged (connector spec `docs/ui/connectors.md`, ADR 0084, the audit; the master revised ADR 0084 and the drafts after the Opus review: 1-D connector, glue formulas, pair resolution, scoped re-route) | `4d5e5e9` |
+| [P7-31](tasks/P7-31.md) | implementer | P7-30 | I | ready, parallel with P7-29 (the 1-D connector master, Visio's glue formulas, right angle by default) | — |
+| [P7-32](tasks/P7-32.md) | implementer | P7-31 | I | waits for P7-31 (glue lands on a sensible point: `larrygram_geom::glue`, exit directions, scoped re-route) | — |
+| [P7-33](tasks/P7-33.md) | implementer | P7-32 | I | waits for P7-32 (end handles, re-glue, unglue, hover feedback, arrow-key unglue); parallel with P7-36 | — |
+| [P7-34](tasks/P7-34.md) | implementer | P7-33 | I | waits for P7-33 (connection points: view check, tool, type, glue renumbering); parallel with P7-35 | — |
+| [P7-35](tasks/P7-35.md) | implementer | P7-33, P7-36 | I | waits (segment drags, Reset Connector, reroute options) | — |
+| [P7-36](tasks/P7-36.md) | implementer | P7-32 | I | waits for P7-32 (right angle, straight and curved styles, the controls, the storage round trip); parallel with P7-33 | — |
 
 Tasks start as soon as their own dependencies merge (no whole-group waits); run at most twelve workers at once across Phase 7 and Phase 8.
 
