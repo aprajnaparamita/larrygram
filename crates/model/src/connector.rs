@@ -227,12 +227,11 @@ impl Document {
     /// `end`, in the connector's parent coordinates, land in the
     /// endpoint cells.
     ///
-    /// A glued end keeps its glue formula (only the cached `V` is
-    /// refreshed); any other end becomes its literal point with no
-    /// formula (ADR 0084 rule 2's "unglued" row). This replaces a
-    /// formula only when it is one of the glue forms; a custom formula
-    /// is the caller's business and is replaced too (the path write
-    /// owns the routed points).
+    /// An end whose cell holds a glue formula (`PAR(PNT(...))` or
+    /// `_WALKGLUE(...)`) keeps that formula and only its cached `V` is
+    /// refreshed. Every other end, a custom formula included, becomes
+    /// its literal point with no formula (ADR 0084 rule 2's "unglued"
+    /// row): the path write owns the routed points.
     pub(crate) fn write_connector_ends(
         &mut self,
         shape: ShapeId,
@@ -261,31 +260,132 @@ impl Document {
         Ok(())
     }
 
-    /// The path write's pin and size half (task P7-31 goal 2): the
-    /// documented formulas of ADR 0084 rule 1 refreshed with the
-    /// values the routed ends compute. `Width` is negative when `end`
-    /// lies left of `begin`.
+    /// The path write's pin and size half (task P7-31 goal 2, ADR 0084
+    /// rule 1 as amended): `PinX`, `PinY`, `Width`, `Height`, the local
+    /// pins and `Angle` are refreshed from the routed ends.
+    ///
+    /// A cell that holds a formula, its own or inherited from the
+    /// master, keeps that formula and gets the value it computes; only
+    /// a literal (or missing) cell gets a literal. The values follow the
+    /// two 1-D families Visio's files carry: a connector box
+    /// (`Width` = `EndX-BeginX`, `Angle` 0) and, when `Angle` is an
+    /// `ATAN2` of the ends, an aligned line (`Width` the length, `Angle`
+    /// the direction). `Width` is negative when `end` lies left of
+    /// `begin` in a connector box. `Height` keeps its value unless its
+    /// formula reads the ends.
     pub(crate) fn write_connector_pins(
         &mut self,
         shape: ShapeId,
         begin: Point,
         end: Point,
     ) -> Result<(), Error> {
-        let width = end.x - begin.x;
-        let height = CONNECTOR_HEIGHT;
-        for (name, formula, value) in [
+        let (dx, dy) = (end.x - begin.x, end.y - begin.y);
+        let aligned = self
+            .pin_formula(shape, "Angle")
+            .is_some_and(|formula| formula_mentions(&formula, "ATAN2("));
+        let (width, angle) = if aligned {
+            (dx.hypot(dy), dy.atan2(dx))
+        } else {
+            // A constant formula (`GUARD(0DA)`) or a literal keeps its
+            // value; a missing cell is 0.
+            (dx, self.pin_value(shape, "Angle").unwrap_or(0.0))
+        };
+        let height = match self.pin_formula(shape, "Height") {
+            Some(formula) if formula_mentions(&formula, "ENDY-BEGINY") => dy,
+            _ => self.pin_value(shape, "Height").unwrap_or(CONNECTOR_HEIGHT),
+        };
+        // Every write is chosen before any is made: `write_cell` derives
+        // `LocPinX` from `Width` on the way, which must not decide the
+        // `LocPinX` formula kept here.
+        let mut writes = Vec::with_capacity(7);
+        for (name, default_formula, value) in [
             ("PinX", "GUARD((BeginX+EndX)/2)", (begin.x + end.x) / 2.0),
             ("PinY", "GUARD((BeginY+EndY)/2)", (begin.y + end.y) / 2.0),
             ("Width", "GUARD(EndX-BeginX)", width),
             ("Height", "GUARD(0.2DL)", height),
             ("LocPinX", "GUARD(Width*0.5)", width * 0.5),
             ("LocPinY", "GUARD(Height*0.5)", height * 0.5),
+            ("Angle", "GUARD(0DA)", angle),
         ] {
-            let write = CellWrite::new(formula, CellValue::Number(value));
+            let write = match self.pin_formula(shape, name) {
+                Some(formula) => CellWrite::new(formula, CellValue::Number(value)),
+                None if self.has_pin_cell(shape, name) => {
+                    CellWrite::value_only(CellValue::Number(value))
+                }
+                // No cell anywhere: the documented formula (ADR 0084
+                // rule 1), so the shape stays a 1-D box.
+                None => CellWrite::new(default_formula, CellValue::Number(value)),
+            };
+            writes.push((name, write));
+        }
+        for (name, write) in writes {
             self.write_cell(SheetRef::Shape(shape), &CellName::new(name), &write)?;
         }
         Ok(())
     }
+
+    /// The formula of one of the shape's cells, its own or inherited
+    /// from its master, when it is a computing formula (not a bare
+    /// number, which is a literal).
+    fn pin_formula(&self, shape: ShapeId, name: &str) -> Option<String> {
+        let found = self.resolve(shape, &CellName::new(name)).ok()?;
+        if !matches!(found.source, ValueSource::Local | ValueSource::Master(_)) {
+            return None;
+        }
+        let formula = found.formula?.trim();
+        if formula.is_empty() || formula.parse::<f64>().is_ok() {
+            return None;
+        }
+        Some(formula.to_owned())
+    }
+
+    /// Whether the shape, or its master, defines the cell.
+    fn has_pin_cell(&self, shape: ShapeId, name: &str) -> bool {
+        self.resolve(shape, &CellName::new(name))
+            .is_ok_and(|found| matches!(found.source, ValueSource::Local | ValueSource::Master(_)))
+    }
+
+    /// The finite cached number of one of the shape's cells (own or
+    /// inherited).
+    fn pin_value(&self, shape: ShapeId, name: &str) -> Option<f64> {
+        let found = self.resolve(shape, &CellName::new(name)).ok()?;
+        if !matches!(found.source, ValueSource::Local | ValueSource::Master(_)) {
+            return None;
+        }
+        match found.value {
+            Some(CellValue::Number(value)) if value.is_finite() => Some(*value),
+            _ => None,
+        }
+    }
+
+    /// True when `shape` is a **routable** 1-D shape (ADR 0084 rule 1,
+    /// amended 2026-11-03): its `ObjType`, own or inherited, has the
+    /// routable bit (`&H2`) and not the "not placeable, not routable"
+    /// bit (`&H4`). Our Connector master and Visio's Dynamic connector
+    /// are routable; a line or a 1-D arrow is not.
+    pub fn is_routable(&self, shape: ShapeId) -> bool {
+        let Some(value) = self.pin_value(shape, "ObjType") else {
+            return false;
+        };
+        if value < 0.0 || value > f64::from(u32::MAX) || value.fract() != 0.0 {
+            return false;
+        }
+        // In range and whole: the cast is exact.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let bits = value as u32;
+        bits & 0x2 != 0 && bits & 0x4 == 0
+    }
+}
+
+/// Whether `formula`, spaces removed and upper-cased, contains `needle`
+/// (an upper-case spelling without spaces).
+fn formula_mentions(formula: &str, needle: &str) -> bool {
+    let compact: String = formula
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .map(|c| c.to_ascii_uppercase())
+        .collect();
+    compact.contains(needle)
 }
 
 /// The connector box's height in inches (`Height` = `GUARD(0.2DL)`,

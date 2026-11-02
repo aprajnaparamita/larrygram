@@ -185,15 +185,38 @@ pub fn instantiate(target: &mut Document, master: &MasterDef) -> ShapeId {
     shape.name = master.name.to_owned();
     shape.name_u = master.name_u.to_owned();
     shape.master = Some(owner);
-    shape.sheet.cells = transform_cells(
-        master.width,
-        master.height,
-        master.width * 0.5,
-        master.height * 0.5,
-    );
+    if master.connector_1d {
+        // A 1-D master (ADR 0084 rule 1, amended 2026-11-03): only the
+        // endpoint cells are the instance's own; the path write fills
+        // the pin and size cells through the master's GUARD formulas.
+        shape.sheet.cells = vec![
+            number_cell("BeginX", 0.0, Unit::Inches),
+            number_cell("BeginY", 0.0, Unit::Inches),
+            number_cell("EndX", master.width, Unit::Inches),
+            number_cell("EndY", 0.0, Unit::Inches),
+        ];
+    } else {
+        shape.sheet.cells = transform_cells(
+            master.width,
+            master.height,
+            master.width * 0.5,
+            master.height * 0.5,
+        );
+    }
     let id = target.add_shape(shape);
     if let Some(entity) = target.pages.get_mut(page.index as usize) {
         entity.shapes.push(id);
+    }
+    if master.connector_1d {
+        // The ends are finite and the path has two points: the write
+        // cannot fail, and a failure would leave the master's own cells.
+        let _ = target.write_connector_path(
+            id,
+            &[
+                larrygram_geom::Point::new(0.0, 0.0),
+                larrygram_geom::Point::new(master.width, 0.0),
+            ],
+        );
     }
     id
 }

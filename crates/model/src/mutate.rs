@@ -1226,6 +1226,34 @@ impl Document {
             .collect();
         shape.name_u = unique_name_u(&name_u, &taken);
         shape.master = Some(master);
+        if let Some(vector) = self.master_end_vector(master) {
+            // A 1-D master (ADR 0084 rule 1, amended 2026-11-03): the
+            // drop point is the midpoint, the ends follow the master's
+            // own begin-to-end vector (scaled to the requested width), and the pin and size cells keep the master's
+            // GUARD formulas: only the endpoint cells are literals.
+            let master_width = vector.x.hypot(vector.y);
+            let scale = if master_width > 0.0 && size.width > 0.0 {
+                size.width / master_width
+            } else {
+                1.0
+            };
+            let half = Point::new(vector.x * scale * 0.5, vector.y * scale * 0.5);
+            let begin = Point::new(at.x - half.x, at.y - half.y);
+            let end = Point::new(at.x + half.x, at.y + half.y);
+            shape.sheet.cells = vec![
+                number_cell("BeginX", begin.x),
+                number_cell("BeginY", begin.y),
+                number_cell("EndX", end.x),
+                number_cell("EndY", end.y),
+            ];
+            let id = self.insert_shape(page, shape, None)?;
+            if let Err(error) = self.write_connector_path(id, &[begin, end]) {
+                // Never leave a half-built instance on the page.
+                let _ = self.detach_shape(id);
+                return Err(error);
+            }
+            return Ok(id);
+        }
         shape.sheet.cells = vec![
             number_cell("Width", size.width),
             number_cell("Height", size.height),
@@ -1866,6 +1894,31 @@ impl Document {
     /// a master that documents a NaN size is an error, not a zero-sized
     /// instance (task P5-19 coverage: the guard is reachable and has a
     /// test).
+    /// The begin-to-end vector of a 1-D master's shape (its own four
+    /// endpoint cells), or `None` for a 2-D master.
+    fn master_end_vector(&self, master: MasterId) -> Option<Point> {
+        let shape = self.master(master)?.shapes.first().copied()?;
+        let entity = self.shape(shape)?;
+        let read = |name: &str| {
+            entity
+                .sheet
+                .cells
+                .iter()
+                .find(|cell| cell.name.as_str() == name)
+                .and_then(|cell| match cell.value {
+                    Some(CellValue::Number(value)) if value.is_finite() => Some(value),
+                    _ => None,
+                })
+        };
+        let (bx, by, ex, ey) = (
+            read("BeginX")?,
+            read("BeginY")?,
+            read("EndX")?,
+            read("EndY")?,
+        );
+        Some(Point::new(ex - bx, ey - by))
+    }
+
     fn master_size(&self, master: MasterId) -> Result<Size, Error> {
         let shape = self
             .master(master)
