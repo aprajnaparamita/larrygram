@@ -18,6 +18,10 @@ toml = "0.9"
 rustls-native-certs = "0.8"
 ureq = { version = "3", default-features = false, features = ["rustls-no-provider", "_ring"] }
 roxmltree = "0.21.1"
+# P7-38: `cargo xtask screenshots` decodes the rendered PNGs to check
+# their size and aspect, and copies them to the website. The same
+# image crate as crates/ui (MIT OR Apache-2.0 / Zlib / BSD).
+image = { version = "0.25", default-features = false, features = ["png"] }
 
 # P4-09: the parity matrix derives `implemented` rows from the builtin
 # registry (ADR 0037). xtask is L9 and may depend on any lower layer.

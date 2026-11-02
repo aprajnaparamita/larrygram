@@ -23,6 +23,8 @@
 //!   committed files with `--check`. See ADR 0009.
 //! - `oracle [status|build|clean] [--build-dir <path>] [--jobs <n>]`:
 //!   build or inspect the libvisio test oracle. See ADR 0010.
+//! - `screenshots [--only <id>]... [--to <dir>]`: render the website's
+//!   screenshots with the app and check them (task P7-38).
 //!
 //! All argument handling lives in [`parse_task`], which validates every
 //! subcommand's arguments before anything runs (C3).
@@ -39,6 +41,7 @@ mod layers;
 mod oracle;
 mod parity;
 mod scout;
+mod screenshots;
 mod util;
 
 use std::process::ExitCode;
@@ -110,6 +113,8 @@ enum Task {
     Extract(extract::ExtractArgs),
     /// `cargo xtask oracle` with its raw arguments.
     Oracle(Vec<String>),
+    /// `cargo xtask screenshots`.
+    Screenshots(screenshots::Options),
     /// `cargo xtask help` (also the empty command line).
     Help,
 }
@@ -149,6 +154,7 @@ fn parse_task(args: &[String]) -> Result<Task, String> {
             oracle::parse_args(rest)?;
             Ok(Task::Oracle(rest.to_vec()))
         }
+        "screenshots" => Ok(Task::Screenshots(screenshots::parse_args(rest)?)),
         "-h" | "--help" | "help" => Ok(Task::Help),
         other => Err(format!("unknown task `{other}`\n\n{USAGE}")),
     }
@@ -182,6 +188,7 @@ fn run_task(task: Task) -> Result<(), String> {
         Task::Scout(opts) => scout::run(&opts),
         Task::Extract(parsed) => extract_dispatch(&parsed),
         Task::Oracle(args) => oracle::run(&args),
+        Task::Screenshots(options) => screenshots::run(&options),
         Task::Help => {
             println!("{}", usage());
             Ok(())
