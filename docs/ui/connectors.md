@@ -327,6 +327,10 @@ answer:
     `RouteStyle`/`LineRouteExt` values does each choice of the
     Connectors dropdown (Right Angle, Straight Lines, Curved Lines)
     write, with a connector selected and with nothing selected?
+13. When the body of a dynamic connector glued at both ends is
+    dragged, does Visio unglue both ends, refuse the drag, or move the
+    whole connector and re-glue? And when only one end is glued? (ADR
+    0084 rule 1, as amended, unglues them for the alpha.)
 
 ## Sources
 
