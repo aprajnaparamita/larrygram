@@ -472,7 +472,7 @@ impl GlueClearEdit {
     /// Stages the clear for every connector end glued to one of
     /// `targets`, or `None` when no end is glued to them. Staged before
     /// the delete applies: the records still name their targets.
-    pub(crate) fn new(
+    pub(crate) fn stage(
         doc: &Document,
         session: SessionId,
         page: PageId,

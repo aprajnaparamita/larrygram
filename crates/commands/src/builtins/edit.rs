@@ -1210,7 +1210,7 @@ pub(super) fn run_delete(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome,
         // its last point as a literal. The records go with the removal
         // above.
         if let Some(page) = page
-            && let Some(step) = super::connector::GlueClearEdit::new(doc, session, page, &targets)
+            && let Some(step) = super::connector::GlueClearEdit::stage(doc, session, page, &targets)
         {
             edit.push(step);
         }
