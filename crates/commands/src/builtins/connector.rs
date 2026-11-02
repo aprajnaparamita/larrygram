@@ -26,8 +26,8 @@
 use larrygram_geom::{Point, Rect, RouteOptions, RouteStyle, Transform, route};
 use larrygram_model::CellReader;
 use larrygram_model::{
-    CellName, CellValue, CellWrite, Connect, Document, PageId, RowTarget, Section, ShapeId,
-    SheetRef, mutate,
+    CellLookup, CellName, CellValue, CellWrite, Connect, Document, PageId, Resolved, RowTarget,
+    Section, ShapeId, SheetRef, mutate,
 };
 use larrygram_shapesheet::CellAddress;
 
@@ -590,13 +590,42 @@ fn route_style_value(style: RouteStyle) -> i32 {
     }
 }
 
-/// The [`RouteStyle`] a `ShapeRouteStyle` cached value spells; 0 (page
-/// default) and unknown values use our straight default.
+/// The [`RouteStyle`] a `ShapeRouteStyle` cached value spells (ADR 0084
+/// rule 8): 2 is straight lines; 1 (right angle), 16, the directed
+/// styles (3-15, 17-22) and unknown values all route as **right
+/// angle** in the alpha. Only 2 means straight; the old straight
+/// default goes.
 fn style_from_value(value: f64) -> RouteStyle {
-    if value == 1.0 {
-        RouteStyle::RightAngle
-    } else {
+    if value == 2.0 {
         RouteStyle::Straight
+    } else {
+        RouteStyle::RightAngle
+    }
+}
+
+/// The style a connector routes with (ADR 0084 rule 8): its
+/// `ShapeRouteStyle` value when it has one, else the page's
+/// `RouteStyle`, else right angle. A missing or 0 cell value falls
+/// through to the page; a missing page value means right angle.
+fn connector_style(doc: &Document, connector: ShapeId) -> RouteStyle {
+    if let Some(value) = nonzero_number(doc.resolve(connector, &CellName::new("ShapeRouteStyle"))) {
+        return style_from_value(value);
+    }
+    if let Some(page) = doc.page_of(connector)
+        && let Some(value) =
+            nonzero_number(doc.resolve_page_cell(page, &CellName::new("RouteStyle")))
+    {
+        return style_from_value(value);
+    }
+    RouteStyle::RightAngle
+}
+
+/// The finite non-zero number a resolution carries, or `None` for a
+/// missing cell, 0 (page default, ADR 0084 rule 8) or a non-number.
+fn nonzero_number(resolved: Result<Resolved<'_>, larrygram_model::Error>) -> Option<f64> {
+    match resolved.ok()?.value? {
+        CellValue::Number(value) if value.is_finite() && *value != 0.0 => Some(*value),
+        _ => None,
     }
 }
 
@@ -1189,18 +1218,6 @@ fn connection_index(connect: &Connect) -> Option<usize> {
     one_based.checked_sub(1)
 }
 
-/// The style cached in `ShapeRouteStyle`, or the straight default.
-fn connector_style(doc: &Document, connector: ShapeId) -> RouteStyle {
-    let mut reader = CellReader::new(doc);
-    let value = reader
-        .number(
-            SheetRef::Shape(connector),
-            &CellName::new("ShapeRouteStyle"),
-        )
-        .unwrap_or(2.0);
-    style_from_value(value)
-}
-
 /// The page transform of a shape: its own local box transform composed
 /// with its ancestors' (the render builder's rule).
 fn page_transform(doc: &Document, shape: ShapeId) -> Result<Transform, CommandError> {
@@ -1605,8 +1622,13 @@ mod tests {
         assert_eq!(route_style_value(RouteStyle::Straight), 2);
         assert_eq!(style_from_value(1.0), RouteStyle::RightAngle);
         assert_eq!(style_from_value(2.0), RouteStyle::Straight);
-        assert_eq!(style_from_value(0.0), RouteStyle::Straight);
-        assert_eq!(style_from_value(f64::NAN), RouteStyle::Straight);
+        // ADR 0084 rule 8: right angle everywhere the old default was
+        // straight (0, 16, the directed styles and unknown values).
+        assert_eq!(style_from_value(0.0), RouteStyle::RightAngle);
+        assert_eq!(style_from_value(f64::NAN), RouteStyle::RightAngle);
+        assert_eq!(style_from_value(16.0), RouteStyle::RightAngle);
+        assert_eq!(style_from_value(3.0), RouteStyle::RightAngle);
+        assert_eq!(style_from_value(22.0), RouteStyle::RightAngle);
     }
 
     #[test]
@@ -1630,7 +1652,9 @@ mod tests {
             let ends = doc.connects_of(page, connector).expect("ends");
             assert_eq!(ends[0].as_ref().map(|c| c.to_sheet), Some(1));
             assert_eq!(ends[1].as_ref().map(|c| c.to_sheet), Some(2));
-            assert_eq!(path_points(&ctx, connector).len(), 2);
+            // The default is right angle (ADR 0084 rule 8): a routed
+            // path with at least the two endpoints.
+            assert!(path_points(&ctx, connector).len() >= 2);
             let _ = (left, right);
         }
 
@@ -1765,7 +1789,9 @@ mod tests {
         assert_eq!(points.first(), Some(&Point::new(0.0, 1.5)));
         assert_eq!(points.last(), Some(&Point::new(4.0, 2.0)));
         dispatch(&mut ctx, "edit.undo", Args::new()).expect("undo style");
-        assert_eq!(path_points(&ctx, connector).len(), 2);
+        // The undo restores no local style; the default routes right
+        // angle too (ADR 0084 rule 8), so the same elbow comes back.
+        assert_eq!(path_points(&ctx, connector), points);
     }
 
     #[test]
