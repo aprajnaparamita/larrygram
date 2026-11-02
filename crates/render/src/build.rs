@@ -3433,8 +3433,7 @@ mod tests {
         // The instance's own `Text` element wins over the master's
         // text (task P7-40), and an empty one draws no text block.
         let (mut doc, shape) = inherited_text_document(true);
-        doc.shape_mut(shape).expect("shape").text =
-            Some(larrygram_model::TextContent::new());
+        doc.shape_mut(shape).expect("shape").text = Some(larrygram_model::TextContent::new());
         let scene = build(&doc);
         match scene.nodes.first() {
             Some(Node::Shape(shape)) => assert!(shape.text.is_none()),
