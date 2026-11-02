@@ -100,9 +100,9 @@ Phase 8: binary `.vsd`, `.vss` and `.vst` import, read-only, in `crates/vsd-bina
 | [R6](tasks/R6.md) | master | Phase 7 and 8 gates | boundary | waiting (remove the Microsoft sample goldens from history; nothing may run; the user's force-push follows) | — |
 | [R7](tasks/R7.md) | implementer | R6, the user's manual test | boundary | merged (`cargo xtask dist mac`: the .app and the .dmg; double-click open left to R8; the .dmg goes to testers after R8, R6 and the user's manual test) | 69a5ec3 |
 | [R8](tasks/R8.md) | implementer | R7 | boundary | merged (path arguments and the macOS open-documents event; ADR 0074) | 90e301b |
-| [R9](tasks/R9.md) | implementer | — | boundary | handed off at `5a33d17`; Opus review: one blocker (a test assumes `target/`), fixes in R10 on the same branch; GitHub Actions blocked by the account billing lock | — |
-| [R10](tasks/R10.md) | implementer | R9 | boundary | ready, on `agent/R9` (the R9 review fixes: target dir from cargo metadata, tester steps, tag/version check, Linux install steps, tar times, no release cache) | — |
-| [R11](tasks/R11.md) | implementer | R9, R10 | boundary | waits (build id in About and `--version`, Windows console attach and `.ico`, `ci.yml` pins, the bug issue template) | — |
+| [R9](tasks/R9.md) | implementer | — | boundary | merged with R10 (`cargo xtask dist mac`, `windows` and `linux` into `<target dir>/dist/`; `release.yml` pre-releases on `v*` tags after R6; untested on GitHub while the account billing lock lasts) | `c2c835d` |
+| [R10](tasks/R10.md) | implementer | R9 | boundary | merged with R9 (target dir from cargo metadata, tester steps, tag/version check, Linux install steps, tar times, no release cache) | `c2c835d` |
+| [R11](tasks/R11.md) | implementer | R9, R10 | boundary | ready (build id in About and `--version`, Windows console attach and `.ico`, `ci.yml` pins, the bug issue template) | — |
 
 ## Phase 9 task board
 
