@@ -557,6 +557,7 @@ impl Shell {
         self.clear_selection_on_page_switch();
         self.finish_pick();
         self.sync_active_tool();
+        self.sync_editing_text();
         self.capture_escape(ui.ctx());
         if self.quit_requested {
             self.quit_requested = false;
@@ -1718,6 +1719,16 @@ impl Shell {
         }
     }
 
+    /// Mirrors the in-place editor's target into
+    /// [`AppCtx::editing_text`] (task P7-29): the text formatting
+    /// predicates read it, so the controls follow the text being
+    /// typed. The per-frame mirror keeps it current through every way
+    /// an edit starts and ends (the same window-state pattern as
+    /// [`Shell::sync_active_tool`], in reverse).
+    fn sync_editing_text(&mut self) {
+        self.app.editing_text = self.editor.shape;
+    }
+
     /// Feeds a Shapes-window drag to the stencil tool (task P5-17,
     /// Goal 3). The drag may have started outside the canvas (on a row),
     /// so the first move inside it synthesizes the `PointerDown`. Escape
@@ -2564,6 +2575,10 @@ impl Shell {
             }
             Some(UiRequest::ConfirmClose { name }) => self.confirm_close = Some(name.clone()),
             Some(UiRequest::Quit) => self.quit_requested = true,
+            // The Text tool on one selected shape (task P7-29 item 2):
+            // the editor opens on the selection's anchor, caret at the
+            // end (`text_edit::show`'s open rule).
+            Some(UiRequest::EditText) => self.begin_text_editor(),
             _ => {}
         }
         if let Some(Payload::Bytes { name, data }) = &outcome.payload {
