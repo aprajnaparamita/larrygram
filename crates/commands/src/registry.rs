@@ -281,12 +281,22 @@ impl Registry {
 /// edit is dropped with one warning line (ADR 0040 rule 2:
 /// [`AppCtx::push_edit`](crate::AppCtx::push_edit) is the only push
 /// path).
+///
+/// A programmatic source (the CLI, the control channel, the MCP server)
+/// never sees an open undo group (ADR 0040, amendment 2026-11-03): it
+/// ends the shell's open group first, so its command runs outside the
+/// typing interaction. Interactive sources keep the group.
 pub fn dispatch(
     registry: &Registry,
     ctx: &mut AppCtx,
     id: &CommandId,
     invocation: Invocation,
 ) -> Result<Outcome, CommandError> {
+    if !invocation.source.is_interactive()
+        && let Some(session) = ctx.active_document().map(|session| session.id)
+    {
+        ctx.end_group(session)?;
+    }
     let ran_against = ctx.active_document().map(|session| session.id);
     let mut outcome = registry.execute(id, ctx, invocation)?;
     if let Some(edit) = outcome.edit.take() {
@@ -566,5 +576,58 @@ mod tests {
             )
             .expect_err("unknown");
         assert_eq!(error.to_string(), "unknown command file.nope");
+    }
+
+    /// One edit for the undo-group test below.
+    struct NoopEdit;
+
+    impl crate::undo::Edit for NoopEdit {
+        fn label(&self) -> &str {
+            "noop"
+        }
+
+        fn apply(&mut self, _ctx: &mut AppCtx) -> Result<(), CommandError> {
+            Ok(())
+        }
+
+        fn revert(&mut self, _ctx: &mut AppCtx) -> Result<(), CommandError> {
+            Ok(())
+        }
+    }
+
+    /// ADR 0040, amendment 2026-11-03: a programmatic source never sees
+    /// an open undo group — `dispatch` ends it first, as one step —
+    /// while an interactive source keeps it.
+    #[test]
+    fn a_programmatic_dispatch_ends_an_open_undo_group() {
+        let mut registry = Registry::new();
+        registry
+            .register(RealCommand::new("file.save", true))
+            .expect("register");
+        let id = CommandId::parse("file.save").expect("id");
+        let mut ctx = AppCtx::new(Settings::default());
+        let index = ctx.open_document(crate::DocumentSession::new(
+            larrygram_model::Document::new(),
+            None,
+        ));
+        let session = ctx.documents.get(index).expect("session").id;
+
+        ctx.begin_group(session, "Insert Text Box").expect("begin");
+        ctx.push_edit(session, Box::new(NoopEdit)).expect("push");
+        dispatch(&registry, &mut ctx, &id, Invocation::empty(Source::Control))
+            .expect("the command runs");
+        let slot = ctx.documents.get(index).expect("session");
+        assert!(!slot.undo.has_group(), "the group ended first");
+        assert_eq!(
+            slot.undo.undo_labels(),
+            vec!["Insert Text Box"],
+            "its edits became one step"
+        );
+
+        // An interactive source keeps the shell's group open.
+        ctx.begin_group(session, "typing").expect("begin");
+        dispatch(&registry, &mut ctx, &id, Invocation::empty(Source::Ui))
+            .expect("the command runs");
+        assert!(ctx.documents.get(index).expect("session").undo.has_group());
     }
 }

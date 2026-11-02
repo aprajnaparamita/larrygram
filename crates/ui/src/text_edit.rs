@@ -38,12 +38,14 @@ struct RunMarkers {
 /// The in-place text editor state (ADR 0044).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct TextEditor {
-    /// The shape being edited, or `None` while idle (and while a
-    /// pending text box is being typed, task P7-25 item 9).
+    /// The shape being edited, or `None` while idle (task P7-37: a new
+    /// text box is a shape too, so the box's id sits here while it is
+    /// typed).
     pub shape: Option<ShapeId>,
-    /// The new text box being typed into (task P7-25 item 9): its
-    /// page bounds while the box is not yet in the model. The box and
-    /// its text are inserted as one undo step on commit.
+    /// The page bounds of the new text box being typed (task P7-25
+    /// item 9, task P7-37): the field fills the outlined box and a
+    /// click inside it is a caret move. `None` for an existing shape's
+    /// edit.
     pub pending: Option<GeoRect>,
     /// The editable buffer (plain text, ADR 0044).
     pub buffer: String,
@@ -96,17 +98,19 @@ impl TextEditor {
     }
 
     /// Opens the editor on a new text box at `rect` (its page bounds;
-    /// task P7-25 item 9).
+    /// task P7-37 item 1).
     ///
-    /// The box is not in the model yet: the typed text commits through
-    /// one `insert.drawing.text_box` with its `text` argument (one undo
-    /// step, ADR 0040).
-    pub fn begin_new(&mut self, rect: GeoRect) {
-        *self = Self {
-            pending: Some(rect),
-            focus_requested: true,
-            ..Self::default()
-        };
+    /// The box already exists in the model (the shell inserts it when
+    /// the editor opens, inside its undo group), so the editor has a
+    /// real shape: `shape` is set and the text formatting predicates
+    /// and format commands work as on any edited shape. The bounds keep
+    /// the box-filling field and the click backstop of task P7-26
+    /// item 3.
+    pub fn begin_box(&mut self, shape: ShapeId, rect: GeoRect) {
+        // `begin` cannot fail; it resets the buffer to the empty text
+        // a new box starts with.
+        self.begin(shape, &TextContent::default()).ok();
+        self.pending = Some(rect);
     }
 
     /// Finishes the edit and returns the text to write (one run, ADR
@@ -750,25 +754,32 @@ mod tests {
         assert_ne!(editor_id(None), editor_id(Some(ShapeId { index: 3 })));
     }
 
-    /// Task P7-25 item 9: a pending text box starts empty and its
-    /// commit carries the typed text (the shell inserts the box with
-    /// it, one undo step).
+    /// Task P7-37 item 1: a new text box starts empty and its commit
+    /// carries the typed text (the shell writes the text and ends the
+    /// box's undo group, one step).
     #[test]
-    fn a_pending_box_finishes_with_the_typed_text() {
+    fn a_new_box_finishes_with_the_typed_text() {
+        let shape = ShapeId { index: 7 };
         let mut editor = TextEditor::new();
-        editor.begin_new(GeoRect::new(Point::new(1.0, 2.0), Point::new(3.0, 2.5)));
+        editor.begin_box(
+            shape,
+            GeoRect::new(Point::new(1.0, 2.0), Point::new(3.0, 2.5)),
+        );
         assert!(editor.is_active());
-        assert_eq!(editor.shape, None);
+        assert_eq!(editor.shape, Some(shape), "the box is a shape while typed");
         assert_eq!(
             editor.pending,
             Some(GeoRect::new(Point::new(1.0, 2.0), Point::new(3.0, 2.5)))
         );
         assert_eq!(editor.buffer, "");
-        // Nothing typed: no text, no text object.
+        // Nothing typed: no text to write.
         assert_eq!(editor.finish().expect("finish"), None);
         assert!(!editor.is_active());
 
-        editor.begin_new(GeoRect::new(Point::new(0.0, 0.0), Point::new(2.0, 0.5)));
+        editor.begin_box(
+            shape,
+            GeoRect::new(Point::new(0.0, 0.0), Point::new(2.0, 0.5)),
+        );
         editor.buffer = "Hi".to_owned();
         let written = editor.finish().expect("finish").expect("changed");
         assert_eq!(
@@ -779,11 +790,14 @@ mod tests {
         assert_eq!(editor, TextEditor::new());
     }
 
-    /// `begin` and `begin_new` replace each other's target.
+    /// `begin` and `begin_box` replace each other's target.
     #[test]
-    fn begin_and_begin_new_replace_the_target() {
+    fn begin_and_begin_box_replace_the_target() {
         let mut editor = TextEditor::new();
-        editor.begin_new(GeoRect::new(Point::new(0.0, 0.0), Point::new(1.0, 1.0)));
+        editor.begin_box(
+            ShapeId { index: 1 },
+            GeoRect::new(Point::new(0.0, 0.0), Point::new(1.0, 1.0)),
+        );
         editor
             .begin(
                 ShapeId { index: 2 },
@@ -792,9 +806,16 @@ mod tests {
             .expect("begin");
         assert_eq!(editor.pending, None);
         assert_eq!(editor.shape, Some(ShapeId { index: 2 }));
-        editor.begin_new(GeoRect::new(Point::new(1.0, 1.0), Point::new(2.0, 2.0)));
-        assert_eq!(editor.shape, None);
-        assert!(editor.pending.is_some());
+        editor.begin_box(
+            ShapeId { index: 3 },
+            GeoRect::new(Point::new(1.0, 1.0), Point::new(2.0, 2.0)),
+        );
+        assert_eq!(
+            editor.shape,
+            Some(ShapeId { index: 3 }),
+            "the box has a shape"
+        );
+        assert!(editor.pending.is_some(), "and its bounds");
         editor.cancel();
         assert_eq!(editor, TextEditor::new());
     }

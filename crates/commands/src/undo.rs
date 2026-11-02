@@ -8,6 +8,7 @@
 //! the inverse of `apply`.
 
 use crate::app::AppCtx;
+use crate::edit::CompositeEdit;
 use crate::error::CommandError;
 use larrygram_shapesheet::CellAddress;
 
@@ -60,10 +61,27 @@ pub trait Edit: Send {
     }
 }
 
+/// One open undo group (ADR 0040, amendment 2026-11-03): the edits
+/// pushed since [`UndoStack::begin_group`], folded into one step by
+/// [`UndoStack::end_group`] or reverted by
+/// [`UndoStack::cancel_group`].
+struct Group {
+    /// The label of the one step the group becomes.
+    label: String,
+    /// The document's unsaved-changes state when the group opened;
+    /// [`UndoStack::cancel_group`] restores it.
+    unsaved: bool,
+    /// The collected steps, in push order.
+    edits: Vec<Box<dyn Edit>>,
+}
+
 /// The undo stack of one document (ADR 0028, ADR 0029).
 ///
 /// The cursor splits the stack: entries before it are undoable, entries
 /// after it are redoable. Pushing truncates the redo tail.
+///
+/// An open group (amendment 2026-11-03) collects every push into one
+/// pending step instead of the stack; see [`UndoStack::begin_group`].
 ///
 /// [`UndoStack::default`] builds a stack with
 /// [`UndoStack::DEFAULT_CAPACITY`]: a defaulted stack keeps its edits
@@ -74,6 +92,7 @@ pub struct UndoStack {
     entries: Vec<Box<dyn Edit>>,
     cursor: usize,
     capacity: usize,
+    group: Option<Group>,
 }
 
 impl Default for UndoStack {
@@ -102,6 +121,7 @@ impl UndoStack {
             entries: Vec::new(),
             cursor: 0,
             capacity,
+            group: None,
         }
     }
 
@@ -125,10 +145,12 @@ impl UndoStack {
         self.entries.is_empty()
     }
 
-    /// Drops every entry (document closed or saved).
+    /// Drops every entry (document closed or saved). An open group is
+    /// dropped with them.
     pub fn clear(&mut self) {
         self.entries.clear();
         self.cursor = 0;
+        self.group = None;
     }
 
     /// The labels of the undoable edits, oldest first (the undo menu).
@@ -151,10 +173,16 @@ impl UndoStack {
 
     /// Pushes a completed edit (the command already applied it).
     ///
-    /// The redo tail after the cursor is dropped first (the new edit
-    /// supersedes it) and the stack is clamped to its capacity by
-    /// dropping the oldest entries.
+    /// While a group is open the edit joins the group instead of the
+    /// stack (ADR 0040, amendment 2026-11-03). Otherwise the redo tail
+    /// after the cursor is dropped first (the new edit supersedes it)
+    /// and the stack is clamped to its capacity by dropping the oldest
+    /// entries.
     pub fn push(&mut self, edit: Box<dyn Edit>) {
+        if let Some(group) = &mut self.group {
+            group.edits.push(edit);
+            return;
+        }
         self.entries.truncate(self.cursor);
         self.entries.push(edit);
         if self.entries.len() > self.capacity {
@@ -164,12 +192,85 @@ impl UndoStack {
         self.cursor = self.entries.len();
     }
 
+    /// Opens an undo group (ADR 0040, amendment 2026-11-03): every
+    /// push until [`UndoStack::end_group`] or [`UndoStack::cancel_group`]
+    /// collects into one step labelled `label`.
+    ///
+    /// `unsaved` is the document's unsaved-changes state as the group
+    /// opened; [`UndoStack::cancel_group`] returns it so the caller can
+    /// restore that state. Groups do not nest: a second `begin_group`
+    /// while one is open is an error.
+    pub fn begin_group(
+        &mut self,
+        label: impl Into<String>,
+        unsaved: bool,
+    ) -> Result<(), CommandError> {
+        if self.group.is_some() {
+            return Err(CommandError::failed("an undo group is already open"));
+        }
+        self.group = Some(Group {
+            label: label.into(),
+            unsaved,
+            edits: Vec::new(),
+        });
+        Ok(())
+    }
+
+    /// Whether a group is open.
+    pub fn has_group(&self) -> bool {
+        self.group.is_some()
+    }
+
+    /// Closes the open group: its edits become one [`CompositeEdit`]
+    /// under the group's label, pushed as one step. An empty group
+    /// pushes nothing. Without an open group this does nothing.
+    pub fn end_group(&mut self) {
+        let Some(group) = self.group.take() else {
+            return;
+        };
+        if group.edits.is_empty() {
+            return;
+        }
+        let mut composite = CompositeEdit::new(group.label);
+        for edit in group.edits {
+            composite.push(edit);
+        }
+        self.push(Box::new(composite));
+    }
+
+    /// Cancels the open group: the collected edits are reverted in
+    /// reverse order with the recording gate closed (ADR 0040 rule 2)
+    /// and discarded. The document is as it was when the group opened.
+    ///
+    /// Returns the unsaved-changes state the group saw when it opened
+    /// (`Ok(None)` without an open group), so the caller can restore it;
+    /// the change counter still only moves forward (rule 3). A failing
+    /// `revert` is returned as [`CommandError`] and the group is
+    /// discarded.
+    pub fn cancel_group(&mut self, ctx: &mut AppCtx) -> Result<Option<bool>, CommandError> {
+        let Some(mut group) = self.group.take() else {
+            return Ok(None);
+        };
+        let result = run_suspended(ctx, |ctx| {
+            for edit in group.edits.iter_mut().rev() {
+                edit.revert(ctx)?;
+            }
+            Ok(())
+        });
+        result?;
+        Ok(Some(group.unsaved))
+    }
+
     /// Reverses the newest undoable edit and returns its label.
+    ///
+    /// An open group ends first (ADR 0040, amendment 2026-11-03), so
+    /// its edits are one step before the undo runs.
     ///
     /// `Ok(None)` when nothing is undoable. A failing `revert` is
     /// returned as [`CommandError`] and leaves the cursor where it was.
     /// The call runs with the recording gate closed (ADR 0040).
     pub fn undo(&mut self, ctx: &mut AppCtx) -> Result<Option<String>, CommandError> {
+        self.end_group();
         let Some(index) = self.cursor.checked_sub(1) else {
             return Ok(None);
         };
@@ -183,10 +284,13 @@ impl UndoStack {
 
     /// Re-applies the newest redoable edit and returns its label.
     ///
+    /// An open group ends first, the same as [`UndoStack::undo`].
+    ///
     /// `Ok(None)` when nothing is redoable. A failing `apply` is
     /// returned as [`CommandError`] and leaves the cursor where it was.
     /// The call runs with the recording gate closed (ADR 0040).
     pub fn redo(&mut self, ctx: &mut AppCtx) -> Result<Option<String>, CommandError> {
+        self.end_group();
         let Some(edit) = self.entries.get_mut(self.cursor) else {
             return Ok(None);
         };
@@ -469,5 +573,202 @@ mod tests {
             entry.undo.is_empty(),
             "the nested edit never landed on the session's stack"
         );
+    }
+
+    // --- ADR 0040, amendment 2026-11-03: undo groups -----------------
+
+    /// One step that appends `mark` to `log` (apply) or removes it
+    /// again (revert), so order and direction are observable.
+    struct MarkEdit {
+        mark: char,
+        log: std::sync::Arc<std::sync::Mutex<String>>,
+    }
+
+    impl Edit for MarkEdit {
+        fn label(&self) -> &str {
+            "mark"
+        }
+
+        fn apply(&mut self, _ctx: &mut AppCtx) -> Result<(), CommandError> {
+            if let Ok(mut log) = self.log.lock() {
+                log.push(self.mark);
+            }
+            Ok(())
+        }
+
+        fn revert(&mut self, _ctx: &mut AppCtx) -> Result<(), CommandError> {
+            if let Ok(mut log) = self.log.lock() {
+                assert_eq!(log.pop(), Some(self.mark), "reverts run in reverse");
+            }
+            Ok(())
+        }
+    }
+
+    /// One step that adds a page (apply) or removes it again (revert):
+    /// the document restoration `cancel_group` promises is observable.
+    struct AddPageEdit;
+
+    impl Edit for AddPageEdit {
+        fn label(&self) -> &str {
+            "add page"
+        }
+
+        fn apply(&mut self, ctx: &mut AppCtx) -> Result<(), CommandError> {
+            let session = ctx
+                .active_document_mut()
+                .ok_or_else(|| CommandError::failed("no open document"))?;
+            session
+                .document
+                .add_page("added")
+                .map_err(|_| CommandError::failed("add page failed"))?;
+            Ok(())
+        }
+
+        fn revert(&mut self, ctx: &mut AppCtx) -> Result<(), CommandError> {
+            let session = ctx
+                .active_document_mut()
+                .ok_or_else(|| CommandError::failed("no open document"))?;
+            session.document.pages.pop();
+            Ok(())
+        }
+    }
+
+    /// A session over a document with no pages.
+    fn app_with_session() -> (AppCtx, crate::SessionId) {
+        let mut ctx = AppCtx::new(Settings::default());
+        let index = ctx.open_document(crate::DocumentSession::new(
+            larrygram_model::Document::new(),
+            None,
+        ));
+        let session = ctx.documents.get(index).expect("session").id;
+        (ctx, session)
+    }
+
+    /// An empty group pushes nothing and leaves a redo tail alone.
+    #[test]
+    fn an_empty_group_pushes_nothing() {
+        let mut stack = UndoStack::new(UndoStack::DEFAULT_CAPACITY);
+        let mut ctx = AppCtx::new(Settings::default());
+        stack.push(Box::new(NamedEdit("one")));
+        stack.undo(&mut ctx).expect("undo");
+        stack.begin_group("group", false).expect("begin");
+        assert!(stack.has_group());
+        stack.end_group();
+        assert!(!stack.has_group());
+        assert_eq!(stack.len(), 1, "no entry was pushed");
+        assert!(stack.can_redo(), "the redo tail survived");
+    }
+
+    /// A group folds every push into one step: undo reverts the steps
+    /// in reverse, redo applies them in order.
+    #[test]
+    fn a_group_folds_its_pushes_into_one_step() {
+        let log = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let mut stack = UndoStack::new(UndoStack::DEFAULT_CAPACITY);
+        let mut ctx = AppCtx::new(Settings::default());
+        stack.begin_group("Insert Text Box", false).expect("begin");
+        for mark in ['a', 'b'] {
+            let mut edit = MarkEdit {
+                mark,
+                log: log.clone(),
+            };
+            edit.apply(&mut ctx).expect("apply");
+            stack.push(Box::new(edit));
+        }
+        assert_eq!(stack.len(), 0, "the pushes collect in the group");
+        stack.end_group();
+        assert_eq!(stack.len(), 1, "one folded step");
+        assert_eq!(stack.undo_labels(), vec!["Insert Text Box"]);
+
+        stack.undo(&mut ctx).expect("undo");
+        assert_eq!(&*log.lock().expect("log"), "", "both steps reverted");
+        stack.redo(&mut ctx).expect("redo");
+        assert_eq!(&*log.lock().expect("log"), "ab", "both steps re-applied");
+    }
+
+    /// `cancel_group` reverts the collected steps in reverse, restores
+    /// the document and answers the unsaved-changes state the group
+    /// saw when it opened (ADR 0040, amendment 2026-11-03).
+    #[test]
+    fn cancel_group_reverts_the_steps_and_restores_the_document() {
+        let (mut ctx, _session) = app_with_session();
+        let mut stack = UndoStack::new(UndoStack::DEFAULT_CAPACITY);
+        stack.begin_group("Insert Text Box", true).expect("begin");
+        let mut edit = AddPageEdit;
+        edit.apply(&mut ctx).expect("apply");
+        stack.push(Box::new(edit));
+        assert_eq!(
+            ctx.active_document().expect("session").document.pages.len(),
+            1
+        );
+
+        let unsaved = stack.cancel_group(&mut ctx).expect("cancel");
+        assert_eq!(unsaved, Some(true), "the group's unsaved state returns");
+        assert!(!stack.has_group());
+        assert!(stack.is_empty(), "nothing is left on the stack");
+        assert_eq!(
+            ctx.active_document().expect("session").document.pages.len(),
+            0,
+            "the document is as it was when the group opened"
+        );
+    }
+
+    /// Cancelling without an open group answers `None` and changes
+    /// nothing.
+    #[test]
+    fn cancel_without_a_group_is_a_no_op() {
+        let (mut ctx, _session) = app_with_session();
+        let mut stack = UndoStack::new(UndoStack::DEFAULT_CAPACITY);
+        assert_eq!(stack.cancel_group(&mut ctx).expect("cancel"), None);
+    }
+
+    /// Undo and redo end an open group first: the collected edits are
+    /// one step before the step runs.
+    #[test]
+    fn undo_and_redo_end_an_open_group_first() {
+        let log = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let mut stack = UndoStack::new(UndoStack::DEFAULT_CAPACITY);
+        let mut ctx = AppCtx::new(Settings::default());
+        stack.begin_group("Insert Text Box", false).expect("begin");
+        let mut edit = MarkEdit {
+            mark: 'a',
+            log: log.clone(),
+        };
+        edit.apply(&mut ctx).expect("apply");
+        stack.push(Box::new(edit));
+
+        let label = stack.undo(&mut ctx).expect("undo");
+        assert_eq!(
+            label.as_deref(),
+            Some("Insert Text Box"),
+            "the group's label"
+        );
+        assert!(!stack.has_group(), "the undo ended the group");
+        assert_eq!(&*log.lock().expect("log"), "", "the step reverted");
+        assert!(!stack.can_undo(), "the group was the only step");
+    }
+
+    /// Groups do not nest: a second `begin_group` is an error.
+    #[test]
+    fn groups_do_not_nest() {
+        let mut stack = UndoStack::new(UndoStack::DEFAULT_CAPACITY);
+        stack.begin_group("outer", false).expect("begin");
+        let error = stack.begin_group("inner", false).expect_err("nested");
+        assert!(
+            error.to_string().contains("already open"),
+            "the error names the problem: {error}"
+        );
+        assert!(stack.has_group(), "the outer group is untouched");
+    }
+
+    /// `clear` drops an open group with everything else.
+    #[test]
+    fn clear_drops_an_open_group() {
+        let mut stack = UndoStack::new(UndoStack::DEFAULT_CAPACITY);
+        stack.begin_group("group", false).expect("begin");
+        stack.push(Box::new(NoopEdit));
+        stack.clear();
+        assert!(!stack.has_group());
+        assert!(stack.is_empty());
     }
 }

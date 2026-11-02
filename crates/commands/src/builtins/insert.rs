@@ -16,7 +16,10 @@
 //!   use `x`/`y` as the lower-left corner; the line uses them as its
 //!   start and `width`/`height` as the signed delta. The text box
 //!   takes an optional `text` (task P7-25 item 9): the text is written
-//!   in the same undo step as the insertion.
+//!   in the same undo step as the insertion. An empty `text` is no
+//!   shape (no insertion, no undo entry) unless the text box also
+//!   carries `allow_empty` (task P7-37: the Text tool opens the box
+//!   before anything is typed).
 //!
 //! Every command creates exactly one shape and returns exactly one
 //! [`CompositeEdit`](crate::CompositeEdit) step ([`StructuralEdit::insertion`],
@@ -351,6 +354,22 @@ fn insert_drawing(
             "width and height must not be negative",
         ));
     }
+    // The `allow_empty` flag (task P7-37): `insert.drawing.text_box`
+    // opens a new box before anything is typed (the shape exists so the
+    // text controls work while it is typed). Without the flag an empty
+    // text is no shape — the deferred-commit rule of task P7-25 item 9
+    // at the command contract — so programmatic callers keep their
+    // behaviour.
+    let allow_empty = match inv.args.get("allow_empty") {
+        None => false,
+        Some(crate::ArgValue::Flag(value)) if drawing == Drawing::TextBox => *value,
+        Some(crate::ArgValue::Flag(_)) => {
+            return Err(CommandError::invalid_args(
+                "allow_empty is only an argument of insert.drawing.text_box",
+            ));
+        }
+        Some(_) => return Err(CommandError::invalid_args("allow_empty must be a flag")),
+    };
     let (session, page) = active_page(ctx)?;
     // The text of a text box (task P7-25 item 9): one undo step with
     // its insertion, so one undo removes the new text object with its
@@ -358,6 +377,11 @@ fn insert_drawing(
     let literal = match inv.args.get("text") {
         None => None,
         Some(crate::ArgValue::Text(text)) if drawing == Drawing::TextBox => {
+            if text.is_empty() && !allow_empty {
+                // An empty text is no shape: no insertion and no undo
+                // entry (task P7-25 item 9, task P7-37's `allow_empty`).
+                return Ok(super::outcome("No text, no text box", Vec::new()));
+            }
             Some(text.clone()).filter(|text| !text.is_empty())
         }
         Some(crate::ArgValue::Text(_)) => {
@@ -1132,6 +1156,114 @@ mod tests {
         let error = run_text_box(&mut ctx, &inv).expect_err("text must be a string");
         assert!(
             error.to_string().contains("text must be a string"),
+            "{error}"
+        );
+    }
+
+    /// Task P7-37: an empty `text` without `allow_empty` is no shape
+    /// and no undo entry (the deferred-commit rule at the command
+    /// contract).
+    #[test]
+    fn an_empty_text_box_without_allow_empty_is_no_shape() {
+        let (mut ctx, _session, page, _shape) = fixture();
+        let inv = Invocation::new(
+            Args::new()
+                .with("x", ArgValue::Number(1.0))
+                .with("y", ArgValue::Number(1.0))
+                .with("width", ArgValue::Number(2.0))
+                .with("height", ArgValue::Number(0.5))
+                .with("text", ArgValue::Text(String::new())),
+            Source::Ui,
+        );
+        let outcome = run_text_box(&mut ctx, &inv).expect("box");
+        assert!(outcome.edit.is_none(), "no undo entry");
+        assert_eq!(outcome.message.as_deref(), Some("No text, no text box"));
+        let doc = &ctx.active_document().expect("session").document;
+        assert_eq!(
+            doc.page(page).expect("page").shapes.len(),
+            1,
+            "only the fixture shape is on the page"
+        );
+    }
+
+    /// Task P7-37: `allow_empty` opens the box before anything is
+    /// typed — the shape exists with no text and one undo step.
+    #[test]
+    fn allow_empty_opens_an_empty_text_box() {
+        for text in [Some(String::new()), None] {
+            let (mut ctx, _session, page, _shape) = fixture();
+            let mut args = Args::new()
+                .with("x", ArgValue::Number(1.0))
+                .with("y", ArgValue::Number(1.0))
+                .with("width", ArgValue::Number(2.0))
+                .with("height", ArgValue::Number(0.5))
+                .with("allow_empty", ArgValue::Flag(true));
+            if let Some(text) = text {
+                args = args.with("text", ArgValue::Text(text));
+            }
+            let outcome =
+                run_text_box(&mut ctx, &Invocation::new(args, Source::Ui)).expect("the box opens");
+            assert!(outcome.edit.is_some(), "one undo step");
+            let doc = &ctx.active_document().expect("session").document;
+            let entry = doc.page(page).expect("page");
+            assert_eq!(entry.shapes.len(), 2, "the box is on the page");
+            let id = *entry.shapes.last().expect("the new box");
+            assert!(doc.shape(id).expect("shape").text.is_none(), "no text yet");
+        }
+    }
+
+    /// Without `text` the box opens as before whatever `allow_empty`
+    /// says, and the flag is a text-box argument of the flag type.
+    #[test]
+    fn allow_empty_is_a_text_box_flag() {
+        let (mut ctx, _session, page, _shape) = fixture();
+        let inv = Invocation::new(
+            Args::new()
+                .with("x", ArgValue::Number(1.0))
+                .with("y", ArgValue::Number(1.0))
+                .with("width", ArgValue::Number(2.0))
+                .with("height", ArgValue::Number(0.5)),
+            Source::Ui,
+        );
+        let outcome = run_text_box(&mut ctx, &inv).expect("box");
+        assert!(outcome.edit.is_some(), "an absent text still inserts");
+        assert_eq!(
+            ctx.active_document()
+                .expect("session")
+                .document
+                .page(page)
+                .expect("page")
+                .shapes
+                .len(),
+            2
+        );
+
+        let (mut ctx, _session, _page, _shape) = fixture();
+        let inv = Invocation::new(
+            Args::new()
+                .with("x", ArgValue::Number(1.0))
+                .with("y", ArgValue::Number(1.0))
+                .with("width", ArgValue::Number(2.0))
+                .with("height", ArgValue::Number(0.5))
+                .with("allow_empty", ArgValue::Flag(true)),
+            Source::Ui,
+        );
+        let error = run_rectangle(&mut ctx, &inv).expect_err("rectangle takes no allow_empty");
+        assert!(error.to_string().contains("only an argument"), "{error}");
+
+        let (mut ctx, _session, _page, _shape) = fixture();
+        let inv = Invocation::new(
+            Args::new()
+                .with("x", ArgValue::Number(1.0))
+                .with("y", ArgValue::Number(1.0))
+                .with("width", ArgValue::Number(2.0))
+                .with("height", ArgValue::Number(0.5))
+                .with("allow_empty", ArgValue::Integer(3)),
+            Source::Ui,
+        );
+        let error = run_text_box(&mut ctx, &inv).expect_err("allow_empty must be a flag");
+        assert!(
+            error.to_string().contains("allow_empty must be a flag"),
             "{error}"
         );
     }
