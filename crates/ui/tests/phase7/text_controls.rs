@@ -774,3 +774,419 @@ fn the_edit_text_row_edits_the_text() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Goal 1 (task P7-37 item 1): a new text box can be formatted while it
+// is typed. The box is a shape from the click, inside its undo group,
+// so the controls enable at once and the format commands write its
+// cells. Each ending of the editor closes the group.
+// ---------------------------------------------------------------------------
+
+/// Presses Cmd/Ctrl+key (the shortcut table's chord).
+fn chord(rig: &mut ShellRig, key: egui::Key) {
+    let harness = rig.harness();
+    harness.event(egui::Event::ModifiersChanged(egui::Modifiers::COMMAND));
+    harness.event(egui::Event::Key {
+        key,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::COMMAND,
+    });
+    harness.event(egui::Event::Key {
+        key,
+        physical_key: None,
+        pressed: false,
+        repeat: false,
+        modifiers: egui::Modifiers::COMMAND,
+    });
+    harness.event(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
+    rig.run();
+}
+
+/// Opens the font-size list (the "Font Size menu" arrow in Panel
+/// Classic, the size face in Panel Modern).
+fn open_size_list(rig: &mut ShellRig, kind: LayoutKind) {
+    match kind {
+        LayoutKind::PanelClassic => click(rig, Role::Button, "Font Size menu"),
+        _ => click(rig, Role::Button, "Font Size"),
+    }
+}
+
+/// Ends the document through the layout's own control (task P7-37
+/// item 5): Panel Classic's File > Close row. Panel Modern's File view
+/// carries no Close row, so the command dispatches there.
+fn close_document(rig: &mut ShellRig, kind: LayoutKind) {
+    match kind {
+        LayoutKind::PanelClassic => {
+            click(rig, Role::Button, "File");
+            click(rig, Role::MenuItem, "Close");
+        }
+        _ => rig.dispatch("file.close"),
+    }
+}
+
+/// The undoable steps of the active document, oldest first.
+fn undo_labels(rig: &ShellRig) -> Vec<String> {
+    let shell = rig.shell.borrow();
+    let session = shell.app.active_document().expect("session");
+    session
+        .undo
+        .undo_labels()
+        .iter()
+        .map(|s| (*s).to_owned())
+        .collect()
+}
+
+/// The text controls are enabled while a new text box is typed, and
+/// choosing Bold, a font size and an alignment applies them to the
+/// box's text — its cells and the rendered picture (task P7-37 item
+/// 1). The command-bar click ends the edit and closes the group as
+/// one step labelled as the insert.
+#[test]
+fn a_new_text_box_can_be_formatted_while_it_is_typed() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        let before = shape_count(&rig);
+        choose_text_tool(&mut rig, kind);
+        let pos = screen(&rig, EMPTY.0, EMPTY.1);
+        click_at(&mut rig, pos);
+        assert!(editing(&mut rig), "{kind:?}: the click opens the box");
+        assert_eq!(
+            shape_count(&rig),
+            before + 1,
+            "{kind:?}: the box is a shape while it is typed"
+        );
+        let box_ = last_shape(&rig.shell.borrow().app);
+        for (role, name) in text_controls(kind) {
+            assert!(
+                !disabled(&mut rig, role, name),
+                "{kind:?}: {name} enables while the new box is typed"
+            );
+        }
+        type_into_editor(&mut rig, "MMMM");
+        // Bold while typed: the click commits the typed text and
+        // records the format on it (the P7-29 rule).
+        click(&mut rig, Role::Button, "Bold");
+        assert_eq!(
+            shape_text(&rig, box_).as_deref(),
+            Some("MMMM"),
+            "{kind:?}: the typed text is written"
+        );
+        assert_eq!(
+            row_number(&rig, box_, "Character", "Style"),
+            Some(1.0),
+            "{kind:?}: the bold bit records"
+        );
+        // A font size from the list.
+        open_size_list(&mut rig, kind);
+        click(&mut rig, Role::Button, "36 pt");
+        let size = row_number(&rig, box_, "Character", "Size").expect("the Size cell");
+        assert!(
+            (size - 0.5).abs() < 1.0e-9,
+            "{kind:?}: the size records ({size})"
+        );
+        // An alignment.
+        click(&mut rig, Role::Button, centre_name(kind));
+        assert_eq!(
+            row_number(&rig, box_, "Paragraph", "HorzAlign"),
+            Some(1.0),
+            "{kind:?}: the alignment records"
+        );
+        // The picture paints the text at that format.
+        let after = ink(&mut rig, 3.1, 5.55, 4.9, 5.95);
+        assert!(after > 0, "{kind:?}: the text paints ({after})");
+        // The commit is one undo step labelled as the insert.
+        assert_eq!(
+            undo_labels(&rig).first().map(String::as_str),
+            Some("Insert Text Box"),
+            "{kind:?}: the commit is one step labelled as the insert"
+        );
+    }
+}
+
+/// The commit is one undo step, labelled as the insert: one undo
+/// removes the whole new box (task P7-37 item 1).
+#[test]
+fn a_new_text_box_commits_as_one_undo_step() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        let before = shape_count(&rig);
+        choose_text_tool(&mut rig, kind);
+        let pos = screen(&rig, EMPTY.0, EMPTY.1);
+        click_at(&mut rig, pos);
+        assert!(editing(&mut rig), "{kind:?}: the box opens");
+        type_into_editor(&mut rig, "Hi");
+        // Escape ends editing and keeps the text (the commit path).
+        press_key(&mut rig, egui::Key::Escape);
+        assert!(!editing(&mut rig), "{kind:?}: Escape commits");
+        let box_ = last_shape(&rig.shell.borrow().app);
+        assert_eq!(
+            shape_text(&rig, box_).as_deref(),
+            Some("Hi"),
+            "{kind:?}: the text lands in the box"
+        );
+        assert_eq!(
+            undo_labels(&rig),
+            vec!["Insert Text Box".to_owned()],
+            "{kind:?}: one undo step, labelled as the insert"
+        );
+        // One undo removes the whole box.
+        chord(&mut rig, egui::Key::Z);
+        assert_eq!(
+            shape_count(&rig),
+            before,
+            "{kind:?}: one undo removes the box"
+        );
+    }
+}
+
+/// A commit with no text leaves no shape, no undo entry and the
+/// document unchanged (and not marked as changed), task P7-37 item 1.
+#[test]
+fn a_new_box_committed_empty_leaves_no_shape_and_no_undo_entry() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        let before = shape_count(&rig);
+        choose_text_tool(&mut rig, kind);
+        let pos = screen(&rig, EMPTY.0, EMPTY.1);
+        click_at(&mut rig, pos);
+        assert!(editing(&mut rig), "{kind:?}: the box opens");
+        press_key(&mut rig, egui::Key::Escape);
+        assert!(!editing(&mut rig), "{kind:?}: the empty edit ends");
+        assert_eq!(shape_count(&rig), before, "{kind:?}: no shape stays");
+        let shell = rig.shell.borrow();
+        let session = shell.app.active_document().expect("session");
+        assert!(session.undo.is_empty(), "{kind:?}: no undo entry");
+        assert!(
+            !session.dirty,
+            "{kind:?}: the document is not marked as changed"
+        );
+    }
+}
+
+/// The P7-25 click elsewhere commits the box being typed and the next
+/// click opens another (task P7-37 item 5: the click closes the
+/// group); the second box committed empty cancels.
+#[test]
+fn a_click_elsewhere_commits_the_box_and_the_next_click_opens_another() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        let before = shape_count(&rig);
+        choose_text_tool(&mut rig, kind);
+        let pos = screen(&rig, 1.0, 6.0);
+        click_at(&mut rig, pos);
+        assert!(editing(&mut rig), "{kind:?}: the first box opens");
+        let first = last_shape(&rig.shell.borrow().app);
+        type_into_editor(&mut rig, "Hi");
+        // The click elsewhere (P7-25) commits the first box.
+        let pos = screen(&rig, 5.5, 6.0);
+        click_at(&mut rig, pos);
+        assert!(editing(&mut rig), "{kind:?}: the second box is typed");
+        assert_eq!(
+            shape_count(&rig),
+            before + 2,
+            "{kind:?}: the first box committed, the second opened"
+        );
+        assert_eq!(
+            shape_text(&rig, first).as_deref(),
+            Some("Hi"),
+            "{kind:?}: the typed text lands in the first box"
+        );
+        press_key(&mut rig, egui::Key::Escape);
+        assert_eq!(
+            shape_count(&rig),
+            before + 1,
+            "{kind:?}: the empty second box cancels"
+        );
+        assert_eq!(
+            undo_labels(&rig),
+            vec!["Insert Text Box".to_owned()],
+            "{kind:?}: one step for the first box"
+        );
+    }
+}
+
+/// A layout switch ends the typing interaction and closes the group
+/// (task P7-37 item 5): the View menu's row commits first, and the
+/// switch command dispatched over an open edit closes the group
+/// before it runs.
+#[test]
+fn a_layout_switch_commits_the_new_text_box() {
+    // The View menu's layout row (a real menu click, Panel Classic).
+    let mut rig = shell_rig(LayoutKind::PanelClassic);
+    choose_text_tool(&mut rig, LayoutKind::PanelClassic);
+    let pos = screen(&rig, EMPTY.0, EMPTY.1);
+    click_at(&mut rig, pos);
+    type_into_editor(&mut rig, "Hi");
+    click(&mut rig, Role::Button, "View");
+    click(&mut rig, Role::MenuItem, "Panel Modern");
+    assert_eq!(
+        rig.shell.borrow().app.settings.ui_layout,
+        LayoutKind::PanelModern,
+        "the layout switched"
+    );
+    assert!(!editing(&mut rig), "the switch ends the edit");
+    let box_ = last_shape(&rig.shell.borrow().app);
+    assert_eq!(
+        shape_text(&rig, box_).as_deref(),
+        Some("Hi"),
+        "the text lands"
+    );
+    assert_eq!(
+        undo_labels(&rig),
+        vec!["Insert Text Box".to_owned()],
+        "one step labelled as the insert"
+    );
+    drop(rig);
+
+    // The switch command over an open edit (the dispatch path, both
+    // layouts): the group closes before it runs.
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        choose_text_tool(&mut rig, kind);
+        let pos = screen(&rig, EMPTY.0, EMPTY.1);
+        click_at(&mut rig, pos);
+        type_into_editor(&mut rig, "Hi");
+        rig.dispatch("view.ui_layout.panel_2016");
+        assert!(!editing(&mut rig), "{kind:?}: the switch ends the edit");
+        let box_ = last_shape(&rig.shell.borrow().app);
+        assert_eq!(shape_text(&rig, box_).as_deref(), Some("Hi"), "{kind:?}");
+        assert_eq!(
+            undo_labels(&rig),
+            vec!["Insert Text Box".to_owned()],
+            "{kind:?}: one step labelled as the insert"
+        );
+    }
+}
+
+/// Closing the document ends the typing interaction and closes the
+/// group (task P7-37 item 5): with typed text the close commits it
+/// first, with no text the box cancels and the document is unchanged.
+#[test]
+fn closing_the_document_closes_the_new_box_first() {
+    for kind in LAYOUTS {
+        // With typed text: the close commits the box first.
+        let mut rig = shell_rig(kind);
+        // The close pauses on its confirmation, so the session stays
+        // open for inspection (an earlier edit marked it changed).
+        rig.shell
+            .borrow_mut()
+            .app
+            .active_document_mut()
+            .expect("session")
+            .dirty = true;
+        let before = shape_count(&rig);
+        choose_text_tool(&mut rig, kind);
+        let pos = screen(&rig, EMPTY.0, EMPTY.1);
+        click_at(&mut rig, pos);
+        type_into_editor(&mut rig, "Hi");
+        close_document(&mut rig, kind);
+        assert!(!editing(&mut rig), "{kind:?}: the interaction ended");
+        assert_eq!(shape_count(&rig), before + 1, "{kind:?}: the box committed");
+        let box_ = last_shape(&rig.shell.borrow().app);
+        assert_eq!(
+            shape_text(&rig, box_).as_deref(),
+            Some("Hi"),
+            "{kind:?}: the typed text lands"
+        );
+        assert_eq!(
+            undo_labels(&rig),
+            vec!["Insert Text Box".to_owned()],
+            "{kind:?}: one step labelled as the insert"
+        );
+        assert!(
+            has(&mut rig, Role::Button, "Close without saving"),
+            "{kind:?}: the close waits for its confirmation"
+        );
+        drop(rig);
+
+        // With no text: the box cancels and the document is unchanged.
+        let mut rig = shell_rig(kind);
+        rig.shell
+            .borrow_mut()
+            .app
+            .active_document_mut()
+            .expect("session")
+            .dirty = true;
+        let before = shape_count(&rig);
+        choose_text_tool(&mut rig, kind);
+        let pos = screen(&rig, EMPTY.0, EMPTY.1);
+        click_at(&mut rig, pos);
+        assert!(editing(&mut rig), "{kind:?}: the box opens");
+        close_document(&mut rig, kind);
+        assert!(!editing(&mut rig), "{kind:?}: the interaction ended");
+        assert_eq!(shape_count(&rig), before, "{kind:?}: no shape stays");
+        assert!(undo_labels(&rig).is_empty(), "{kind:?}: no undo entry");
+        assert!(
+            has(&mut rig, Role::Button, "Close without saving"),
+            "{kind:?}: the close waits for its confirmation"
+        );
+    }
+}
+
+/// Clicks the Undo button (Panel Modern names it for the last edit,
+/// "Undo Insert Text Box"; the split's "Undo menu" is not the button,
+/// and the disabled button reads "Can't Undo").
+fn undo_button(rig: &mut ShellRig) {
+    rig.run();
+    let root = rig.harness().root();
+    let node = root
+        .children_recursive()
+        .find(|node| {
+            let data = node.accesskit_node().data();
+            data.role() == Role::Button
+                && data.label().is_some_and(|label| {
+                    // The disabled button reads "Can't Undo".
+                    label == "Undo"
+                        || label.starts_with("Can't Undo")
+                        || (label.starts_with("Undo ") && label != "Undo menu")
+                })
+        })
+        .unwrap_or_else(|| {
+            let labels: Vec<String> = root
+                .children_recursive()
+                .filter(|n| n.accesskit_node().data().role() == Role::Button)
+                .filter_map(|n| n.accesskit_node().data().label().map(|s| s.to_owned()))
+                .collect();
+            panic!("no Undo button; buttons: {labels:?}");
+        });
+    node.click();
+    rig.run();
+}
+
+/// The Undo button's click ends the typing interaction (the click
+/// commits the text and closes the group) and the next undo removes
+/// the whole new box in one step (task P7-37 item 1). The button is
+/// disabled while the group is open — its steps are not on the stack
+/// yet — so the first click only reaches the commit.
+#[test]
+fn the_undo_button_removes_the_whole_new_box() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        let before = shape_count(&rig);
+        choose_text_tool(&mut rig, kind);
+        let pos = screen(&rig, EMPTY.0, EMPTY.1);
+        click_at(&mut rig, pos);
+        type_into_editor(&mut rig, "Hi");
+        let box_ = last_shape(&rig.shell.borrow().app);
+        undo_button(&mut rig);
+        assert!(!editing(&mut rig), "{kind:?}: the click ends the edit");
+        assert_eq!(
+            shape_text(&rig, box_).as_deref(),
+            Some("Hi"),
+            "{kind:?}: the click commits the text"
+        );
+        assert_eq!(
+            undo_labels(&rig),
+            vec!["Insert Text Box".to_owned()],
+            "{kind:?}: one undo step, labelled as the insert"
+        );
+        undo_button(&mut rig);
+        assert_eq!(
+            shape_count(&rig),
+            before,
+            "{kind:?}: one undo removes the whole box"
+        );
+    }
+}
