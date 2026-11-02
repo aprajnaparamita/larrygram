@@ -310,8 +310,8 @@ fn status_rect(rig: &mut Rig) -> Option<egui::Rect> {
         .find(|rect| rect.center().y > WINDOW.y - 60.0)
 }
 
-/// The open page-tab menu's rect (its rows near the tab: the ribbon
-/// also has an "Insert" tab and a "Delete" may appear in panes).
+/// The open page-tab menu's rect (its rows near the tab: the tab
+/// bar also has an "Insert" tab, and a "Delete" may appear in panes).
 fn menu_rect(rig: &mut Rig, tab: &egui::Rect) -> Option<egui::Rect> {
     rig.run();
     let root = rig.harness().root();
