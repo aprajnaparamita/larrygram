@@ -1107,6 +1107,40 @@ pub(super) fn selection_targets(
     Ok((session.id, targets, warnings))
 }
 
+/// The targets without their 1-D shapes (ADR 0084 rule 1, amended
+/// 2026-11-03): resize, rotate and flip refuse a 1-D shape until its
+/// end handles exist, and align and distribute leave it in place.
+///
+/// Each skipped shape adds one warning line. When nothing is left the
+/// run fails with one status message (`what` names the operation), so
+/// no undo step is pushed for an edit that changes nothing.
+pub(super) fn without_one_d(
+    ctx: &AppCtx,
+    targets: Vec<ShapeId>,
+    warnings: &mut Vec<String>,
+    what: &str,
+) -> Result<Vec<ShapeId>, CommandError> {
+    let doc = &ctx.active_document().ok_or_else(no_document)?.document;
+    let (one_d, kept): (Vec<ShapeId>, Vec<ShapeId>) = targets
+        .into_iter()
+        .partition(|shape| doc.is_connector(*shape));
+    if kept.is_empty() && !one_d.is_empty() {
+        return Err(CommandError::failed(format!(
+            "{what} does not apply to a connector or a line; drag its ends instead"
+        )));
+    }
+    for shape in one_d {
+        let visio_id = doc
+            .shape(shape)
+            .map(|entity| entity.visio_id)
+            .unwrap_or_default();
+        warnings.push(format!(
+            "shape {visio_id} is a connector or a line; {what} skipped it"
+        ));
+    }
+    Ok(kept)
+}
+
 /// Whether any shape of `targets` is a strict ancestor of `id`: such a
 /// target is deleted with its ancestor (one subtree, one undo step,
 /// task P5-19 review F1). The parent walk is bounded (AGENTS.md section
@@ -1150,10 +1184,9 @@ fn deleted_glue_warnings(ctx: &AppCtx, page: Option<PageId>, targets: &[ShapeId]
     let Some(entity) = doc.page(page) else {
         return Vec::new();
     };
-    let removed: Vec<i32> = targets
-        .iter()
-        .filter_map(|shape| doc.shape(*shape).map(|entry| entry.visio_id))
-        .collect();
+    // Members of a removed group lose their glue too (P7-31 review
+    // finding 3).
+    let removed = super::connector::subtree_visio_ids(doc, targets);
     entity
         .connects
         .iter()
@@ -1204,6 +1237,15 @@ pub(super) fn run_delete(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome,
         for &root in &targets {
             let step = StructuralEdit::removal(doc, session, "Delete shape", root);
             edit.push(Box::new(step?));
+        }
+        // The glue formulas of every end glued to a removed shape clear
+        // in the same edit (ADR 0084 rule 2, task P7-31): the end keeps
+        // its last point as a literal. The records go with the removal
+        // above.
+        if let Some(page) = page
+            && let Some(step) = super::connector::GlueClearEdit::stage(doc, session, page, &targets)
+        {
+            edit.push(step);
         }
     }
     edit.apply(ctx)?;

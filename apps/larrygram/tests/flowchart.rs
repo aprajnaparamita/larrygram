@@ -49,8 +49,8 @@ use std::path::PathBuf;
 use larrygram_commands::app::{AppCtx, Settings};
 use larrygram_commands::{ArgValue, Args, CommandId, Invocation, Outcome, Source};
 use larrygram_model::{
-    Cell, CellName, CellValue, Document, PageId, Preserved, QName, Shape, ShapeId, Sheet,
-    XmlAttribute, XmlChild, XmlNode,
+    Cell, CellName, CellValue, ConnectorEnd, Document, PageId, Preserved, QName, Shape, ShapeId,
+    Sheet, XmlAttribute, XmlChild, XmlNode,
 };
 use larrygram_ui::Intent;
 use larrygram_ui::dialogs::{FileChoice, FilePicker, OpenRequest, PickState, SaveRequest};
@@ -654,30 +654,18 @@ fn model_equal(a: &Document, b: &Document) -> bool {
 /// The raw first/last `Geometry` row point of `shape` (the routed
 /// path's begin/end as the model stores them).
 fn path_point(document: &Document, shape: ShapeId, end: bool) -> (f64, f64) {
-    let entry = document.shape(shape).expect("the connector exists");
-    let section = entry
-        .sheet
-        .sections
-        .iter()
-        .find(|section| section.name.as_str() == "Geometry")
-        .expect("the connector has a path");
-    let row = if end {
-        section.rows.last().expect("a routed row")
+    // The page-space point of the end, from its 1-D endpoint cells
+    // (task P7-31: the geometry rows are the box's local coordinates
+    // now, so their raw values are not page points).
+    let which = if end {
+        ConnectorEnd::End
     } else {
-        section.rows.first().expect("a routed row")
+        ConnectorEnd::Begin
     };
-    let value = |name: &str| {
-        row.cells
-            .iter()
-            .find(|cell| cell.name.as_str() == name)
-            .and_then(|cell| cell.value.clone())
-            .and_then(|value| match value {
-                CellValue::Number(number) => Some(number),
-                _ => None,
-            })
-            .expect("a numeric geometry cell")
-    };
-    (value("X"), value("Y"))
+    let point = document
+        .connector_end(shape, which)
+        .expect("the connector end resolves");
+    (point.x, point.y)
 }
 
 // ---------------------------------------------------------------------------

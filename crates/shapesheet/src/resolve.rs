@@ -98,6 +98,9 @@ pub struct DocumentResolver<'d> {
     origins: Vec<CellRef>,
     depth: u32,
     evaluations: u32,
+    /// Whether an evaluation stood back silently (a Visio-owned call,
+    /// task P7-31): the caller keeps the cell's cached value.
+    kept_cached: bool,
 }
 
 impl<'d> DocumentResolver<'d> {
@@ -110,6 +113,7 @@ impl<'d> DocumentResolver<'d> {
             origins: Vec::new(),
             depth: 0,
             evaluations: 0,
+            kept_cached: false,
         }
     }
 
@@ -134,6 +138,15 @@ impl<'d> DocumentResolver<'d> {
     /// (ADR 0057). The recalc budget counts these too (ADR 0055).
     pub fn evaluations(&self) -> u32 {
         self.evaluations
+    }
+
+    /// Whether an evaluation stood back silently (a Visio-owned call
+    /// such as `_XFTRIGGER`, task P7-31). A **nested** such call (inside
+    /// a referenced cell's formula) sets the flag too: like a nested
+    /// unknown function, it makes the outer evaluation keep its cached
+    /// value.
+    pub fn kept_cached(&self) -> bool {
+        self.kept_cached
     }
 
     /// The collected warnings and writes, taking them out of the
@@ -726,6 +739,10 @@ impl EvalContext for DocumentResolver<'_> {
 
     fn warn(&mut self, warning: EvalWarning) {
         self.record(warning);
+    }
+
+    fn keep_cached(&mut self) {
+        self.kept_cached = true;
     }
 }
 

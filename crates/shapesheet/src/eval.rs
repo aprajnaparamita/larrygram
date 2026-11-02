@@ -60,7 +60,7 @@ use crate::Error;
 use crate::ast::{BinaryOp, Expr, ExprKind, Literal, NumberLiteral, UnaryOp};
 use crate::coerce::{ValueKind, coerce};
 use crate::formula::{CellRef, Formula};
-use crate::functions::lookup_function;
+use crate::functions::{FunctionKind, lookup_function};
 use crate::units::{Unit, UnitFamily, parse_unit};
 use crate::value::{ErrorCode, Number, Value};
 
@@ -133,6 +133,12 @@ pub trait EvalContext {
 
     /// Records one structured warning.
     fn warn(&mut self, warning: EvalWarning);
+
+    /// Records that the evaluation stood back **silently** (a
+    /// [`FunctionKind::VisioOwned`] call, task P7-31): the caller keeps
+    /// the cell's cached value and reports nothing. The default is a
+    /// no-op so existing contexts compile unchanged.
+    fn keep_cached(&mut self) {}
 }
 
 /// Evaluates one expression on `sheet`.
@@ -407,13 +413,20 @@ impl Evaluator<'_> {
     }
 
     fn eval_call(&mut self, name: &str, args: &[Expr], depth: u32) -> Result<Flow, Error> {
-        if name.starts_with('_') {
-            self.stand_back(name, true);
-            return Ok(Flow::KeepCached);
-        }
-        let Some(def) = lookup_function(name)? else {
-            self.stand_back(name, false);
-            return Ok(Flow::KeepCached);
+        let def = match lookup_function(name)? {
+            Some(def) if def.kind == FunctionKind::VisioOwned => {
+                // A Visio-owned call (`PAR`, `PNT`, `_WALKGLUE`,
+                // `_XFTRIGGER`, ADR 0084 rule 2) stands back silently:
+                // the cell keeps its cached value, nothing is reported
+                // and its arguments are not evaluated.
+                self.ctx.keep_cached();
+                return Ok(Flow::KeepCached);
+            }
+            Some(def) => def,
+            None => {
+                self.stand_back(name, name.starts_with('_'));
+                return Ok(Flow::KeepCached);
+            }
         };
         let count = args.len();
         let within = count >= usize::from(def.min_args)

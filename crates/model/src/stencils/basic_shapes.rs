@@ -30,6 +30,7 @@ fn master(
         fill,
         shape_data: vec![("Label", name), ("Cost", "0")],
         connection_points,
+        connector_1d: false,
     }
 }
 

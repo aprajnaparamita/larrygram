@@ -26,8 +26,8 @@
 use larrygram_geom::{Point, Rect, RouteOptions, RouteStyle, Transform, route};
 use larrygram_model::CellReader;
 use larrygram_model::{
-    CellName, CellValue, CellWrite, Connect, Document, PageId, RowTarget, Section, ShapeId,
-    SheetRef, mutate,
+    CellLookup, CellName, CellValue, CellWrite, Connect, ConnectorEnd, Document, EndGlue, PageId,
+    Resolved, RowTarget, ShapeId, Sheet, SheetRef, mutate,
 };
 use larrygram_shapesheet::CellAddress;
 
@@ -98,6 +98,14 @@ impl End {
             End::End
         } else {
             End::Begin
+        }
+    }
+
+    /// This end in the model's vocabulary (task P7-31).
+    fn connector_end(self) -> ConnectorEnd {
+        match self {
+            End::Begin => ConnectorEnd::Begin,
+            End::End => ConnectorEnd::End,
         }
     }
 
@@ -242,11 +250,16 @@ fn glue_record(
     })
 }
 
-/// One undoable endpoint replacement.
+/// One undoable endpoint replacement (task P7-31: the glue formula,
+/// the cached values, the trigger and the `Connects` record in one
+/// edit).
 ///
-/// `apply` installs the new record (or removes the endpoint for an
-/// unglue), `revert` puts the exact previous records back at their
-/// original list positions.
+/// `apply` writes the end's endpoint cells and trigger the way Visio
+/// stores them (ADR 0084 rule 2) and installs the new record (or
+/// removes the endpoint for an unglue); `revert` puts the exact
+/// previous records and cells back. A shape without the endpoint cells
+/// (a legacy record-only connector) keeps its records as its only
+/// glue: nothing migrates it.
 #[derive(Debug)]
 struct GlueEdit {
     session: SessionId,
@@ -258,13 +271,20 @@ struct GlueEdit {
     new: Option<Connect>,
     /// The connector's Visio `ID` (unique on the page, stable over undo).
     connector_visio: i32,
-    /// The connector's geometry before the first glue (restored on
-    /// revert, so undoing a glue also undoes its routed path).
-    old_sections: Vec<Section>,
+    /// The connector's sheet before the glue (restored on `revert`, so
+    /// one undo restores the cells and the routed path exactly).
+    old_sheet: Sheet,
+    /// The point the end lands on (page inches, the cached `V`).
+    at: Point,
+    /// The glue kind the endpoint formula spells (ADR 0084 rule 2).
+    glue: EndGlue,
+    /// The cells `apply` writes (the recalc dirty set, ADR 0056).
+    dirty: Vec<CellAddress>,
 }
 
 impl GlueEdit {
-    /// Stages the replacement of `connector`'s `end` glue with `new`.
+    /// Stages the replacement of `connector`'s `end` glue with `new`
+    /// (the end lands on `at`).
     #[allow(clippy::too_many_arguments)] // one staging seam
     fn new(
         doc: &Document,
@@ -275,12 +295,18 @@ impl GlueEdit {
         connector_visio: i32,
         end: End,
         new: Option<Connect>,
+        at: Point,
     ) -> Result<Self, CommandError> {
         let old = endpoint_records(doc, page, connector_visio, end)?;
-        let old_sections = doc
+        let old_sheet = doc
             .shape(connector)
-            .map(|entry| entry.sheet.sections.clone())
+            .map(|entity| entity.sheet.clone())
             .unwrap_or_default();
+        let glue = end_glue_of(new.as_ref())?;
+        let dirty = end_cells(end)
+            .iter()
+            .map(|name| CellAddress::new(SheetRef::Shape(connector), CellName::new(*name)))
+            .collect();
         Ok(Self {
             session,
             label: label.into(),
@@ -290,7 +316,10 @@ impl GlueEdit {
             old,
             new,
             connector_visio,
-            old_sections,
+            old_sheet,
+            at,
+            glue,
+            dirty,
         })
     }
 
@@ -344,21 +373,216 @@ impl Edit for GlueEdit {
         &self.label
     }
 
+    fn dirty_cells(&self) -> &[CellAddress] {
+        &self.dirty
+    }
+
     fn apply(&mut self, ctx: &mut AppCtx) -> Result<(), CommandError> {
         match &self.new {
-            Some(connect) => self.set(ctx, EndpointState::One(connect)),
-            None => self.set(ctx, EndpointState::Many(&[])),
+            Some(connect) => self.set(ctx, EndpointState::One(connect))?,
+            None => self.set(ctx, EndpointState::Many(&[]))?,
         }
+        self.write_end(ctx)
     }
 
     fn revert(&mut self, ctx: &mut AppCtx) -> Result<(), CommandError> {
         let old = self.old.clone();
-        let sections = self.old_sections.clone();
+        let sheet = self.old_sheet.clone();
         self.set(ctx, EndpointState::Many(&old))?;
         let session = self.session;
         let doc = document_mut(ctx, session)?;
         if let Some(entity) = doc.shape_mut(self.connector) {
-            entity.sheet.sections = sections;
+            entity.sheet = sheet;
+        }
+        ctx.touch_session(session);
+        Ok(())
+    }
+}
+
+impl GlueEdit {
+    /// Writes the end's endpoint cells and trigger (ADR 0084 rule 2).
+    ///
+    /// A shape without the endpoint cells (a legacy record-only
+    /// connector) is not migrated: only its records change.
+    fn write_end(&self, ctx: &mut AppCtx) -> Result<(), CommandError> {
+        let session = self.session;
+        let doc = document_mut(ctx, session)?;
+        if !doc.is_connector(self.connector) {
+            return Ok(());
+        }
+        doc.write_connector_end(self.connector, self.end.connector_end(), self.at, self.glue)
+            .map_err(model_error)?;
+        ctx.touch_session(session);
+        Ok(())
+    }
+}
+
+/// The three cells one end's glue writes: its endpoint pair and its
+/// trigger (ADR 0084 rule 2).
+fn end_cells(end: End) -> [&'static str; 3] {
+    match end {
+        End::Begin => ["BeginX", "BeginY", "BegTrigger"],
+        End::End => ["EndX", "EndY", "EndTrigger"],
+    }
+}
+
+/// The glue kind of a record (ADR 0084 rule 2's table): point glue for
+/// a `Connections.X<n>` row (`ToPart` 100 + the row index), dynamic
+/// glue for a shape's pin, free when there is no record.
+fn end_glue_of(record: Option<&Connect>) -> Result<EndGlue, CommandError> {
+    let Some(connect) = record else {
+        return Ok(EndGlue::Free);
+    };
+    Ok(match connection_index(connect) {
+        Some(ix) => EndGlue::Point {
+            sheet: connect.to_sheet,
+            ix: u32::try_from(ix).map_err(|_| {
+                CommandError::invalid_args("the connection row index is out of range")
+            })?,
+        },
+        None => EndGlue::Dynamic {
+            sheet: connect.to_sheet,
+        },
+    })
+}
+
+/// One undoable clear of the glue formulas of every end glued to a
+/// shape a delete removes (ADR 0084 rule 2, task P7-31 goal 3): each
+/// end keeps its last point as a literal and its trigger names its own
+/// sheet. The `Connects` records go with the delete itself (the model's
+/// `detach_shape` removes them; the delete's own edit restores them).
+///
+/// A legacy record-only connector (no endpoint cells) has no formulas
+/// to clear and is not migrated.
+#[derive(Debug)]
+pub(crate) struct GlueClearEdit {
+    session: SessionId,
+    items: Vec<ClearedConnector>,
+}
+
+/// One connector whose glued ends [`GlueClearEdit`] frees.
+#[derive(Debug)]
+struct ClearedConnector {
+    connector: ShapeId,
+    /// The freed ends and the points they keep.
+    ends: Vec<(End, Point)>,
+    /// The connector's sheet before the clear (restored on `revert`).
+    old_sheet: Sheet,
+}
+
+impl GlueClearEdit {
+    /// Stages the clear for every connector end glued to one of
+    /// `targets`, or `None` when no end is glued to them. Staged before
+    /// the delete applies: the records still name their targets.
+    pub(crate) fn stage(
+        doc: &Document,
+        session: SessionId,
+        page: PageId,
+        targets: &[ShapeId],
+    ) -> Option<Box<dyn Edit>> {
+        // Every shape the delete removes, members of a removed group
+        // included (P7-31 review finding 3).
+        let removed = subtree_visio_ids(doc, targets);
+        let entity = doc.page(page)?;
+        // The ends glued to a removed target, in file order, grouped by
+        // connector (one connector may lose both ends). A record whose
+        // connector is gone (a dangling record) is skipped; it is no
+        // reason to clear nothing (review finding 5).
+        let mut grouped: Vec<(ShapeId, Vec<(End, Point)>)> = Vec::new();
+        for connect in &entity.connects {
+            if !is_connector_end(connect) || !removed.contains(&connect.to_sheet) {
+                continue;
+            }
+            let Some(connector) = doc.shape_by_visio_id(page, connect.from_sheet) else {
+                continue;
+            };
+            if !doc.is_connector(connector) {
+                continue;
+            }
+            let end = End::of(connect);
+            // The freed end keeps its stored point (review finding 6),
+            // not a fresh resolution of the glue.
+            let at = stored_end_point(doc, connector, end);
+            match grouped.iter_mut().find(|(shape, _)| *shape == connector) {
+                Some((_, ends)) => ends.push((end, at)),
+                None => grouped.push((connector, vec![(end, at)])),
+            }
+        }
+        let items: Vec<ClearedConnector> = grouped
+            .into_iter()
+            .filter_map(|(connector, ends)| {
+                let old_sheet = doc.shape(connector)?.sheet.clone();
+                Some(ClearedConnector {
+                    connector,
+                    ends,
+                    old_sheet,
+                })
+            })
+            .collect();
+        (!items.is_empty()).then(|| Box::new(Self { session, items }) as Box<dyn Edit>)
+    }
+}
+
+/// The Visio ids of every shape in the subtrees rooted at `roots` (the
+/// roots and all their members), bounded and cycle-safe.
+pub(crate) fn subtree_visio_ids(doc: &Document, roots: &[ShapeId]) -> Vec<i32> {
+    let mut ids = Vec::new();
+    let mut seen: std::collections::HashSet<ShapeId> = std::collections::HashSet::new();
+    let mut stack: Vec<ShapeId> = roots.to_vec();
+    // The visited set bounds the walk: each arena shape is seen once,
+    // so a cyclic child list cannot loop.
+    while let Some(shape) = stack.pop() {
+        if !seen.insert(shape) {
+            continue;
+        }
+        if let Some(entity) = doc.shape(shape) {
+            ids.push(entity.visio_id);
+            stack.extend(entity.children.iter().copied());
+        }
+    }
+    ids
+}
+
+/// One end's stored point: its endpoint cells or, without them, its
+/// geometry path's end (then the pin as the last resort).
+fn stored_end_point(doc: &Document, connector: ShapeId, end: End) -> Point {
+    current_end_point(doc, connector, end)
+        .or_else(|| fallback_point(doc, connector))
+        .unwrap_or(Point::new(0.0, 0.0))
+}
+
+impl Edit for GlueClearEdit {
+    fn label(&self) -> &str {
+        "Clear glue to deleted shapes"
+    }
+
+    fn apply(&mut self, ctx: &mut AppCtx) -> Result<(), CommandError> {
+        let session = self.session;
+        let doc = document_mut(ctx, session)?;
+        for item in &self.items {
+            for (end, at) in &item.ends {
+                if doc.is_connector(item.connector) {
+                    doc.write_connector_end(
+                        item.connector,
+                        end.connector_end(),
+                        *at,
+                        EndGlue::Free,
+                    )
+                    .map_err(model_error)?;
+                }
+            }
+        }
+        ctx.touch_session(session);
+        Ok(())
+    }
+
+    fn revert(&mut self, ctx: &mut AppCtx) -> Result<(), CommandError> {
+        let session = self.session;
+        let doc = document_mut(ctx, session)?;
+        for item in &self.items {
+            if let Some(entity) = doc.shape_mut(item.connector) {
+                entity.sheet = item.old_sheet.clone();
+            }
         }
         ctx.touch_session(session);
         Ok(())
@@ -400,14 +624,16 @@ fn glue(ctx: &mut AppCtx, inv: &Invocation, end: End) -> Result<Outcome, Command
     let connector = connector_shape(ctx, page, &inv.args)?;
     let target = target_shape(ctx, page, &inv.args)?;
     let point = optional_point(&inv.args)?;
-    let (target_visio_id, record) = {
+    let (target_visio_id, record, at) = {
         let doc = &ctx.active_document().ok_or_else(no_document)?.document;
         let target_visio_id = doc
             .shape(target)
             .ok_or_else(|| CommandError::failed("the target shape no longer exists"))?
             .visio_id;
         let record = glue_record(connector, target, target_visio_id, point, end, doc)?;
-        (target_visio_id, record)
+        let mut warnings = Vec::new();
+        let at = end_point_for(doc, page, connector, end, Some(&record), &mut warnings);
+        (target_visio_id, record, at)
     };
     let label = match end {
         End::Begin => "Glue connector begin",
@@ -424,6 +650,7 @@ fn glue(ctx: &mut AppCtx, inv: &Invocation, end: End) -> Result<Outcome, Command
             record.from_sheet,
             end,
             Some(record),
+            at,
         )
     };
     let mut edit = staged?;
@@ -464,6 +691,8 @@ pub(super) fn run_unglue(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, 
             .shape(connector)
             .map(|entry| entry.visio_id)
             .unwrap_or_default();
+        let mut warnings = Vec::new();
+        let at = end_point_for(doc, page, connector, end, None, &mut warnings);
         let staged = GlueEdit::new(
             doc,
             session,
@@ -473,6 +702,7 @@ pub(super) fn run_unglue(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, 
             connector_visio,
             end,
             None,
+            at,
         );
         staged?
     };
@@ -539,6 +769,9 @@ pub(super) fn run_style(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, C
             .iter()
             .copied()
             .filter(|shape| doc.page_of(*shape) == Some(page))
+            // A 1-D shape that is not routable (a line or a 1-D arrow)
+            // takes no style cells (ADR 0084 rule 1, amended).
+            .filter(|shape| !doc.is_connector(*shape) || doc.is_routable(*shape))
             .collect()
     };
     if targets.is_empty() {
@@ -590,13 +823,54 @@ fn route_style_value(style: RouteStyle) -> i32 {
     }
 }
 
-/// The [`RouteStyle`] a `ShapeRouteStyle` cached value spells; 0 (page
-/// default) and unknown values use our straight default.
+/// The [`RouteStyle`] a `ShapeRouteStyle` cached value spells (ADR 0084
+/// rule 8): 2 is straight lines; 1 (right angle), 16, the directed
+/// styles (3-15, 17-22) and unknown values all route as **right
+/// angle** in the alpha. Only 2 means straight; the old straight
+/// default goes.
 fn style_from_value(value: f64) -> RouteStyle {
-    if value == 1.0 {
-        RouteStyle::RightAngle
-    } else {
+    if value == 2.0 {
         RouteStyle::Straight
+    } else {
+        RouteStyle::RightAngle
+    }
+}
+
+/// The style a connector routes with (ADR 0084 rule 8): its
+/// `ShapeRouteStyle` value when it has one, else the page's
+/// `RouteStyle`, else right angle. A missing or 0 cell value falls
+/// through to the page; a missing page value means right angle.
+fn connector_style(doc: &Document, connector: ShapeId) -> RouteStyle {
+    if let Some(value) = nonzero_number(doc.resolve(connector, &CellName::new("ShapeRouteStyle"))) {
+        return style_from_value(value);
+    }
+    if let Some(page) = doc.page_of(connector)
+        && let Some(value) =
+            nonzero_number(doc.resolve_page_cell(page, &CellName::new("RouteStyle")))
+    {
+        return style_from_value(value);
+    }
+    RouteStyle::RightAngle
+}
+
+/// The style one connector's path takes (ADR 0084 rule 1, amended): a
+/// 1-D shape that is not routable stays a straight line from begin to
+/// end; a routable one (or a legacy record-only connector) follows
+/// [`connector_style`].
+fn route_style_for(doc: &Document, connector: ShapeId) -> RouteStyle {
+    if doc.is_connector(connector) && !doc.is_routable(connector) {
+        RouteStyle::Straight
+    } else {
+        connector_style(doc, connector)
+    }
+}
+
+/// The finite non-zero number a resolution carries, or `None` for a
+/// missing cell, 0 (page default, ADR 0084 rule 8) or a non-number.
+fn nonzero_number(resolved: Result<Resolved<'_>, larrygram_model::Error>) -> Option<f64> {
+    match resolved.ok()?.value? {
+        CellValue::Number(value) if value.is_finite() && *value != 0.0 => Some(*value),
+        _ => None,
     }
 }
 
@@ -679,6 +953,15 @@ fn run_draw(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError>
                         ))
                     })?;
                 let record = glue_record(connector, target, target_visio_id, point, end, doc)?;
+                let mut resolve_warnings = Vec::new();
+                let at = end_point_for(
+                    doc,
+                    page,
+                    connector,
+                    end,
+                    Some(&record),
+                    &mut resolve_warnings,
+                );
                 let staged = GlueEdit::new(
                     doc,
                     session,
@@ -688,6 +971,7 @@ fn run_draw(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError>
                     connector_visio,
                     end,
                     Some(record),
+                    at,
                 );
                 staged?
             };
@@ -716,7 +1000,7 @@ fn run_draw(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError>
             let points = route(
                 start,
                 end,
-                &RouteOptions::new(connector_style(doc, connector)),
+                &RouteOptions::new(route_style_for(doc, connector)),
             )
             .map_err(|error| CommandError::failed(format!("cannot route connector: {error}")))?;
             PathEdit::new(doc, session, connector, points)?
@@ -785,6 +1069,56 @@ fn resolved_end(
         .ok_or_else(|| CommandError::invalid_args("a free connector end needs its x and y"))
 }
 
+/// The resolved point of one end (page inches) with the resolution the
+/// re-route uses (task P7-31 keeps the old landing; P7-32 replaces
+/// it): the glue target's row point for point glue, the nearest bounds
+/// point for dynamic glue, and the end's own current point when it is
+/// free. A point that cannot be resolved falls back to that current
+/// point (the re-route refreshes the cached `V` afterwards).
+fn end_point_for(
+    doc: &Document,
+    page: PageId,
+    connector: ShapeId,
+    end: End,
+    record: Option<&Connect>,
+    warnings: &mut Vec<String>,
+) -> Point {
+    let current = current_end_point(doc, connector, end);
+    let reference = current
+        .or_else(|| fallback_point(doc, connector))
+        .unwrap_or(Point::new(0.0, 0.0));
+    match record {
+        Some(connect) => {
+            let visio = doc
+                .shape(connector)
+                .map(|entity| entity.visio_id)
+                .unwrap_or_default();
+            resolve_endpoint(doc, page, connect, reference, visio, warnings).unwrap_or(reference)
+        }
+        None => reference,
+    }
+}
+
+/// The end's current point in page inches: its endpoint cells when it
+/// has them, else its geometry path's end.
+fn current_end_point(doc: &Document, connector: ShapeId, end: End) -> Option<Point> {
+    if let Ok(point) = doc.connector_end(connector, end.connector_end()) {
+        return Some(point);
+    }
+    let transform = page_transform(doc, connector).ok()?;
+    let (start, last) = geometry_endpoints(doc, connector, transform)?;
+    Some(match end {
+        End::Begin => start,
+        End::End => last,
+    })
+}
+
+/// The connector's pin in page inches (the last-resort end point).
+fn fallback_point(doc: &Document, connector: ShapeId) -> Option<Point> {
+    let transform = page_transform(doc, connector).ok()?;
+    Some(transform_point(transform, loc_pin(doc, connector)))
+}
+
 /// One required text argument.
 fn need_text(args: &Args, name: &str, prompt: &str) -> Result<String, CommandError> {
     match args.text(name) {
@@ -847,7 +1181,10 @@ fn optional_free_point(
 struct PathEdit {
     session: SessionId,
     connector: ShapeId,
-    old_sections: Vec<Section>,
+    /// The connector's sheet before the write: a 1-D path write also
+    /// moves its endpoint, pin and size cells, so `revert` restores the
+    /// whole sheet.
+    old_sheet: Sheet,
     points: Vec<Point>,
     /// The row cells the path write replaces (ADR 0056's dirty set).
     dirty: Vec<CellAddress>,
@@ -860,11 +1197,10 @@ impl PathEdit {
         connector: ShapeId,
         points: Vec<Point>,
     ) -> Result<Self, CommandError> {
-        let old_sections = doc
+        let old_sheet = doc
             .shape(connector)
             .ok_or_else(|| CommandError::failed("the connector shape is missing"))?
             .sheet
-            .sections
             .clone();
         let mut dirty = Vec::new();
         for (position, _) in points.iter().enumerate() {
@@ -881,10 +1217,22 @@ impl PathEdit {
                 ));
             }
         }
+        if doc.is_connector(connector) {
+            // The 1-D cells the path write refreshes (task P7-31).
+            for cell in [
+                "BeginX", "BeginY", "EndX", "EndY", "PinX", "PinY", "Width", "Height", "LocPinX",
+                "LocPinY", "Angle",
+            ] {
+                dirty.push(CellAddress::new(
+                    SheetRef::Shape(connector),
+                    CellName::new(cell),
+                ));
+            }
+        }
         Ok(Self {
             session,
             connector,
-            old_sections,
+            old_sheet,
             points,
             dirty,
         })
@@ -911,14 +1259,279 @@ impl Edit for PathEdit {
 
     fn revert(&mut self, ctx: &mut AppCtx) -> Result<(), CommandError> {
         let session = self.session;
-        let sections = self.old_sections.clone();
+        let sheet = self.old_sheet.clone();
         let doc = document_mut(ctx, session)?;
         if let Some(entity) = doc.shape_mut(self.connector) {
-            entity.sheet.sections = sections;
+            entity.sheet = sheet;
         }
         ctx.touch_session(session);
         Ok(())
     }
+}
+
+// ---------------------------------------------------------------------------
+// Moving and copying 1-D shapes (ADR 0084 rule 1, amended 2026-11-03)
+// ---------------------------------------------------------------------------
+
+/// The page transform of a shape's parent (identity on the page).
+fn parent_transform(doc: &Document, shape: ShapeId) -> Result<Transform, CommandError> {
+    let parent = doc
+        .shape(shape)
+        .ok_or_else(|| CommandError::failed("the shape is gone"))?
+        .parent;
+    parent.map_or(Ok(Transform::identity()), |parent| {
+        page_transform(doc, parent)
+    })
+}
+
+/// Translates one 1-D shape by (`dx`, `dy`) page inches: its endpoint
+/// cells move and its path is re-written in its parent's space. A
+/// shape whose geometry is formula-driven keeps its rows (recalc owns
+/// them): only its ends and box move. A glued end keeps its formula
+/// here; the caller frees it first when it must come loose.
+pub(crate) fn translate_one_d(
+    doc: &mut Document,
+    shape: ShapeId,
+    dx: f64,
+    dy: f64,
+) -> Result<(), CommandError> {
+    let shift = |point: Point| Point::new(point.x + dx, point.y + dy);
+    let parent = parent_transform(doc, shape)?;
+    let ends = [ConnectorEnd::Begin, ConnectorEnd::End].map(|end| {
+        doc.connector_end(shape, end)
+            .map(|point| parent.apply(point))
+    });
+    let [Ok(begin), Ok(end)] = ends else {
+        return Err(CommandError::failed("the 1-D shape has no numeric ends"));
+    };
+    if crate::recalc::geometry_is_formula_driven(doc, shape) {
+        let inverse = parent.invert().map_err(|_| singular())?;
+        return doc
+            .write_connector_box(
+                shape,
+                inverse.apply(shift(begin)),
+                inverse.apply(shift(end)),
+            )
+            .map_err(model_error);
+    }
+    // The drawn rows through the page transform: a moved route keeps
+    // its bends. Rows that give fewer than two points become the
+    // straight line between the ends.
+    let transform = page_transform(doc, shape)?;
+    let mut path: Vec<Point> = doc
+        .shape_geometry(shape)
+        .ok()
+        .and_then(|geometry| geometry.paths.into_iter().next())
+        .map(|path| {
+            path.rows
+                .iter()
+                .filter_map(row_point)
+                .map(|point| transform.apply(point))
+                .collect()
+        })
+        .unwrap_or_default();
+    if path.len() < 2 {
+        path = vec![begin, end];
+    }
+    let moved: Vec<Point> = path.into_iter().map(shift).collect();
+    write_path(doc, shape, &moved)
+}
+
+/// The error of a parent transform that cannot be inverted.
+fn singular() -> CommandError {
+    CommandError::failed("singular parent transform")
+}
+
+/// The cells a 1-D move or copy writes (the recalc dirty set, ADR 0056).
+fn one_d_dirty(shape: ShapeId) -> Vec<CellAddress> {
+    [
+        "BeginX",
+        "BeginY",
+        "EndX",
+        "EndY",
+        "BegTrigger",
+        "EndTrigger",
+        "PinX",
+        "PinY",
+        "Width",
+        "Height",
+        "LocPinX",
+        "LocPinY",
+        "Angle",
+    ]
+    .iter()
+    .map(|name| CellAddress::new(SheetRef::Shape(shape), CellName::new(*name)))
+    .collect()
+}
+
+/// One 1-D shape a [`OneDMoveEdit`] moves.
+#[derive(Debug)]
+struct MovedOneD {
+    shape: ShapeId,
+    visio_id: i32,
+    /// The ends that come loose (their target does not move) and the
+    /// stored point each keeps before the translation.
+    freed: Vec<End>,
+    /// The shape's sheet before the move (restored on `revert`).
+    old_sheet: Sheet,
+}
+
+/// One undoable move of 1-D shapes (ADR 0084 rule 1, amended): the
+/// endpoint cells move with the path, and a glued end comes loose,
+/// formula and record together, unless its target moves in the same
+/// edit.
+#[derive(Debug)]
+pub(crate) struct OneDMoveEdit {
+    session: SessionId,
+    page: PageId,
+    dx: f64,
+    dy: f64,
+    items: Vec<MovedOneD>,
+    /// The page's records before the move (restored on `revert`).
+    old_connects: Vec<Connect>,
+    dirty: Vec<CellAddress>,
+}
+
+impl OneDMoveEdit {
+    /// Stages the move of `shapes` (1-D shapes on `page`) by (`dx`,
+    /// `dy`) page inches; `moving` is every shape the whole edit moves
+    /// (an end glued to one of them, or to a member of one, stays
+    /// glued). `None` when `shapes` holds no 1-D shape.
+    pub(crate) fn stage(
+        doc: &Document,
+        session: SessionId,
+        page: PageId,
+        shapes: &[ShapeId],
+        moving: &[ShapeId],
+        (dx, dy): (f64, f64),
+    ) -> Result<Option<Self>, CommandError> {
+        let moved = subtree_visio_ids(doc, moving);
+        let entity = doc
+            .page(page)
+            .ok_or_else(|| CommandError::failed("the page is gone"))?;
+        let mut items = Vec::new();
+        let mut dirty = Vec::new();
+        for &shape in shapes {
+            let Some(found) = doc.shape(shape).filter(|_| doc.is_connector(shape)) else {
+                continue;
+            };
+            let visio_id = found.visio_id;
+            let freed: Vec<End> = entity
+                .connects
+                .iter()
+                .filter(|connect| {
+                    connect.from_sheet == visio_id
+                        && is_connector_end(connect)
+                        && !moved.contains(&connect.to_sheet)
+                })
+                .map(End::of)
+                .fold(Vec::new(), |mut ends, end| {
+                    if !ends.contains(&end) {
+                        ends.push(end);
+                    }
+                    ends
+                });
+            dirty.extend(one_d_dirty(shape));
+            items.push(MovedOneD {
+                shape,
+                visio_id,
+                freed,
+                old_sheet: found.sheet.clone(),
+            });
+        }
+        if items.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(Self {
+            session,
+            page,
+            dx,
+            dy,
+            items,
+            old_connects: entity.connects.clone(),
+            dirty,
+        }))
+    }
+}
+
+impl Edit for OneDMoveEdit {
+    fn label(&self) -> &str {
+        "Move 1-D shape"
+    }
+
+    fn dirty_cells(&self) -> &[CellAddress] {
+        &self.dirty
+    }
+
+    fn apply(&mut self, ctx: &mut AppCtx) -> Result<(), CommandError> {
+        let session = self.session;
+        let doc = document_mut(ctx, session)?;
+        for item in &self.items {
+            for end in &item.freed {
+                let at = doc
+                    .connector_end(item.shape, end.connector_end())
+                    .map_err(model_error)?;
+                doc.write_connector_end(item.shape, end.connector_end(), at, EndGlue::Free)
+                    .map_err(model_error)?;
+                if let Some(entity) = doc.pages.get_mut(self.page.index as usize) {
+                    entity.connects.retain(|connect| {
+                        !(connect.from_sheet == item.visio_id
+                            && is_connector_end(connect)
+                            && End::of(connect) == *end)
+                    });
+                }
+            }
+            translate_one_d(doc, item.shape, self.dx, self.dy)?;
+        }
+        ctx.touch_session(session);
+        Ok(())
+    }
+
+    fn revert(&mut self, ctx: &mut AppCtx) -> Result<(), CommandError> {
+        let session = self.session;
+        let doc = document_mut(ctx, session)?;
+        for item in &self.items {
+            if let Some(entity) = doc.shape_mut(item.shape) {
+                entity.sheet = item.old_sheet.clone();
+            }
+        }
+        if let Some(entity) = doc.pages.get_mut(self.page.index as usize) {
+            entity.connects = self.old_connects.clone();
+        }
+        ctx.touch_session(session);
+        Ok(())
+    }
+}
+
+/// The glue of one copied 1-D shape (ADR 0084 rule 1, amended): an end
+/// glued to a shape copied in the same operation re-glues to the copy,
+/// as the renumbered record in `records` names it (the caller adds the
+/// records); every other end becomes free at its stored point, so no
+/// formula names the source's targets.
+pub(crate) fn rebind_copied_glue(
+    doc: &mut Document,
+    shape: ShapeId,
+    records: &[Connect],
+) -> Result<(), CommandError> {
+    if !doc.is_connector(shape) {
+        return Ok(());
+    }
+    let visio_id = doc
+        .shape(shape)
+        .map(|entity| entity.visio_id)
+        .unwrap_or_default();
+    for end in [End::Begin, End::End] {
+        let Ok(at) = doc.connector_end(shape, end.connector_end()) else {
+            continue;
+        };
+        let record = records.iter().find(|connect| {
+            connect.from_sheet == visio_id && is_connector_end(connect) && End::of(connect) == end
+        });
+        let glue = end_glue_of(record)?;
+        doc.write_connector_end(shape, end.connector_end(), at, glue)
+            .map_err(model_error)?;
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -1054,7 +1667,7 @@ fn reroute_document(
         let (Some(start), Some(end)) = (begin, end) else {
             continue;
         };
-        let style = connector_style(doc, connector);
+        let style = route_style_for(doc, connector);
         let points = route(start, end, &RouteOptions::new(style)).map_err(|error| {
             CommandError::failed(format!("cannot route connector {visio_id}: {error}"))
         })?;
@@ -1081,8 +1694,10 @@ fn is_connector_end(connect: &Connect) -> bool {
         || connect.from_cell.starts_with("End")
 }
 
-/// The distinct connector Visio ids named by the page's `Connect`
-/// records, in file order (connector ends only, [`is_connector_end`]).
+/// The distinct connector Visio ids the pass routes: the connector
+/// ends the page's `Connect` records name, in file order (connector
+/// ends only, [`is_connector_end`]). A connector with no record has no
+/// glued end and nothing to re-route.
 fn connector_visio_ids(doc: &Document, page: PageId) -> Result<Vec<i32>, CommandError> {
     let entity = doc
         .page(page)
@@ -1106,7 +1721,9 @@ fn drop_all_for(doc: &mut Document, page: PageId, connector_visio_id: i32) {
 }
 
 /// Drops the records whose target shape is no longer on the page, with
-/// one warning line per dropped glue.
+/// one warning line per dropped glue. The ends glued to a detached
+/// target keep their last point as a literal (ADR 0084 rule 2): the
+/// endpoint formulas naming the gone shape go with the records.
 fn drop_detached_targets(
     doc: &mut Document,
     page: PageId,
@@ -1125,6 +1742,34 @@ fn drop_detached_targets(
         .collect();
     if missing.is_empty() {
         return;
+    }
+    let mut lost_ends: Vec<(End, Point)> = Vec::new();
+    for connect in &page_entity.connects {
+        if connect.from_sheet != connector_visio_id || !missing.contains(&connect.to_sheet) {
+            continue;
+        }
+        let end = End::of(connect);
+        let at = doc
+            .shape_by_visio_id(page, connector_visio_id)
+            .and_then(|shape| {
+                current_end_point(doc, shape, end).or_else(|| fallback_point(doc, shape))
+            })
+            .unwrap_or(Point::new(0.0, 0.0));
+        lost_ends.push((end, at));
+    }
+    let clear = doc
+        .shape_by_visio_id(page, connector_visio_id)
+        .filter(|shape| doc.is_connector(*shape));
+    if let Some(shape) = clear {
+        for (end, at) in &lost_ends {
+            if let Err(error) =
+                doc.write_connector_end(shape, end.connector_end(), *at, EndGlue::Free)
+            {
+                warnings.push(format!(
+                    "connector {connector_visio_id} kept a stale glue formula: {error}"
+                ));
+            }
+        }
     }
     if let Some(entity) = doc.pages.get_mut(page.index as usize) {
         entity.connects.retain(|connect| {
@@ -1187,18 +1832,6 @@ fn connection_index(connect: &Connect) -> Option<usize> {
     let cells = connect.to_cell.strip_prefix("Connections.X")?;
     let one_based = cells.parse::<usize>().ok()?;
     one_based.checked_sub(1)
-}
-
-/// The style cached in `ShapeRouteStyle`, or the straight default.
-fn connector_style(doc: &Document, connector: ShapeId) -> RouteStyle {
-    let mut reader = CellReader::new(doc);
-    let value = reader
-        .number(
-            SheetRef::Shape(connector),
-            &CellName::new("ShapeRouteStyle"),
-        )
-        .unwrap_or(2.0);
-    style_from_value(value)
 }
 
 /// The page transform of a shape: its own local box transform composed
@@ -1390,9 +2023,7 @@ fn write_path(
         Some(parent) => page_transform(doc, parent)?,
         None => Transform::identity(),
     };
-    let inverse = parent
-        .invert()
-        .map_err(|_| CommandError::failed("singular parent transform"))?;
+    let inverse = parent.invert().map_err(|_| singular())?;
     let local: Vec<Point> = points.iter().map(|point| inverse.apply(*point)).collect();
     doc.write_connector_path(connector, &local)
         .map_err(model_error)
@@ -1605,8 +2236,42 @@ mod tests {
         assert_eq!(route_style_value(RouteStyle::Straight), 2);
         assert_eq!(style_from_value(1.0), RouteStyle::RightAngle);
         assert_eq!(style_from_value(2.0), RouteStyle::Straight);
-        assert_eq!(style_from_value(0.0), RouteStyle::Straight);
-        assert_eq!(style_from_value(f64::NAN), RouteStyle::Straight);
+        // ADR 0084 rule 8: right angle everywhere the old default was
+        // straight (0, 16, the directed styles and unknown values).
+        assert_eq!(style_from_value(0.0), RouteStyle::RightAngle);
+        assert_eq!(style_from_value(f64::NAN), RouteStyle::RightAngle);
+        assert_eq!(style_from_value(16.0), RouteStyle::RightAngle);
+        assert_eq!(style_from_value(3.0), RouteStyle::RightAngle);
+        assert_eq!(style_from_value(22.0), RouteStyle::RightAngle);
+    }
+
+    #[test]
+    fn the_style_falls_through_to_the_page_and_to_right_angle() {
+        let (mut ctx, session, page, connector, _left, _right) = fixture();
+        // No local style and no page value: right angle (ADR 0084 rule 8).
+        let doc = ctx.active_document().expect("session").document.clone();
+        assert_eq!(connector_style(&doc, connector), RouteStyle::RightAngle);
+        // A missing or 0 cell value falls through to the page's
+        // `RouteStyle`.
+        let doc = document_mut(&mut ctx, session).expect("session");
+        doc.write_cell(
+            SheetRef::Page(page),
+            &CellName::new("RouteStyle"),
+            &CellWrite::new("2", CellValue::Number(2.0)),
+        )
+        .expect("page style");
+        let doc = ctx.active_document().expect("session").document.clone();
+        assert_eq!(connector_style(&doc, connector), RouteStyle::Straight);
+        // A local value of 16 (center-to-centre) routes as right angle.
+        let doc = document_mut(&mut ctx, session).expect("session");
+        doc.write_cell(
+            SheetRef::Shape(connector),
+            &CellName::new("ShapeRouteStyle"),
+            &CellWrite::new("16", CellValue::Number(16.0)),
+        )
+        .expect("local style");
+        let doc = ctx.active_document().expect("session").document.clone();
+        assert_eq!(connector_style(&doc, connector), RouteStyle::RightAngle);
     }
 
     #[test]
@@ -1630,7 +2295,9 @@ mod tests {
             let ends = doc.connects_of(page, connector).expect("ends");
             assert_eq!(ends[0].as_ref().map(|c| c.to_sheet), Some(1));
             assert_eq!(ends[1].as_ref().map(|c| c.to_sheet), Some(2));
-            assert_eq!(path_points(&ctx, connector).len(), 2);
+            // The default is right angle (ADR 0084 rule 8): a routed
+            // path with at least the two endpoints.
+            assert!(path_points(&ctx, connector).len() >= 2);
             let _ = (left, right);
         }
 
@@ -1765,7 +2432,9 @@ mod tests {
         assert_eq!(points.first(), Some(&Point::new(0.0, 1.5)));
         assert_eq!(points.last(), Some(&Point::new(4.0, 2.0)));
         dispatch(&mut ctx, "edit.undo", Args::new()).expect("undo style");
-        assert_eq!(path_points(&ctx, connector).len(), 2);
+        // The undo restores no local style; the default routes right
+        // angle too (ADR 0084 rule 8), so the same elbow comes back.
+        assert_eq!(path_points(&ctx, connector), points);
     }
 
     #[test]
@@ -2064,6 +2733,7 @@ mod tests {
                 doc.shape(connector).expect("connector").visio_id,
                 End::Begin,
                 Some(record),
+                Point::new(2.0, 2.0),
             )
             .expect("edit")
         };
@@ -2204,5 +2874,318 @@ mod tests {
         drop_detached_targets(&mut doc, PageId { index: 9 }, 1, &mut warnings);
         drop_all_for(&mut doc, PageId { index: 9 }, 1);
         assert!(warnings.is_empty());
+    }
+
+    // --- Task P7-39: 1-D moves, copies, deletes ---------------------------
+
+    /// A 1-D shape from `begin` to `end` with literal endpoint cells and
+    /// the master's pin and size formulas, its geometry rows literal or,
+    /// with `formula_rows`, formula-driven (`Width*0`, `Width*1`).
+    fn one_d(visio_id: i32, begin: (f64, f64), end: (f64, f64), formula_rows: bool) -> Shape {
+        let formula = |name: &str, text: &str, value: f64| Cell {
+            name: CellName::new(name),
+            formula: Some(text.to_owned()),
+            value: Some(CellValue::Number(value)),
+            unit: larrygram_geom::Unit::Inches,
+            preserved: Preserved::new(),
+        };
+        let width = end.0 - begin.0;
+        let mut shape = Shape::new(ShapeId { index: 0 }, visio_id);
+        shape.sheet.cells = vec![
+            cell("BeginX", begin.0),
+            cell("BeginY", begin.1),
+            cell("EndX", end.0),
+            cell("EndY", end.1),
+            formula("PinX", "GUARD((BeginX+EndX)/2)", (begin.0 + end.0) / 2.0),
+            formula("PinY", "GUARD((BeginY+EndY)/2)", (begin.1 + end.1) / 2.0),
+            formula("Width", "GUARD(EndX-BeginX)", width),
+            formula("Height", "GUARD(0.2DL)", 0.2),
+            formula("LocPinX", "GUARD(Width*0.5)", width / 2.0),
+            formula("LocPinY", "GUARD(Height*0.5)", 0.1),
+            formula("Angle", "GUARD(0DA)", 0.0),
+            cell("ObjType", 2.0),
+        ];
+        let mut geometry = Section::new(SectionName::from_static("Geometry"));
+        for (ix, (kind, x, text)) in [("MoveTo", 0.0, "Width*0"), ("LineTo", width, "Width*1")]
+            .into_iter()
+            .enumerate()
+        {
+            let mut row = Row::new();
+            row.row_type = Some(kind.to_owned());
+            row.ix = Some(i32::try_from(ix).unwrap_or(0));
+            row.cells = if formula_rows {
+                vec![formula("X", text, x), formula("Y", "Height*0.5", 0.1)]
+            } else {
+                vec![cell("X", x), cell("Y", 0.1)]
+            };
+            geometry.rows.push(row);
+        }
+        shape.sheet.sections.push(geometry);
+        shape
+    }
+
+    fn open(doc: Document) -> (AppCtx, SessionId) {
+        let mut ctx = AppCtx::new(Settings::default());
+        let index = ctx.open_document(DocumentSession::new(doc, None));
+        let session = ctx.documents.get(index).expect("session").id;
+        (ctx, session)
+    }
+
+    fn end_at(ctx: &AppCtx, shape: ShapeId, end: ConnectorEnd) -> Point {
+        ctx.active_document()
+            .expect("session")
+            .document
+            .connector_end(shape, end)
+            .expect("end")
+    }
+
+    #[test]
+    fn end_glue_of_refuses_an_out_of_range_row() {
+        let mut connect = Connect::new();
+        connect.to_sheet = 2;
+        connect.to_cell = "Connections.X99999999999".to_owned();
+        connect.to_part = 0;
+        assert!(end_glue_of(Some(&connect)).is_err());
+        assert_eq!(end_glue_of(None).expect("free"), EndGlue::Free);
+    }
+
+    #[test]
+    fn a_formula_driven_1d_shape_moves_its_ends_and_keeps_its_rows() {
+        let mut doc = Document::new();
+        let page = doc.add_page("Page-1").expect("page");
+        let line = insert(&mut doc, page, one_d(4, (1.0, 1.0), (3.0, 1.0), true));
+        let rows = doc.shape(line).expect("line").sheet.sections.clone();
+        translate_one_d(&mut doc, line, 1.0, 2.0).expect("move");
+        assert_eq!(
+            doc.connector_end(line, ConnectorEnd::Begin).expect("begin"),
+            Point::new(2.0, 3.0)
+        );
+        assert_eq!(
+            doc.shape(line).expect("line").sheet.sections,
+            rows,
+            "rows kept"
+        );
+    }
+
+    #[test]
+    fn a_1d_shape_without_rows_moves_as_a_straight_line() {
+        let mut doc = Document::new();
+        let page = doc.add_page("Page-1").expect("page");
+        let mut bare = one_d(4, (1.0, 1.0), (3.0, 2.0), false);
+        bare.sheet.sections.clear();
+        let line = insert(&mut doc, page, bare);
+        translate_one_d(&mut doc, line, 0.5, 0.0).expect("move");
+        assert_eq!(
+            doc.connector_end(line, ConnectorEnd::End).expect("end"),
+            Point::new(3.5, 2.0)
+        );
+        // A shape whose ends are not numbers cannot move.
+        let mut broken = one_d(5, (0.0, 0.0), (1.0, 0.0), false);
+        if let Some(cell) = broken
+            .sheet
+            .cells
+            .iter_mut()
+            .find(|cell| cell.name.as_str() == "BeginX")
+        {
+            cell.value = Some(CellValue::Str("x".to_owned()));
+        }
+        let broken = insert(&mut doc, page, broken);
+        assert!(translate_one_d(&mut doc, broken, 1.0, 0.0).is_err());
+        assert!(parent_transform(&doc, ShapeId { index: 999 }).is_err());
+    }
+
+    #[test]
+    fn a_1d_member_of_a_group_moves_in_its_parents_space() {
+        let mut doc = Document::new();
+        let page = doc.add_page("Page-1").expect("page");
+        let group = insert(&mut doc, page, shape_at(1, 4.0, 4.0, 4.0, 4.0));
+        let line = doc
+            .insert_subshape(group, one_d(2, (1.0, 1.0), (3.0, 1.0), false), None)
+            .expect("member");
+        let (mut ctx, _) = open(doc);
+        ctx.selection.shapes = vec![line];
+        ctx.selection.anchor = Some(line);
+        dispatch(
+            &mut ctx,
+            "shape.move",
+            Args::new()
+                .with("dx", ArgValue::Number(1.0))
+                .with("dy", ArgValue::Number(0.0)),
+        )
+        .expect("move");
+        // The group's local box starts at (2, 2) on the page: the cells
+        // are in the group's space and move by the page delta.
+        assert_eq!(
+            end_at(&ctx, line, ConnectorEnd::Begin),
+            Point::new(2.0, 1.0)
+        );
+    }
+
+    #[test]
+    fn the_staged_edits_skip_what_they_do_not_touch() {
+        let (ctx, session, page, connector, left, _right) = fixture();
+        let doc = &ctx.active_document().expect("session").document;
+        // No 1-D shape to move: nothing staged.
+        let staged = OneDMoveEdit::stage(doc, session, page, &[left, connector], &[], (1.0, 0.0))
+            .expect("stage");
+        assert!(staged.is_none());
+        assert!(
+            OneDMoveEdit::stage(doc, session, PageId { index: 9 }, &[], &[], (0.0, 0.0)).is_err()
+        );
+        // A legacy record-only connector glued to a deleted shape has no
+        // formulas to clear.
+        let mut doc = doc.clone();
+        let mut connect = Connect::new();
+        connect.from_sheet = 3;
+        connect.from_cell = "BeginX".to_owned();
+        connect.from_part = mutate::VIS_BEGIN;
+        connect.to_sheet = 1;
+        connect.to_cell = "PinX".to_owned();
+        connect.to_part = mutate::VIS_WHOLE_SHAPE;
+        doc.add_connect(page, connect).expect("record");
+        assert!(GlueClearEdit::stage(&doc, session, page, &[left]).is_none());
+    }
+
+    #[test]
+    fn the_1d_edits_carry_their_labels() {
+        let mut doc = Document::new();
+        let page = doc.add_page("Page-1").expect("page");
+        let line = insert(&mut doc, page, one_d(4, (1.0, 1.0), (3.0, 1.0), false));
+        let (ctx, session) = open(doc.clone());
+        let staged = OneDMoveEdit::stage(&doc, session, page, &[line], &[line], (1.0, 0.0))
+            .expect("stage")
+            .expect("one 1-D shape");
+        assert_eq!(staged.label(), "Move 1-D shape");
+        assert!(!staged.dirty_cells().is_empty());
+        let target = insert(&mut doc, page, shape_at(5, 6.0, 1.0, 2.0, 1.0));
+        let visio = |doc: &Document, shape: ShapeId| doc.shape(shape).expect("shape").visio_id;
+        let mut connect = Connect::new();
+        connect.from_sheet = visio(&doc, line);
+        connect.from_cell = "EndX".to_owned();
+        connect.from_part = mutate::VIS_END;
+        connect.to_sheet = visio(&doc, target);
+        connect.to_cell = "PinX".to_owned();
+        connect.to_part = mutate::VIS_WHOLE_SHAPE;
+        doc.add_connect(page, connect).expect("record");
+        let clear = GlueClearEdit::stage(&doc, session, page, &[target]).expect("staged");
+        assert_eq!(clear.label(), "Clear glue to deleted shapes");
+        let _ = ctx;
+    }
+
+    #[test]
+    fn the_subtree_walk_survives_a_cyclic_child_list() {
+        let mut doc = Document::new();
+        let page = doc.add_page("Page-1").expect("page");
+        let group = insert(&mut doc, page, shape_at(1, 4.0, 4.0, 4.0, 4.0));
+        let member = doc
+            .insert_subshape(group, shape_at(2, 1.0, 1.0, 1.0, 1.0), None)
+            .expect("member");
+        if let Some(entity) = doc.shape_mut(member) {
+            entity.children.push(group);
+        }
+        let mut ids = subtree_visio_ids(&doc, &[group]);
+        ids.sort_unstable();
+        assert_eq!(ids, vec![1, 2]);
+    }
+
+    #[test]
+    fn a_copy_with_unreadable_ends_keeps_them() {
+        let mut doc = Document::new();
+        let page = doc.add_page("Page-1").expect("page");
+        let mut broken = one_d(4, (0.0, 0.0), (1.0, 0.0), false);
+        if let Some(cell) = broken
+            .sheet
+            .cells
+            .iter_mut()
+            .find(|cell| cell.name.as_str() == "EndY")
+        {
+            cell.value = Some(CellValue::Str("x".to_owned()));
+        }
+        let broken = insert(&mut doc, page, broken);
+        rebind_copied_glue(&mut doc, broken, &[]).expect("rebind");
+        assert_eq!(
+            doc.connector_end(broken, ConnectorEnd::Begin)
+                .expect("begin"),
+            Point::new(0.0, 0.0)
+        );
+        // A shape that is not 1-D has nothing to rebind.
+        let plain = insert(&mut doc, page, shape_at(5, 1.0, 1.0, 1.0, 1.0));
+        rebind_copied_glue(&mut doc, plain, &[]).expect("plain");
+    }
+
+    #[test]
+    fn a_target_gone_without_a_delete_frees_the_end_on_the_next_pass() {
+        let mut doc = Document::new();
+        let page = doc.add_page("Page-1").expect("page");
+        let target = insert(&mut doc, page, shape_at(1, 6.0, 1.0, 2.0, 1.0));
+        let line = insert(&mut doc, page, one_d(4, (1.0, 1.0), (5.0, 1.0), false));
+        let target_visio = doc.shape(target).expect("target").visio_id;
+        doc.write_connector_end(
+            line,
+            ConnectorEnd::End,
+            Point::new(5.0, 1.0),
+            EndGlue::Dynamic {
+                sheet: target_visio,
+            },
+        )
+        .expect("glue formula");
+        let mut connect = Connect::new();
+        connect.from_sheet = doc.shape(line).expect("line").visio_id;
+        connect.from_cell = "EndX".to_owned();
+        connect.from_part = mutate::VIS_END;
+        connect.to_sheet = target_visio;
+        connect.to_cell = "PinX".to_owned();
+        connect.to_part = mutate::VIS_WHOLE_SHAPE;
+        doc.add_connect(page, connect).expect("record");
+        // The target leaves the page's list but the record survives (a
+        // file with a dangling record).
+        if let Some(entity) = doc.pages.get_mut(0) {
+            entity.shapes.retain(|shape| *shape != target);
+        }
+        let mut warnings = Vec::new();
+        reroute_document(&mut doc, page, &mut warnings).expect("pass");
+        assert!(doc.page(page).expect("page").connects.is_empty());
+        let end_x = doc
+            .shape(line)
+            .expect("line")
+            .sheet
+            .cells
+            .iter()
+            .find(|cell| cell.name.as_str() == "EndX")
+            .cloned()
+            .expect("EndX");
+        assert_eq!(end_x.formula, None, "the stale glue formula goes");
+        assert!(warnings.iter().any(|line| line.contains("lost its glue")));
+    }
+
+    #[test]
+    fn a_legacy_connector_glues_from_its_geometry_or_its_pin() {
+        // The fixture's connector has no endpoint cells and no rows: its
+        // ends fall back to its pin.
+        let (mut ctx, _session, _page, connector, _left, _right) = fixture();
+        dispatch(
+            &mut ctx,
+            "connector.glue_begin",
+            args(&[("connector", 3), ("target", 1)]),
+        )
+        .expect("glue");
+        // With rows, the geometry's ends are the stored points.
+        if let Some(slot) = ctx.active_document_mut() {
+            slot.document
+                .write_connector_path(connector, &[Point::new(0.0, 0.0), Point::new(2.0, 1.0)])
+                .expect("rows");
+        }
+        dispatch(
+            &mut ctx,
+            "connector.glue_end",
+            args(&[("connector", 3), ("target", 2)]),
+        )
+        .expect("glue");
+        let doc = &ctx.active_document().expect("session").document;
+        assert!(!doc.is_connector(connector), "nothing migrates it");
+        assert_eq!(
+            doc.page(PageId { index: 0 }).expect("page").connects.len(),
+            2
+        );
     }
 }

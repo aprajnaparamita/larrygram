@@ -102,7 +102,24 @@ fn the_shape_data_and_connection_rows_survive() {
                 .sections
                 .iter()
                 .find(|section| section.name.as_str() == name)
-                .unwrap_or_else(|| panic!("{}: no {name} section", def.name_u))
+        };
+        if def.connector_1d {
+            // The 1-D connector carries neither section (ADR 0084
+            // rule 1): no Shape Data rows and no connection points.
+            assert!(
+                sections("Property").is_none(),
+                "{}: no Property",
+                def.name_u
+            );
+            assert!(
+                sections("Connection").is_none(),
+                "{}: no Connection",
+                def.name_u
+            );
+            continue;
+        }
+        let sections = |name: &str| {
+            sections(name).unwrap_or_else(|| panic!("{}: no {name} section", def.name_u))
         };
         assert_eq!(
             sections("Property").rows.len(),
