@@ -117,6 +117,9 @@ pub(super) fn run_insert_shape(
             .instantiate_master(master_id, page, Point::new(x, y), size)
             .map_err(model_error)?;
         let scaled = match size {
+            // A 1-D instance's path already has its length (ADR 0084
+            // rule 1, amended: the drop writes its ends): no rescale.
+            _ if doc.is_connector(shape) => None,
             Some(size) if size.width != definition.width || size.height != definition.height => {
                 Some(size)
             }

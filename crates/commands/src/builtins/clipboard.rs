@@ -377,8 +377,36 @@ pub(super) fn paste_content(
             root_ids.push(id);
         }
 
+        // The records whose two ends were copied, renumbered to the
+        // copies (added after the moves below).
+        let mut fresh_connects = Vec::new();
+        for connect in &content.connects {
+            let (Some(from_sheet), Some(to_sheet)) = (
+                visio_map.get(&connect.from_sheet),
+                visio_map.get(&connect.to_sheet),
+            ) else {
+                warnings
+                    .push("a connect record referred to a shape that was not copied".to_owned());
+                continue;
+            };
+            let mut fresh = connect.clone();
+            fresh.from_sheet = *from_sheet;
+            fresh.to_sheet = *to_sheet;
+            fresh_connects.push(fresh);
+        }
+
+        // A copied 1-D shape's glue formulas follow its records (ADR
+        // 0084 rule 1, amended): an end glued to a copied shape names the
+        // copy, every other glued end comes loose at its stored point.
+        for new_visio in visio_map.values() {
+            if let Some(copy) = doc.shape_by_visio_id(page, *new_visio) {
+                super::connector::rebind_copied_glue(doc, copy, &fresh_connects)?;
+            }
+        }
+
         // The pointer or the consecutive-paste offset moves the roots
-        // only; their descendants follow through the group transform.
+        // only; their descendants follow through the group transform. A
+        // 1-D root moves its endpoint cells with its path.
         let delta = match placement {
             Placement::Offset(dx, dy) => (dx, dy),
             Placement::Pointer(x, y) => match root_ids.first().copied() {
@@ -394,6 +422,10 @@ pub(super) fn paste_content(
         };
         if delta.0 != 0.0 || delta.1 != 0.0 {
             for root in &root_ids {
+                if doc.is_connector(*root) {
+                    super::connector::translate_one_d(doc, *root, delta.0, delta.1)?;
+                    continue;
+                }
                 let (pin_x, pin_y) =
                     read_cell_number(doc, *root, "PinX").and_then(|(pin_x, _)| {
                         read_cell_number(doc, *root, "PinY").map(|(pin_y, _)| (pin_x, pin_y))
@@ -414,18 +446,7 @@ pub(super) fn paste_content(
             }
         }
 
-        for connect in &content.connects {
-            let (Some(from_sheet), Some(to_sheet)) = (
-                visio_map.get(&connect.from_sheet),
-                visio_map.get(&connect.to_sheet),
-            ) else {
-                warnings
-                    .push("a connect record referred to a shape that was not copied".to_owned());
-                continue;
-            };
-            let mut fresh = connect.clone();
-            fresh.from_sheet = *from_sheet;
-            fresh.to_sheet = *to_sheet;
+        for fresh in fresh_connects {
             doc.add_connect(page, fresh).map_err(super::model_error)?;
         }
     }
