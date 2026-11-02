@@ -812,6 +812,346 @@ const ALLOWED: &[Allow] = &[
         context: ContextId::ShapesheetWindow,
         reason: "the window mode is UI state that an AppCtx predicate cannot see",
     },
+    Allow {
+        command: "format.text.align_bottom",
+        context: ContextId::ShapesSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "format.text.align_bottom",
+        context: ContextId::GroupSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "format.text.align_bottom",
+        context: ContextId::PictureSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "format.text.align_bottom",
+        context: ContextId::ContainerSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "format.text.align_center",
+        context: ContextId::ShapesSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "format.text.align_center",
+        context: ContextId::GroupSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "format.text.align_center",
+        context: ContextId::PictureSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "format.text.align_center",
+        context: ContextId::ContainerSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "format.text.align_justify",
+        context: ContextId::ShapesSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "format.text.align_justify",
+        context: ContextId::GroupSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "format.text.align_justify",
+        context: ContextId::PictureSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "format.text.align_justify",
+        context: ContextId::ContainerSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "format.text.align_left",
+        context: ContextId::ShapesSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "format.text.align_left",
+        context: ContextId::GroupSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "format.text.align_left",
+        context: ContextId::PictureSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "format.text.align_left",
+        context: ContextId::ContainerSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "format.text.align_middle",
+        context: ContextId::ShapesSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "format.text.align_middle",
+        context: ContextId::GroupSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "format.text.align_middle",
+        context: ContextId::PictureSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "format.text.align_middle",
+        context: ContextId::ContainerSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "format.text.align_right",
+        context: ContextId::ShapesSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "format.text.align_right",
+        context: ContextId::GroupSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "format.text.align_right",
+        context: ContextId::PictureSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "format.text.align_right",
+        context: ContextId::ContainerSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "format.text.align_top",
+        context: ContextId::ShapesSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "format.text.align_top",
+        context: ContextId::GroupSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "format.text.align_top",
+        context: ContextId::PictureSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "format.text.align_top",
+        context: ContextId::ContainerSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "format.text.bold",
+        context: ContextId::ShapesSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "format.text.bold",
+        context: ContextId::GroupSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "format.text.bold",
+        context: ContextId::PictureSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "format.text.bold",
+        context: ContextId::ContainerSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "format.text.italic",
+        context: ContextId::ShapesSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "format.text.italic",
+        context: ContextId::GroupSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "format.text.italic",
+        context: ContextId::PictureSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "format.text.italic",
+        context: ContextId::ContainerSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "format.text.underline",
+        context: ContextId::ShapesSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "format.text.underline",
+        context: ContextId::GroupSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "format.text.underline",
+        context: ContextId::PictureSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "format.text.underline",
+        context: ContextId::ContainerSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "text.bullets",
+        context: ContextId::ShapesSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "text.bullets",
+        context: ContextId::GroupSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "text.bullets",
+        context: ContextId::PictureSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "text.bullets",
+        context: ContextId::ContainerSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "text.font",
+        context: ContextId::ShapesSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "text.font",
+        context: ContextId::GroupSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "text.font",
+        context: ContextId::PictureSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "text.font",
+        context: ContextId::ContainerSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "text.font.color",
+        context: ContextId::ShapesSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "text.font.color",
+        context: ContextId::GroupSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "text.font.color",
+        context: ContextId::PictureSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "text.font.color",
+        context: ContextId::ContainerSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "text.font.size",
+        context: ContextId::ShapesSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "text.font.size",
+        context: ContextId::GroupSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "text.font.size",
+        context: ContextId::PictureSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "text.font.size",
+        context: ContextId::ContainerSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "text.font.size.decrease",
+        context: ContextId::ShapesSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "text.font.size.decrease",
+        context: ContextId::GroupSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "text.font.size.decrease",
+        context: ContextId::PictureSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "text.font.size.decrease",
+        context: ContextId::ContainerSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "text.font.size.increase",
+        context: ContextId::ShapesSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "text.font.size.increase",
+        context: ContextId::GroupSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "text.font.size.increase",
+        context: ContextId::PictureSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "text.font.size.increase",
+        context: ContextId::ContainerSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "tools.strikethrough",
+        context: ContextId::ShapesSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "tools.strikethrough",
+        context: ContextId::GroupSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "tools.strikethrough",
+        context: ContextId::PictureSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
+    Allow {
+        command: "tools.strikethrough",
+        context: ContextId::ContainerSelected,
+        reason: "the text controls follow the text (task P7-29 item 1): the 2007 table offers them whenever shapes are selected, our rule needs a shape with text (the context fixtures' shapes have none)",
+    },
 ];
 
 fn allowed(command: &str, context: ContextId) -> Option<&'static str> {
