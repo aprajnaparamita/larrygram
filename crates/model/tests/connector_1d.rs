@@ -749,3 +749,44 @@ fn instantiate_master_places_a_1d_masters_ends_at_the_drop_point() {
     let end = doc.connector_end(sized, ConnectorEnd::End).expect("end");
     assert!((end.x - begin.x - 2.4).abs() < 1e-12, "{begin:?} {end:?}");
 }
+
+#[test]
+fn a_zero_length_1d_master_drops_unscaled() {
+    let (mut doc, _) = with_connector();
+    let page = doc.pages[0].id;
+    let master = doc.master_by_name_u("Connector").expect("master");
+    let content = doc.masters[master.index as usize].shapes[0];
+    // The master's end sits on its begin: there is no length to scale.
+    if let Some(entity) = doc.shape_mut(content) {
+        for cell in &mut entity.sheet.cells {
+            if cell.name.as_str() == "EndX" {
+                cell.value = Some(CellValue::Number(0.0));
+            }
+        }
+    }
+    let dropped = doc
+        .instantiate_master(master, page, Point::new(1.0, 1.0), None)
+        .expect("drop");
+    let begin = doc
+        .connector_end(dropped, ConnectorEnd::Begin)
+        .expect("begin");
+    let end = doc.connector_end(dropped, ConnectorEnd::End).expect("end");
+    assert_eq!(begin, end);
+}
+
+#[test]
+fn a_1d_drop_that_overflows_is_refused_and_leaves_nothing() {
+    let (mut doc, _) = with_connector();
+    let page = doc.pages[0].id;
+    let master = doc.master_by_name_u("Connector").expect("master");
+    let before = doc.page(page).expect("page").shapes.len();
+    // A finite but enormous width pushes the end past f64::MAX.
+    let refused = doc.instantiate_master(
+        master,
+        page,
+        Point::new(f64::MAX, 0.0),
+        Some(larrygram_geom::Size::new(f64::MAX, 0.2)),
+    );
+    assert!(refused.is_err());
+    assert_eq!(doc.page(page).expect("page").shapes.len(), before);
+}
