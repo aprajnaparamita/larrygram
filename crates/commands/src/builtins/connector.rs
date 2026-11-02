@@ -1174,15 +1174,7 @@ impl PathEdit {
         if doc.is_connector(connector) {
             // The 1-D cells the path write refreshes (task P7-31).
             for cell in [
-                "BeginX",
-                "BeginY",
-                "EndX",
-                "EndY",
-                "PinX",
-                "PinY",
-                "Width",
-                "Height",
-                "LocPinX",
+                "BeginX", "BeginY", "EndX", "EndY", "PinX", "PinY", "Width", "Height", "LocPinX",
                 "LocPinY",
             ] {
                 dirty.push(CellAddress::new(
@@ -1476,7 +1468,8 @@ fn drop_detached_targets(
         .filter(|shape| doc.is_connector(*shape));
     if let Some(shape) = clear {
         for (end, at) in &lost_ends {
-            if let Err(error) = doc.write_connector_end(shape, end.connector_end(), *at, EndGlue::Free)
+            if let Err(error) =
+                doc.write_connector_end(shape, end.connector_end(), *at, EndGlue::Free)
             {
                 warnings.push(format!(
                     "connector {connector_visio_id} kept a stale glue formula: {error}"

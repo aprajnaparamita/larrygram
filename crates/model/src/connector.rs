@@ -19,8 +19,8 @@ use crate::error::Error;
 use crate::id::ShapeId;
 use crate::lookup::{CellLookup, ValueSource};
 use crate::mutate::CellWrite;
-use crate::values::SheetRef;
 use crate::name::CellName;
+use crate::values::SheetRef;
 
 /// Which end of a 1-D shape.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -100,9 +100,10 @@ impl Document {
     /// **not** a connector; nothing migrates it.
     pub fn is_connector(&self, shape: ShapeId) -> bool {
         ENDPOINT_CELLS.iter().all(|name| {
-            self.resolve(shape, &CellName::new(*name)).is_ok_and(|found| {
-                matches!(found.source, ValueSource::Local | ValueSource::Master(_))
-            })
+            self.resolve(shape, &CellName::new(*name))
+                .is_ok_and(|found| {
+                    matches!(found.source, ValueSource::Local | ValueSource::Master(_))
+                })
         })
     }
 
@@ -185,7 +186,11 @@ impl Document {
         };
         self.write_cell(SheetRef::Shape(shape), &CellName::new(x_cell), &x_write)?;
         self.write_cell(SheetRef::Shape(shape), &CellName::new(y_cell), &y_write)?;
-        self.write_cell(SheetRef::Shape(shape), &CellName::new(trigger), &trigger_write)?;
+        self.write_cell(
+            SheetRef::Shape(shape),
+            &CellName::new(trigger),
+            &trigger_write,
+        )?;
         Ok(())
     }
 
