@@ -47,6 +47,18 @@ larrygram-render = { path = "../../crates/render" }
 # of the saved and reopened documents (ADR 0049, task P5-10).
 larrygram-model = { path = "../../crates/model" }
 
+# The Windows console attach (task R11 goal 2, ADR 0074): the same
+# windows-sys 0.61 line the tree already builds (through winit and
+# eframe), so one version unifies. MIT OR Apache-2.0 (checked by
+# cargo deny).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Console",
+] }
+
 # The macOS open-documents delegate (task R8, ADR 0074): the same
 # objc2 family and versions eframe 0.37 already uses, so the features
 # unify in one build. MIT OR Apache-2.0 (checked by cargo deny).
@@ -66,8 +78,9 @@ objc2-foundation = { version = "0.3", default-features = false, features = [
 ] }
 
 # The workspace lint list, with one exception (ADR 0074): `unsafe`
-# is denied rather than forbidden, so the one macOS delegate module
-# (`macos_open_urls.rs`) can carry its own `#![allow(unsafe_code)]`.
+# is denied rather than forbidden, so the two platform modules
+# (`macos_open_urls.rs`, task R8, and `windows_console.rs`, task R11
+# goal 2) can carry their own `#![allow(unsafe_code)]`.
 # Cargo forbids mixing `lints.workspace = true` with overrides, so the
 # list is spelled out here and must stay in step with `[workspace.lints]`
 # in the root `Cargo.toml`.

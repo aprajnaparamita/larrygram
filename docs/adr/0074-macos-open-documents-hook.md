@@ -1,6 +1,7 @@
-# 0074: The macOS open-documents hook (the one `unsafe` module)
+# 0074: The macOS open-documents hook (the `unsafe` modules)
 
-- Status: accepted
+- Status: accepted; amended by task R11 goal 2 (the Windows console
+  attach), see the amendment at the end
 - Date: 2026-10-25
 - Task: R8
 
@@ -33,7 +34,9 @@ behind an accepted ADR.
 ### One small module
 
 `apps/larrygram/src/macos_open_urls.rs` is the only module with
-`unsafe` code. It is `cfg(target_os = "macos")`, so no other platform
+`unsafe` code on macOS (task R11 goal 2 adds the second platform
+module, `windows_console.rs`, by the same pattern; see the amendment
+at the end). It is `cfg(target_os = "macos")`, so no other platform
 compiles it.
 
 ### Method injection, never a delegate change
@@ -88,7 +91,7 @@ queue of paths is the only state it touches.
   forbids mixing `lints.workspace = true` with overrides.
 - The crate root of `apps/larrygram` keeps `#![deny(unsafe_code)]`, so
   every other module is still denied `unsafe`.
-- `macos_open_urls.rs` carries `#![allow(unsafe_code)] // ADR 0074`,
+- Each platform module carries its own `#![allow(unsafe_code)] // ADR 0074`,
   and every `unsafe` block inside it carries a `// SAFETY:` comment
   saying why it holds.
 
@@ -150,3 +153,28 @@ crate versions.
   consumes the event first is less certain than delegate dispatch.
 - **Poll the pasteboard or `NSDocumentController`**: neither reports
   launch documents to a non-document app.
+## Amendment (task R11 goal 2): the Windows console attach
+
+- Date: 2026-10-26
+- Task: R11
+
+`apps/larrygram/src/windows_console.rs` is the second (and last)
+module with `unsafe` code, built by this ADR's pattern: one small
+module, `cfg(windows)`, its own `#![allow(unsafe_code)]`, and a
+`// SAFETY:` comment on every call.
+
+The Windows desktop app is a GUI-subsystem binary, so `larrygram.exe
+--help` and a startup error printed nothing (the R9 review's item 7).
+When the app is started from a console, the module attaches to the
+parent's console with `AttachConsole(ATTACH_PARENT_PROCESS)` and
+points the standard output and error handles at `CONOUT$`, so both
+prints appear there. A double-click start has no parent console: the
+attach fails silently and the prints go nowhere, as before. The
+message-box alternative was rejected because it cannot serve
+`--help`.
+
+`main()` runs the attach before any printing, and the two print sites
+go through fallible writes that ignore a missing console instead of
+panicking (AGENTS.md section 6). The dependency is `windows-sys` 0.61
+(MIT OR Apache-2.0), the same line the tree already builds through
+winit and eframe.

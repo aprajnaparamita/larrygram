@@ -15,22 +15,27 @@
 //! (task R8): paths on the command line and the macOS open-documents
 //! event.
 //!
-//! `unsafe` is denied everywhere except the one macOS delegate module
-//! (ADR 0074): the workspace lint is lowered to `deny` there so the
-//! module can carry its own `#![allow(unsafe_code)]`, and nothing else
-//! in this crate may use `unsafe`.
+//! `unsafe` is denied everywhere except the two platform modules
+//! (ADR 0074): the workspace lint is lowered to `deny` so each module
+//! can carry its own `#![allow(unsafe_code)]` — `macos_open_urls.rs`
+//! (task R8) and `windows_console.rs` (task R11 goal 2) — and nothing
+//! else in this crate may use `unsafe`.
 
 // No console window behind the GUI on Windows (task R9 goal 2). The
-// CLI (`larrygram-cli`) keeps its console. The window and taskbar icon
-// come from `icon.svg`, rasterised at runtime into the viewport icon
-// (ADR 0067, task P7-16), so no `.ico` resource or build script is
-// needed (task R9 goal 2).
+// CLI (`larrygram-cli`) keeps its console. When the app is started
+// from a console, `windows_console` attaches to it (task R11 goal 2),
+// so `--help` and startup errors print there. The window and taskbar
+// icon come from `icon.svg`, rasterised at runtime into the viewport
+// icon (ADR 0067, task P7-16); the Explorer and taskbar-pin icon is
+// the `.ico` resource `build.rs` embeds (task R11 goal 3).
 #![cfg_attr(windows, windows_subsystem = "windows")]
 #![deny(unsafe_code)]
 
 #[cfg(target_os = "macos")]
 mod macos_open_urls;
 mod open_documents;
+#[cfg(windows)]
+mod windows_console;
 
 use std::fmt;
 use std::path::PathBuf;
@@ -226,7 +231,7 @@ fn native_options() -> eframe::NativeOptions {
 fn run_with(args: &[String]) -> Result<(), AppError> {
     let options = parse_args(args)?;
     if options.help {
-        println!("{}", help_text());
+        print_line(help_text());
         return Ok(());
     }
     let registry = larrygram_commands::builtins::registry()
@@ -371,12 +376,31 @@ impl eframe::App for LarrygramApp {
     }
 }
 
+/// Writes one line to stdout, ignoring a missing or closed console
+/// (task R11 goal 2: the Windows GUI build with no parent console
+/// prints nothing) and never panicking (AGENTS.md section 6).
+fn print_line(line: &str) {
+    use std::io::Write as _;
+    let _ = writeln!(std::io::stdout(), "{line}");
+}
+
+/// Writes one line to stderr, with the contract of [`print_line`].
+fn print_error_line(line: &str) {
+    use std::io::Write as _;
+    let _ = writeln!(std::io::stderr(), "{line}");
+}
+
 /// Entry point: prints `error: <message>` and exits non-zero on
 /// failure (ADR 0026 style).
 fn main() {
+    // The Windows console attach (task R11 goal 2) goes first: the
+    // prints below write through the standard handles, which the
+    // attach points at the parent's console.
+    #[cfg(windows)]
+    windows_console::attach_parent_console();
     let args: Vec<String> = std::env::args().skip(1).collect();
     if let Err(error) = run_with(&args) {
-        eprintln!("error: {error}");
+        print_error_line(&format!("error: {error}"));
         std::process::exit(1);
     }
 }

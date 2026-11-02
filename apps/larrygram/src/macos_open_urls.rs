@@ -26,10 +26,11 @@
 //!
 //! The callback only queues the paths;
 //! `crate::open_documents` dispatches them as `file.open` on the UI
-//! thread. This is the one `unsafe` module of the app (ADR 0074), and
-//! nothing in it may unwind across the AppKit callback (AGENTS.md
-//! section 6): the body runs inside `std::panic::catch_unwind`, and a
-//! failure is logged and dropped.
+//! thread. This is the one `unsafe` module of the macOS build (ADR
+//! 0074, amended: `windows_console.rs` is the other platform module,
+//! task R11 goal 2), and nothing in it may unwind across the AppKit
+//! callback (AGENTS.md section 6): the body runs inside
+//! `std::panic::catch_unwind`, and a failure is logged and dropped.
 
 #![allow(unsafe_code)] // ADR 0074: one Objective-C method injection.
 
