@@ -31,6 +31,19 @@ fn shell_rig(kind: LayoutKind) -> ShellRig {
     app.settings.ui_layout = kind;
     app.selection.shapes.clear();
     app.selection.anchor = None;
+    // Both fixture shapes carry text (task P7-29 item 1: the text
+    // controls follow the text and disable without it, and the latch
+    // contrast here is the style bits, not the text).
+    let session = app.active_document_mut().expect("session");
+    let page = session.active_page.expect("page");
+    let shapes = session.document.page(page).expect("page").shapes.clone();
+    for shape in shapes {
+        if let Some(entry) = session.document.shape_mut(shape) {
+            entry.text = Some(larrygram_model::TextContent {
+                parts: vec![larrygram_model::TextPart::Text("x".to_owned())],
+            });
+        }
+    }
     let mut rig = ShellRig::with_app(app);
     rig.run();
     // Centre the fixture shapes in the viewport (the `interaction`

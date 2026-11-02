@@ -528,10 +528,8 @@ fn draw_combo(
 ) {
     let label = item.label.clone().unwrap_or_default();
     let mut buffer = state.combo_text.get(&item.id).cloned().unwrap_or_default();
-    let enabled = !matches!(
-        rows::combo_activation(item, input, Source::Ui, String::new()),
-        Activation::Disabled { .. }
-    );
+    let activation = rows::combo_activation(item, input, Source::Ui, String::new());
+    let enabled = !matches!(activation, Activation::Disabled { .. });
     let m = ClassicMetrics::for_ctx(ui.ctx());
     let width = item
         .width
@@ -545,7 +543,7 @@ fn draw_combo(
     } else {
         0.0
     };
-    let response = ui
+    let mut response = ui
         .add_enabled_ui(enabled, |ui| {
             ui.add_sized(
                 Vec2::new(width - arrow_width, m.toolbar_button.y),
@@ -556,6 +554,12 @@ fn draw_combo(
     response.widget_info(|| {
         WidgetInfo::labeled(egui::accesskit::Role::ComboBox, enabled, label.clone())
     });
+    // The combo carries the same tooltip as a toolbar button (task
+    // P7-29 item 1: the disabled reason is the tooltip).
+    let tooltip = rows::button_tooltip(&label, item.shortcut.as_deref(), &activation);
+    if !tooltip.is_empty() {
+        response = response.on_hover_text(tooltip);
+    }
     if list {
         let arrow = ui
             .scope(|ui| {

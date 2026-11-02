@@ -1087,15 +1087,20 @@ fn the_transparency_rows_preview_and_apply() {
 }
 
 // ---------------------------------------------------------------------------
-// Goal 8 (the part that stays here): the text controls stay enabled on
-// a shape without text, and the format applies to text typed later.
+// Goal 8 (rewritten by task P7-29 item 1): the text controls follow
+// the text — disabled on a shape without text (this reverses P7-24
+// item 8's rule), enabled while its text is being edited, and the
+// format applies to the text being typed.
 // ---------------------------------------------------------------------------
 
-/// On a shape without text the font, size and style controls stay
-/// enabled (goal 8) and the format they apply shows on text typed
-/// later.
+/// The disabled hint of the text controls (task P7-29 item 1).
+const ADD_TEXT: &str = "Add text first: double-click the shape or start typing.";
+
+/// The text controls disable on a shape without text with the "add
+/// text" hint, enable while its text is being edited, and the format
+/// applies to the text being typed (task P7-29 item 1).
 #[test]
-fn the_text_controls_stay_enabled_on_an_empty_shape_and_apply_to_later_text() {
+fn the_text_controls_follow_the_text() {
     for kind in LAYOUTS {
         let mut rig = shell_rig(kind);
         select_shape(&mut rig);
@@ -1105,9 +1110,9 @@ fn the_text_controls_stay_enabled_on_an_empty_shape_and_apply_to_later_text() {
             "{kind:?}: the fixture starts without text"
         );
 
-        // Every text control is enabled on the text-less shape (the
-        // centre button is "Align Center" in Panel Classic and
-        // "Center" in Panel Modern).
+        // Every text control is disabled on the text-less shape with
+        // the hint (the centre button is "Align Center" in Panel
+        // Classic and "Center" in Panel Modern).
         let role = combo_role(kind);
         let centre = match kind {
             LayoutKind::PanelClassic => "Align Center",
@@ -1124,26 +1129,28 @@ fn the_text_controls_stay_enabled_on_an_empty_shape_and_apply_to_later_text() {
             (Role::Button, "Align Right"),
         ] {
             assert!(
-                !disabled(&mut rig, role, name),
-                "{kind:?}: {name} enables on a shape without text"
+                disabled(&mut rig, role, name),
+                "{kind:?}: {name} disables on a shape without text"
+            );
+            assert_eq!(
+                tooltip(&mut rig, role, name).as_deref(),
+                Some(ADD_TEXT),
+                "{kind:?}: {name} carries the hint"
             );
         }
 
-        // The format applies now: bold and 36 pt.
-        click(&mut rig, Role::Button, "Bold");
-        open_size_list(&mut rig, kind);
-        click(&mut rig, Role::Button, "36 pt");
-        let style = row_number(&rig, shape, "Character", "Style")
-            .unwrap_or_else(|| panic!("{kind:?}: the Style cell"));
-        assert_eq!(style, 1.0, "{kind:?}: the bold bit records at once");
-        let size = row_number(&rig, shape, "Character", "Size")
-            .unwrap_or_else(|| panic!("{kind:?}: the Size cell"));
+        // The fill and line controls are unchanged (goal 1's split).
+        let line_weight = match kind {
+            LayoutKind::PanelClassic => "Line Weight",
+            _ => "Line",
+        };
         assert!(
-            (size - 0.5).abs() < 1.0e-9,
-            "{kind:?}: the size records at once ({size})"
+            !disabled(&mut rig, Role::Button, line_weight),
+            "{kind:?}: the shape controls stay enabled"
         );
 
-        // Text typed later paints at that format (a light fill first:
+        // While the text is being edited the controls enable and the
+        // format applies to the text being typed (a light fill first:
         // the default fill is dark and the black text hides on it —
         // and "No Fill" would leave the shape's interior unhittable).
         open_fill_picker(&mut rig, kind);
@@ -1151,12 +1158,49 @@ fn the_text_controls_stay_enabled_on_an_empty_shape_and_apply_to_later_text() {
         let before = ink(&mut rig, 2.05, 2.55, 3.95, 3.6);
         let pos = screen(&rig, SHAPE.0, SHAPE.1);
         double_click_at(&mut rig, pos);
+        assert!(
+            has(&mut rig, Role::MultilineTextInput, "Text"),
+            "{kind:?}: the double click opens the editor"
+        );
+        assert!(
+            !disabled(&mut rig, role, "Font"),
+            "{kind:?}: the font box enables while the text is typed"
+        );
+        assert!(
+            !disabled(&mut rig, Role::Button, "Bold"),
+            "{kind:?}: Bold enables while the text is typed"
+        );
         type_into_editor(&mut rig, "MMMM");
-        press_key(&mut rig, egui::Key::Escape);
+        // Bold while typing: the click commits the typed text and
+        // records the format on it.
+        click(&mut rig, Role::Button, "Bold");
+        open_size_list(&mut rig, kind);
+        click(&mut rig, Role::Button, "36 pt");
+        assert_eq!(
+            shape_text(&rig, shape).as_deref(),
+            Some("MMMM"),
+            "{kind:?}: the typed text is written"
+        );
+        let style = row_number(&rig, shape, "Character", "Style")
+            .unwrap_or_else(|| panic!("{kind:?}: the Style cell"));
+        assert_eq!(style, 1.0, "{kind:?}: the bold bit records");
+        let size = row_number(&rig, shape, "Character", "Size")
+            .unwrap_or_else(|| panic!("{kind:?}: the Size cell"));
+        assert!(
+            (size - 0.5).abs() < 1.0e-9,
+            "{kind:?}: the size records ({size})"
+        );
+
+        // The picture paints the text at that format, and the
+        // controls stay enabled now that the shape has text.
         let after = ink(&mut rig, 2.05, 2.55, 3.95, 3.6);
         assert!(
             after > before * 2,
-            "{kind:?}: the later text paints at the recorded format ({before} to {after})"
+            "{kind:?}: the typed text paints at the recorded format ({before} to {after})"
+        );
+        assert!(
+            !disabled(&mut rig, role, "Font"),
+            "{kind:?}: the font box stays enabled on a shape with text"
         );
     }
 }
@@ -1167,11 +1211,16 @@ fn the_text_controls_stay_enabled_on_an_empty_shape_and_apply_to_later_text() {
 // ---------------------------------------------------------------------------
 
 /// Bold, Italic, Underline and the alignment buttons show which
-/// setting is on, in both layouts (goal 10).
+/// setting is on, in both layouts (goal 10). The shape carries text
+/// first (task P7-29 item 1: the text controls follow the text).
 #[test]
 fn the_toggle_buttons_show_the_current_state() {
     for kind in LAYOUTS {
         let mut rig = shell_rig(kind);
+        let pos = screen(&rig, SHAPE.0, SHAPE.1);
+        double_click_at(&mut rig, pos);
+        type_into_editor(&mut rig, "MMMM");
+        press_key(&mut rig, egui::Key::Escape);
         select_shape(&mut rig);
         let shape = rectangle(&rig.shell.borrow().app);
         // The alignment default is left; no style bits are on.

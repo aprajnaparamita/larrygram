@@ -480,6 +480,12 @@ pub struct AppCtx {
     /// a copied format waits to be applied. The state is the copy's
     /// origin, never the format itself (the apply form re-reads it).
     pub format_painter: Option<PaintSource>,
+    /// The shape whose text the in-place editor is editing (task
+    /// P7-29), mirrored from `crates/ui`'s text editor each frame (the
+    /// same window-state pattern as `active_tool` and `full_screen`,
+    /// in reverse). The text formatting predicates read it: the
+    /// format applies to the text being typed.
+    pub editing_text: Option<larrygram_model::ShapeId>,
     /// The undo-recording gate (ADR 0040 rule 2): set while an
     /// [`Edit`]'s `apply`/`revert` runs. While it is set,
     /// [`AppCtx::push_edit`] drops the edit and warns instead of
@@ -504,6 +510,7 @@ impl AppCtx {
             active_tool: ActiveTool::Pointer,
             full_screen: false,
             format_painter: None,
+            editing_text: None,
             undo_suspended: false,
         }
     }

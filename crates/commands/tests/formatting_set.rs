@@ -307,6 +307,11 @@ fn prepared() -> AppCtx {
             });
         }
         shape.sheet.sections.push(geometry());
+        // Every shape carries text (task P7-29: the text formatting
+        // commands follow the text and disable on a shape without it).
+        shape.text = Some(larrygram_model::TextContent {
+            parts: vec![larrygram_model::TextPart::Text("x".to_owned())],
+        });
         let id = session
             .document
             .insert_shape(page, shape, None)
@@ -492,6 +497,7 @@ fn the_format_painter_takes_a_flag() {
 #[test]
 fn a_formatted_shape_renders_its_cells_and_its_picture() {
     let mut ctx = prepared();
+    run(&mut ctx, "shape.set.text", text("text", "Hello")).expect("text");
     run(&mut ctx, "format.set.fill.color", text("color", "#FF0000")).expect("fill");
     run(&mut ctx, "shape.transparency", number("transparency", 50.0)).expect("transparency");
     run(&mut ctx, "format.set.line.color", text("value", "#0000FF")).expect("line color");
@@ -505,7 +511,6 @@ fn a_formatted_shape_renders_its_cells_and_its_picture() {
     run(&mut ctx, "format.text.underline", Args::new()).expect("underline");
     run(&mut ctx, "tools.strikethrough", Args::new()).expect("strikethrough");
     run(&mut ctx, "text.font.color", text("value", "#008000")).expect("font color");
-    run(&mut ctx, "shape.set.text", text("text", "Hello")).expect("text");
 
     // The cells the renderer reads.
     let session = ctx.active_document().expect("session");
