@@ -14,6 +14,7 @@
 //! `text.begin`/`text.commit`/`text.cancel` commands validate and
 //! announce the same transition for headless callers.
 
+use egui::text::{CCursor, CCursorRange};
 use egui::{Id, Ui};
 use larrygram_commands::AppCtx;
 use larrygram_geom::{Point, Rect as GeoRect, Transform};
@@ -167,6 +168,9 @@ impl TextEditor {
             egui::Rect::from_min_size(ui.ctx().viewport_rect().min, egui::vec2(160.0, 40.0))
         };
         let request_focus = self.focus_requested;
+        // The caret goes to the end of the buffer when the editor
+        // opens (task P7-29 item 2).
+        let buffer_chars = self.buffer.chars().count();
         let mut commit = false;
         egui::Area::new(editor_id(self.shape))
             .order(egui::Order::Foreground)
@@ -200,6 +204,16 @@ impl TextEditor {
                 output.response.response = output.response.response.clone().accessible_name("Text");
                 if request_focus {
                     output.response.request_focus();
+                    // The caret sits at the end of the text when the
+                    // editor opens (task P7-29 item 2): a stale cursor
+                    // from an earlier edit of the same shape must not
+                    // survive the re-open (egui keeps the field's
+                    // state under its id).
+                    output
+                        .state
+                        .cursor
+                        .set_char_range(Some(CCursorRange::one(CCursor::new(buffer_chars))));
+                    output.state.store(ui.ctx(), output.response.id);
                 }
                 if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
                     commit = true;
