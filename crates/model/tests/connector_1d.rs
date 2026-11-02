@@ -541,3 +541,211 @@ fn a_legacy_connector_gets_geometry_rows_only() {
     let geometry = doc.shape_geometry(legacy).expect("geometry");
     assert_eq!(geometry.paths[0].rows.len(), 2);
 }
+
+// ---------------------------------------------------------------------------
+// Task P7-39: routability, formulas kept through path writes, 1-D drops
+// ---------------------------------------------------------------------------
+
+/// A bare 1-D shape on a fresh page with the given extra cells.
+fn one_d_with(cells: Vec<Cell>) -> (Document, ShapeId) {
+    let mut doc = Document::new();
+    let page = doc.add_page("Page-1").expect("page");
+    let mut shape = Shape::new(ShapeId { index: 0 }, 7);
+    shape.sheet.cells = vec![
+        value_cell("BeginX", 0.0),
+        value_cell("BeginY", 0.0),
+        value_cell("EndX", 1.0),
+        value_cell("EndY", 0.0),
+    ];
+    shape.sheet.cells.extend(cells);
+    let id = doc.insert_shape(page, shape, None).expect("insert");
+    (doc, id)
+}
+
+fn formula_cell(name: &str, formula: &str, value: f64) -> Cell {
+    Cell {
+        name: CellName::new(name),
+        formula: Some(formula.to_owned()),
+        value: Some(CellValue::Number(value)),
+        unit: larrygram_geom::Unit::Inches,
+        preserved: Preserved::new(),
+    }
+}
+
+#[test]
+fn is_routable_reads_the_obj_type_bits() {
+    let (doc, connector) = with_connector();
+    assert!(
+        doc.is_routable(connector),
+        "our master is routable (ObjType 2)"
+    );
+    for (value, routable) in [
+        (2.0, true),
+        (3.0, true),
+        (10.0, true),
+        (6.0, false),
+        (1.0, false),
+        (0.0, false),
+        (-2.0, false),
+        (2.5, false),
+        (f64::INFINITY, false),
+    ] {
+        let (doc, shape) = one_d_with(vec![value_cell("ObjType", value)]);
+        assert_eq!(doc.is_routable(shape), routable, "ObjType {value}");
+    }
+    // No ObjType at all: not routable.
+    let (doc, shape) = one_d_with(Vec::new());
+    assert!(!doc.is_routable(shape));
+}
+
+#[test]
+fn a_path_write_keeps_an_aligned_lines_formulas() {
+    let (mut doc, line) = one_d_with(vec![
+        formula_cell("PinX", "GUARD((BeginX+EndX)/2)", 0.5),
+        formula_cell("PinY", "GUARD((BeginY+EndY)/2)", 0.0),
+        formula_cell("Width", "GUARD(SQRT((EndX-BeginX)^2+(EndY-BeginY)^2))", 1.0),
+        value_cell("Height", 0.25),
+        formula_cell("LocPinX", "GUARD(Width*0.5)", 0.5),
+        formula_cell("LocPinY", "GUARD(Height*0.5)", 0.125),
+        formula_cell("Angle", "GUARD(ATAN2(EndY-BeginY,EndX-BeginX))", 0.0),
+    ]);
+    doc.write_connector_path(line, &[Point::new(1.0, 1.0), Point::new(4.0, 5.0)])
+        .expect("path");
+    assert_eq!(
+        formula(&doc, line, "Width"),
+        Some("GUARD(SQRT((EndX-BeginX)^2+(EndY-BeginY)^2))".to_owned())
+    );
+    assert!(
+        (number(&doc, line, "Width") - 5.0).abs() < 1e-12,
+        "the length"
+    );
+    assert!((number(&doc, line, "Angle") - 4.0_f64.atan2(3.0)).abs() < 1e-12);
+    // A literal Height keeps its value and stays literal.
+    assert_eq!(formula(&doc, line, "Height"), None);
+    assert!((number(&doc, line, "Height") - 0.25).abs() < 1e-12);
+    assert!((number(&doc, line, "LocPinY") - 0.125).abs() < 1e-12);
+    // The geometry rows run along the local x axis.
+    let geometry = doc.shape_geometry(line).expect("geometry");
+    match geometry.paths[0].rows.as_slice() {
+        [
+            GeometryRow::MoveTo { x: x0, y: y0 },
+            GeometryRow::LineTo { x: x1, y: y1 },
+        ] => {
+            assert!(x0.abs() < 1e-9 && (y0 - 0.125).abs() < 1e-9, "{x0} {y0}");
+            assert!(
+                (x1 - 5.0).abs() < 1e-9 && (y1 - 0.125).abs() < 1e-9,
+                "{x1} {y1}"
+            );
+        }
+        other => panic!("two rows expected: {other:?}"),
+    }
+}
+
+#[test]
+fn a_path_write_keeps_custom_formulas_and_fills_missing_cells() {
+    // A Visio connector's Height reads the ends; a missing Angle gets
+    // the documented formula.
+    let (mut doc, shape) = one_d_with(vec![formula_cell("Height", "GUARD(EndY-BeginY)", 0.0)]);
+    doc.write_connector_path(shape, &[Point::new(0.0, 0.0), Point::new(2.0, 3.0)])
+        .expect("path");
+    assert_eq!(
+        formula(&doc, shape, "Height"),
+        Some("GUARD(EndY-BeginY)".to_owned())
+    );
+    assert!((number(&doc, shape, "Height") - 3.0).abs() < 1e-12);
+    assert_eq!(formula(&doc, shape, "Angle"), Some("GUARD(0DA)".to_owned()));
+    assert_eq!(
+        formula(&doc, shape, "PinX"),
+        Some("GUARD((BeginX+EndX)/2)".to_owned())
+    );
+    // A literal Angle keeps its value (a connector box that is turned).
+    let (mut doc, shape) = one_d_with(vec![value_cell("Angle", 0.5)]);
+    doc.write_connector_path(shape, &[Point::new(0.0, 0.0), Point::new(2.0, 0.0)])
+        .expect("path");
+    assert_eq!(formula(&doc, shape, "Angle"), None);
+    assert!((number(&doc, shape, "Angle") - 0.5).abs() < 1e-12);
+}
+
+#[test]
+fn write_connector_box_moves_the_ends_and_the_box_only() {
+    let (mut doc, connector) = with_connector();
+    let rows_before = doc.shape_geometry(connector).expect("geometry");
+    doc.write_connector_box(connector, Point::new(1.0, 2.0), Point::new(3.0, 2.0))
+        .expect("box");
+    assert_eq!(number(&doc, connector, "BeginX"), 1.0);
+    assert_eq!(number(&doc, connector, "EndX"), 3.0);
+    assert!((number(&doc, connector, "PinX") - 2.0).abs() < 1e-12);
+    assert_eq!(
+        doc.shape_geometry(connector).expect("geometry"),
+        rows_before
+    );
+    // The refusals.
+    let (mut doc, plain) = {
+        let mut doc = Document::new();
+        let page = doc.add_page("Page-1").expect("page");
+        let plain = doc.insert_shape(page, plain_box(3), None).expect("box");
+        (doc, plain)
+    };
+    assert!(
+        doc.write_connector_box(plain, Point::new(0.0, 0.0), Point::new(1.0, 0.0))
+            .is_err()
+    );
+    assert!(
+        doc.write_connector_box(
+            ShapeId { index: 999 },
+            Point::new(0.0, 0.0),
+            Point::new(1.0, 0.0)
+        )
+        .is_err()
+    );
+    let (mut doc, connector) = with_connector();
+    assert!(
+        doc.write_connector_box(connector, Point::new(f64::NAN, 0.0), Point::new(1.0, 0.0))
+            .is_err()
+    );
+}
+
+#[test]
+fn instantiate_master_places_a_1d_masters_ends_at_the_drop_point() {
+    let (mut doc, _) = with_connector();
+    let master = doc.master_by_name_u("Connector").expect("master");
+    let page = doc.pages[0].id;
+    let dropped = doc
+        .instantiate_master(master, page, Point::new(5.0, 6.0), None)
+        .expect("drop");
+    assert!(doc.is_connector(dropped));
+    let begin = doc
+        .connector_end(dropped, ConnectorEnd::Begin)
+        .expect("begin");
+    let end = doc.connector_end(dropped, ConnectorEnd::End).expect("end");
+    assert!(
+        (begin.x - 4.4).abs() < 1e-12 && (begin.y - 6.0).abs() < 1e-12,
+        "{begin:?}"
+    );
+    assert!(
+        (end.x - 5.6).abs() < 1e-12 && (end.y - 6.0).abs() < 1e-12,
+        "{end:?}"
+    );
+    assert_eq!(
+        formula(&doc, dropped, "PinX"),
+        Some("GUARD((BeginX+EndX)/2)".to_owned())
+    );
+    assert_eq!(
+        formula(&doc, dropped, "LocPinX"),
+        Some("GUARD(Width*0.5)".to_owned())
+    );
+    // A requested width scales the master's vector.
+    let sized = doc
+        .instantiate_master(
+            master,
+            page,
+            Point::new(0.0, 0.0),
+            Some(larrygram_geom::Size::new(2.4, 0.2)),
+        )
+        .expect("sized drop");
+    let begin = doc
+        .connector_end(sized, ConnectorEnd::Begin)
+        .expect("begin");
+    let end = doc.connector_end(sized, ConnectorEnd::End).expect("end");
+    assert!((end.x - begin.x - 2.4).abs() < 1e-12, "{begin:?} {end:?}");
+}
