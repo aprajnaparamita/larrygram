@@ -37,6 +37,16 @@ larrygram-ui-spec = { path = "../../crates/ui-spec" }
 # tree through egui_extras).
 resvg = { version = "0.45.1", default-features = false }
 
+# The Windows icon resource (task R11 goal 3): the build script
+# rasterises the brand `icon.svg` into a `.ico` (with the same resvg
+# 0.45.1 the app rasterises its window icon with) and embeds it with
+# winresource. Both are host-only build tools; on a non-Windows host
+# the build script skips the step and nothing runs. winresource is MIT
+# and resvg MIT OR Apache-2.0 (checked by cargo deny).
+[build-dependencies]
+resvg = { version = "0.45.1", default-features = false }
+winresource = "0.1"
+
 [dev-dependencies]
 # Headless UI tests (ADR 0030, ADR 0037).
 egui_kittest = "0.37"
