@@ -11,6 +11,22 @@ use egui::Ui;
 
 use crate::UiError;
 
+/// The version line of the About window (task R11 goal 1):
+/// `<version> (<build id>)`, for example `1.0.0-alpha.1 (abc1234)`.
+///
+/// The build id comes from
+/// [`larrygram_commands::build`](larrygram_commands::build); both this
+/// line and `larrygram-cli --version` print it.
+pub fn version_line() -> String {
+    larrygram_commands::build::version_line()
+}
+
+/// The version line with a fixed build id (task R11 goal 1: the fixed
+/// id the About golden image renders with).
+pub fn version_line_with(build_id: &str) -> String {
+    larrygram_commands::build::version_line_with(build_id)
+}
+
 /// The video link of the About window.
 ///
 /// The `?si=...` share-tracking id is deliberately absent. The
@@ -45,7 +61,8 @@ pub enum Outcome {
     WatchVideo,
 }
 
-/// Draws one frame of the About window (ADR 0066).
+/// Draws one frame of the About window (ADR 0066), with
+/// [`version_line`] under the text (task R11 goal 1).
 ///
 /// Left: `larry.png`, square, as tall as the body and never wider
 /// than half of it. Right, with padding: the dedication text and,
@@ -55,6 +72,12 @@ pub enum Outcome {
 /// grows with it (task P7-17). Close wins when both buttons report a
 /// click in the same frame.
 pub fn show(ui: &mut Ui) -> Result<Outcome, UiError> {
+    show_with_version(ui, &version_line())
+}
+
+/// Draws one frame with a given version line (task R11 goal 1: the
+/// golden test passes a fixed build id). See [`show`].
+pub fn show_with_version(ui: &mut Ui, version: &str) -> Result<Outcome, UiError> {
     use crate::window_size::{GAP, fit_aspect, split_footer, text_scale};
 
     // Close and the video button are standard framed controls.
@@ -101,6 +124,9 @@ pub fn show(ui: &mut Ui) -> Result<Outcome, UiError> {
     });
     column.add_space(GAP);
     column.label(body_text(CLOSING));
+    // The version line (task R11 goal 1), weak under the text.
+    column.add_space(GAP);
+    column.label(body_text(version).weak());
 
     let mut close = false;
     let mut buttons = ui.new_child(
@@ -138,6 +164,13 @@ mod tests {
     #[test]
     fn show_draws_and_stays_open() {
         let outcome = with_ui(show).expect("show draws");
+        assert_eq!(outcome, Outcome::Open);
+    }
+
+    #[test]
+    fn show_with_version_draws_and_stays_open() {
+        let outcome = with_ui(|ui| show_with_version(ui, "1.0.0-alpha.1 (abc1234)"))
+            .expect("show_with_version draws");
         assert_eq!(outcome, Outcome::Open);
     }
 }

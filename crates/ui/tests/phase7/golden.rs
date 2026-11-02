@@ -274,11 +274,17 @@ fn golden_the_wizard_layout_page() {
     check_golden("wizard-layout", &image);
 }
 
-/// The About window (ADR 0065, the amendment).
+/// The About window (ADR 0065, the amendment). The version line
+/// renders with a fixed build id (task R11 goal 1: the variable set
+/// in the test build), so the golden stays stable across builds.
 #[test]
 fn golden_the_about_window() {
     let image = window_golden(egui::vec2(900.0, 600.0), |ui| {
-        let _ = larrygram_ui::about::show(ui).expect("the About window renders");
+        let _ = larrygram_ui::about::show_with_version(
+            ui,
+            &larrygram_ui::about::version_line_with("abc1234"),
+        )
+        .expect("the About window renders");
     });
     check_golden("about", &image);
 }
