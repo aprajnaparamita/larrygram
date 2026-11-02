@@ -6,10 +6,11 @@
 //! decides the click: a click inside an existing text object starts
 //! editing that object's text, a click on empty page starts a new text
 //! box. The new box is a [`PendingBox`] — the tool records where it
-//! goes and the shell opens the editor over it; the box itself is
-//! inserted once, with its text, on commit
-//! (`insert.drawing.text_box`'s `text` argument, one undo step). The
-//! tool never mutates the model or the selection itself (ADR 0042).
+//! goes and the shell opens the editor over it. The shell inserts the
+//! box shape when it opens (inside its undo group, task P7-37: one
+//! undo step holds the insert, the format commands and the final text
+//! write); the tool never mutates the model or the selection itself
+//! (ADR 0042).
 //!
 //! The pointer tool's double click (item 8: edit a shape's text) is
 //! `mod@pointer`'s `double_click`; it keeps the group click rule.
@@ -35,9 +36,10 @@ pub const TEXT_BOX_HEIGHT_IN: f64 = 0.5;
 /// pixels (the pointer tool's threshold; task P7-26 item 9).
 const DRAG_THRESHOLD_PX: f64 = 2.0;
 
-/// Where a new text box goes once its text is committed (task P7-25
-/// item 9): the insert command's coordinate rule, `x`/`y` the
-/// lower-left corner in page inches.
+/// Where a new text box goes (task P7-25 item 9, task P7-37): the
+/// insert command's coordinate rule, `x`/`y` the lower-left corner in
+/// page inches. The shell consumes the box at once and inserts the
+/// shape with `insert.drawing.text_box`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PendingBox {
     /// The lower-left corner x, in page inches.

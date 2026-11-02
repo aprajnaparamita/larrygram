@@ -98,6 +98,27 @@ const PANE_MIN_HEIGHT: f32 = 60.0;
 /// The full-screen toggle (task P7-20's `view.full_screen_mode`).
 const FULL_SCREEN: &str = "view.full_screen_mode";
 
+/// Commands that end a new text box's typing interaction before they
+/// run (task P7-37 item 5): a layout switch and closing the document
+/// end the editor, and undo/redo end an open undo group anyway (ADR
+/// 0040, amendment 2026-11-03). The shell writes the typed text the
+/// usual way and closes the group first.
+const TEXT_BOX_TRIGGERS: &[&str] = &[
+    "edit.redo",
+    "edit.undo",
+    "file.close",
+    "file.exit",
+    "file.new",
+    "file.new.blank.drawing",
+    "file.new.blank.drawing.metric",
+    "file.new.blank.drawing.us",
+    "file.open",
+    "view.ui_layout.panel_2016",
+    "view.ui_layout.panel_365",
+    "view.ui_layout.panel_classic",
+    "view.ui_layout.panel_modern",
+];
+
 /// The settings key of the Shapes window width.
 const SHAPES_PANE: &str = "shapes";
 
@@ -148,6 +169,30 @@ fn tool_for(active: ActiveTool) -> Tool {
         ActiveTool::TextBlock => Tool::TextBlock,
         _ => Tool::Pointer,
     }
+}
+
+/// The plain literal of one text content: the literal parts joined,
+/// field and run markers dropped (the commit's `text` argument).
+fn literal_of(text: &TextContent) -> String {
+    text.parts
+        .iter()
+        .filter_map(|part| match part {
+            TextPart::Text(part) => Some(part.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The new text box the Text tool opened (task P7-37 item 1): the shape
+/// `insert.drawing.text_box` created when the box opened, and the
+/// session whose undo group holds the interaction (the insert, the
+/// format commands and the final text write are one step).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TrackedBox {
+    /// The session whose undo group is open.
+    session: SessionId,
+    /// The box's shape (the editor's target).
+    shape: larrygram_model::ShapeId,
 }
 
 /// The application shell (one per window, single window in Phase 4).
@@ -217,6 +262,10 @@ pub struct Shell {
     tools: ToolMachine,
     /// The in-place text editor (ADR 0044, task P5-17).
     editor: TextEditor,
+    /// The new text box being typed (task P7-37 item 1): its shape and
+    /// undo group, open from the click that opened the box until its
+    /// commit or cancel. The shell closes the group on every path.
+    text_box: Option<TrackedBox>,
     /// The typed character that starts the next text edit (task P7-25
     /// item 8: "a typed character starts the text with that
     /// character"); consumed by [`Shell::begin_text_editor`].
@@ -322,6 +371,7 @@ impl Shell {
             tab_bar_rect: None,
             tools: ToolMachine::new(),
             editor: TextEditor::new(),
+            text_box: None,
             text_seed: None,
             popup_open: false,
             stencil_down: false,
@@ -558,6 +608,7 @@ impl Shell {
         self.finish_pick();
         self.sync_active_tool();
         self.sync_editing_text();
+        self.sync_text_box();
         self.capture_escape(ui.ctx());
         if self.quit_requested {
             self.quit_requested = false;
@@ -1551,13 +1602,12 @@ impl Shell {
                 }
             }
         }
-        // A click with the Text tool on empty page starts a pending
-        // text box (task P7-25 item 9): the editor opens over it and
-        // the box is inserted with its text when the edit commits.
+        // A click with the Text tool on empty page opens a new text
+        // box (task P7-25 item 9, task P7-37 item 1): the box is
+        // inserted now, inside its undo group, and the editor opens on
+        // it so the text controls work while the text is typed.
         if let Some(box_) = self.tools.take_pending_text_box() {
-            let min = larrygram_geom::Point::new(box_.x, box_.y);
-            let max = larrygram_geom::Point::new(box_.x + box_.width, box_.y + box_.height);
-            self.editor.begin_new(larrygram_geom::Rect::new(min, max));
+            self.open_text_box(box_);
         }
         if !had_events && !stencil::is_dragging(&self.tools) {
             match self.tools.idle_overlay(&self.app) {
@@ -1827,7 +1877,6 @@ impl Shell {
             return;
         }
         let shape = self.editor.shape;
-        let pending = self.editor.pending;
         let action = if self.escape_pressed {
             // Escape commits (ADR 0044): it ends the edit and keeps
             // the text (task P7-25 item 9). The shell took the key
@@ -1840,113 +1889,217 @@ impl Shell {
         } else {
             let Some(session) = self.app.active_document() else {
                 self.editor.cancel();
+                self.cancel_text_box();
                 return;
             };
             canvas::show_text_editor(ui, session, rect, &mut self.editor)
         };
         match action {
             Ok(EditorAction::Pending) => {}
-            Ok(EditorAction::Committed(Some(text))) => {
-                if let Some(mut produced) = self.text_committed_intents(shape, pending, &text) {
-                    intents.append(&mut produced);
-                }
-            }
-            Ok(EditorAction::Committed(None)) => {}
+            Ok(EditorAction::Committed(text)) => self.commit_text(shape, text.as_ref(), intents),
             Err(error) => self.note_error(error.to_string()),
         }
     }
 
     /// Finishes the text edit outside [`Shell::show_editor`] and
-    /// dispatches its commit: the Text tool's click commits the text
-    /// being typed before it acts (task P7-25 item 9).
+    /// commits it: the Text tool's click commits the text being typed
+    /// before it acts (task P7-25 item 9).
     fn commit_editor(&mut self, intents: &mut Vec<Intent>) {
         let shape = self.editor.shape;
-        let pending = self.editor.pending;
         match self.editor.finish() {
-            Ok(Some(text)) => {
-                if let Some(mut produced) = self.text_committed_intents(shape, pending, &text) {
-                    intents.append(&mut produced);
-                }
-            }
-            Ok(None) => {}
+            Ok(text) => self.commit_text(shape, text.as_ref(), intents),
             Err(error) => self.note_error(error.to_string()),
         }
     }
 
-    /// The intents of one committed text edit (task P7-25 item 9): a
-    /// pending text box is inserted with its text in one undo step, an
-    /// edited shape gets its `shape.set.text` pair.
-    fn text_committed_intents(
-        &self,
+    /// Commits one ended text edit (task P7-25 item 9, task P7-37 item
+    /// 1). An edited shape's text is written the usual way. A new text
+    /// box with text gets the same write and then its undo group ends
+    /// as one step labelled as the insert; a new box with no text
+    /// cancels: no shape, no undo entry, the document unchanged.
+    fn commit_text(
+        &mut self,
         shape: Option<ShapeId>,
-        pending: Option<larrygram_geom::Rect>,
-        text: &TextContent,
-    ) -> Option<Vec<Intent>> {
-        match pending {
-            Some(bounds) => self.text_insert_intents(bounds, text),
-            None => self.text_commit_intents(shape, text),
+        text: Option<&TextContent>,
+        intents: &mut Vec<Intent>,
+    ) {
+        if self
+            .text_box
+            .is_some_and(|tracked| Some(tracked.shape) == shape)
+        {
+            self.finish_text_box(text);
+            return;
+        }
+        if let Some(text) = text
+            && let Some(mut produced) = self.text_commit_intents(shape, &literal_of(text))
+        {
+            intents.append(&mut produced);
         }
     }
 
-    /// The `insert.drawing.text_box` intent of one committed pending
-    /// text box (task P7-25 item 9): the command writes the box and
-    /// its text in one undo step (its `text` argument).
-    fn text_insert_intents(
-        &self,
-        bounds: larrygram_geom::Rect,
-        text: &TextContent,
-    ) -> Option<Vec<Intent>> {
-        let literal: String = text
-            .parts
-            .iter()
-            .filter_map(|part| match part {
-                TextPart::Text(part) => Some(part.as_str()),
-                _ => None,
-            })
-            .collect();
+    /// Writes the new box's text the usual way and closes its undo
+    /// group as one step (task P7-37 item 1), or cancels the group
+    /// when there is no text (no shape, no undo entry).
+    ///
+    /// The write runs now, before the commands of the menu or
+    /// command-bar click that ended the edit, so it lands inside the
+    /// group: the insert, the format commands and the final text write
+    /// are one step (ADR 0040, amendment 2026-11-03).
+    fn finish_text_box(&mut self, text: Option<&TextContent>) {
+        let Some(tracked) = self.text_box.take() else {
+            return;
+        };
+        let literal = text.map(literal_of).unwrap_or_default();
         if literal.is_empty() {
-            // Nothing typed, no text object (task P7-25 item 9).
-            return None;
+            self.close_group(tracked.session, false);
+            return;
+        }
+        if let Some(intents) = self.text_commit_intents(Some(tracked.shape), &literal)
+            && let Err(error) = self.dispatch(&intents)
+        {
+            self.note_error(error.to_string());
+        }
+        self.close_group(tracked.session, true);
+    }
+
+    /// Ends the typing interaction before a command that ends it
+    /// another way (task P7-37 item 5): the typed text is written the
+    /// usual way and the group closes first.
+    fn commit_open_text_box(&mut self) {
+        if self.text_box.is_none() {
+            return;
+        }
+        let text = self.editor.finish().ok().flatten();
+        self.finish_text_box(text.as_ref());
+    }
+
+    /// Cancels the tracked box (task P7-37 item 1): no shape, no undo
+    /// entry, the document unchanged.
+    fn cancel_text_box(&mut self) {
+        let Some(tracked) = self.text_box.take() else {
+            return;
+        };
+        self.close_group(tracked.session, false);
+    }
+
+    /// Closes the undo group of `session` (ADR 0040, amendment
+    /// 2026-11-03): collected as one step when `end`, reverted when
+    /// cancelled.
+    fn close_group(&mut self, session: SessionId, end: bool) {
+        let result = if end {
+            self.app.end_group(session)
+        } else {
+            self.app.cancel_group(session)
+        };
+        if let Err(error) = result {
+            self.note_error(error.to_string());
+        }
+    }
+
+    /// Opens the new text box the Text tool just laid out (task P7-37
+    /// item 1): `insert.drawing.text_box` runs now with `allow_empty`,
+    /// inside a fresh undo group, and the editor opens on the shape so
+    /// `editing_text`, `can_format_text` and the format commands work
+    /// as on any edited shape while the text is typed.
+    fn open_text_box(&mut self, box_: crate::tools::text::PendingBox) {
+        // An earlier interaction ends before a new one opens.
+        self.commit_open_text_box();
+        let Some(session) = self.app.active_document().map(|session| session.id) else {
+            return;
+        };
+        if let Err(error) = self.app.begin_group(session, "Insert Text Box") {
+            self.note_error(error.to_string());
+            return;
         }
         let mut args = larrygram_commands::Args::new();
-        args.set("x", ArgValue::Number(bounds.min.x));
-        args.set("y", ArgValue::Number(bounds.min.y));
-        args.set("width", ArgValue::Number(bounds.width()));
-        args.set("height", ArgValue::Number(bounds.height()));
-        args.set("text", ArgValue::Text(literal));
-        let command = CommandId::parse("insert.drawing.text_box").ok()?;
-        Some(vec![Intent::new(
-            command,
-            Invocation::new(args, Source::Ui),
-        )])
+        args.set("x", ArgValue::Number(box_.x));
+        args.set("y", ArgValue::Number(box_.y));
+        args.set("width", ArgValue::Number(box_.width));
+        args.set("height", ArgValue::Number(box_.height));
+        args.set("allow_empty", ArgValue::Flag(true));
+        let opened = match CommandId::parse("insert.drawing.text_box") {
+            Ok(command) => {
+                let intent = Intent::new(command, Invocation::new(args, Source::Ui));
+                self.dispatch(std::slice::from_ref(&intent))
+            }
+            Err(error) => Err(UiError::Command(larrygram_commands::CommandError::failed(
+                error.to_string(),
+            ))),
+        };
+        let shape = match opened {
+            Ok(results) if results.first().is_some_and(|result| result.is_ok()) => {
+                self.app.selection.anchor
+            }
+            Ok(_) => None,
+            Err(error) => {
+                self.note_error(error.to_string());
+                None
+            }
+        };
+        let Some(shape) = shape else {
+            self.close_group(session, false);
+            return;
+        };
+        let min = larrygram_geom::Point::new(box_.x, box_.y);
+        let max = larrygram_geom::Point::new(box_.x + box_.width, box_.y + box_.height);
+        self.editor
+            .begin_box(shape, larrygram_geom::Rect::new(min, max));
+        self.text_box = Some(TrackedBox { session, shape });
+    }
+
+    /// Ends the typing interaction of a tracked box whose document,
+    /// shape or undo group went away underneath it (task P7-37 item 5:
+    /// every way the editor can end closes the group).
+    fn sync_text_box(&mut self) {
+        let Some(tracked) = self.text_box else {
+            return;
+        };
+        let live = self
+            .app
+            .documents
+            .iter()
+            .find(|slot| slot.id == tracked.session)
+            .map(|slot| slot.undo.has_group());
+        match live {
+            // The document went away with its stack.
+            None => {
+                self.text_box = None;
+                if self.editor.shape == Some(tracked.shape) {
+                    self.editor.cancel();
+                }
+            }
+            Some(false) => {
+                // The group ended elsewhere (undo or redo, or a
+                // programmatic source): the interaction is over.
+                self.text_box = None;
+                if self.editor.shape == Some(tracked.shape) {
+                    self.editor.cancel();
+                }
+            }
+            Some(true) => {
+                if self.editor.shape != Some(tracked.shape) {
+                    // The editor moved on without a commit: the box
+                    // cancels.
+                    self.cancel_text_box();
+                }
+            }
+        }
     }
 
     /// Presses the editor's shape, then writes its text: one command
     /// pair so the selection cannot drift before the write (the editor
     /// closes on a click that may select another shape).
-    fn text_commit_intents(
-        &self,
-        shape: Option<ShapeId>,
-        text: &TextContent,
-    ) -> Option<Vec<Intent>> {
+    fn text_commit_intents(&self, shape: Option<ShapeId>, literal: &str) -> Option<Vec<Intent>> {
         let shape = shape?;
         let session = self.app.active_document()?;
         let visio_id = session.document.shape(shape)?.visio_id;
-        let literal: String = text
-            .parts
-            .iter()
-            .filter_map(|part| match part {
-                TextPart::Text(part) => Some(part.as_str()),
-                _ => None,
-            })
-            .collect();
         let mut args = larrygram_commands::Args::new();
         args.set("shapes", ArgValue::List(vec![visio_id.to_string()]));
         args.set("mode", ArgValue::Text("replace".to_owned()));
         let command = CommandId::parse("edit.select").ok()?;
         let select = Intent::new(command, Invocation::new(args, Source::Ui));
         let mut args = larrygram_commands::Args::new();
-        args.set("text", ArgValue::Text(literal));
+        args.set("text", ArgValue::Text(literal.to_owned()));
         let command = CommandId::parse("shape.set.text").ok()?;
         let write = Intent::new(command, Invocation::new(args, Source::Ui));
         Some(vec![select, write])
@@ -1968,6 +2121,11 @@ impl Shell {
             self.text_seed = None;
             return;
         };
+        if self.text_box.is_some_and(|tracked| tracked.shape != shape) {
+            // A text edit on another shape ends the tracked box first
+            // (task P7-37 item 5).
+            self.commit_open_text_box();
+        }
         if self.editor.shape == Some(shape) {
             self.text_seed = None;
             return;
@@ -2389,6 +2547,12 @@ impl Shell {
         &mut self,
         intent: &Intent,
     ) -> Result<Result<Outcome, CommandError>, UiError> {
+        if self.text_box.is_some() && TEXT_BOX_TRIGGERS.contains(&intent.command.as_str()) {
+            // A command that ends the typing interaction another way
+            // (task P7-37 item 5): the typed text is written and the
+            // group closes before it runs.
+            self.commit_open_text_box();
+        }
         let source = intent.invocation.source;
         let first = dispatch_one(
             &self.registry,
@@ -2438,6 +2602,9 @@ impl Shell {
             self.begin_text_editor();
         } else if intent.command.as_str() == "text.cancel" {
             self.editor.cancel();
+            // The explicit discard path ends the tracked box too (task
+            // P7-37 item 5): no shape, no undo entry.
+            self.cancel_text_box();
         }
         Ok(Ok(outcome))
     }

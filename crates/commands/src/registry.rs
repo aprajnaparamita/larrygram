@@ -626,7 +626,8 @@ mod tests {
 
         // An interactive source keeps the shell's group open.
         ctx.begin_group(session, "typing").expect("begin");
-        dispatch(&registry, &mut ctx, &id, Invocation::empty(Source::Ui)).expect("the command runs");
+        dispatch(&registry, &mut ctx, &id, Invocation::empty(Source::Ui))
+            .expect("the command runs");
         assert!(ctx.documents.get(index).expect("session").undo.has_group());
     }
 }

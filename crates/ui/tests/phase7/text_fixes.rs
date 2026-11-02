@@ -1516,9 +1516,10 @@ fn a_context_menu_from_the_keyboard_starts_no_text() {
 // a caret move, not a commit and a second box over the first.
 // ---------------------------------------------------------------------------
 
-/// Item 3: the click lower in the outlined box keeps the edit (the box
-/// is still being typed, nothing is inserted early) and no second box
-/// opens; Escape then inserts exactly one box with the typed text.
+/// Item 3: the click lower in the outlined box keeps the edit and no
+/// second box opens; the box shape exists from the click (task P7-37
+/// item 1) and Escape then commits exactly one box with the typed
+/// text.
 #[test]
 fn a_click_inside_the_new_text_box_keeps_editing_it() {
     for kind in LAYOUTS {
@@ -1530,6 +1531,11 @@ fn a_click_inside_the_new_text_box_keeps_editing_it() {
         let pos = screen(&rig, 1.0, 5.0);
         click_at(&mut rig, pos);
         assert!(editing(&mut rig), "{kind:?}: the click starts a text box");
+        assert_eq!(
+            shape_count(&rig),
+            before + 1,
+            "{kind:?}: the box is a shape from the click (task P7-37)"
+        );
         type_text(&mut rig, "Hi");
         // A click lower in the outlined box, below the first row.
         let lower = screen(&rig, 2.0, 5.1);
@@ -1540,7 +1546,7 @@ fn a_click_inside_the_new_text_box_keeps_editing_it() {
         );
         assert_eq!(
             shape_count(&rig),
-            before,
+            before + 1,
             "{kind:?}: the click neither commits nor opens a second box"
         );
         press_key(&mut rig, egui::Key::Escape, egui::Modifiers::NONE);

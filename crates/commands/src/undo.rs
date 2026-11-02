@@ -697,7 +697,10 @@ mod tests {
         let mut edit = AddPageEdit;
         edit.apply(&mut ctx).expect("apply");
         stack.push(Box::new(edit));
-        assert_eq!(ctx.active_document().expect("session").document.pages.len(), 1);
+        assert_eq!(
+            ctx.active_document().expect("session").document.pages.len(),
+            1
+        );
 
         let unsaved = stack.cancel_group(&mut ctx).expect("cancel");
         assert_eq!(unsaved, Some(true), "the group's unsaved state returns");
@@ -735,7 +738,11 @@ mod tests {
         stack.push(Box::new(edit));
 
         let label = stack.undo(&mut ctx).expect("undo");
-        assert_eq!(label.as_deref(), Some("Insert Text Box"), "the group's label");
+        assert_eq!(
+            label.as_deref(),
+            Some("Insert Text Box"),
+            "the group's label"
+        );
         assert!(!stack.has_group(), "the undo ended the group");
         assert_eq!(&*log.lock().expect("log"), "", "the step reverted");
         assert!(!stack.can_undo(), "the group was the only step");

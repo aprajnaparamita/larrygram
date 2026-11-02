@@ -1201,8 +1201,8 @@ mod tests {
             if let Some(text) = text {
                 args = args.with("text", ArgValue::Text(text));
             }
-            let outcome = run_text_box(&mut ctx, &Invocation::new(args, Source::Ui))
-                .expect("the box opens");
+            let outcome =
+                run_text_box(&mut ctx, &Invocation::new(args, Source::Ui)).expect("the box opens");
             assert!(outcome.edit.is_some(), "one undo step");
             let doc = &ctx.active_document().expect("session").document;
             let entry = doc.page(page).expect("page");
@@ -1228,7 +1228,13 @@ mod tests {
         let outcome = run_text_box(&mut ctx, &inv).expect("box");
         assert!(outcome.edit.is_some(), "an absent text still inserts");
         assert_eq!(
-            ctx.active_document().expect("session").document.page(page).expect("page").shapes.len(),
+            ctx.active_document()
+                .expect("session")
+                .document
+                .page(page)
+                .expect("page")
+                .shapes
+                .len(),
             2
         );
 
@@ -1243,10 +1249,7 @@ mod tests {
             Source::Ui,
         );
         let error = run_rectangle(&mut ctx, &inv).expect_err("rectangle takes no allow_empty");
-        assert!(
-            error.to_string().contains("only an argument"),
-            "{error}"
-        );
+        assert!(error.to_string().contains("only an argument"), "{error}");
 
         let (mut ctx, _session, _page, _shape) = fixture();
         let inv = Invocation::new(

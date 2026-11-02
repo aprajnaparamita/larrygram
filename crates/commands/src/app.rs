@@ -705,7 +705,9 @@ impl AppCtx {
         step: impl FnOnce(&mut UndoStack, &mut AppCtx) -> R,
     ) -> Result<R, CommandError> {
         let Some(index) = self.documents.iter().position(|slot| slot.id == session) else {
-            return Err(CommandError::failed("no document session for the undo group"));
+            return Err(CommandError::failed(
+                "no document session for the undo group",
+            ));
         };
         let mut stack = std::mem::replace(&mut self.documents[index].undo, UndoStack::new(0));
         let out = step(&mut stack, self);
