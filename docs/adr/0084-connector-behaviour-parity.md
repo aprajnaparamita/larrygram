@@ -70,7 +70,39 @@ Nothing migrates it.
 
 Every path write sets the four endpoint cells to the route's first and
 last points, recalculates the pin and size cells, and writes the
-geometry rows in the box's local coordinates.
+geometry rows in the box's local coordinates. A pin or size cell that
+holds a formula is refreshed through recalc and keeps its formula; only
+a literal cell gets a literal.
+
+**Routable or not** (amended 2026-11-03, P7-31 review). Only a
+*routable* 1-D shape is routed: `ObjType` has the routable bit (`&H2`)
+and not the "not placeable, not routable" bit (`&H4`), as our master
+and Visio's Dynamic connector have. The rule 8 default (right angle)
+and the style cells apply only to those. Any other glued 1-D shape (a
+line or a 1-D arrow from a Visio file) keeps its geometry: its glued
+ends follow their targets, and its path stays a straight line from
+begin to end; formula-driven geometry is left to its formulas, as
+today. A shape that is the `FromSheet` of a record but has no endpoint
+cells is routed as before.
+
+**Moving and copying a 1-D shape** (amended 2026-11-03). The endpoint
+cells are the 1-D shape's position. So:
+
+- a move (body drag, `shape.move`) translates `BeginX`/`BeginY`/
+  `EndX`/`EndY` and re-writes the path. It unglues each glued end in
+  the same edit, as the arrow keys do (rule 6), except an end glued to
+  a shape that moves with it in the same edit;
+- align and distribute leave 1-D shapes where they are;
+- resize, rotate and flip refuse a 1-D shape with a status message and
+  push no undo entry, until the end handles of rule 6 exist;
+- duplicate and paste offset the endpoint cells with the pin. An end
+  glued to a shape copied in the same operation is re-glued to the
+  copy (formula and record renumbered together); any other glued end
+  becomes free at its stored point;
+- a drop from the Shapes window places the begin and end points from
+  the drop point and the master's own begin-to-end vector.
+
+No edit may leave the endpoint cells disagreeing with the drawn path.
 
 ### 2. Glue is stored the way Visio stores it (replaces P7-30's rule 6)
 
