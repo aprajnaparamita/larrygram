@@ -533,6 +533,14 @@ mod tests {
         }
     }
 
+    #[test]
+    fn the_print_helpers_write_and_never_panic() {
+        // Task R11 goal 2: the GUI build may have no console; the
+        // helpers ignore that instead of panicking.
+        print_line("larrygram test line");
+        print_error_line("larrygram test error line");
+    }
+
     /// A committed fixture under `corpus/fixtures/` (task P8-10).
     fn fixture() -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR"))
