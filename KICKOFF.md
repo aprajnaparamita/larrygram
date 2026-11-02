@@ -364,9 +364,10 @@ Also:
   Larrygram** (ADR 0066).
 - **Brand assets:** `about_screen.svg`, `panel-layout.svg`,
   `classic-layout.svg`, `icon.svg` and `larry.png` under
-  `crates/ui/assets/brand/`, all rights reserved, used with
-  permission (ADR 0067). `icon.svg` is the window icon and the
-  favicon. Forks must replace them.
+  `crates/ui/assets/brand/` (ADR 0067). `icon.svg` is the window
+  icon and the favicon, and is MIT since 2026-11-03; the other four
+  are all rights reserved, used with permission, and forks must
+  replace them.
 - **Icons:** Tabler outline icons (MIT), chosen by meaning, mapped in
   `ui-spec/icons.yaml` and tinted with theme tokens (ADR 0062). No
   third-party application artwork.

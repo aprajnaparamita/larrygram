@@ -94,3 +94,16 @@ the icon set; the brand SVGs are drawn as-is.
   artwork of their own, not widgets.
 - **PNG only, rasterised at build time.** Rejected: SVGs stay sharp at
   every scale factor and at the zoom levels of HiDPI screens.
+
+## Amendment 2026-11-03: the app icon is MIT
+
+The artist, Janet Jeffus, releases `icon.svg` under the MIT licence of
+the repository, so packages and distributions can ship the app icon
+without a separate permission. It is still © 2026 Janet Jeffus. Forks
+may keep it.
+
+`about_screen.svg`, `panel-layout.svg`, `classic-layout.svg` and
+`larry.png` keep the terms above: all rights reserved, not covered by
+the MIT licence, replaced by any fork. The three goldens that render
+them (`about.png`, `wizard-welcome.png`, `wizard-layout.png`) keep the
+same restriction.
