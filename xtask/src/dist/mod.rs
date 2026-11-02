@@ -127,13 +127,19 @@ pub struct Layout {
 
 impl Layout {
     /// The layout of a real run: the workspace root, the cargo target
-    /// directory (`$CARGO_TARGET_DIR` when set, else `target/` under
-    /// the root) and the `dist` directory under it.
-    pub fn real() -> Self {
-        let root = util::root();
-        let target = std::env::var_os("CARGO_TARGET_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| root.join("target"));
+    /// directory as `cargo metadata` reports it, and the `dist`
+    /// directory under it. Asking cargo honours every way the target
+    /// directory can be set: `CARGO_TARGET_DIR`,
+    /// `CARGO_BUILD_TARGET_DIR` and `build.target-dir` (task R10
+    /// item 1).
+    pub fn real() -> Result<Self> {
+        let target = metadata_target_dir(&mut Command::new(util::cargo()))?;
+        Ok(Self::with_target(util::root(), target))
+    }
+
+    /// The layout for the workspace `root` and the cargo target
+    /// directory `target`: the output goes to `<target>/dist`.
+    pub fn with_target(root: PathBuf, target: PathBuf) -> Self {
         let dist = target.join("dist");
         Layout { root, target, dist }
     }
@@ -141,13 +147,7 @@ impl Layout {
     /// The layout of a test run: everything under `root`.
     #[cfg(test)]
     pub fn under(root: &Path) -> Self {
-        let target = root.join("target");
-        let dist = target.join("dist");
-        Layout {
-            root: root.to_path_buf(),
-            target,
-            dist,
-        }
+        Self::with_target(root.to_path_buf(), root.join("target"))
     }
 
     /// The built binary `name` for `target_triple`, as cargo lays it
@@ -166,6 +166,25 @@ impl Layout {
     pub fn package(&self, name: &str) -> PathBuf {
         self.dist.join(name)
     }
+}
+
+/// Runs `cargo metadata --no-deps` through `cargo` (a bare cargo
+/// command; the tests add environment variables to it) and returns
+/// the target directory it reports (task R10 item 1).
+pub fn metadata_target_dir(cargo: &mut Command) -> Result<PathBuf> {
+    let json = util::output(cargo.args(["metadata", "--format-version", "1", "--no-deps"]))?;
+    target_directory(&json)
+}
+
+/// The `target_directory` of `cargo metadata` JSON.
+pub fn target_directory(json: &str) -> Result<PathBuf> {
+    let value: serde_json::Value =
+        serde_json::from_str(json).map_err(|e| format!("bad cargo metadata JSON: {e}"))?;
+    value
+        .get("target_directory")
+        .and_then(|t| t.as_str())
+        .map(PathBuf::from)
+        .ok_or_else(|| "cargo metadata: no `target_directory`".to_owned())
 }
 
 /// The brand icon source, relative to the workspace root (ADR 0067).
@@ -293,7 +312,7 @@ pub fn render_png(svg: &str, size: u32) -> Result<Vec<u8>> {
 /// tools. Each platform pipeline checks the host itself before it
 /// builds anything.
 pub fn run(options: &Options) -> Result<()> {
-    let layout = Layout::real();
+    let layout = Layout::real()?;
     let (os, arch) = (std::env::consts::OS, std::env::consts::ARCH);
     match options.platform {
         Platform::Mac => run_mac(&layout, os, arch),
@@ -463,14 +482,47 @@ mod tests {
         );
     }
 
-    /// `Layout::real` puts the output under the cargo target
-    /// directory's `dist` (task R9 goal 1).
+    /// `Layout::real` puts the output under `<target dir>/dist`, with
+    /// the target dir that cargo itself reports, whatever sets it
+    /// (task R10 item 1: the master's gate sets `CARGO_TARGET_DIR`).
     #[test]
-    fn layout_real_lives_under_the_target_dir() {
-        let layout = Layout::real();
+    fn layout_real_lives_under_the_cargo_target_dir() {
+        let layout = Layout::real().unwrap();
         assert_eq!(layout.root, util::root());
-        assert!(layout.target.ends_with("target"), "{:?}", layout.target);
-        assert_eq!(layout.dist, layout.target.join("dist"));
+        let reported = metadata_target_dir(&mut Command::new(util::cargo())).unwrap();
+        assert_eq!(layout.target, reported);
+        assert_eq!(layout.dist, reported.join("dist"));
+    }
+
+    /// Both environment variables move the target dir `cargo
+    /// metadata` reports, so `Layout::real` follows them (task R10
+    /// item 1). `build.target-dir` is the config-file spelling of
+    /// `CARGO_BUILD_TARGET_DIR`.
+    #[test]
+    fn metadata_target_dir_follows_the_environment() {
+        let tmp = TempDir::new("dist-target-env");
+        for var in ["CARGO_TARGET_DIR", "CARGO_BUILD_TARGET_DIR"] {
+            let want = tmp.join(var);
+            let mut cargo = Command::new(util::cargo());
+            cargo
+                .env_remove("CARGO_TARGET_DIR")
+                .env_remove("CARGO_BUILD_TARGET_DIR")
+                .env(var, &want);
+            assert_eq!(metadata_target_dir(&mut cargo).unwrap(), want, "{var}");
+        }
+    }
+
+    /// Broken or incomplete metadata is a clean error.
+    #[test]
+    fn target_directory_reports_bad_metadata() {
+        assert_eq!(
+            target_directory(r#"{"target_directory":"/t"}"#).unwrap(),
+            PathBuf::from("/t")
+        );
+        let err = target_directory("not json").unwrap_err();
+        assert!(err.contains("bad cargo metadata JSON"), "{err}");
+        let err = target_directory("{}").unwrap_err();
+        assert!(err.contains("no `target_directory`"), "{err}");
     }
 
     /// `StdSys` runs the real command and reports a failing one
