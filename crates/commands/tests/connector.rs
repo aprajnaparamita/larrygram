@@ -1143,7 +1143,14 @@ fn a_draw_with_one_glued_end_routes_the_free_end_to_its_point() {
     assert_eq!(records.len(), 1, "one glue on the new shape");
     let drawn = records.first().expect("record").from_sheet;
     let points = path(&ctx, drawn);
-    assert_eq!(points.len(), 2, "two routed endpoints");
+    // The default routes right angle (ADR 0084 rule 8): a routed path
+    // with an axis-aligned elbow between the two ends.
+    assert!(points.len() >= 2, "{points:?}");
+    let start = points.first().expect("begin");
+    assert!(
+        (start.x - 2.0).abs() < 1e-9 && (start.y - 6.625).abs() < 1e-9,
+        "the glued begin lands on the connection point: {start:?}"
+    );
     let end = points.last().expect("end");
     assert!(
         (end.x - 5.0).abs() < 1e-9 && (end.y - 1.0).abs() < 1e-9,

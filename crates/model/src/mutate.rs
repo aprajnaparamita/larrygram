@@ -131,7 +131,10 @@ const MAX_WALK: usize = 1 << 16;
 /// `F='Inh'` is expressed by *not* writing the cell.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CellWrite {
-    /// The formula text, e.g. `"2.5"` or `"Width*0.5"`.
+    /// The formula text, e.g. `"2.5"` or `"Width*0.5"`. An **empty**
+    /// text writes the cached value only: a literal cell with no
+    /// formula (`CellWrite::value_only`, the "unglued" row of ADR 0084
+    /// rule 2).
     pub formula: String,
     /// The cached value to store alongside the formula.
     pub value: CellValue,
@@ -142,6 +145,15 @@ impl CellWrite {
     pub fn new(formula: impl Into<String>, value: CellValue) -> Self {
         Self {
             formula: formula.into(),
+            value,
+        }
+    }
+
+    /// A write of the cached value only: the cell keeps no formula (a
+    /// literal cell).
+    pub fn value_only(value: CellValue) -> Self {
+        Self {
+            formula: String::new(),
             value,
         }
     }
@@ -293,18 +305,21 @@ fn write_sheet_cell(sheet: &mut crate::sheet::Sheet, cell: &CellName, write: &Ce
 /// (the ShapeSheet table's kind for a sheet cell, the unit the row
 /// records for a Shape Data value).
 fn write_entry(cells: &mut Vec<Cell>, cell: &CellName, write: &CellWrite, unit: Unit) {
+    // An empty formula text writes the cached value only (a literal
+    // cell with no `F`, `CellWrite::value_only`).
+    let formula = (!write.formula.is_empty()).then(|| write.formula.clone());
     match cells
         .iter_mut()
         .find(|existing| existing.name.as_str() == cell.as_str())
     {
         Some(existing) => {
-            existing.formula = Some(write.formula.clone());
+            existing.formula = formula;
             existing.value = Some(write.value.clone());
             existing.unit = unit;
         }
         None => cells.push(Cell {
             name: cell.clone(),
-            formula: Some(write.formula.clone()),
+            formula,
             value: Some(write.value.clone()),
             unit,
             preserved: Preserved::new(),
@@ -1211,6 +1226,34 @@ impl Document {
             .collect();
         shape.name_u = unique_name_u(&name_u, &taken);
         shape.master = Some(master);
+        if let Some(vector) = self.master_end_vector(master) {
+            // A 1-D master (ADR 0084 rule 1, amended 2026-11-03): the
+            // drop point is the midpoint, the ends follow the master's
+            // own begin-to-end vector (scaled to the requested width), and the pin and size cells keep the master's
+            // GUARD formulas: only the endpoint cells are literals.
+            let master_width = vector.x.hypot(vector.y);
+            let scale = if master_width > 0.0 && size.width > 0.0 {
+                size.width / master_width
+            } else {
+                1.0
+            };
+            let half = Point::new(vector.x * scale * 0.5, vector.y * scale * 0.5);
+            let begin = Point::new(at.x - half.x, at.y - half.y);
+            let end = Point::new(at.x + half.x, at.y + half.y);
+            shape.sheet.cells = vec![
+                number_cell("BeginX", begin.x),
+                number_cell("BeginY", begin.y),
+                number_cell("EndX", end.x),
+                number_cell("EndY", end.y),
+            ];
+            let id = self.insert_shape(page, shape, None)?;
+            if let Err(error) = self.write_connector_path(id, &[begin, end]) {
+                // Never leave a half-built instance on the page.
+                let _ = self.detach_shape(id);
+                return Err(error);
+            }
+            return Ok(id);
+        }
         shape.sheet.cells = vec![
             number_cell("Width", size.width),
             number_cell("Height", size.height),
@@ -1569,6 +1612,16 @@ impl Document {
     /// lands in the shape's own `Geometry` section (the row union rules of
     /// ADR 0019).
     ///
+    /// For a 1-D shape (task P7-31 goal 2, [`Document::is_connector`])
+    /// the write keeps the endpoint cells true as well: `BeginX`/`BeginY`
+    /// take the path's first point and `EndX`/`EndY` its last (a glued
+    /// end keeps its glue formula, only the cached `V` refreshes), and
+    /// `PinX`, `PinY`, `Width`, `Height` and the local pins are
+    /// refreshed through the formulas of ADR 0084 rule 1. `Width` is
+    /// negative when the path runs right to left. A shape without the
+    /// endpoint cells (a legacy record-only connector) gets its
+    /// geometry rows only: nothing migrates it.
+    ///
     /// The routed path **replaces** the connector's geometry: the rows go
     /// into the first `Geometry` section and any further `Geometry`
     /// sections are dropped (task P5-19 review F7, recorded in ADR 0045).
@@ -1582,9 +1635,10 @@ impl Document {
         if self.shape(connector).is_none() {
             return Err(Error::UnknownShape(connector));
         }
-        if path.is_empty() {
-            return Err(Error::BadCell("empty connector path"));
-        }
+        let (begin, end) = match (path.first(), path.last()) {
+            (Some(begin), Some(end)) => (*begin, *end),
+            _ => return Err(Error::BadCell("empty connector path")),
+        };
         if path.len() > MAX_PATH_POINTS {
             return Err(Error::BadCell("connector path too long"));
         }
@@ -1592,6 +1646,10 @@ impl Document {
             if !point.x.is_finite() || !point.y.is_finite() {
                 return Err(Error::BadCell("non-finite path point"));
             }
+        }
+        if self.is_connector(connector) {
+            self.write_connector_ends(connector, begin, end)?;
+            self.write_connector_pins(connector, begin, end)?;
         }
         let frame = self.frame_of(connector)?;
         let inverse = frame
@@ -1836,6 +1894,31 @@ impl Document {
     /// a master that documents a NaN size is an error, not a zero-sized
     /// instance (task P5-19 coverage: the guard is reachable and has a
     /// test).
+    /// The begin-to-end vector of a 1-D master's shape (its own four
+    /// endpoint cells), or `None` for a 2-D master.
+    fn master_end_vector(&self, master: MasterId) -> Option<Point> {
+        let shape = self.master(master)?.shapes.first().copied()?;
+        let entity = self.shape(shape)?;
+        let read = |name: &str| {
+            entity
+                .sheet
+                .cells
+                .iter()
+                .find(|cell| cell.name.as_str() == name)
+                .and_then(|cell| match cell.value {
+                    Some(CellValue::Number(value)) if value.is_finite() => Some(value),
+                    _ => None,
+                })
+        };
+        let (bx, by, ex, ey) = (
+            read("BeginX")?,
+            read("BeginY")?,
+            read("EndX")?,
+            read("EndY")?,
+        );
+        Some(Point::new(ex - bx, ey - by))
+    }
+
     fn master_size(&self, master: MasterId) -> Result<Size, Error> {
         let shape = self
             .master(master)

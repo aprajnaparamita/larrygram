@@ -1223,6 +1223,7 @@ mod tests {
             self.done = true;
             Ok(Evaluation {
                 value: CellValue::Number(7.0),
+                kept_cached: false,
                 warnings: Vec::new(),
                 writes: Vec::new(),
                 evaluations: 1,

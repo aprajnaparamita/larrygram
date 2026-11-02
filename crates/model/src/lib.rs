@@ -15,6 +15,7 @@
 pub mod aliases;
 mod cell;
 mod connection;
+mod connector;
 mod defaults;
 mod document;
 mod error;
@@ -38,6 +39,7 @@ mod theme;
 mod values;
 
 pub use cell::{Cell, CellValue, Color};
+pub use connector::{ConnectorEnd, EndGlue};
 pub use defaults::{DocumentedDefault, documented_default};
 pub use document::{Document, DocumentKind, Property};
 pub use error::Error;

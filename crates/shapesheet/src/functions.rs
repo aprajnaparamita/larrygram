@@ -50,8 +50,16 @@ pub enum FunctionKind {
     Guard,
     /// An action with no value (`RUNADDON`, `OPENTEXTWIN`).
     Action,
-    /// Reserved for Visio's own use (`_MOD`, `_XFTRIGGER`).
+    /// Reserved for Visio's own use (`_MOD` and other `_`-prefixed
+    /// names the table does not hold): the call stands back with an
+    /// [`crate::EvalWarningKind::UnknownFunction`] warning.
     Internal,
+    /// A Visio-owned function the evaluator never computes (`PAR`,
+    /// `PNT`, `_WALKGLUE`, `_XFTRIGGER`): the call keeps the cell's
+    /// cached value and reports nothing (task P7-31, ADR 0084 rule 2).
+    /// The glue formulas of a Visio-written file carry these calls; our
+    /// router, not the evaluator, moves the endpoints.
+    VisioOwned,
 }
 
 /// The function table (ADR 0053): every name of the evaluated set, with
@@ -321,6 +329,35 @@ pub const FUNCTIONS: &[FunctionDef] = &[
         max_args: Some(2),
         kind: FunctionKind::Guard,
     },
+    // Visio-owned functions (task P7-31, ADR 0084 rule 2): the glue
+    // formulas of a Visio-written file (`docs/ui/connectors.md`
+    // section 8) carry these calls. The evaluator keeps the cell's
+    // cached value for them and reports nothing; the arities record the
+    // observed spellings.
+    FunctionDef {
+        name: "PAR",
+        min_args: 1,
+        max_args: Some(1),
+        kind: FunctionKind::VisioOwned,
+    },
+    FunctionDef {
+        name: "PNT",
+        min_args: 2,
+        max_args: Some(2),
+        kind: FunctionKind::VisioOwned,
+    },
+    FunctionDef {
+        name: "_WALKGLUE",
+        min_args: 3,
+        max_args: Some(3),
+        kind: FunctionKind::VisioOwned,
+    },
+    FunctionDef {
+        name: "_XFTRIGGER",
+        min_args: 1,
+        max_args: Some(1),
+        kind: FunctionKind::VisioOwned,
+    },
 ];
 
 /// Looks a function up by name (case-insensitive per ADR 0053).
@@ -334,12 +371,18 @@ pub fn lookup_function(name: &str) -> Result<Option<&'static FunctionDef>, Error
         .find(|def| def.name.eq_ignore_ascii_case(name)))
 }
 
-/// True when the evaluator implements the function (ADR 0053).
+/// True when the evaluator computes the function (ADR 0053).
 ///
-/// Exactly the names [`FUNCTIONS`] holds are supported; an unknown name
-/// keeps the cell's cached value instead (ADR 0053).
+/// The names [`FUNCTIONS`] holds, except the [`FunctionKind::VisioOwned`]
+/// ones: those keep the cell's cached value and are never computed, so
+/// they are as unimplemented as a name the table does not hold (ADR
+/// 0084 rule 2). A caller that compares computed values with cached
+/// ones (the crosscheck classifier) skips both the same way.
 pub fn is_supported(name: &str) -> bool {
-    matches!(lookup_function(name), Ok(Some(_)))
+    matches!(
+        lookup_function(name),
+        Ok(Some(def)) if def.kind != FunctionKind::VisioOwned
+    )
 }
 
 #[cfg(test)]
@@ -351,7 +394,21 @@ mod tests {
         for def in FUNCTIONS {
             let found = lookup_function(&def.name.to_ascii_lowercase());
             assert_eq!(found, Ok(Some(def)));
-            assert!(is_supported(def.name));
+            if def.kind == FunctionKind::VisioOwned {
+                assert!(!is_supported(def.name), "{} is keep-cached", def.name);
+            } else {
+                assert!(is_supported(def.name));
+            }
+        }
+    }
+
+    #[test]
+    fn the_visio_owned_functions_are_tabled_but_not_supported() {
+        for name in ["PAR", "PNT", "_WALKGLUE", "_XFTRIGGER"] {
+            let found = lookup_function(name).expect("lookup");
+            let def = found.expect("the Visio-owned rows are in the table");
+            assert_eq!(def.kind, FunctionKind::VisioOwned);
+            assert!(!is_supported(name));
         }
     }
 
