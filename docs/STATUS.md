@@ -99,7 +99,7 @@ Phase 8: binary `.vsd`, `.vss` and `.vst` import, read-only, in `crates/vsd-bina
 | [R6](tasks/R6.md) | master | Phase 7 and 8 gates | boundary | waiting (remove the Microsoft sample goldens from history; nothing may run; the user's force-push follows) | — |
 | [R7](tasks/R7.md) | implementer | R6, the user's manual test | boundary | merged (`cargo xtask dist mac`: the .app and the .dmg; double-click open left to R8; the .dmg goes to testers after R8, R6 and the user's manual test) | 69a5ec3 |
 | [R8](tasks/R8.md) | implementer | R7 | boundary | merged (path arguments and the macOS open-documents event; ADR 0074) | 90e301b |
-| [R9](tasks/R9.md) | implementer | — | boundary | ready (alpha builds for macOS, Windows and Linux: `cargo xtask dist windows|linux`, `release.yml` pre-releases on `v*` tags, CI on hosted runners; GitHub Actions blocked by the account billing lock until the user clears it) | — |
+| [R9](tasks/R9.md) | implementer | — | boundary | ready (alpha builds for macOS, Windows and Linux: `cargo xtask dist windows` and `linux`, `release.yml` pre-releases on `v*` tags, CI on hosted runners; GitHub Actions blocked by the account billing lock until the user clears it) | — |
 
 ## Phase 9 task board
 
