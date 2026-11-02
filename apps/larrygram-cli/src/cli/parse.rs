@@ -2,8 +2,8 @@
 //!
 //! The parser is `lexopt`: small, pure Rust, and it leaves the help text
 //! to us (AGENTS.md section 4: our own descriptions). `Ok(None)` means
-//! `--help` was requested and [`USAGE_TEXT`] has been written to the given
-//! stream.
+//! `--help` or `--version` was requested and the help text or the
+//! version line has been written to the given stream.
 
 use std::ffi::OsString;
 use std::io::Write;
@@ -27,6 +27,7 @@ Usage:
   larrygram-cli export <file> --out <dir> [--format png|svg] [--scale PPI]
     [--strict]
   larrygram-cli --help
+  larrygram-cli --version
 
 Commands:
   inspect   Summarise a document: kind, pages, masters, styles, themes.
@@ -45,6 +46,7 @@ Options:
                     for transparent (default: the page background).
   --strict          Exit with the warnings code when warnings occurred.
   -h, --help        Print this help.
+  -V, --version     Print the version and build id.
 
 Input files: .vsdx, .vssx, .vstx or the binary .vsd, .vss, .vst
 (read-only formats, imported into the model).
@@ -70,6 +72,7 @@ pub(crate) fn parse_to(
     };
     let name = match arg {
         Arg::Short('h') | Arg::Long("help") => return write_help(out),
+        Arg::Short('V') | Arg::Long("version") => return write_version(out),
         Arg::Value(value) => value,
         other => return Err(unknown_option(&other)),
     };
@@ -94,6 +97,7 @@ fn parse_inspect(parser: &mut Parser, out: &mut dyn Write) -> Result<Option<Comm
     while let Some(arg) = parser.next().map_err(lexop_usage)? {
         match arg {
             Arg::Short('h') | Arg::Long("help") => return write_help(out),
+            Arg::Short('V') | Arg::Long("version") => return write_version(out),
             Arg::Long("json") => json = true,
             Arg::Long("page") => page = Some(parse_page(&next_value(parser, "page")?)?),
             Arg::Value(value) => {
@@ -124,6 +128,7 @@ fn parse_render(parser: &mut Parser, out: &mut dyn Write) -> Result<Option<Comma
     while let Some(arg) = parser.next().map_err(lexop_usage)? {
         match arg {
             Arg::Short('h') | Arg::Long("help") => return write_help(out),
+            Arg::Short('V') | Arg::Long("version") => return write_version(out),
             Arg::Long("out") => out_path = Some(PathBuf::from(next_value(parser, "out")?)),
             Arg::Long("page") => page = Some(parse_page(&next_value(parser, "page")?)?),
             Arg::Long("format") => format = Some(parse_format(&next_value(parser, "format")?)?),
@@ -177,6 +182,7 @@ fn parse_export(parser: &mut Parser, out: &mut dyn Write) -> Result<Option<Comma
     while let Some(arg) = parser.next().map_err(lexop_usage)? {
         match arg {
             Arg::Short('h') | Arg::Long("help") => return write_help(out),
+            Arg::Short('V') | Arg::Long("version") => return write_version(out),
             Arg::Long("out") => out_path = Some(PathBuf::from(next_value(parser, "out")?)),
             Arg::Long("format") => format = Some(parse_format(&next_value(parser, "format")?)?),
             Arg::Long("scale") => scale = Some(parse_scale(&next_value(parser, "scale")?)?),
@@ -284,6 +290,16 @@ fn format_from_extension(out: &Path) -> Option<OutputFormat> {
     }
 }
 
+/// Writes the version line to `out` (task R11 goal 1):
+/// `<version> (<build id>)`, the same line the About window shows.
+fn write_version(out: &mut dyn Write) -> Result<Option<Command>, Usage> {
+    let line = larrygram_commands::build::version_line();
+    writeln!(out, "{line}")
+        .and_then(|()| out.flush())
+        .map_err(|error| usage_error(format!("cannot write the version line: {error}")))?;
+    Ok(None)
+}
+
 /// Writes [`USAGE_TEXT`] to `out`.
 fn write_help(out: &mut dyn Write) -> Result<Option<Command>, Usage> {
     out.write_all(USAGE_TEXT.as_bytes())
@@ -329,6 +345,42 @@ mod tests {
             Ok(Some(command)) => command,
             other => panic!("expected a command, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn the_version_option_prints_the_version_line() {
+        // Task R11 goal 1: the same line the About window shows.
+        let mut out = Vec::new();
+        let parsed = parse_to(["--version"].into_iter().map(OsString::from), &mut out)
+            .expect("--version parses");
+        assert!(parsed.is_none());
+        let printed = String::from_utf8(out).expect("text");
+        assert_eq!(
+            printed,
+            format!("{}\n", larrygram_commands::build::version_line())
+        );
+    }
+
+    #[test]
+    fn the_version_option_works_inside_a_command_and_with_a_short_flag() {
+        let cases: &[&[&str]] = &[
+            &["inspect", "drawing.vsdx", "--version"],
+            &["render", "-V"],
+            &["export", "--version"],
+        ];
+        for args in cases {
+            let mut out = Vec::new();
+            let parsed = parse_to(args.iter().copied().map(OsString::from), &mut out)
+                .unwrap_or_else(|error| panic!("{args:?}: {error:?}"));
+            assert!(parsed.is_none(), "{args:?}");
+            assert!(!out.is_empty(), "{args:?} print the line");
+        }
+    }
+
+    #[test]
+    fn the_usage_text_names_the_version_option() {
+        assert!(USAGE_TEXT.contains("-V, --version"), "{USAGE_TEXT}");
+        assert!(USAGE_TEXT.contains("--version"), "{USAGE_TEXT}");
     }
 
     #[test]
