@@ -997,6 +997,7 @@ fn a_row_address_without_its_section_is_a_warning_not_a_panic() {
                 SheetRef::Page(_) => larrygram_model::ShapeId { index: 0 },
             };
             Ok(Evaluation {
+                kept_cached: false,
                 value: CellValue::Number(0.0),
                 warnings: Vec::new(),
                 writes: vec![CellWriteOp {
