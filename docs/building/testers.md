@@ -91,9 +91,8 @@ software: expect rough edges and save your work often.
 
 ## Report a bug
 
-Open an issue in the repository's issue tracker. The repository has
-bug-report templates; pick the one for defects. Whatever the template
-asks, the report needs at least:
+Open an issue in the repository's issue tracker. The report needs at
+least:
 
 - what you did, what you expected and what happened instead;
 - the drawing, if you can share it (a small file that shows the
