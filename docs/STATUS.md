@@ -63,8 +63,9 @@ Phase 7: Panel and Classic layouts, the Larrygram rename and the welcome wizard.
 | [P7-34](tasks/P7-34.md) | implementer | P7-33 | I | waits for P7-33 (connection points: view check, tool, type, glue renumbering); parallel with P7-35 | — |
 | [P7-35](tasks/P7-35.md) | implementer | P7-33, P7-36 | I | waits (segment drags, Reset Connector, reroute options) | — |
 | [P7-36](tasks/P7-36.md) | implementer | P7-32 | I | waits for P7-32 (right angle, straight and curved styles, the controls, the storage round trip); parallel with P7-33 | — |
-| [P7-37](tasks/P7-37.md) | implementer | P7-29 | I | ready, parallel with P7-31 (format a new text box while typing, inherited text counts, one allowlist rule) | — |
+| [P7-37](tasks/P7-37.md) | implementer | P7-29 | I | ready, restarted 2026-11-03 with the approach decided (a new text box is formatted while typed, through an undo group, ADR 0040 amendment; one allowlist rule); inherited text moved to P7-40 | — |
 | [P7-39](tasks/P7-39.md) | implementer | P7-31 | I | ready, on `agent/P7-31` (the P7-31 review fixes; P7-31 merges with them); parallel with P7-37 | — |
+| [P7-40](tasks/P7-40.md) | implementer | P7-37 | I | waits for P7-37 (instances draw, enable and edit their master's text) | — |
 | [P7-38](tasks/P7-38.md) | test-engineer | P7-31–P7-37 | I | waits for the connector and text tasks to merge (the website's screenshots rendered offscreen, `cargo xtask screenshots --to`, copied to the site) | — |
 
 Tasks start as soon as their own dependencies merge (no whole-group waits); run at most twelve workers at once across Phase 7 and Phase 8.

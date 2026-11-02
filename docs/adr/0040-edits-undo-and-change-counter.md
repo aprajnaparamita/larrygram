@@ -123,3 +123,28 @@ That behaviour is now a written rule:
 The rule is pinned by
 `undo_steps_select_their_shapes_and_a_page_restore_clears_the_selection`
 (`crates/commands/tests/arrange.rs`).
+
+## Amendment 2026-11-03 (task P7-37): undo groups
+
+Rule 1 stays: each command still returns one edit. An **undo group**
+lets the shell fold the edits of several commands into one undo step,
+for an interaction that spans commands but is one act for the user.
+The first user is a new text box that is formatted while it is typed
+(P7-37): the insert, the format commands and the final text write are
+one step.
+
+- `UndoStack::begin_group(label)` opens a group. While it is open,
+  `push` appends to the group instead of the stack. Groups do not nest:
+  a second `begin_group` is an error.
+- `end_group()` pushes the collected edits as one `CompositeEdit`
+  under the label. An empty group pushes nothing.
+- `cancel_group(ctx)` reverts the collected edits in reverse order,
+  with recording suspended (rule 2), and discards them. The document
+  is as it was when the group opened, and its unsaved-changes state is
+  restored too. The change counter still only moves forward (rule 3).
+- `undo` and `redo` end an open group first.
+- Only the shell opens a group, and it always closes it, with
+  `end_group` or `cancel_group`, when the interaction ends by any path:
+  commit, Escape, a click elsewhere (P7-25), a layout switch, closing
+  the document. Programmatic sources never see an open group; a
+  command from the control channel ends it first.
