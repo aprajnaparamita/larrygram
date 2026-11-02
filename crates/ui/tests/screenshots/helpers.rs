@@ -83,34 +83,43 @@ pub fn crop_around(
     egui::Rect::from_center_size(center, size)
 }
 
-/// The pixel size of a logical crop at `scale`.
-fn crop_px(size: egui::Vec2, scale: f32) -> (u32, u32) {
-    (
-        (size.x * scale).round().max(0.0) as u32,
-        (size.y * scale).round().max(0.0) as u32,
-    )
+/// A pixel rectangle in a rendered image: `x`, `y`, `width`,
+/// `height`.
+type PxRect = (u32, u32, u32, u32);
+
+/// The frame's logical crop at `scale`, in image pixels, intersected
+/// with the image: what the frame can really give (a crop rectangle
+/// larger than the window is cut back to the window, never padded).
+fn available_px(frame: &Frame, scale: f32) -> PxRect {
+    let (image_w, image_h) = frame.image.dimensions();
+    let edge = |value: f32, max: u32| (value * scale).round().clamp(0.0, max as f32) as u32;
+    let (x0, x1) = (
+        edge(frame.crop.min.x, image_w),
+        edge(frame.crop.max.x, image_w),
+    );
+    let (y0, y1) = (
+        edge(frame.crop.min.y, image_h),
+        edge(frame.crop.max.y, image_h),
+    );
+    (x0, y0, x1.saturating_sub(x0), y1.saturating_sub(y0))
 }
 
-/// Crops `frame` to `size_px` (already the exact aspect) centred on
-/// the frame's crop rectangle, clamped into the image.
-fn crop_image(frame: &Frame, size_px: (u32, u32), scale: f32) -> RgbaImage {
+/// Crops `image` to `size_px` (already the exact aspect, no larger
+/// than `area`) centred in `area`.
+fn crop_image(image: &RgbaImage, area: PxRect, size_px: (u32, u32)) -> RgbaImage {
+    let (x0, y0, area_w, area_h) = area;
     let (width, height) = size_px;
-    let (image_w, image_h) = frame.image.dimensions();
-    let center = frame.crop.center() * scale;
-    let x = (center.x - width as f32 / 2.0)
-        .round()
-        .clamp(0.0, (image_w.saturating_sub(width)) as f32);
-    let y = (center.y - height as f32 / 2.0)
-        .round()
-        .clamp(0.0, (image_h.saturating_sub(height)) as f32);
-    image::imageops::crop_imm(&frame.image, x as u32, y as u32, width, height).to_image()
+    let x = x0 + (area_w - width) / 2;
+    let y = y0 + (area_h - height) / 2;
+    image::imageops::crop_imm(image, x, y, width, height).to_image()
 }
 
 /// Renders one shot through `build` and crops it to `aspect` at least
-/// `min_px` in size. The first attempt renders at 2x; when that crop
-/// falls short of the minimum the shot re-renders at 3x (never
-/// upscale). `build` receives the scale and returns the full frame
-/// with its logical crop rectangle.
+/// `min_px` in size. The first attempt renders at 2x; when the crop
+/// the frame can really give (its rectangle cut to the image) falls
+/// short of the minimum, the shot re-renders at 3x (never upscale).
+/// `build` receives the scale and returns the full frame with its
+/// logical crop rectangle.
 pub fn capture(
     mut build: impl FnMut(f32) -> Frame,
     aspect: (u32, u32),
@@ -119,9 +128,10 @@ pub fn capture(
     let mut short = String::new();
     for scale in [2.0f32, 3.0] {
         let frame = build(scale);
-        let (w, h) = fit_aspect_px(crop_px(frame.crop.size(), scale), aspect);
+        let area = available_px(&frame, scale);
+        let (w, h) = fit_aspect_px((area.2, area.3), aspect);
         if w >= min_px.0 && h >= min_px.1 {
-            return crop_image(&frame, (w, h), scale);
+            return crop_image(&frame.image, area, (w, h));
         }
         short = format!("at {scale}x the crop is {w}x{h}");
     }
@@ -302,4 +312,36 @@ fn crop_around_recentres_a_crop_bigger_than_the_bounds() {
         (crop.center() - bounds.center()).length() < 0.5,
         "{crop:?} is centred in {bounds:?}"
     );
+}
+
+#[test]
+fn capture_falls_back_to_3x_when_the_crop_is_larger_than_the_frame() {
+    // The crop asks for more than the 700 x 525 window: at 2x the
+    // image is only 1400 x 1050, below 1600 x 1200, so the shot must
+    // re-render at 3x (2100 x 1575) instead of clipping silently.
+    let mut scales = Vec::new();
+    let image = capture(
+        |scale| {
+            scales.push(scale);
+            synthetic((700.0, 525.0), rect(-50.0, -40.0, 900.0, 700.0), scale)
+        },
+        (4, 3),
+        (1600, 1200),
+    );
+    assert_eq!(scales, vec![2.0, 3.0], "2x first, then 3x");
+    assert_eq!(image.dimensions(), (2100, 1575));
+}
+
+#[test]
+fn capture_measures_the_part_of_the_crop_inside_the_image() {
+    // Half the crop hangs off the right edge: only the inside half
+    // counts, and the output stays inside the image at the exact
+    // aspect.
+    let image = capture(
+        |scale| synthetic((1000.0, 600.0), rect(600.0, 0.0, 800.0, 600.0), scale),
+        (4, 3),
+        (400, 300),
+    );
+    // 400 logical px inside at 2x: 800 x 1200 available, 800 x 600 fit.
+    assert_eq!(image.dimensions(), (800, 600));
 }
