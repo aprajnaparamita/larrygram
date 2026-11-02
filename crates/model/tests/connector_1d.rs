@@ -431,6 +431,65 @@ fn a_glued_end_keeps_its_formula_across_a_path_write() {
 }
 
 #[test]
+fn the_writes_refuse_impossible_input() {
+    let (mut doc, connector) = with_connector();
+    // Non-finite points, a negative glue target, an overflowing row
+    // index and stale ids are errors, never panics (AGENTS.md
+    // section 6).
+    assert!(
+        doc.write_connector_end(
+            connector,
+            ConnectorEnd::Begin,
+            Point::new(f64::NAN, 0.0),
+            EndGlue::Free
+        )
+        .is_err()
+    );
+    assert!(
+        doc.write_connector_end(
+            connector,
+            ConnectorEnd::Begin,
+            Point::new(0.0, 0.0),
+            EndGlue::Point { sheet: -1, ix: 0 }
+        )
+        .is_err()
+    );
+    assert!(
+        doc.write_connector_end(
+            connector,
+            ConnectorEnd::Begin,
+            Point::new(0.0, 0.0),
+            EndGlue::Dynamic { sheet: -2 }
+        )
+        .is_err()
+    );
+    assert!(
+        doc.write_connector_end(
+            connector,
+            ConnectorEnd::Begin,
+            Point::new(0.0, 0.0),
+            EndGlue::Point {
+                sheet: 1,
+                ix: u32::MAX
+            }
+        )
+        .is_err()
+    );
+    let stale = ShapeId { index: 999 };
+    assert!(
+        doc.write_connector_end(
+            stale,
+            ConnectorEnd::Begin,
+            Point::new(0.0, 0.0),
+            EndGlue::Free
+        )
+        .is_err()
+    );
+    assert!(doc.connector_end(stale, ConnectorEnd::Begin).is_err());
+    assert!(doc.connector_end(connector, ConnectorEnd::End).is_ok());
+}
+
+#[test]
 fn a_legacy_connector_gets_geometry_rows_only() {
     let mut doc = Document::new();
     let page = doc.add_page("Page-1").expect("page");
