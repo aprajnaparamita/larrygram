@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Larrygram
+GenericName=Diagram editor
+Comment=Diagram editor for Visio drawings
+Exec=larrygram %F
+Icon=larrygram
+Terminal=false
+Categories=Office;Graphics;
+Keywords=diagram;flowchart;visio;
+MimeType=application/vnd.ms-visio.drawing.main+xml;application/vnd.visio;
+StartupNotify=true

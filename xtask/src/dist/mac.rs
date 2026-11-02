@@ -1,11 +1,13 @@
 //! `cargo xtask dist mac`: builds the macOS `Larrygram.app` bundle and
-//! the `Larrygram-<version>.dmg` disk image (task R7).
+//! the `Larrygram-<version>-macos-arm64.dmg` disk image (tasks R7 and
+//! R9).
 //!
-//! The artifacts go under [`DIST_ROOT`] on the external drive, never
-//! into the repository. The build steps:
+//! The artifacts go under `<target dir>/dist/` (task R9 goal 1). The
+//! build steps:
 //!
-//! 1. build the release binary of `apps/larrygram` for the one
-//!    supported target, [`TARGET`] (Apple silicon, task R7 decisions);
+//! 1. build the release binaries of `larrygram` and `larrygram-cli`
+//!    for the one supported target, [`TARGET`] (Apple silicon, task R7
+//!    decisions; both binaries in every package, task R9 decisions);
 //! 2. render `Contents/Info.plist` from the committed template in
 //!    `apps/larrygram/macos/Info.plist`, with the workspace version
 //!    from `Cargo.toml`;
@@ -24,27 +26,26 @@
 //! never linked (task R7 master notes). Every command runs through
 //! the [`Sys`] trait, so the unit tests drive the whole pipeline with
 //! a fake runner and hand-built inputs.
+//!
+//! This module only compiles on unix hosts (the bundle tools and the
+//! symlink are unix); on any other host `cargo xtask dist mac` refuses
+//! with a clear message before reaching it.
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
-use crate::util::{self, Result};
-
-/// Where the built artifacts go: the external drive, never the
-/// repository (task R7). The volume must be mounted.
-pub const DIST_ROOT: &str = "/Volumes/Dara/larrygram/dist";
+use super::{
+    BINARIES, ICON_SVG, Layout, MAC_TARGET, Sys, licence_files, package_name, render_png,
+    version_from_root,
+};
+use crate::util::Result;
 
 /// The only supported target triple: Apple silicon (task R7
 /// decisions). No universal binary for now.
-pub const TARGET: &str = "aarch64-apple-darwin";
+pub const TARGET: &str = MAC_TARGET;
 
-/// The bundle directory name under [`DIST_ROOT`].
+/// The bundle directory name under the output directory.
 pub const BUNDLE_NAME: &str = "Larrygram.app";
-
-/// The executable name inside `Contents/MacOS`, and the
-/// `CFBundleExecutable` value.
-pub const EXECUTABLE_NAME: &str = "larrygram";
 
 /// The icon file name inside `Contents/Resources`, and the
 /// `CFBundleIconFile` value.
@@ -56,98 +57,23 @@ pub const VOLUME_NAME: &str = "Larrygram";
 /// The committed `Info.plist` template, relative to the workspace root.
 const INFO_PLIST_TEMPLATE: &str = "apps/larrygram/macos/Info.plist";
 
-/// The brand icon source, relative to the workspace root (ADR 0067).
-const ICON_SVG: &str = "crates/ui/assets/brand/icon.svg";
-
-/// The built app binary, relative to the workspace root. `cargo`
-/// writes it under the workspace `target/` because the build runs
-/// with no `CARGO_TARGET_DIR` (AGENTS.md section 2).
-const BINARY_RELPATH: &str = "target/aarch64-apple-darwin/release/larrygram";
-
 /// The `.iconset` directory name `iconutil` expects (it must end in
 /// `.iconset`).
 const ICONSET_DIR: &str = "AppIcon.iconset";
 
-/// The platform `cargo xtask dist` builds for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Platform {
-    /// `dist mac`: the macOS `.app` and `.dmg` (task R7).
-    Mac,
+/// The `<os>` and `<arch>` in the package name (task R9 decisions).
+const PACKAGE_OS: &str = "macos";
+const PACKAGE_ARCH: &str = "arm64";
+
+/// The `.app` directory under the output directory.
+pub fn bundle_dir(layout: &Layout) -> PathBuf {
+    layout.dist.join(BUNDLE_NAME)
 }
 
-/// `cargo xtask dist` options.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Options {
-    /// The platform to build.
-    pub platform: Platform,
-}
-
-/// Parses `cargo xtask dist` arguments. Exactly one platform argument
-/// (`mac`) is accepted; everything else is a clean error (C3).
-pub fn parse_args(args: &[String]) -> Result<Options> {
-    let [platform, rest @ ..] = args else {
-        return Err("dist needs a platform: `cargo xtask dist mac`".to_owned());
-    };
-    if !rest.is_empty() {
-        return Err(format!(
-            "dist takes one platform argument (got `{}`)",
-            args.join(" ")
-        ));
-    }
-    match platform.as_str() {
-        "mac" => Ok(Options {
-            platform: Platform::Mac,
-        }),
-        other => Err(format!("unknown dist platform `{other}`; platforms: mac")),
-    }
-}
-
-/// The system side effects the build needs: running a tool while
-/// inheriting stdio. The production implementation is [`StdSys`]; the
-/// tests use a fake that records the calls and fabricates the
-/// outputs.
-pub trait Sys {
-    /// Runs `program args`, inheriting stdio. Fails naming the command
-    /// when the command fails.
-    fn run(&mut self, program: &str, args: &[&str]) -> Result<()>;
-}
-
-/// The real [`Sys`]: every command runs in the workspace root.
-pub struct StdSys;
-
-impl Sys for StdSys {
-    fn run(&mut self, program: &str, args: &[&str]) -> Result<()> {
-        util::run(Command::new(program).args(args))
-    }
-}
-
-/// The directories a build works in.
-#[derive(Debug, Clone)]
-pub struct Layout {
-    /// The workspace root: the sources and the cargo build live here.
-    pub root: PathBuf,
-    /// The output directory, outside the repository.
-    pub dist: PathBuf,
-}
-
-impl Layout {
-    /// The layout of a real run: the workspace root and [`DIST_ROOT`].
-    pub fn real() -> Self {
-        Layout {
-            root: util::root(),
-            dist: PathBuf::from(DIST_ROOT),
-        }
-    }
-
-    /// The `.app` directory under the output directory.
-    pub fn bundle(&self) -> PathBuf {
-        self.dist.join(BUNDLE_NAME)
-    }
-
-    /// The `.dmg` for `version` under the output directory.
-    pub fn dmg(&self, version: &str) -> PathBuf {
-        self.dist.join(format!("Larrygram-{version}.dmg"))
-    }
+/// The package name of the `.dmg` for `version` (task R9 decisions:
+/// `Larrygram-<version>-macos-arm64.dmg`).
+pub fn dmg_name(version: &str) -> Result<String> {
+    package_name(version, PACKAGE_OS, PACKAGE_ARCH, "dmg")
 }
 
 /// The standard `.iconset` entries: the file name inside
@@ -169,62 +95,21 @@ pub fn iconset_entries() -> &'static [(&'static str, u32)] {
     ]
 }
 
-/// The licence files the bundle ships: `(destination under
-/// Contents/Resources, source under the workspace root)` — the three
-/// repository licences and the OFL texts of the two bundled fonts
-/// (task R7 goal 1).
-pub fn licence_files() -> &'static [(&'static str, &'static str)] {
-    &[
-        ("LICENSE", "LICENSE"),
-        ("NOTICE", "NOTICE"),
-        ("ATTRIBUTION.md", "ATTRIBUTION.md"),
-        ("fonts/Carlito-OFL.txt", "crates/text/fonts/Carlito-OFL.txt"),
-        ("fonts/Selawik-OFL.txt", "crates/text/fonts/Selawik-OFL.txt"),
-    ]
-}
-
 /// The files the bundle contains, relative to the `.app` directory,
-/// sorted: the executable, the plist, the icon and the licence files.
-/// The tests pin the bundle layout against this list (task R7 checks).
+/// sorted: the two executables, the plist, the icon and the licence
+/// files. The tests pin the bundle layout against this list (task R7
+/// checks, task R9 decisions: both binaries in every package).
 pub fn bundle_entries() -> Vec<String> {
-    let mut entries = vec![
-        "Contents/Info.plist".to_owned(),
-        format!("Contents/MacOS/{EXECUTABLE_NAME}"),
-        format!("Contents/Resources/{ICON_FILE}"),
-    ];
+    let mut entries = vec!["Contents/Info.plist".to_owned()];
+    for binary in BINARIES {
+        entries.push(format!("Contents/MacOS/{binary}"));
+    }
+    entries.push(format!("Contents/Resources/{ICON_FILE}"));
     for (dest, _) in licence_files() {
         entries.push(format!("Contents/Resources/{dest}"));
     }
     entries.sort();
     entries
-}
-
-/// The architecture check: only macOS on Apple silicon is supported
-/// (task R7 decisions). `os` and `arch` are `std::env::consts`
-/// values, passed in so the test is pure.
-pub fn check_target(os: &str, arch: &str) -> Result<()> {
-    if os == "macos" && arch == "aarch64" {
-        Ok(())
-    } else {
-        Err(format!(
-            "dist mac builds on macOS on Apple silicon only (got {os}/{arch}, target {TARGET})"
-        ))
-    }
-}
-
-/// Reads the workspace version from the root `Cargo.toml` text
-/// (`[workspace.package] version`).
-pub fn workspace_version(cargo_toml: &str) -> Result<String> {
-    let table: toml::Table = cargo_toml
-        .parse()
-        .map_err(|e| format!("Cargo.toml does not parse: {e}"))?;
-    table
-        .get("workspace")
-        .and_then(|w| w.get("package"))
-        .and_then(|p| p.get("version"))
-        .and_then(|v| v.as_str())
-        .map(str::to_owned)
-        .ok_or_else(|| "Cargo.toml has no [workspace.package] version".to_owned())
 }
 
 /// Renders the committed `Info.plist` template for `version`:
@@ -248,24 +133,11 @@ pub fn render_info_plist(template: &str, version: &str) -> Result<String> {
 /// the app uses for its window icon, ADR 0067). Returns the PNG paths
 /// in entry order.
 pub fn rasterise_iconset(svg: &str, out_dir: &Path) -> Result<Vec<PathBuf>> {
-    let tree = resvg::usvg::Tree::from_str(svg, &resvg::usvg::Options::default())
-        .map_err(|e| format!("cannot parse {ICON_SVG}: {e}"))?;
-    let width = tree.size().width().max(1.0);
-    let height = tree.size().height().max(1.0);
     std::fs::create_dir_all(out_dir)
         .map_err(|e| format!("cannot create {}: {e}", out_dir.display()))?;
     let mut written = Vec::new();
     for (name, size) in iconset_entries() {
-        let mut pixmap = resvg::tiny_skia::Pixmap::new(*size, *size)
-            .ok_or_else(|| format!("cannot allocate a {size}x{size} pixmap for {name}"))?;
-        resvg::render(
-            &tree,
-            resvg::tiny_skia::Transform::from_scale(*size as f32 / width, *size as f32 / height),
-            &mut pixmap.as_mut(),
-        );
-        let png = pixmap
-            .encode_png()
-            .map_err(|e| format!("cannot encode {name}: {e}"))?;
+        let png = render_png(svg, *size)?;
         let path = out_dir.join(name);
         std::fs::write(&path, png).map_err(|e| format!("cannot write {}: {e}", path.display()))?;
         written.push(path);
@@ -297,33 +169,16 @@ fn build_icon(sys: &mut dyn Sys, root: &Path, scratch: &Path) -> Result<PathBuf>
     Ok(icns)
 }
 
-/// Copies one directory tree from `src` into `dst` (created).
-fn copy_dir(src: &Path, dst: &Path) -> Result<()> {
-    std::fs::create_dir_all(dst).map_err(|e| format!("cannot create {}: {e}", dst.display()))?;
-    let entries =
-        std::fs::read_dir(src).map_err(|e| format!("cannot read {}: {e}", src.display()))?;
-    for entry in entries {
-        let entry = entry.map_err(|e| format!("cannot read {}: {e}", src.display()))?;
-        let from = entry.path();
-        let to = dst.join(entry.file_name());
-        if from.is_dir() {
-            copy_dir(&from, &to)?;
-        } else {
-            std::fs::copy(&from, &to)
-                .map_err(|e| format!("cannot copy {} -> {}: {e}", from.display(), to.display()))?;
-        }
-    }
-    Ok(())
-}
-
-/// Writes the `.app` bundle under `app`: the executable (made
+/// Writes the `.app` bundle under `app`: the executables (made
 /// executable), the rendered `Info.plist`, the packed icon and the
-/// licence files from `root`. Returns the relative paths written, in
-/// the order of [`bundle_entries`] (task R7 bundle layout).
+/// licence files from `root`. `executables` maps the bundle file name
+/// to the built binary, in [`BINARIES`] order. Returns the relative
+/// paths written, in the order of [`bundle_entries`] (task R7 bundle
+/// layout, task R9 decisions).
 pub fn write_bundle(
     root: &Path,
     app: &Path,
-    executable: &Path,
+    executables: &[(String, PathBuf)],
     info_plist: &str,
     icon: &Path,
 ) -> Result<Vec<String>> {
@@ -341,21 +196,23 @@ pub fn write_bundle(
         .map_err(|e| format!("cannot write {}: {e}", plist_path.display()))?;
     written.push("Contents/Info.plist".to_owned());
 
-    let bin_path = macos.join(EXECUTABLE_NAME);
-    std::fs::copy(executable, &bin_path).map_err(|e| {
-        format!(
-            "cannot copy {} -> {}: {e}",
-            executable.display(),
-            bin_path.display()
-        )
-    })?;
-    let mut mode = std::fs::metadata(&bin_path)
-        .map_err(|e| format!("cannot stat {}: {e}", bin_path.display()))?
-        .permissions();
-    mode.set_mode(0o755);
-    std::fs::set_permissions(&bin_path, mode)
-        .map_err(|e| format!("cannot chmod {}: {e}", bin_path.display()))?;
-    written.push(format!("Contents/MacOS/{EXECUTABLE_NAME}"));
+    for (name, executable) in executables {
+        let bin_path = macos.join(name);
+        std::fs::copy(executable, &bin_path).map_err(|e| {
+            format!(
+                "cannot copy {} -> {}: {e}",
+                executable.display(),
+                bin_path.display()
+            )
+        })?;
+        let mut mode = std::fs::metadata(&bin_path)
+            .map_err(|e| format!("cannot stat {}: {e}", bin_path.display()))?
+            .permissions();
+        mode.set_mode(0o755);
+        std::fs::set_permissions(&bin_path, mode)
+            .map_err(|e| format!("cannot chmod {}: {e}", bin_path.display()))?;
+        written.push(format!("Contents/MacOS/{name}"));
+    }
 
     let icon_path = resources.join(ICON_FILE);
     std::fs::copy(icon, &icon_path).map_err(|e| {
@@ -428,38 +285,68 @@ fn make_dmg(sys: &mut dyn Sys, staging: &Path, dmg: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Copies one directory tree from `src` into `dst` (created).
+pub fn copy_dir(src: &Path, dst: &Path) -> Result<()> {
+    std::fs::create_dir_all(dst).map_err(|e| format!("cannot create {}: {e}", dst.display()))?;
+    let entries =
+        std::fs::read_dir(src).map_err(|e| format!("cannot read {}: {e}", src.display()))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("cannot read {}: {e}", src.display()))?;
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        if from.is_dir() {
+            copy_dir(&from, &to)?;
+        } else {
+            std::fs::copy(&from, &to)
+                .map_err(|e| format!("cannot copy {} -> {}: {e}", from.display(), to.display()))?;
+        }
+    }
+    Ok(())
+}
+
 /// The argument spelling of a path (a `&str` for the command line).
-fn path_arg(path: &Path) -> String {
+pub fn path_arg(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
-/// The whole build through `sys`: release binary, bundle, ad-hoc
+/// The whole build through `sys`: release binaries, bundle, ad-hoc
 /// signature and `.dmg`. Returns the `.dmg` path. `os` and `arch` are
-/// the host's `std::env::consts` values (see [`check_target`]); the
-/// tests pass their own and use a fake [`Sys`], so the whole pipeline
-/// runs on hand-built inputs (task R7 checks).
+/// the host's `std::env::consts` values (see [`super::check_host`]);
+/// the tests pass their own and use a fake [`Sys`], so the whole
+/// pipeline runs on hand-built inputs (task R7 checks).
 pub fn dist_mac(sys: &mut dyn Sys, layout: &Layout, os: &str, arch: &str) -> Result<PathBuf> {
-    check_target(os, arch)?;
+    super::check_host(super::Platform::Mac, os, arch)?;
     let root = &layout.root;
     let dist = &layout.dist;
     std::fs::create_dir_all(dist).map_err(|e| format!("cannot create {}: {e}", dist.display()))?;
 
-    let cargo_toml = std::fs::read_to_string(root.join("Cargo.toml"))
-        .map_err(|e| format!("cannot read {}: {e}", root.join("Cargo.toml").display()))?;
-    let version = workspace_version(&cargo_toml)?;
+    let version = version_from_root(root)?;
     println!("dist mac: building Larrygram {version} for {TARGET}");
 
-    // 1. The release binary (AGENTS.md section 2: no CARGO_TARGET_DIR).
+    // 1. The release binaries (AGENTS.md section 2: no CARGO_TARGET_DIR).
     sys.run(
-        &util::cargo(),
-        &["build", "--release", "-p", "larrygram", "--target", TARGET],
+        &crate::util::cargo(),
+        &[
+            "build",
+            "--release",
+            "-p",
+            "larrygram",
+            "-p",
+            "larrygram-cli",
+            "--target",
+            TARGET,
+        ],
     )?;
-    let binary = root.join(BINARY_RELPATH);
-    if !binary.is_file() {
-        return Err(format!(
-            "cargo built no release binary at {}",
-            binary.display()
-        ));
+    let mut executables = Vec::new();
+    for binary in BINARIES {
+        let built = layout.binary(TARGET, binary);
+        if !built.is_file() {
+            return Err(format!(
+                "cargo built no release binary at {}",
+                built.display()
+            ));
+        }
+        executables.push(((*binary).to_owned(), built));
     }
 
     // 2. The Info.plist.
@@ -479,12 +366,12 @@ pub fn dist_mac(sys: &mut dyn Sys, layout: &Layout, os: &str, arch: &str) -> Res
     };
 
     // 4. The bundle.
-    let app = layout.bundle();
+    let app = bundle_dir(layout);
     if app.exists() {
         std::fs::remove_dir_all(&app)
             .map_err(|e| format!("cannot clear {}: {e}", app.display()))?;
     }
-    let bundle_result = write_bundle(root, &app, &binary, &info_plist, &icns);
+    let bundle_result = write_bundle(root, &app, &executables, &info_plist, &icns);
     let _ = std::fs::remove_dir_all(&scratch);
     bundle_result?;
 
@@ -496,7 +383,7 @@ pub fn dist_mac(sys: &mut dyn Sys, layout: &Layout, os: &str, arch: &str) -> Res
     // 6. The disk image.
     let staging = dist.join(format!(".dmg-staging-{}", std::process::id()));
     stage_dmg(&staging, &app)?;
-    let dmg = layout.dmg(&version);
+    let dmg = layout.package(&dmg_name(&version)?);
     make_dmg(sys, &staging, &dmg)?;
 
     println!("dist mac: {}", app.display());
@@ -504,27 +391,14 @@ pub fn dist_mac(sys: &mut dyn Sys, layout: &Layout, os: &str, arch: &str) -> Res
     Ok(dmg)
 }
 
-/// `cargo xtask dist` entry point: the real layout and the real
-/// system tools.
-pub fn run(options: &Options) -> Result<()> {
-    match options.platform {
-        Platform::Mac => dist_mac(
-            &mut StdSys,
-            &Layout::real(),
-            std::env::consts::OS,
-            std::env::consts::ARCH,
-        )
-        .map(|_| ()),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::util;
     use crate::util::test_support::TempDir;
 
     /// A [`Sys`] that records every call and fabricates the outputs:
-    /// `cargo build` writes a dummy binary, `iconutil` a dummy
+    /// `cargo build` writes dummy binaries, `iconutil` a dummy
     /// `.icns`, `hdiutil` a dummy `.dmg`, `codesign` nothing.
     struct FakeSys {
         root: PathBuf,
@@ -550,10 +424,19 @@ mod tests {
                 .unwrap_or_else(|| program.to_owned());
             match name.as_str() {
                 "cargo" => {
-                    let bin = self.root.join(BINARY_RELPATH);
-                    std::fs::create_dir_all(bin.parent().unwrap_or(Path::new("/")))
-                        .map_err(|e| format!("fake cargo: {e}"))?;
-                    std::fs::write(&bin, b"fake binary").map_err(|e| format!("fake cargo: {e}"))
+                    for binary in BINARIES {
+                        let bin = self
+                            .root
+                            .join("target")
+                            .join(TARGET)
+                            .join("release")
+                            .join(binary);
+                        std::fs::create_dir_all(bin.parent().unwrap_or(Path::new("/")))
+                            .map_err(|e| format!("fake cargo: {e}"))?;
+                        std::fs::write(&bin, b"fake binary")
+                            .map_err(|e| format!("fake cargo: {e}"))?;
+                    }
+                    Ok(())
                 }
                 "iconutil" => write_after_flag(args, "-o", b"fake icns", "iconutil"),
                 "hdiutil" => {
@@ -614,48 +497,6 @@ mod tests {
         tmp
     }
 
-    /// C3: `dist mac` parses, and every other argument list is a clean
-    /// error.
-    #[test]
-    fn parse_args_accepts_only_mac() {
-        assert_eq!(
-            parse_args(&["mac".to_owned()]).unwrap(),
-            Options {
-                platform: Platform::Mac
-            }
-        );
-        let err = parse_args(&[]).unwrap_err();
-        assert!(err.contains("dist needs a platform"), "{err}");
-        let err = parse_args(&["--bogus".to_owned()]).unwrap_err();
-        assert!(err.contains("unknown dist platform `--bogus`"), "{err}");
-        let err = parse_args(&["mac".to_owned(), "extra".to_owned()]).unwrap_err();
-        assert!(err.contains("dist takes one platform argument"), "{err}");
-    }
-
-    /// The architecture check accepts Apple silicon and rejects
-    /// everything else (task R7 decisions).
-    #[test]
-    fn check_target_accepts_only_apple_silicon() {
-        assert!(check_target("macos", "aarch64").is_ok());
-        let err = check_target("linux", "aarch64").unwrap_err();
-        assert!(err.contains("macOS on Apple silicon only"), "{err}");
-        let err = check_target("macos", "x86_64").unwrap_err();
-        assert!(err.contains("macOS on Apple silicon only"), "{err}");
-    }
-
-    /// The version comes from `[workspace.package]` in Cargo.toml.
-    #[test]
-    fn workspace_version_reads_the_workspace_package() {
-        assert_eq!(
-            workspace_version("[workspace.package]\nversion = \"2.3.4\"\n").unwrap(),
-            "2.3.4"
-        );
-        let err = workspace_version("[package]\nversion = \"2.3.4\"\n").unwrap_err();
-        assert!(err.contains("no [workspace.package] version"), "{err}");
-        let err = workspace_version("not [toml").unwrap_err();
-        assert!(err.contains("does not parse"), "{err}");
-    }
-
     /// The plist rendering substitutes the version and rejects a
     /// leftover placeholder or an empty version.
     #[test]
@@ -692,19 +533,31 @@ mod tests {
         assert_eq!(entries, expect);
     }
 
-    /// Every licence source exists in the real workspace, and the
-    /// bundle entries are the executable, the plist, the icon and
-    /// those licences.
+    /// The `.dmg` name follows the task R9 decision scheme.
     #[test]
-    fn licence_sources_exist_and_shape_the_bundle() {
-        let root = util::root();
-        for (dest, source) in licence_files() {
-            assert!(root.join(source).is_file(), "missing licence {source}");
-            assert!(bundle_entries().contains(&format!("Contents/Resources/{dest}")));
+    fn dmg_name_follows_the_scheme() {
+        assert_eq!(
+            dmg_name("1.0.0-alpha.1").unwrap(),
+            "Larrygram-1.0.0-alpha.1-macos-arm64.dmg"
+        );
+    }
+
+    /// The bundle entries are the two executables, the plist, the icon
+    /// and the licence files.
+    #[test]
+    fn bundle_entries_hold_both_binaries_and_the_licences() {
+        let entries = bundle_entries();
+        assert!(entries.contains(&"Contents/MacOS/larrygram".to_owned()));
+        assert!(entries.contains(&"Contents/MacOS/larrygram-cli".to_owned()));
+        assert!(entries.contains(&"Contents/Info.plist".to_owned()));
+        assert!(entries.contains(&format!("Contents/Resources/{ICON_FILE}")));
+        for (dest, _) in licence_files() {
+            assert!(entries.contains(&format!("Contents/Resources/{dest}")));
         }
-        assert!(bundle_entries().contains(&format!("Contents/MacOS/{EXECUTABLE_NAME}")));
-        assert!(bundle_entries().contains(&"Contents/Info.plist".to_owned()));
-        assert!(bundle_entries().contains(&format!("Contents/Resources/{ICON_FILE}")));
+        assert_eq!(
+            entries.len(),
+            1 + BINARIES.len() + 1 + licence_files().len()
+        );
     }
 
     /// `write_bundle` builds the expected layout with the expected
@@ -722,24 +575,36 @@ mod tests {
         }
         let bin = tmp.join("built-larrygram");
         std::fs::write(&bin, b"binary").unwrap();
+        let cli = tmp.join("built-cli");
+        std::fs::write(&cli, b"cli").unwrap();
         let icns = tmp.join("Larrygram.icns");
         std::fs::write(&icns, b"icns").unwrap();
+        let executables = vec![
+            ("larrygram".to_owned(), bin),
+            ("larrygram-cli".to_owned(), cli),
+        ];
 
-        let written = write_bundle(&root, &app, &bin, "<plist/>", &icns).unwrap();
+        let written = write_bundle(&root, &app, &executables, "<plist/>", &icns).unwrap();
         assert_eq!(written, bundle_entries());
         assert_eq!(
             std::fs::read_to_string(app.join("Contents/Info.plist")).unwrap(),
             "<plist/>"
         );
+        for (name, _source) in &executables {
+            let mode = std::fs::metadata(app.join("Contents/MacOS").join(name))
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o755, "{name} must be executable");
+        }
         assert_eq!(
             std::fs::read(app.join("Contents/MacOS/larrygram")).unwrap(),
             b"binary"
         );
-        let mode = std::fs::metadata(app.join("Contents/MacOS/larrygram"))
-            .unwrap()
-            .permissions()
-            .mode();
-        assert_eq!(mode & 0o777, 0o755);
+        assert_eq!(
+            std::fs::read(app.join("Contents/MacOS/larrygram-cli")).unwrap(),
+            b"cli"
+        );
         assert_eq!(
             std::fs::read(app.join("Contents/Resources/Larrygram.icns")).unwrap(),
             b"icns"
@@ -758,10 +623,11 @@ mod tests {
         std::fs::write(&bin, b"binary").unwrap();
         let icns = tmp.join("icon.icns");
         std::fs::write(&icns, b"icns").unwrap();
+        let executables = vec![("larrygram".to_owned(), bin)];
         let err = write_bundle(
             tmp.join("empty").as_path(),
             tmp.join("dist/Larrygram.app").as_path(),
-            &bin,
+            &executables,
             "<plist/>",
             &icns,
         )
@@ -813,6 +679,80 @@ mod tests {
         assert_eq!(link, PathBuf::from("/Applications"));
     }
 
+    /// `copy_dir` copies a tree, files and subdirectories.
+    #[test]
+    fn copy_dir_copies_trees() {
+        let tmp = TempDir::new("dist-copy");
+        std::fs::create_dir_all(tmp.join("src/inner")).unwrap();
+        std::fs::write(tmp.join("src/inner/file.txt"), "x").unwrap();
+        copy_dir(&tmp.join("src"), &tmp.join("dst")).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(tmp.join("dst/inner/file.txt")).unwrap(),
+            "x"
+        );
+    }
+
+    /// `stage_dmg` replaces a stale staging directory.
+    #[test]
+    fn stage_dmg_clears_a_stale_staging_dir() {
+        let tmp = TempDir::new("stage-stale");
+        let app = tmp.join("Larrygram.app/Contents");
+        std::fs::create_dir_all(&app).unwrap();
+        std::fs::write(app.join("Info.plist"), "<plist/>").unwrap();
+        let staging = tmp.join("staging");
+        std::fs::create_dir_all(&staging).unwrap();
+        std::fs::write(staging.join("stale.txt"), "old").unwrap();
+        stage_dmg(&staging, tmp.join("Larrygram.app").as_path()).unwrap();
+        assert!(!staging.join("stale.txt").exists());
+        assert!(staging.join("Larrygram.app/Contents/Info.plist").is_file());
+    }
+
+    /// A fake [`Sys`] that records the calls and produces nothing.
+    struct BareSys(Vec<String>);
+
+    impl Sys for BareSys {
+        fn run(&mut self, program: &str, args: &[&str]) -> Result<()> {
+            self.0.push(format!("{program} {}", args.join(" ")));
+            Ok(())
+        }
+    }
+
+    /// The pipeline reports a cargo build that produces no binary and
+    /// an iconutil that produces no icon (the two clean error paths).
+    #[test]
+    fn dist_mac_reports_missing_build_outputs() {
+        let tmp = workspace();
+        let layout = Layout::under(tmp.path());
+        let mut sys = BareSys(Vec::new());
+        let err = dist_mac(&mut sys, &layout, "macos", "aarch64").unwrap_err();
+        assert!(err.contains("cargo built no release binary"), "{err}");
+
+        // Now let the fake cargo produce the binaries, but nothing
+        // else: iconutil must then produce the .icns and fails to.
+        let mut sys = FakeSys::new(tmp.path());
+        let err = with_empty_iconutil(&mut sys, &layout).unwrap_err();
+        assert!(err.contains("iconutil produced no"), "{err}");
+    }
+
+    /// Runs the pipeline with a fake whose iconutil writes nothing.
+    fn with_empty_iconutil(sys: &mut FakeSys, layout: &Layout) -> Result<PathBuf> {
+        struct EmptyIconutil<'a>(&'a mut FakeSys);
+        impl Sys for EmptyIconutil<'_> {
+            fn run(&mut self, program: &str, args: &[&str]) -> Result<()> {
+                let is_iconutil = Path::new(program)
+                    .file_name()
+                    .map(|n| n == "iconutil")
+                    .unwrap_or(false);
+                if is_iconutil {
+                    self.0.calls.push(format!("{program} {}", args.join(" ")));
+                    return Ok(());
+                }
+                self.0.run(program, args)
+            }
+        }
+        dist_mac(&mut EmptyIconutil(sys), layout, "macos", "aarch64")
+    }
+
     /// The whole pipeline on hand-built inputs: the bundle tree, the
     /// rendered plist, the `.dmg`, and the tool calls in order (task R7
     /// checks).
@@ -820,17 +760,16 @@ mod tests {
     fn dist_mac_pipeline_builds_the_app_and_the_dmg() {
         let tmp = workspace();
         let root = tmp.path().to_path_buf();
-        let dist = tmp.join("dist");
-        let layout = Layout {
-            root: root.clone(),
-            dist: dist.clone(),
-        };
+        let layout = Layout::under(&root);
         let mut sys = FakeSys::new(&root);
         let dmg = dist_mac(&mut sys, &layout, "macos", "aarch64").unwrap();
 
-        assert_eq!(dmg, dist.join("Larrygram-1.0.0-alpha.1.dmg"));
+        assert_eq!(
+            dmg,
+            layout.dist.join("Larrygram-1.0.0-alpha.1-macos-arm64.dmg")
+        );
         assert!(dmg.is_file());
-        let app = layout.bundle();
+        let app = bundle_dir(&layout);
         let mut found = Vec::new();
         collect_entries(&app, Path::new(""), &mut found);
         found.sort();
@@ -841,7 +780,9 @@ mod tests {
 
         let calls = sys.calls.join("\n");
         assert!(
-            calls.contains("build --release -p larrygram --target aarch64-apple-darwin"),
+            calls.contains(
+                "build --release -p larrygram -p larrygram-cli --target aarch64-apple-darwin"
+            ),
             "{calls}"
         );
         assert!(calls.contains("iconutil -c icns"), "{calls}");
@@ -854,9 +795,15 @@ mod tests {
         assert!(calls.contains("-format UDZO"), "{calls}");
 
         // The scratch and staging directories are cleaned up.
-        assert!(!dist.join(format!(".build-{}", std::process::id())).exists());
         assert!(
-            !dist
+            !layout
+                .dist
+                .join(format!(".build-{}", std::process::id()))
+                .exists()
+        );
+        assert!(
+            !layout
+                .dist
                 .join(format!(".dmg-staging-{}", std::process::id()))
                 .exists()
         );
@@ -868,10 +815,7 @@ mod tests {
     fn dist_mac_rejects_the_wrong_host() {
         let tmp = workspace();
         let mut sys = FakeSys::new(tmp.path());
-        let layout = Layout {
-            root: tmp.path().to_path_buf(),
-            dist: tmp.join("dist"),
-        };
+        let layout = Layout::under(tmp.path());
         let err = dist_mac(&mut sys, &layout, "macos", "x86_64").unwrap_err();
         assert!(err.contains("Apple silicon only"), "{err}");
         assert!(sys.calls.is_empty(), "{:?}", sys.calls);

@@ -20,6 +20,12 @@
 //! module can carry its own `#![allow(unsafe_code)]`, and nothing else
 //! in this crate may use `unsafe`.
 
+// No console window behind the GUI on Windows (task R9 goal 2). The
+// CLI (`larrygram-cli`) keeps its console. The window and taskbar icon
+// come from `icon.svg`, rasterised at runtime into the viewport icon
+// (ADR 0067, task P7-16), so no `.ico` resource or build script is
+// needed (task R9 goal 2).
+#![cfg_attr(windows, windows_subsystem = "windows")]
 #![deny(unsafe_code)]
 
 #[cfg(target_os = "macos")]

@@ -764,6 +764,10 @@ size = 41984
         assert!(!dest.exists(), "the bad file must be deleted");
     }
 
+    /// A symlink loop cannot be stat'ed, so verification errors. The
+    /// loop needs unix symlinks, so the test is unix-only (R9: the
+    /// xtask tests compile on the Windows runner too).
+    #[cfg(unix)]
     #[test]
     fn fetch_loop_reports_a_stat_error() {
         let sha = sha256_hex(b"abc");
@@ -776,6 +780,9 @@ size = 41984
         assert!(err.contains("cannot stat"), "{err}");
     }
 
+    /// The fetch "succeeds" but leaves a symlink loop behind. Unix-only
+    /// like the other loop test (R9).
+    #[cfg(unix)]
     #[test]
     fn fetch_loop_reports_a_stat_error_while_verifying() {
         let sha = sha256_hex(b"abc");
