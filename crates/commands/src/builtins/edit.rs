@@ -1150,10 +1150,9 @@ fn deleted_glue_warnings(ctx: &AppCtx, page: Option<PageId>, targets: &[ShapeId]
     let Some(entity) = doc.page(page) else {
         return Vec::new();
     };
-    let removed: Vec<i32> = targets
-        .iter()
-        .filter_map(|shape| doc.shape(*shape).map(|entry| entry.visio_id))
-        .collect();
+    // Members of a removed group lose their glue too (P7-31 review
+    // finding 3).
+    let removed = super::connector::subtree_visio_ids(doc, targets);
     entity
         .connects
         .iter()
