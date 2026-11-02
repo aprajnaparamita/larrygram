@@ -241,8 +241,7 @@ mod tests {
             cells
                 .iter()
                 .find(|cell| cell.name.as_str() == name)
-                .unwrap_or_else(|| panic!("{name} missing"))
-                .clone()
+                .expect("the named cell exists")
         };
         // The endpoint cells are literal values (the master's own ends).
         assert_eq!(find("BeginX").formula, None);
