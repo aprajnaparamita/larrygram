@@ -24,7 +24,9 @@
 //! The only command the pipeline runs is `cargo build`, through the
 //! [`Sys`] trait, so the unit tests drive it with a fake runner.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::{
     BINARIES, ICON_SVG, LINUX_TARGET, Layout, Sys, check_host, licence_entries, licence_files,
@@ -59,19 +61,33 @@ pub const INSTALL_TXT: &str = "\
 Larrygram for Linux
 ===================
 
-This archive is not an installer. To install Larrygram for one user:
+This archive is not an installer. To install Larrygram for one user,
+run these commands in this directory:
 
-1. Copy `larrygram` and `larrygram-cli` somewhere on your PATH, for
-   example ~/.local/bin (tar keeps them executable).
-2. Copy `larrygram.desktop` to ~/.local/share/applications/.
-3. Copy `larrygram.png` to ~/.local/share/icons/hicolor/256x256/apps/.
+    mkdir -p ~/.local/bin ~/.local/share/applications \\
+      ~/.local/share/icons/hicolor/256x256/apps
+    cp larrygram larrygram-cli ~/.local/bin/
+    cp larrygram.desktop ~/.local/share/applications/
+    cp larrygram.png ~/.local/share/icons/hicolor/256x256/apps/
+    command -v update-desktop-database >/dev/null &&
+      update-desktop-database ~/.local/share/applications
 
-For a system-wide install use /usr/bin, /usr/share/applications and
-/usr/share/icons/hicolor/256x256/apps instead.
+tar keeps the two binaries executable. The last command refreshes the
+desktop's list of file types; it does nothing where the tool is not
+installed.
 
-The desktop entry starts `larrygram` from your PATH and registers the
-Visio drawing types (application/vnd.ms-visio.drawing.main+xml and
-application/vnd.visio).
+The desktop entry starts `larrygram` by name, so ~/.local/bin must be
+on the PATH of your desktop session. Most distributions add it at
+login once the directory exists: log out and back in after the first
+install, and check with `echo $PATH`.
+
+Optional, to make Larrygram the default for .vsdx and .vsd files:
+
+    xdg-mime default larrygram.desktop application/vnd.ms-visio.drawing.main+xml
+    xdg-mime default larrygram.desktop application/vnd.visio
+
+For a system-wide install use /usr/local/bin, /usr/share/applications
+and /usr/share/icons/hicolor/256x256/apps instead (as root).
 
 The binaries are unsigned and built for x86-64 Linux on the Ubuntu
 22.04 runner, so they need glibc 2.35 or newer. See
@@ -81,6 +97,40 @@ The bundled fonts Carlito and Selawik are under the SIL Open Font
 Licence; the licence texts are in fonts/ next to this file. LICENSE,
 NOTICE and ATTRIBUTION.md describe the rest of the package.
 ";
+
+/// The modification time every archive entry records, in seconds
+/// since the Unix epoch (task R10 item 6): `SOURCE_DATE_EPOCH` when it
+/// is set and not empty (the release workflow sets it to the commit
+/// time, so rebuilding a commit gives the same timestamps), otherwise
+/// `now`. A value that is not a whole number of seconds is an error.
+pub fn archive_mtime(source_date_epoch: Option<&str>, now: SystemTime) -> Result<u64> {
+    match source_date_epoch.map(str::trim) {
+        Some(value) if !value.is_empty() => value
+            .parse::<u64>()
+            .map_err(|_| format!("SOURCE_DATE_EPOCH `{value}` is not a whole number of seconds")),
+        _ => now
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .map_err(|e| format!("the system clock is before 1970: {e}")),
+    }
+}
+
+/// The directories the archive holds, each before its contents: the
+/// package directory itself and every directory an entry sits in
+/// (`fonts/`), sorted so a parent comes before its children (task R10
+/// item 6).
+pub fn archive_dirs(dir_name: &str, sources: &[Entry]) -> Vec<String> {
+    let mut dirs = BTreeSet::new();
+    dirs.insert(format!("{dir_name}/"));
+    for entry in sources {
+        let mut parent = Path::new(&entry.name).parent();
+        while let Some(dir) = parent.filter(|p| !p.as_os_str().is_empty()) {
+            dirs.insert(format!("{dir_name}/{}/", dir.to_string_lossy()));
+            parent = dir.parent();
+        }
+    }
+    dirs.into_iter().collect()
+}
 
 /// One file in the package: its entry name (relative to the top
 /// directory), its unix mode and where its bytes come from.
@@ -158,8 +208,9 @@ pub fn package_sources(root: &Path, layout: &Layout, icon_svg: &str) -> Result<V
 }
 
 /// Writes `sources` into the gzipped tar `out`, every entry under
-/// `dir_name/` (the task R9 package layout).
-fn write_tar_gz(out: &Path, dir_name: &str, sources: &[Entry]) -> Result<()> {
+/// `dir_name/` (the task R9 package layout), after a directory entry
+/// for every directory (task R10 item 6). Every entry records `mtime`.
+fn write_tar_gz(out: &Path, dir_name: &str, sources: &[Entry], mtime: u64) -> Result<()> {
     if let Some(parent) = out.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
@@ -168,10 +219,20 @@ fn write_tar_gz(out: &Path, dir_name: &str, sources: &[Entry]) -> Result<()> {
         std::fs::File::create(out).map_err(|e| format!("cannot create {}: {e}", out.display()))?;
     let gz = flate2::write::GzEncoder::new(file, flate2::Compression::default());
     let mut tar = tar::Builder::new(gz);
+    for dir in archive_dirs(dir_name, sources) {
+        let mut header = tar::Header::new_gnu();
+        header.set_mode(0o755);
+        header.set_mtime(mtime);
+        header.set_entry_type(tar::EntryType::Directory);
+        header.set_size(0);
+        tar.append_data(&mut header, &dir, std::io::empty())
+            .map_err(|e| format!("cannot write {dir}: {e}"))?;
+    }
     for entry in sources {
         let path = format!("{dir_name}/{}", entry.name);
         let mut header = tar::Header::new_gnu();
         header.set_mode(entry.mode);
+        header.set_mtime(mtime);
         header.set_entry_type(tar::EntryType::Regular);
         match &entry.source {
             Source::File(from) => {
@@ -200,11 +261,21 @@ fn write_tar_gz(out: &Path, dir_name: &str, sources: &[Entry]) -> Result<()> {
     Ok(())
 }
 
-/// Reads back the entries of a written archive: `(name, mode,
-/// contents)` (the tests pin the package contents against this, task
-/// R9 tests).
+/// One entry read back from a written archive (the tests pin the
+/// package contents against this, tasks R9 and R10).
 #[cfg(test)]
-fn read_tar_gz(path: &Path) -> Result<Vec<(String, u32, Vec<u8>)>> {
+#[derive(Debug)]
+struct ReadEntry {
+    name: String,
+    mode: u32,
+    mtime: u64,
+    is_dir: bool,
+    bytes: Vec<u8>,
+}
+
+/// Reads back the entries of a written archive, in archive order.
+#[cfg(test)]
+fn read_tar_gz(path: &Path) -> Result<Vec<ReadEntry>> {
     use std::io::Read;
 
     let file =
@@ -223,22 +294,39 @@ fn read_tar_gz(path: &Path) -> Result<Vec<(String, u32, Vec<u8>)>> {
             .to_string_lossy()
             .into_owned();
         let mode = entry.header().mode().unwrap_or(0);
+        let mtime = entry.header().mtime().unwrap_or(0);
+        let is_dir = entry.header().entry_type().is_dir();
         let mut bytes = Vec::new();
         entry
             .read_to_end(&mut bytes)
             .map_err(|e| format!("cannot read {name}: {e}"))?;
-        out.push((name, mode, bytes));
+        out.push(ReadEntry {
+            name,
+            mode,
+            mtime,
+            is_dir,
+            bytes,
+        });
     }
     Ok(out)
 }
 
 /// The whole build through `sys`: release binaries and the
 /// `.tar.gz`. Returns the package path. `os` and `arch` are the
-/// host's `std::env::consts` values (see [`check_host`]); the tests
-/// pass their own and use a fake [`Sys`], so the whole pipeline runs
-/// on hand-built inputs (task R9 tests).
-pub fn dist_linux(sys: &mut dyn Sys, layout: &Layout, os: &str, arch: &str) -> Result<PathBuf> {
+/// host's `std::env::consts` values (see [`check_host`]);
+/// `source_date_epoch` is the `SOURCE_DATE_EPOCH` value, if any (see
+/// [`archive_mtime`]). The tests pass their own and use a fake
+/// [`Sys`], so the whole pipeline runs on hand-built inputs (task R9
+/// tests).
+pub fn dist_linux(
+    sys: &mut dyn Sys,
+    layout: &Layout,
+    os: &str,
+    arch: &str,
+    source_date_epoch: Option<&str>,
+) -> Result<PathBuf> {
     check_host(super::Platform::Linux, os, arch)?;
+    let mtime = archive_mtime(source_date_epoch, SystemTime::now())?;
     let root = &layout.root;
     let dist = &layout.dist;
     std::fs::create_dir_all(dist).map_err(|e| format!("cannot create {}: {e}", dist.display()))?;
@@ -287,7 +375,7 @@ pub fn dist_linux(sys: &mut dyn Sys, layout: &Layout, os: &str, arch: &str) -> R
     // 3. The archive.
     let dir_name = package_dir_name(&version, PACKAGE_OS, PACKAGE_ARCH)?;
     let package = layout.package(&package_name(&version, PACKAGE_OS, PACKAGE_ARCH, EXT)?);
-    write_tar_gz(&package, &dir_name, &sources)?;
+    write_tar_gz(&package, &dir_name, &sources, mtime)?;
 
     println!("dist linux: {}", package.display());
     Ok(package)
@@ -377,6 +465,27 @@ mod tests {
             "icon"
         );
         assert!(INSTALL_TXT.contains("~/.local/bin"), "binaries");
+        assert!(INSTALL_TXT.contains("mkdir -p"), "mkdir");
+        // The shell line continuation survives the Rust string literal.
+        assert!(
+            INSTALL_TXT.contains("applications \\\n      ~/.local/share/icons"),
+            "continuation"
+        );
+        assert!(
+            INSTALL_TXT.contains("command -v update-desktop-database"),
+            "desktop database"
+        );
+        assert!(
+            INSTALL_TXT.contains(
+                "xdg-mime default larrygram.desktop application/vnd.ms-visio.drawing.main+xml"
+            ),
+            "default for .vsdx"
+        );
+        assert!(
+            INSTALL_TXT.contains("xdg-mime default larrygram.desktop application/vnd.visio"),
+            "default for .vsd"
+        );
+        assert!(INSTALL_TXT.contains("PATH"), "PATH note");
         assert!(
             INSTALL_TXT.contains("docs/building/testers.md"),
             "reporting"
@@ -384,14 +493,14 @@ mod tests {
     }
 
     /// The whole pipeline on hand-built inputs: the package name, the
-    /// archive contents and modes read back, and the one tool call
-    /// (task R9 tests).
+    /// archive contents, modes and timestamps read back, the directory
+    /// entries, and the one tool call (tasks R9 and R10).
     #[test]
     fn dist_linux_pipeline_writes_the_tar_gz() {
         let tmp = workspace();
         let layout = Layout::under(tmp.path());
         let mut sys = FakeSys::new(&layout.release_dir(TARGET), &["larrygram", "larrygram-cli"]);
-        let package = dist_linux(&mut sys, &layout, "linux", "x86_64").unwrap();
+        let package = dist_linux(&mut sys, &layout, "linux", "x86_64", Some("1700000000")).unwrap();
 
         assert_eq!(
             package,
@@ -401,7 +510,29 @@ mod tests {
 
         let dir = "Larrygram-1.0.0-alpha.1-linux-x64";
         let read = read_tar_gz(&package).unwrap();
-        let mut names: Vec<String> = read.iter().map(|(n, _, _)| n.clone()).collect();
+
+        // The directories come first, each before its contents.
+        let dirs: Vec<&str> = read
+            .iter()
+            .filter(|e| e.is_dir)
+            .map(|e| e.name.as_str())
+            .collect();
+        assert_eq!(dirs, [format!("{dir}/"), format!("{dir}/fonts/")]);
+        assert!(read[0].is_dir && read[1].is_dir, "{read:?}");
+        for entry in read.iter().filter(|e| e.is_dir) {
+            assert_eq!(entry.mode & 0o777, 0o755, "{}", entry.name);
+        }
+
+        // Every entry carries the SOURCE_DATE_EPOCH time.
+        for entry in &read {
+            assert_eq!(entry.mtime, 1_700_000_000, "{}", entry.name);
+        }
+
+        let mut names: Vec<String> = read
+            .iter()
+            .filter(|e| !e.is_dir)
+            .map(|e| e.name.clone())
+            .collect();
         names.sort();
         let mut expect: Vec<String> = package_entries()
             .iter()
@@ -409,7 +540,10 @@ mod tests {
             .collect();
         expect.sort();
         assert_eq!(names, expect, "{names:?}");
-        for (name, mode, bytes) in &read {
+        for ReadEntry {
+            name, mode, bytes, ..
+        } in &read
+        {
             if name.ends_with("larrygram-cli") {
                 assert_eq!(bytes, b"fake binary larrygram-cli", "{name}");
                 assert_eq!(mode & 0o777, 0o755, "{name} must be executable");
@@ -438,13 +572,75 @@ mod tests {
         );
     }
 
+    /// Without SOURCE_DATE_EPOCH the entries carry the build time, not
+    /// 1970 (task R10 item 6).
+    #[test]
+    fn dist_linux_without_source_date_epoch_uses_the_current_time() {
+        let tmp = workspace();
+        let layout = Layout::under(tmp.path());
+        let mut sys = FakeSys::new(&layout.release_dir(TARGET), &["larrygram", "larrygram-cli"]);
+        let before = archive_mtime(None, SystemTime::now()).unwrap();
+        let package = dist_linux(&mut sys, &layout, "linux", "x86_64", None).unwrap();
+        for entry in read_tar_gz(&package).unwrap() {
+            assert!(entry.mtime >= before, "{} at {}", entry.name, entry.mtime);
+        }
+    }
+
+    /// `archive_mtime` takes SOURCE_DATE_EPOCH when set, falls back to
+    /// the clock when unset or empty, and rejects anything else.
+    #[test]
+    fn archive_mtime_reads_source_date_epoch() {
+        let now = UNIX_EPOCH + std::time::Duration::from_secs(1_800_000_000);
+        assert_eq!(
+            archive_mtime(Some("1700000000"), now).unwrap(),
+            1_700_000_000
+        );
+        assert_eq!(archive_mtime(Some(" 42\n"), now).unwrap(), 42);
+        assert_eq!(archive_mtime(None, now).unwrap(), 1_800_000_000);
+        assert_eq!(archive_mtime(Some(""), now).unwrap(), 1_800_000_000);
+        let err = archive_mtime(Some("yesterday"), now).unwrap_err();
+        assert!(err.contains("SOURCE_DATE_EPOCH `yesterday`"), "{err}");
+        let err = archive_mtime(Some("-5"), now).unwrap_err();
+        assert!(err.contains("not a whole number"), "{err}");
+        let before_1970 = UNIX_EPOCH - std::time::Duration::from_secs(1);
+        let err = archive_mtime(None, before_1970).unwrap_err();
+        assert!(err.contains("before 1970"), "{err}");
+    }
+
+    /// A bad SOURCE_DATE_EPOCH stops the pipeline before it builds.
+    #[test]
+    fn dist_linux_rejects_a_bad_source_date_epoch() {
+        let tmp = workspace();
+        let layout = Layout::under(tmp.path());
+        let mut sys = FakeSys::new(&layout.release_dir(TARGET), &["larrygram", "larrygram-cli"]);
+        let err = dist_linux(&mut sys, &layout, "linux", "x86_64", Some("soon")).unwrap_err();
+        assert!(err.contains("SOURCE_DATE_EPOCH"), "{err}");
+        assert!(sys.calls.is_empty(), "{:?}", sys.calls);
+    }
+
+    /// `archive_dirs` lists the package directory and every nested
+    /// directory once, parents first.
+    #[test]
+    fn archive_dirs_lists_each_directory_once() {
+        let file = |name: &str| Entry {
+            name: name.to_owned(),
+            mode: 0o644,
+            source: Source::Bytes(Vec::new()),
+        };
+        let dirs = archive_dirs(
+            "P",
+            &[file("a"), file("fonts/x"), file("fonts/y"), file("b/c/d")],
+        );
+        assert_eq!(dirs, ["P/", "P/b/", "P/b/c/", "P/fonts/"]);
+    }
+
     /// The pipeline refuses a non-Linux host before anything runs.
     #[test]
     fn dist_linux_rejects_the_wrong_host() {
         let tmp = workspace();
         let layout = Layout::under(tmp.path());
         let mut sys = FakeSys::new(&layout.release_dir(TARGET), &["larrygram"]);
-        let err = dist_linux(&mut sys, &layout, "macos", "aarch64").unwrap_err();
+        let err = dist_linux(&mut sys, &layout, "macos", "aarch64", None).unwrap_err();
         assert!(err.contains("64-bit x86 Linux only"), "{err}");
         assert!(sys.calls.is_empty(), "{:?}", sys.calls);
     }
@@ -455,7 +651,7 @@ mod tests {
         let tmp = workspace();
         let layout = Layout::under(tmp.path());
         let mut sys = FakeSys::new(&layout.release_dir(TARGET), &["larrygram"]);
-        let err = dist_linux(&mut sys, &layout, "linux", "x86_64").unwrap_err();
+        let err = dist_linux(&mut sys, &layout, "linux", "x86_64", None).unwrap_err();
         assert!(err.contains("cargo built no release binary"), "{err}");
         assert!(err.contains("larrygram-cli"), "{err}");
     }
@@ -467,7 +663,7 @@ mod tests {
         std::fs::remove_file(tmp.join(DESKTOP_FILE)).unwrap();
         let layout = Layout::under(tmp.path());
         let mut sys = FakeSys::new(&layout.release_dir(TARGET), &["larrygram", "larrygram-cli"]);
-        let err = dist_linux(&mut sys, &layout, "linux", "x86_64").unwrap_err();
+        let err = dist_linux(&mut sys, &layout, "linux", "x86_64", None).unwrap_err();
         assert!(err.contains("cannot read"), "{err}");
     }
 
@@ -476,7 +672,7 @@ mod tests {
     #[test]
     fn write_tar_gz_reports_an_unwritable_output() {
         let tmp = TempDir::new("dist-tar-out");
-        let err = write_tar_gz(tmp.path(), "Larrygram-1", &[]).unwrap_err();
+        let err = write_tar_gz(tmp.path(), "Larrygram-1", &[], 0).unwrap_err();
         assert!(err.contains("cannot create"), "{err}");
     }
 

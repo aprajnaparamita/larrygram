@@ -317,7 +317,10 @@ pub fn run(options: &Options) -> Result<()> {
     match options.platform {
         Platform::Mac => run_mac(&layout, os, arch),
         Platform::Windows => windows::dist_windows(&mut StdSys, &layout, os, arch).map(|_| ()),
-        Platform::Linux => linux::dist_linux(&mut StdSys, &layout, os, arch).map(|_| ()),
+        Platform::Linux => {
+            let epoch = std::env::var("SOURCE_DATE_EPOCH").ok();
+            linux::dist_linux(&mut StdSys, &layout, os, arch, epoch.as_deref()).map(|_| ())
+        }
     }
 }
 
