@@ -109,12 +109,14 @@ cargo xtask gate --quick  # skip coverage, wasm and fuzz
 tools/gate-queue/gateq submit <id> --skip wasm,fuzz   # agents: run the gate through the queue
 cargo xtask codegen       # regenerate the ShapeSheet table
 cargo xtask corpus        # fetch the test corpus (needs network)
-cargo xtask dist mac      # macOS: build Larrygram.app and the .dmg (Apple silicon)
+cargo xtask dist mac      # macOS: the .dmg with Larrygram.app (Apple silicon)
+cargo xtask dist windows  # Windows: the .zip (64-bit Windows only)
+cargo xtask dist linux    # Linux: the .tar.gz (x86-64 Linux only)
 ```
 
 The gate needs `cargo-deny`, `cargo-llvm-cov`, a nightly toolchain with `cargo-fuzz`, and the `wasm32-unknown-unknown` target.
 
-The macOS `.app` and `.dmg` for the testers come from `cargo xtask dist mac`: it builds the Apple silicon release bundle, signs it ad-hoc and packs a `Larrygram-<version>.dmg` under `/Volumes/Dara/larrygram/dist/`. See [docs/building/macos.md](docs/building/macos.md) for the build, the first-launch note for an unsigned app, and the testers' check list.
+The testers' packages come from `cargo xtask dist <mac|windows|linux>`: one command per platform, each run on its own system (no cross-building), writing `Larrygram-<version>-<os>-<arch>.<ext>` under `<target dir>/dist/`. Every package carries both binaries (`larrygram`, `larrygram-cli`), the licences and, on Linux, the desktop entry with its icon. The builds are unsigned and have no installer. See [docs/building/macos.md](docs/building/macos.md), [docs/building/windows.md](docs/building/windows.md) and [docs/building/linux.md](docs/building/linux.md) for the builds, and [docs/building/testers.md](docs/building/testers.md) for the testers: download, checksum check, first launch of an unsigned build, bug reports. The CI (`.github/workflows/ci.yml`) runs the gate on the hosted runners; `.github/workflows/release.yml` builds the three packages for every `v*` tag and publishes a GitHub pre-release.
 
 ## License
 
