@@ -103,7 +103,12 @@ use super::{CommandTable, edit_outcome, model_error, outcome};
 /// The implemented formatting commands (task P7-21).
 pub(crate) const TABLE: CommandTable = &[
     ("text.font", "Font", can_format_text, run_font),
-    ("text.font.size", "Font Size", can_format_text, run_font_size),
+    (
+        "text.font.size",
+        "Font Size",
+        can_format_text,
+        run_font_size,
+    ),
     (
         "text.font.size.increase",
         "Increase Font Size",
@@ -150,7 +155,12 @@ pub(crate) const TABLE: CommandTable = &[
         can_format_text,
         run_strikethrough,
     ),
-    ("text.font.color", "Font Color", can_format_text, run_font_color),
+    (
+        "text.font.color",
+        "Font Color",
+        can_format_text,
+        run_font_color,
+    ),
     (
         "format.text_color.use_default",
         "Use Default Font Color",
