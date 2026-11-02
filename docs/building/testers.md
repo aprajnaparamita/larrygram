@@ -120,19 +120,25 @@ software: expect rough edges and save your work often.
 
 ## Report a bug
 
-Open an issue in the repository's issue tracker. The report needs at
-least:
+Open the repository's **Issues** page, choose **New issue** and pick
+the **Bug report** form (`.github/ISSUE_TEMPLATE/bug.yml`). The form
+asks for one problem per report:
 
-- what you did, what you expected and what happened instead;
-- the drawing, if you can share it (a small file that shows the
-  problem is best);
-- your system (macOS version, Windows version or Linux
-  distribution);
-- the release you ran: copy its tag (for example `v1.0.0-alpha.1`)
-  from the top of its page on the Releases page. The tag names one
-  exact build; the release notes under it also give the full commit
-  it was built from. The version in **Help > About** is a useful
-  extra, but several builds can share it.
+- **What happened**: what you expected and what happened instead,
+  with any error text you saw;
+- **Steps to reproduce**: the shortest list of steps that shows the
+  problem;
+- **Release tag**: copy its tag (for example `v1.0.0-alpha.1`) from
+  the top of its page on the Releases page. The tag names one exact
+  build; the release notes under it also give the full commit it was
+  built from;
+- **Build id**: the part in brackets in **Help > About** (for example
+  `abc1234`), which names the commit your binary was built from;
+- **Operating system**: macOS version, Windows version or Linux
+  distribution;
+- **Drawing**: optional. A small `.vsdx` or `.vsd` that shows the
+  problem, if you can share it.
 
 If the app cannot open at all, the tag is still on the release page
-you downloaded from.
+you downloaded from; leave the build id empty and say so in the
+report.
