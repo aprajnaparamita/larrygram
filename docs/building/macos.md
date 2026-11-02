@@ -1,18 +1,21 @@
 # Building the macOS `.dmg`
 
 How to build, sign and test the macOS app bundle and disk image
-(task R7). The build is local: there is no hosted CI, and this is the
-machine the artifacts are built on.
+(tasks R7 and R9). The build runs on macOS on Apple silicon; there is
+no cross-building. The same command builds the package on the
+`macos-14` CI runner (see "CI" below).
 
 ## What gets built
 
 `cargo xtask dist mac` builds a release `Larrygram.app` and a
-`Larrygram-<version>.dmg` under `/Volumes/Dara/larrygram/dist/` (the
-external drive, never the repository):
+`Larrygram-<version>-macos-arm64.dmg` under `<target dir>/dist/` (the
+cargo target directory's `dist/`, never the repository):
 
 - `Contents/MacOS/larrygram` — the release binary of `apps/larrygram`,
   for `aarch64-apple-darwin` (Apple silicon only; no universal binary
   for now);
+- `Contents/MacOS/larrygram-cli` — the command line tool; every
+  package carries both binaries (task R9 decisions);
 - `Contents/Info.plist` — rendered from
   `apps/larrygram/macos/Info.plist`, with the bundle id
   `org.maitrigroup.Larrygram`, the version from `Cargo.toml`, the
@@ -34,7 +37,9 @@ external drive, never the repository):
 - The Xcode Command Line Tools (`iconutil`, `hdiutil`, `codesign`):
   `xcode-select --install`.
 - The Rust toolchain the workspace pins.
-- `/Volumes/Dara` mounted: the output directory lives there.
+- Enough free disk space for the release build and the image: the
+  output goes to `<target dir>/dist/` (task R9 goal 1), which on this
+  machine's worktrees is the external drive.
 
 ## Build
 
@@ -42,10 +47,11 @@ external drive, never the repository):
 cargo xtask dist mac
 ```
 
-The command builds the release binary, assembles the bundle, signs it
-ad-hoc and packs the `.dmg`. It prints the two artifact paths at the
-end. Rebuild after a version bump to get a new `Larrygram-<version>.dmg`;
-the `.app` directory is replaced in place.
+The command builds the release binaries, assembles the bundle, signs
+it ad-hoc and packs the `.dmg`. It prints the two artifact paths at
+the end. Rebuild after a version bump to get a new
+`Larrygram-<version>-macos-arm64.dmg`; the `.app` directory is
+replaced in place.
 
 ## Signing
 
@@ -84,7 +90,7 @@ The check the maintainer runs after each `cargo xtask dist mac` build
 that touches opening:
 
 ```sh
-D=/Volumes/Dara/larrygram/dist/Larrygram.app
+D=<target dir>/dist/Larrygram.app
 open "$D"                                    # start the app
 open -a "$D" /path/to/drawing.vsdx           # Finder-style open
 "$D/Contents/MacOS/larrygram" /path/to/drawing.vsdx   # command line
@@ -99,9 +105,11 @@ testers' check list covers on the mounted `.dmg`.
 
 ## Testers' check list
 
-Do this on the mounted `.dmg`, before copying the app anywhere:
+See also [testers.md](testers.md) for the download, the checksum
+check and the first-launch note. Do this on the mounted `.dmg`,
+before copying the app anywhere:
 
-- [ ] Mount `Larrygram-<version>.dmg` (double-click).
+- [ ] Mount `Larrygram-<version>-macos-arm64.dmg` (double-click).
 - [ ] Open `Larrygram.app` from the mounted image (right-click, Open,
       the first time; see "Signing" above).
 - [ ] Open a `.vsdx` drawing by double-clicking it in Finder: the app
@@ -122,3 +130,19 @@ Do this on the mounted `.dmg`, before copying the app anywhere:
       repeat the open steps from there.
 
 Report any step that fails with the file used and what you saw.
+
+## CI
+
+Two workflows build and check the macOS app (task R9 goals 4 and 5):
+
+- `.github/workflows/ci.yml` runs the quality gate on `macos-latest`
+  for every push to `main` and every pull request (and on request,
+  `workflow_dispatch`). It is the same `cargo xtask gate` as local.
+- `.github/workflows/release.yml` runs `cargo xtask dist mac` on the
+  `macos-14` runner (Apple silicon, the only supported target) for
+  every pushed `v*` tag and uploads the `.dmg` to the GitHub
+  pre-release, with the Windows and Linux packages and `SHA256SUMS`.
+
+The CI build is unsigned like the local one: ad-hoc, no Developer ID,
+no notarisation. Nothing on GitHub is pushed or tagged by the build;
+the maintainer pushes the tag by hand.
