@@ -17,7 +17,9 @@
 //! - `tools.ellipse` and `shape.ellipse` — ellipse tool;
 //! - `shape.line` — line tool (there is no `tools.line` row);
 //! - `tools.connector` — connector tool;
-//! - `tools.text` — text tool;
+//! - `tools.text` — text tool (task P7-29: chosen with exactly one
+//!   shape selected, it starts that shape's text; otherwise it only
+//!   arms the tool);
 //! - `tools.text_block` — text block tool (task P7-25 item 4): the
 //!   same enablement as the other tools (its `contexts.yaml` row), and
 //!   the drag it leads with acts on the selection's text block.
@@ -27,7 +29,7 @@
 //! state from [`AppCtx::active_tool`] (Open issue in the P5-17 Result).
 
 use crate::app::ActiveTool;
-use crate::{Invocation, Outcome};
+use crate::{Invocation, Outcome, UiRequest};
 
 use super::{CommandTable, has_document, outcome};
 
@@ -97,9 +99,28 @@ fn run_connector(
     choose(ctx, ActiveTool::Connector)
 }
 
-/// `tools.text`.
+/// `tools.text` (task P7-29 item 2): the choice arms the Text tool,
+/// and with exactly one live shape selected it also starts editing
+/// that shape's text (the `EditText` request opens the UI's editor
+/// with the caret at the end). Nothing selected, or several shapes:
+/// the choice only arms the tool.
 fn run_text(ctx: &mut crate::AppCtx, _inv: &Invocation) -> Result<Outcome, super::CommandError> {
-    choose(ctx, ActiveTool::Text)
+    let edit_one = one_selected_shape(ctx);
+    let mut result = choose(ctx, ActiveTool::Text)?;
+    if edit_one {
+        result.ui_request = Some(UiRequest::EditText);
+    }
+    Ok(result)
+}
+
+/// Whether the selection names exactly one live shape (task P7-29
+/// item 2's editor target).
+fn one_selected_shape(ctx: &crate::AppCtx) -> bool {
+    let [shape] = ctx.selection.shapes.as_slice() else {
+        return false;
+    };
+    ctx.active_document()
+        .is_some_and(|session| session.document.page_of(*shape).is_some())
 }
 
 /// `tools.text_block` (task P7-25 item 4).
@@ -141,5 +162,53 @@ mod tests {
             ctx.format_painter.is_none(),
             "a tool change clears the copy"
         );
+    }
+
+    /// A document with `count` selected shapes.
+    fn app_with_shapes(count: usize) -> (crate::AppCtx, Vec<ShapeId>) {
+        let mut doc = larrygram_model::Document::new();
+        let page = doc.add_page("Page-1").expect("page");
+        let mut ids = Vec::new();
+        for index in 0..count {
+            let visio_id = i32::try_from(index + 1).unwrap_or(1);
+            let shape = larrygram_model::Shape::new(ShapeId { index: 0 }, visio_id);
+            ids.push(doc.insert_shape(page, shape, None).expect("shape"));
+        }
+        let mut ctx = crate::AppCtx::new(Settings::default());
+        ctx.open_document(DocumentSession::new(doc, None));
+        ctx.selection.shapes = ids.clone();
+        (ctx, ids)
+    }
+
+    /// Task P7-29 item 2: `tools.text` with exactly one selected
+    /// shape asks for the in-place editor on it (and still arms the
+    /// tool); with nothing or several shapes it only arms the tool.
+    #[test]
+    fn the_text_tool_on_one_selected_shape_requests_the_editor() {
+        let (mut ctx, ids) = app_with_shapes(1);
+        let invocation = Invocation::empty(crate::Source::Test);
+        let outcome = run_text(&mut ctx, &invocation).expect("text tool");
+        assert_eq!(ctx.active_tool, ActiveTool::Text, "the tool is armed");
+        assert_eq!(
+            outcome.ui_request,
+            Some(UiRequest::EditText),
+            "one selected shape starts its text"
+        );
+
+        let (mut ctx, _) = app_with_shapes(0);
+        let outcome = run_text(&mut ctx, &invocation).expect("text tool");
+        assert_eq!(ctx.active_tool, ActiveTool::Text);
+        assert_eq!(outcome.ui_request, None, "nothing selected: arm only");
+
+        let (mut ctx, _) = app_with_shapes(2);
+        let outcome = run_text(&mut ctx, &invocation).expect("text tool");
+        assert_eq!(outcome.ui_request, None, "several shapes: arm only");
+
+        // A single stale selection is not an editor target.
+        let (mut ctx, _) = app_with_shapes(1);
+        ctx.selection.shapes = vec![ShapeId { index: 99 }];
+        let outcome = run_text(&mut ctx, &invocation).expect("text tool");
+        assert_eq!(outcome.ui_request, None, "a stale shape: arm only");
+        assert_eq!(ids.len(), 1);
     }
 }

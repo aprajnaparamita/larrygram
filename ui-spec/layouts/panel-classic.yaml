@@ -5239,6 +5239,13 @@ context_menus:
       command: layer.dlg
       visuicmd: visCmdLayerDlg
       begin_group: true
+  - id: context.shape.edit_text
+    kind: button
+    label: Edit Text
+    access: "t"
+    command: text.begin
+    shortcut: F2
+    icon: text.begin
   - id: context.shape.data
     kind: submenu
     label: Data

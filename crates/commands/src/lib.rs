@@ -433,6 +433,12 @@ pub enum UiRequest {
     /// follows the selection. The command toggles: a second run with
     /// the pane open closes it).
     ShowFormatShape,
+    /// Start in-place editing of the selection's text (task P7-29:
+    /// `tools.text` chosen with exactly one shape selected starts
+    /// that shape's text, caret at the end). The editor lives in
+    /// `crates/ui` (ADR 0044), so the command only announces the
+    /// request; a programmatic caller just records it.
+    EditText,
     /// Ask the user to confirm closing a document.
     ConfirmClose {
         /// The document's display name.
