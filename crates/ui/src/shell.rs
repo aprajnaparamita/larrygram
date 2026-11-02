@@ -2133,8 +2133,10 @@ impl Shell {
         let text = self
             .app
             .active_document()
-            .and_then(|session| session.document.shape(shape))
-            .and_then(|entry| entry.text.clone())
+            // The starting text is the effective one (task P7-40): an
+            // instance with no text of its own starts with its
+            // master's text.
+            .and_then(|session| session.document.effective_text(shape).cloned())
             .unwrap_or_default();
         if let Err(error) = self.editor.begin(shape, &text) {
             self.note_error(error.to_string());

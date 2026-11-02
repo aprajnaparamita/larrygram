@@ -136,7 +136,9 @@ impl TextEditor {
     }
 
     /// The shape's text as the editor started with it (unchanged-buffer
-    /// detection). A stale shape or a missing document is an error.
+    /// detection): the effective text (task P7-40), so a master's text
+    /// on an instance with none of its own is the start state. A stale
+    /// shape or a missing document is an error.
     pub fn original_text(&self, ctx: &AppCtx) -> Result<Option<TextContent>, UiError> {
         let Some(shape) = self.shape else {
             return Ok(None);
@@ -146,13 +148,13 @@ impl TextEditor {
                 "no open document",
             )));
         };
-        let entry = session.document.shape(shape).ok_or_else(|| {
+        session.document.shape(shape).ok_or_else(|| {
             UiError::Command(larrygram_commands::CommandError::failed(format!(
                 "unknown shape id {}",
                 shape.index
             )))
         })?;
-        Ok(entry.text.clone())
+        Ok(session.document.effective_text(shape).cloned())
     }
 
     /// Draws the editor over `rect` (the shape's text block in screen
@@ -615,6 +617,36 @@ mod tests {
                 larrygram_commands::CommandError::Failed { .. }
             ))
         ));
+    }
+
+    #[test]
+    fn original_text_follows_the_master_text() {
+        // Task P7-40: the editor starts from the effective text, the
+        // master's on an instance with no text of its own.
+        use larrygram_model::{Master, MasterId};
+        let (mut app, shape) = document_with(None);
+        let session = app.active_document_mut().expect("session");
+        let master_shape = session
+            .document
+            .add_shape(larrygram_model::Shape::new(ShapeId { index: 0 }, 2));
+        session
+            .document
+            .shape_mut(master_shape)
+            .expect("shape")
+            .text = Some(text(vec![TextPart::Text("master".to_owned())]));
+        let mut master = Master::new(MasterId { index: 0 }, 2);
+        master.shapes = vec![master_shape];
+        session.document.masters.push(master);
+        session.document.shape_mut(shape).expect("shape").master = Some(MasterId { index: 0 });
+
+        let mut editor = TextEditor::new();
+        editor
+            .begin(shape, &text(vec![TextPart::Text("master".to_owned())]))
+            .expect("begin");
+        assert_eq!(
+            editor.original_text(&app).expect("text"),
+            Some(text(vec![TextPart::Text("master".to_owned())]))
+        );
     }
 
     #[test]

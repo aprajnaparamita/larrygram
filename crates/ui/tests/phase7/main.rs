@@ -27,6 +27,7 @@ mod first_run;
 mod fit;
 mod format_dialogs;
 mod golden;
+mod inherited_text;
 mod interaction;
 mod latch_fixes;
 mod layouts;
