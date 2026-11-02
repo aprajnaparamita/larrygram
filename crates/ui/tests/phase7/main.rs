@@ -21,6 +21,7 @@
 
 mod combo_fixes;
 mod connector_1d;
+mod connector_moves;
 mod expect;
 mod first_run;
 mod fit;
