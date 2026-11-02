@@ -128,8 +128,11 @@ least:
   problem is best);
 - your system (macOS version, Windows version or Linux
   distribution);
-- the app version from **Help > About** inside Larrygram — that is
-  the version in the package name and the exact build you ran.
+- the release you ran: copy its tag (for example `v1.0.0-alpha.1`)
+  from the top of its page on the Releases page. The tag names one
+  exact build; the release notes under it also give the full commit
+  it was built from. The version in **Help > About** is a useful
+  extra, but several builds can share it.
 
-If the app cannot open at all, the version is in the package name you
-downloaded.
+If the app cannot open at all, the tag is still on the release page
+you downloaded from.
