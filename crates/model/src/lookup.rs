@@ -730,6 +730,32 @@ impl Document {
         }
         targets
     }
+
+    /// The deepest master chain [`Document::effective_text`] walks.
+    const MAX_TEXT_CHAIN: usize = 128;
+
+    /// The text the shape shows (task P7-40): its own text when the
+    /// shape has a `Text` element — an empty one included, it overrides
+    /// the master — otherwise the text of the first shape of the chain
+    /// of [`Document::master_chain_shapes`] that has a `Text` element.
+    /// Visio draws the master's text on an instance that has none of
+    /// its own.
+    ///
+    /// A shape of no master with no own text has no text. A stale
+    /// shape id, a missing master and a cyclic chain answer `None`
+    /// (never a panic): `master_chain_shapes` bounds and cuts the walk.
+    pub fn effective_text(&self, shape: ShapeId) -> Option<&crate::text::TextContent> {
+        let entity = self.shape(shape)?;
+        if let Some(text) = entity.text.as_ref() {
+            return Some(text);
+        }
+        for rung in self.master_chain_shapes(shape, Self::MAX_TEXT_CHAIN) {
+            if let Some(text) = self.shape(rung).and_then(|master| master.text.as_ref()) {
+                return Some(text);
+            }
+        }
+        None
+    }
 }
 
 /// The corresponding shape of `root` at the child positions `path`, or
