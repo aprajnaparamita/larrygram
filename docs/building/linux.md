@@ -47,14 +47,26 @@ version for one user is
 ```sh
 tar xzf Larrygram-<version>-linux-x64.tar.gz
 cd Larrygram-<version>-linux-x64
-cp larrygram larrygram-cli ~/.local/bin
+mkdir -p ~/.local/bin ~/.local/share/applications ~/.local/share/icons/hicolor/256x256/apps
+cp larrygram larrygram-cli ~/.local/bin/
 cp larrygram.desktop ~/.local/share/applications/
 cp larrygram.png ~/.local/share/icons/hicolor/256x256/apps/
+command -v update-desktop-database >/dev/null && update-desktop-database ~/.local/share/applications
 ```
 
-The desktop entry starts `larrygram` from your `PATH`, so keep
-`~/.local/bin` on it. Opening a drawing from the file manager or the
-command line passes the path to the running app (task R8).
+The last line refreshes the desktop's MIME cache and is skipped
+quietly where the tool is missing. The desktop entry starts
+`larrygram` from your `PATH`, so `~/.local/bin` must be on the `PATH`
+of the desktop session. Optional, to make Larrygram the default for
+`.vsdx` and `.vsd`:
+
+```sh
+xdg-mime default larrygram.desktop application/vnd.ms-visio.drawing.main+xml
+xdg-mime default larrygram.desktop application/vnd.visio
+```
+
+Opening a drawing from the file manager or the command line passes
+the path to the app (task R8).
 
 ## Compatibility
 

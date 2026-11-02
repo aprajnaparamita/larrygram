@@ -55,12 +55,26 @@ download again. Report it if it happens twice.
 The builds carry no developer signature (task R9 decisions), so the
 operating system warns on the first launch. That is expected.
 
-- **macOS**: right-click (or Control-click) `Larrygram.app` and choose
-  **Open**, then **Open** in the dialog. If the dialog refuses, open
-  **System Settings > Privacy & Security**, scroll down and click
-  **Open Anyway**. After that the app opens normally; a newer build may
-  ask once more. The `.dmg` also holds an `Applications` link: drag
-  the app there and start it from your Applications folder.
+- **macOS**: drag `Larrygram.app` from the `.dmg` onto its
+  `Applications` link, then open it once from your Applications
+  folder. macOS refuses and names the app. Click **Done** (not **Move
+  to Trash**), open **System Settings > Privacy & Security**, scroll
+  down to the line about Larrygram and click **Open Anyway**, then
+  confirm. From then on the app opens normally; a newer build may ask
+  once more.
+
+  On macOS 14 (Sonoma) and earlier there is a shorter way:
+  right-click (or Control-click) the app, choose **Open**, then
+  **Open** in the dialog.
+
+  If neither works, remove the download flag in Terminal:
+
+  ```sh
+  xattr -dr com.apple.quarantine /Applications/Larrygram.app
+  ```
+
+  This deletes the "downloaded from the internet" mark that makes
+  macOS check the app, so it opens without the prompt.
 
 - **Windows**: unpack the zip anywhere (for example
   `%LOCALAPPDATA%\Larrygram`) and run `larrygram.exe`. Windows
@@ -73,15 +87,30 @@ operating system warns on the first launch. That is expected.
   ```sh
   tar xzf Larrygram-<version>-linux-x64.tar.gz
   cd Larrygram-<version>-linux-x64
-  cp larrygram larrygram-cli ~/.local/bin
+  mkdir -p ~/.local/bin ~/.local/share/applications ~/.local/share/icons/hicolor/256x256/apps
+  cp larrygram larrygram-cli ~/.local/bin/
   cp larrygram.desktop ~/.local/share/applications/
   cp larrygram.png ~/.local/share/icons/hicolor/256x256/apps/
+  command -v update-desktop-database >/dev/null && update-desktop-database ~/.local/share/applications
   ```
 
-  The two binaries keep their executable bit; `chmod +x larrygram
-  larrygram-cli` restores it if your unpacker drops it. The desktop
-  entry starts `larrygram` and registers the Visio drawing types, so
-  double-clicking a `.vsdx` or `.vsd` file opens it in Larrygram.
+  The last line refreshes the menu's list of file types; it is skipped
+  quietly where the tool is not installed. The two binaries keep their
+  executable bit; `chmod +x larrygram larrygram-cli` restores it if
+  your unpacker drops it.
+
+  The desktop entry starts `larrygram` by name, so `~/.local/bin` must
+  be on the `PATH` of your desktop session. Most distributions add it
+  at login once the directory exists: log out and back in after the
+  first install, and check with `echo $PATH`.
+
+  Optional, to make Larrygram the default for `.vsdx` and `.vsd`
+  files (otherwise it is only offered under "Open With"):
+
+  ```sh
+  xdg-mime default larrygram.desktop application/vnd.ms-visio.drawing.main+xml
+  xdg-mime default larrygram.desktop application/vnd.visio
+  ```
 
 ## What the alpha can and cannot do
 
