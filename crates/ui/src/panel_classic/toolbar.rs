@@ -311,6 +311,14 @@ fn draw_button(
             .inner
         }
     };
+    // A text-format button's press keeps the in-place editor open
+    // (task P7-41 item 1).
+    crate::text_edit::keep_editing_rect(
+        ui.ctx(),
+        item.command.as_ref().map(|id| id.as_str()),
+        response.rect,
+        true,
+    );
     finish_button(
         response,
         item,
@@ -430,6 +438,14 @@ fn draw_split(
             .inner
         }
     };
+    // A text-format control's press keeps the in-place editor open
+    // (task P7-41 item 1): the split's two halves record their rects.
+    crate::text_edit::keep_editing_rect(
+        ui.ctx(),
+        main_item.command.as_ref().map(|id| id.as_str()),
+        response.rect,
+        true,
+    );
     finish_button(
         response,
         &main_item,
@@ -453,6 +469,12 @@ fn draw_split(
             ui.add_sized(arrow_size, arrow)
         })
         .inner;
+    crate::text_edit::keep_editing_rect(
+        ui.ctx(),
+        item.command.as_ref().map(|id| id.as_str()),
+        response.rect,
+        true,
+    );
     response.widget_info(|| {
         WidgetInfo::labeled(egui::accesskit::Role::Button, true, format!("{label} menu"))
     });
@@ -500,6 +522,14 @@ fn draw_dropdown(
         )
     });
     let mut response = response.inner;
+    // A text-format control's press keeps the in-place editor open
+    // (task P7-41 item 1).
+    crate::text_edit::keep_editing_rect(
+        ui.ctx(),
+        item.command.as_ref().map(|id| id.as_str()),
+        response.rect,
+        true,
+    );
     response
         .widget_info(|| WidgetInfo::labeled(egui::accesskit::Role::Button, enabled, label.clone()));
     let tooltip = rows::button_tooltip(&label, item.shortcut.as_deref(), &activation);
@@ -551,6 +581,14 @@ fn draw_combo(
             )
         })
         .inner;
+    // A text-format box's press keeps the in-place editor open but the
+    // box keeps the keyboard for its own typing (task P7-41 item 1).
+    crate::text_edit::keep_editing_rect(
+        ui.ctx(),
+        item.command.as_ref().map(|id| id.as_str()),
+        response.rect,
+        false,
+    );
     response.widget_info(|| {
         WidgetInfo::labeled(egui::accesskit::Role::ComboBox, enabled, label.clone())
     });
@@ -577,6 +615,14 @@ fn draw_combo(
             })
             .inner
             .inner;
+        // The arrow keeps the editor open too, and the editor keeps the
+        // keyboard (task P7-41 item 1).
+        crate::text_edit::keep_editing_rect(
+            ui.ctx(),
+            item.command.as_ref().map(|id| id.as_str()),
+            arrow.rect,
+            true,
+        );
         arrow.widget_info(|| {
             WidgetInfo::labeled(egui::accesskit::Role::Button, true, format!("{label} menu"))
         });

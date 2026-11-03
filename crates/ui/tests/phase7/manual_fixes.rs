@@ -1171,11 +1171,17 @@ fn the_text_controls_follow_the_text() {
             "{kind:?}: Bold enables while the text is typed"
         );
         type_into_editor(&mut rig, "MMMM");
-        // Bold while typing: the click commits the typed text and
-        // records the format on it.
+        // Bold while typing (task P7-41 item 1): the format click no
+        // longer ends the edit; the format applies to the shape being
+        // edited and the typed text is written when the edit ends.
         click(&mut rig, Role::Button, "Bold");
         open_size_list(&mut rig, kind);
         click(&mut rig, Role::Button, "36 pt");
+        assert!(
+            has(&mut rig, Role::MultilineTextInput, "Text"),
+            "{kind:?}: the format clicks keep the editor open"
+        );
+        press_key(&mut rig, egui::Key::Escape);
         assert_eq!(
             shape_text(&rig, shape).as_deref(),
             Some("MMMM"),

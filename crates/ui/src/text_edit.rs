@@ -55,6 +55,11 @@ pub struct TextEditor {
     markers: RunMarkers,
     /// Whether the text field still needs focus on its first frame.
     focus_requested: bool,
+    /// Whether the field re-requests the keyboard focus on its next
+    /// frame with the caret where it is (task P7-41 item 1): a
+    /// text-format control click keeps the edit open and the field
+    /// takes the keys back the same frame.
+    refocus_requested: bool,
 }
 
 impl TextEditor {
@@ -135,6 +140,14 @@ impl TextEditor {
         *self = Self::new();
     }
 
+    /// Re-requests the keyboard focus with the caret where it is (task
+    /// P7-41 item 1): after a text-format control click the field
+    /// takes the keys back without losing the typed text or the
+    /// caret's place.
+    pub fn refocus(&mut self) {
+        self.refocus_requested = true;
+    }
+
     /// The shape's text as the editor started with it (unchanged-buffer
     /// detection): the effective text (task P7-40), so a master's text
     /// on an instance with none of its own is the start state. A stale
@@ -173,7 +186,34 @@ impl TextEditor {
         } else {
             egui::Rect::from_min_size(ui.ctx().viewport_rect().min, egui::vec2(160.0, 40.0))
         };
-        let request_focus = self.focus_requested;
+        // The commit-on-outside-press rule (ADR 0044, task P7-41 item
+        // 1) decides before the field draws: a press on a text-format
+        // control or in a popup above the panels keeps the edit, any
+        // other press outside the block commits. A press that keeps
+        // the edit may have taken the keyboard, so the field
+        // re-requests the focus below the same frame, caret untouched.
+        let pressed_outside = ui.input(|input| {
+            input
+                .pointer
+                .any_pressed()
+                .then(|| input.pointer.interact_pos())
+                .flatten()
+                .filter(|pos| !rect.contains(*pos))
+        });
+        let commit_on_press = match pressed_outside {
+            Some(pos) => match press_rule(ui.ctx(), self.shape, pos) {
+                PressRule::Commit => true,
+                PressRule::KeepAndRefocus => {
+                    self.refocus();
+                    false
+                }
+                PressRule::Keep => false,
+            },
+            None => false,
+        };
+        let open_focus = std::mem::take(&mut self.focus_requested);
+        let refocus = std::mem::take(&mut self.refocus_requested);
+        let request_focus = open_focus || refocus;
         // The caret goes to the end of the buffer when the editor
         // opens (task P7-29 item 2).
         let buffer_chars = self.buffer.chars().count();
@@ -210,11 +250,14 @@ impl TextEditor {
                 output.response.response = output.response.response.clone().accessible_name("Text");
                 if request_focus {
                     output.response.request_focus();
+                }
+                if open_focus {
                     // The caret sits at the end of the text when the
                     // editor opens (task P7-29 item 2): a stale cursor
                     // from an earlier edit of the same shape must not
                     // survive the re-open (egui keeps the field's
-                    // state under its id).
+                    // state under its id). A refocus (task P7-41 item
+                    // 1) leaves the caret alone.
                     output
                         .state
                         .cursor
@@ -237,17 +280,7 @@ impl TextEditor {
             egui::Stroke::new(1.0, colors.selection),
             egui::StrokeKind::Inside,
         );
-        if request_focus {
-            self.focus_requested = false;
-        }
-        let outside_click = ui.input(|input| {
-            input.pointer.any_pressed()
-                && input
-                    .pointer
-                    .interact_pos()
-                    .is_some_and(|pos| !rect.contains(pos))
-        });
-        if commit || outside_click {
+        if commit || commit_on_press {
             return match self.finish() {
                 Ok(text) => EditorAction::Committed(text),
                 // `finish` only fails when the editor is inactive, which
@@ -273,6 +306,110 @@ pub enum EditorAction {
 /// The stable egui id of the editor area for one shape.
 fn editor_id(shape: Option<ShapeId>) -> Id {
     Id::unique(("larrygram-text-editor", shape.map(|shape| shape.index)))
+}
+
+/// The key of the per-frame keep-editing rects (task P7-41 item 1).
+fn keep_rects_id() -> Id {
+    Id::unique("larrygram-keep-editing-rects")
+}
+
+/// One recorded keep-editing rect (task P7-41 item 1).
+#[derive(Debug, Clone, Copy)]
+struct KeepRect {
+    /// The control's widget rect.
+    rect: egui::Rect,
+    /// Whether the editor takes the keyboard back after the press.
+    editor_keeps_keyboard: bool,
+}
+
+/// The keep-editing rects recorded in one frame (task P7-41 item 1):
+/// the pass number they were drawn in, so a stale list never silences
+/// a press.
+#[derive(Debug, Clone, Default)]
+struct KeepRects {
+    /// The pass the rects were drawn in.
+    pass: u64,
+    /// The widget rects of text-format controls.
+    rects: Vec<KeepRect>,
+}
+
+/// Records a text-format control's widget rect (task P7-41 item 1): a
+/// press on such a control keeps the in-place editor open. The
+/// controls call this as they draw with the command they dispatch;
+/// anything that is not a text-format command records nothing.
+/// `editor_keeps_keyboard` says whether the editor takes the keyboard
+/// back after the press: it does after a button or a list row, but not
+/// after the classic font and size boxes, which are text fields of
+/// their own. The list follows the frame and [`TextEditor::show`]
+/// reads it the same frame (the controls draw before the canvas).
+pub fn keep_editing_rect(
+    ctx: &egui::Context,
+    command: Option<&str>,
+    rect: egui::Rect,
+    editor_keeps_keyboard: bool,
+) {
+    if !command.is_some_and(larrygram_commands::builtins::is_text_format) {
+        return;
+    }
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data_mut(|data| {
+        let mut kept: KeepRects = data.get_temp(keep_rects_id()).unwrap_or_default();
+        if kept.pass != pass {
+            kept.rects.clear();
+            kept.pass = pass;
+        }
+        kept.rects.push(KeepRect {
+            rect,
+            editor_keeps_keyboard,
+        });
+        data.insert_temp(keep_rects_id(), kept);
+    });
+}
+
+/// What a press at `pos` does to the open editor (task P7-41 item 1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PressRule {
+    /// The press is not on text-format UI: the edit commits (the P7-29
+    /// rule).
+    Commit,
+    /// The press is on text-format UI that hands the keyboard back: the
+    /// edit stays and the field re-takes the keyboard and the caret.
+    KeepAndRefocus,
+    /// The press is on text-format UI that takes the keyboard for its
+    /// own text (the classic font and size boxes): the edit stays.
+    Keep,
+}
+
+/// The press rule at `pos` (task P7-41 item 1): a press in a popup,
+/// menu or palette layer (the format popups and dropdowns choose
+/// values with the editor open) or on a recorded text-format control
+/// ([`keep_editing_rect`]) keeps the edit. The editor's own area is
+/// not one of them: a press on it but off the text block commits, like
+/// any press outside.
+fn press_rule(ctx: &egui::Context, shape: Option<ShapeId>, pos: egui::Pos2) -> PressRule {
+    let own = editor_id(shape);
+    if ctx
+        .layer_id_at(pos)
+        .is_some_and(|layer| layer.order == egui::Order::Foreground && layer.id != own)
+    {
+        return PressRule::KeepAndRefocus;
+    }
+    let pass = ctx.cumulative_pass_nr();
+    let recorded = ctx.data(|data| {
+        data.get_temp::<KeepRects>(keep_rects_id())
+            .filter(|kept| kept.pass == pass)
+            .and_then(|kept| {
+                kept.rects
+                    .iter()
+                    .find(|kept| kept.rect.contains(pos))
+                    .copied()
+            })
+    });
+    match recorded {
+        Some(kept) if kept.editor_keeps_keyboard => PressRule::KeepAndRefocus,
+        Some(_) => PressRule::Keep,
+        None => PressRule::Commit,
+    }
 }
 
 /// The plain text of a [`TextContent`]: literal parts concatenated, field

@@ -1067,6 +1067,16 @@ fn put(
     item: &Item,
     part: &'static str,
 ) -> egui::Response {
+    // A text-format control's press keeps the in-place editor open
+    // (task P7-41 item 1): record its widget rect as it draws. The
+    // command-bar controls are buttons and menus; the editor takes the
+    // keyboard back after their presses.
+    crate::text_edit::keep_editing_rect(
+        ui.ctx(),
+        item.command.as_ref().map(|id| id.as_str()),
+        rect,
+        true,
+    );
     ui.push_id((item.id.as_str(), part), |ui| {
         ui.add_enabled_ui(enabled, |ui| ui.put(rect, widget)).inner
     })

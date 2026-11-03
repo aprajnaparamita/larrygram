@@ -838,11 +838,12 @@ fn undo_labels(rig: &ShellRig) -> Vec<String> {
         .collect()
 }
 
-/// The text controls are enabled while a new text box is typed, and
-/// choosing Bold, a font size and an alignment applies them to the
-/// box's text — its cells and the rendered picture (task P7-37 item
-/// 1). The command-bar click ends the edit and closes the group as
-/// one step labelled as the insert.
+/// The text controls are enabled while a new text box is typed, and a
+/// Bold click before anything is typed keeps the editor open and
+/// formats the box (task P7-41 item 1, review case 1: the old rule
+/// committed on the click, cancelled the group and dropped the box).
+/// Escape commits the typed text in the open group: one step labelled
+/// as the insert, the text bold.
 #[test]
 fn a_new_text_box_can_be_formatted_while_it_is_typed() {
     for kind in LAYOUTS {
@@ -864,10 +865,19 @@ fn a_new_text_box_can_be_formatted_while_it_is_typed() {
                 "{kind:?}: {name} enables while the new box is typed"
             );
         }
-        type_into_editor(&mut rig, "MMMM");
-        // Bold while typed: the click commits the typed text and
-        // records the format on it (the P7-29 rule).
+        // Bold before typing: the click keeps the edit and the format
+        // lands in the open group.
         click(&mut rig, Role::Button, "Bold");
+        assert!(
+            editing(&mut rig),
+            "{kind:?}: the Bold click keeps the editor open"
+        );
+        assert!(
+            undo_labels(&rig).is_empty(),
+            "{kind:?}: the steps collect in the open group, not on the stack"
+        );
+        type_into_editor(&mut rig, "MMMM");
+        press_key(&mut rig, egui::Key::Escape);
         assert_eq!(
             shape_text(&rig, box_).as_deref(),
             Some("MMMM"),
@@ -876,31 +886,168 @@ fn a_new_text_box_can_be_formatted_while_it_is_typed() {
         assert_eq!(
             row_number(&rig, box_, "Character", "Style"),
             Some(1.0),
-            "{kind:?}: the bold bit records"
+            "{kind:?}: the text is bold"
         );
-        // A font size from the list.
+        assert_eq!(
+            undo_labels(&rig),
+            vec!["Insert Text Box".to_owned()],
+            "{kind:?}: the commit is one step labelled as the insert"
+        );
+        // The picture paints the text at that format.
+        let after = ink(&mut rig, 3.1, 5.55, 4.9, 5.95);
+        assert!(after > 0, "{kind:?}: the text paints ({after})");
+    }
+}
+
+/// Typing, a Bold click, more typing, a font size from the list and
+/// Escape (task P7-41 item 2's second bullet): the editor stays open
+/// after every click, every keystroke is kept where the caret sat
+/// (the editor keeps the keyboard and the caret), and the whole box
+/// is one undo step.
+#[test]
+fn formatting_while_typing_keeps_every_keystroke_and_the_caret() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        choose_text_tool(&mut rig, kind);
+        let pos = screen(&rig, EMPTY.0, EMPTY.1);
+        click_at(&mut rig, pos);
+        assert!(editing(&mut rig), "{kind:?}: the box opens");
+        let box_ = last_shape(&rig.shell.borrow().app);
+        type_into_editor(&mut rig, "ab");
+        click(&mut rig, Role::Button, "Bold");
+        assert!(
+            editing(&mut rig),
+            "{kind:?}: still editing after the Bold click"
+        );
+        type_into_editor(&mut rig, "cd");
         open_size_list(&mut rig, kind);
         click(&mut rig, Role::Button, "36 pt");
-        let size = row_number(&rig, box_, "Character", "Size").expect("the Size cell");
         assert!(
-            (size - 0.5).abs() < 1.0e-9,
-            "{kind:?}: the size records ({size})"
+            editing(&mut rig),
+            "{kind:?}: still editing after the size choice"
         );
-        // An alignment.
         click(&mut rig, Role::Button, centre_name(kind));
+        assert!(
+            editing(&mut rig),
+            "{kind:?}: still editing after the alignment click"
+        );
+        type_into_editor(&mut rig, "ef");
+        // The caret kept its place across the click: the "X" lands
+        // where the caret sat (after the "e"), not at the end.
+        press_key(&mut rig, egui::Key::ArrowLeft);
+        click(&mut rig, Role::Button, "Italic");
+        assert!(
+            editing(&mut rig),
+            "{kind:?}: still editing after the Italic click"
+        );
+        type_into_editor(&mut rig, "X");
+        press_key(&mut rig, egui::Key::Escape);
+        assert_eq!(
+            shape_text(&rig, box_).as_deref(),
+            Some("abcdeXf"),
+            "{kind:?}: every keystroke kept, at the caret"
+        );
         assert_eq!(
             row_number(&rig, box_, "Paragraph", "HorzAlign"),
             Some(1.0),
             "{kind:?}: the alignment records"
         );
-        // The picture paints the text at that format.
-        let after = ink(&mut rig, 3.1, 5.55, 4.9, 5.95);
-        assert!(after > 0, "{kind:?}: the text paints ({after})");
-        // The commit is one undo step labelled as the insert.
         assert_eq!(
-            undo_labels(&rig).first().map(String::as_str),
-            Some("Insert Text Box"),
-            "{kind:?}: the commit is one step labelled as the insert"
+            undo_labels(&rig),
+            vec!["Insert Text Box".to_owned()],
+            "{kind:?}: one step labelled as the insert"
+        );
+    }
+}
+
+/// The same on an existing shape's edit (task P7-41 item 2's third
+/// bullet): one step per format click (as Visio), the editor still
+/// open after every click, and the typed text lands as its own last
+/// step.
+#[test]
+fn format_clicks_on_an_existing_shape_are_one_step_each() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        select_shape(&mut rig);
+        let shape = rectangle(&rig.shell.borrow().app);
+        let pos = screen(&rig, SHAPE.0, SHAPE.1);
+        double_click_at(&mut rig, pos);
+        assert!(editing(&mut rig), "{kind:?}: the double click edits");
+        type_into_editor(&mut rig, "Hi");
+        click(&mut rig, Role::Button, "Bold");
+        assert!(
+            editing(&mut rig),
+            "{kind:?}: still editing after the Bold click"
+        );
+        assert_eq!(
+            undo_labels(&rig),
+            vec!["Bold".to_owned()],
+            "{kind:?}: one step per format click (as Visio)"
+        );
+        open_size_list(&mut rig, kind);
+        click(&mut rig, Role::Button, "36 pt");
+        assert!(
+            editing(&mut rig),
+            "{kind:?}: still editing after the size choice"
+        );
+        assert_eq!(
+            undo_labels(&rig),
+            vec!["Bold".to_owned(), "Set font size".to_owned()],
+            "{kind:?}: the size is its own step"
+        );
+        type_into_editor(&mut rig, "!");
+        press_key(&mut rig, egui::Key::Escape);
+        assert_eq!(
+            shape_text(&rig, shape).as_deref(),
+            Some("Hi!"),
+            "{kind:?}: the typed text is kept"
+        );
+        assert_eq!(
+            undo_labels(&rig),
+            vec![
+                "Bold".to_owned(),
+                "Set font size".to_owned(),
+                "Write shape text".to_owned()
+            ],
+            "{kind:?}: the text write is one more step"
+        );
+    }
+}
+
+/// Cmd+B while typing folds into the group (task P7-41 item 2's
+/// fourth bullet, the path the review probed by hand): the chord keeps
+/// the editor open and the commit is one step.
+#[test]
+fn cmd_b_while_typing_folds_into_the_group() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        choose_text_tool(&mut rig, kind);
+        let pos = screen(&rig, EMPTY.0, EMPTY.1);
+        click_at(&mut rig, pos);
+        assert!(editing(&mut rig), "{kind:?}: the box opens");
+        let box_ = last_shape(&rig.shell.borrow().app);
+        type_into_editor(&mut rig, "Hi");
+        chord(&mut rig, egui::Key::B);
+        assert!(
+            editing(&mut rig),
+            "{kind:?}: the chord keeps the editor open"
+        );
+        type_into_editor(&mut rig, "!");
+        press_key(&mut rig, egui::Key::Escape);
+        assert_eq!(
+            shape_text(&rig, box_).as_deref(),
+            Some("Hi!"),
+            "{kind:?}: the typed text is kept"
+        );
+        assert_eq!(
+            row_number(&rig, box_, "Character", "Style"),
+            Some(1.0),
+            "{kind:?}: the chord folded its bold into the group"
+        );
+        assert_eq!(
+            undo_labels(&rig),
+            vec!["Insert Text Box".to_owned()],
+            "{kind:?}: one step labelled as the insert"
         );
     }
 }
@@ -1153,11 +1300,10 @@ fn undo_button(rig: &mut ShellRig) {
     rig.run();
 }
 
-/// The Undo button's click ends the typing interaction (the click
-/// commits the text and closes the group) and the next undo removes
-/// the whole new box in one step (task P7-37 item 1). The button is
-/// disabled while the group is open — its steps are not on the stack
-/// yet — so the first click only reaches the commit.
+/// Undo while a box is open (task P7-41 item 5): the button is
+/// enabled while the group collects its steps, and one click removes
+/// the whole new box — the click commits the typing (the group folds
+/// into one step) and undoes that step.
 #[test]
 fn the_undo_button_removes_the_whole_new_box() {
     for kind in LAYOUTS {
@@ -1167,24 +1313,18 @@ fn the_undo_button_removes_the_whole_new_box() {
         let pos = screen(&rig, EMPTY.0, EMPTY.1);
         click_at(&mut rig, pos);
         type_into_editor(&mut rig, "Hi");
-        let box_ = last_shape(&rig.shell.borrow().app);
         undo_button(&mut rig);
         assert!(!editing(&mut rig), "{kind:?}: the click ends the edit");
         assert_eq!(
-            shape_text(&rig, box_).as_deref(),
-            Some("Hi"),
-            "{kind:?}: the click commits the text"
-        );
-        assert_eq!(
-            undo_labels(&rig),
-            vec!["Insert Text Box".to_owned()],
-            "{kind:?}: one undo step, labelled as the insert"
-        );
-        undo_button(&mut rig);
-        assert_eq!(
             shape_count(&rig),
             before,
-            "{kind:?}: one undo removes the whole box"
+            "{kind:?}: one click removes the whole box"
+        );
+        let shell = rig.shell.borrow();
+        let session = shell.app.active_document().expect("session");
+        assert!(
+            session.undo.undo_labels().is_empty(),
+            "{kind:?}: the committed step is undone again"
         );
     }
 }
