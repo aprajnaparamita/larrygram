@@ -663,7 +663,9 @@ const RECENT_FILES_MAX: usize = 10;
 /// A never-saved document has no target: interactive callers get
 /// [`CommandError::NeedsInput`] (the desktop save dialog, ADR 0036) and
 /// the wasm build returns the package in [`Outcome::payload`] for the
-/// browser download (ADR 0036).
+/// browser download (ADR 0036). The path the dialog picks comes back
+/// as the `path` argument and becomes the session's path (task P7-47),
+/// as Save As does: the next save writes there and the title follows.
 pub(super) fn run_save(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError> {
     save_document(ctx, inv, false)
 }
@@ -719,8 +721,13 @@ fn save_document(
     let bytes = encoded.map_err(|error| io_error(&path, error))?;
     write_file(&path, &bytes)?;
     // A mapped save re-homes the session on the file it just wrote, so
-    // the next save goes to the same place and the title follows.
-    if set_path || mapped {
+    // the next save goes to the same place and the title follows. A
+    // never-saved document adopts the target the same way (task
+    // P7-47): the picker's answer becomes the session's path, as Save
+    // As does. A named save of a saved document keeps today's
+    // behaviour: the file goes to the named path and the session stays
+    // on its own (only Save As re-homes that one).
+    if set_path || mapped || own.is_none() {
         session.path = Some(path.clone());
     }
     session.mark_saved();
@@ -1810,6 +1817,104 @@ mod tests {
             ctx.settings.recent_files,
             vec![path.clone()],
             "one entry, not two"
+        );
+        std::fs::remove_dir_all(&dir).expect("clean up");
+    }
+
+    /// Task P7-47: `file.save` on a never-saved document keeps the
+    /// picked path (the picker's answer arrives as the `path`
+    /// argument): the session re-homes on it as Save As does, it lands
+    /// in the recent list, and the drawing reads unchanged after the
+    /// save.
+    #[test]
+    fn a_save_of_an_unnamed_drawing_keeps_the_picked_path() {
+        let dir = scratch_dir();
+        let target = dir.join("picked.vsdx");
+        let mut ctx = AppCtx::new(crate::Settings::default());
+        run_new(&mut ctx, &Invocation::empty(Source::Test)).expect("new");
+        {
+            let session = ctx.active_document_mut().expect("session");
+            session.document.add_page("Page-2").expect("page");
+            session.changes = session.changes.wrapping_add(1);
+        }
+        let before = ctx.active_document().expect("session").document.clone();
+        let invocation = Invocation::new(
+            Args::new().with("path", ArgValue::Path(target.clone())),
+            Source::Ui,
+        );
+        let outcome = run_save(&mut ctx, &invocation).expect("save");
+        assert_eq!(
+            outcome.message.as_deref(),
+            Some(format!("Saved {}", target.display()).as_str())
+        );
+        let session = ctx.active_document().expect("session");
+        assert_eq!(
+            session.path.as_deref(),
+            Some(target.as_path()),
+            "the picked path is kept"
+        );
+        assert_eq!(session.display_name(), "picked.vsdx");
+        assert_eq!(
+            ctx.settings.recent_files,
+            vec![target.clone()],
+            "the picked path is recorded as a recent file"
+        );
+        assert!(!session.is_dirty(), "the save records the saved state");
+        assert_eq!(
+            session.document, before,
+            "the save does not touch the drawing"
+        );
+        // The written file reads back as the same drawing.
+        let bytes = std::fs::read(&target).expect("read back");
+        let package = read_package(&bytes, &Limits::DEFAULT).expect("package");
+        let document = to_model(&package).expect("model");
+        assert_eq!(document, before, "the drawing reads unchanged");
+        std::fs::remove_dir_all(&dir).expect("clean up");
+    }
+
+    /// Task P7-47: `file.save` naming a path on a document that
+    /// already has one keeps today's behaviour: the file goes to the
+    /// named path, the session stays on its own path (only
+    /// `file.save_as` re-homes a named save of a saved document), and
+    /// the recent list records the file that was written.
+    #[test]
+    fn a_named_save_of_a_saved_drawing_keeps_its_own_path() {
+        let dir = scratch_dir();
+        let own = dir.join("own.vsdx");
+        let other = dir.join("other.vsdx");
+        let mut ctx = AppCtx::new(crate::Settings::default());
+        run_new(&mut ctx, &Invocation::empty(Source::Test)).expect("new");
+        run_save_as(
+            &mut ctx,
+            &Invocation::new(
+                Args::new().with("path", ArgValue::Path(own.clone())),
+                Source::Ui,
+            ),
+        )
+        .expect("save as");
+        let outcome = run_save(
+            &mut ctx,
+            &Invocation::new(
+                Args::new().with("path", ArgValue::Path(other.clone())),
+                Source::Ui,
+            ),
+        )
+        .expect("save");
+        assert_eq!(
+            outcome.message.as_deref(),
+            Some(format!("Saved {}", other.display()).as_str())
+        );
+        assert!(other.is_file(), "the named path received the file");
+        let session = ctx.active_document().expect("session");
+        assert_eq!(
+            session.path.as_deref(),
+            Some(own.as_path()),
+            "the session keeps its own path"
+        );
+        assert_eq!(
+            ctx.settings.recent_files,
+            vec![other.clone(), own],
+            "the recent list records the written file first"
         );
         std::fs::remove_dir_all(&dir).expect("clean up");
     }
