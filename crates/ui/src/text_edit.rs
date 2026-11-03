@@ -170,21 +170,52 @@ impl TextEditor {
         Ok(session.document.effective_text(shape).cloned())
     }
 
-    /// Draws the editor over `rect` (the shape's text block in screen
-    /// points) and reports a commit.
+    /// Draws the editor over the shape's drawn text (task P7-41 item
+    /// 9) and reports a commit.
     ///
-    /// Escape and a click outside the block commit, matching the common
-    /// Visio behaviour (ADR 0044); the `text.cancel` command is the
-    /// explicit discard path. The first frame requests keyboard focus so
-    /// egui's `Text` shortcut scope becomes active (ADR 0036).
-    pub fn show(&mut self, ui: &mut Ui, rect: egui::Rect) -> EditorAction {
+    /// The overlay box, the field's font size and its first baseline
+    /// match the drawn text ([`EditorOverlay`]): the fill covers the
+    /// drawn glyphs and the typed text sits where they sat. Escape and
+    /// a click outside the block commit, matching the common Visio
+    /// behaviour (ADR 0044); the `text.cancel` command is the explicit
+    /// discard path. The first frame requests keyboard focus so egui's
+    /// `Text` shortcut scope becomes active (ADR 0036).
+    pub fn show(&mut self, ui: &mut Ui, overlay: EditorOverlay) -> EditorAction {
         if !self.is_active() {
             return EditorAction::Pending;
         }
-        let rect = if finite_rect(rect) {
-            rect
+        let rect = if finite_rect(overlay.rect) {
+            overlay.rect
         } else {
             egui::Rect::from_min_size(ui.ctx().viewport_rect().min, egui::vec2(160.0, 40.0))
+        };
+        // The field's font matches the drawn text (task P7-41 item 9)
+        // and its text sits on the drawn first baseline: the galley
+        // starts one measured ascent below it. The drawn family wins
+        // when the theme registered it (the same face draws then).
+        let font = overlay.font.as_ref().map(|drawn| {
+            let named = egui::FontFamily::Name(drawn.family.as_str().into());
+            let known = ui.fonts(|fonts| fonts.definitions().families.contains_key(&named));
+            let family = if known {
+                named
+            } else {
+                egui::FontFamily::Proportional
+            };
+            egui::FontId::new(drawn.size_pt, family)
+        });
+        let baseline_shift = match (overlay.font.as_ref(), &font) {
+            (Some(drawn), Some(font)) => {
+                let ascent = ui.fonts_mut(|fonts| {
+                    fonts
+                        .layout_no_wrap("X".to_owned(), font.clone(), egui::Color32::WHITE)
+                        .rows
+                        .first()
+                        .and_then(|row| row.glyphs.first().map(|glyph| glyph.pos.y))
+                        .unwrap_or(0.0)
+                });
+                drawn.first_baseline_y - rect.min.y - ascent
+            }
+            _ => 0.0,
         };
         // The commit-on-outside-press rule (ADR 0044, task P7-41 item
         // 1) decides before the field draws: a press on a text-format
@@ -220,7 +251,7 @@ impl TextEditor {
         let mut commit = false;
         egui::Area::new(editor_id(self.shape))
             .order(egui::Order::Foreground)
-            .fixed_pos(rect.min)
+            .fixed_pos(rect.min + egui::vec2(0.0, baseline_shift))
             .show(ui.ctx(), |ui| {
                 ui.set_min_width(rect.width().max(80.0));
                 // A new text box's field fills the outlined box
@@ -237,14 +268,21 @@ impl TextEditor {
                 } else {
                     1
                 };
-                let mut output = egui::TextEdit::multiline(&mut self.buffer)
+                let mut edit = egui::TextEdit::multiline(&mut self.buffer)
                     // The one outline of the edit is the text block's,
-                    // painted below (task P7-25 item 9).
+                    // painted below (task P7-25 item 9). The margin is
+                    // zero (task P7-41 item 9): the field's text starts
+                    // at the drawn text's box, not inside an inset.
                     .frame(egui::Frame::NONE)
+                    .margin(egui::Margin::ZERO)
                     .desired_width(rect.width().max(80.0))
-                    .desired_rows(rows)
-                    .hint_text("Text")
-                    .show(ui);
+                    .desired_rows(rows);
+                if let Some(font) = font.clone() {
+                    // The font size matches the drawn text (task
+                    // P7-41 item 9).
+                    edit = edit.font(font);
+                }
+                let mut output = edit.hint_text("Text").show(ui);
                 // The editor's accessible name (task P7-24: the tests
                 // and screen readers find the field by it).
                 output.response.response = output.response.response.clone().accessible_name("Text");
@@ -445,22 +483,50 @@ fn one_run(buffer: &str, markers: RunMarkers) -> TextContent {
     TextContent { parts }
 }
 
-/// The screen rectangle of a shape's text block (or its shape bounds for
-/// an empty shape such as a fresh text box), or `None` when the shape is
-/// not in the scene or the view values are unusable.
+/// Where the in-place editor draws over the shape's drawn text (task
+/// P7-41 item 9): the box and font of the overlay follow the glyphs
+/// the scene draws, at any display scale.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EditorOverlay {
+    /// The drawn text's screen box: the fill and outline of the edit.
+    pub rect: egui::Rect,
+    /// The drawn text's font metrics, or `None` for a plain field over
+    /// a box with no drawn text (a pending text box, or a shape whose
+    /// text draws no ink).
+    pub font: Option<EditorFont>,
+}
+
+/// The font of the drawn text the overlay matches (task P7-41 item 9).
+#[derive(Debug, Clone, PartialEq)]
+pub struct EditorFont {
+    /// The first line's font size, in egui points (the drawn points
+    /// scaled by the canvas zoom).
+    pub size_pt: f32,
+    /// The first baseline's screen y: the field's text sits on it.
+    pub first_baseline_y: f32,
+    /// The drawn face's family name. The field uses it when the theme
+    /// registered that family (the same face draws then), else the
+    /// proportional UI font.
+    pub family: String,
+}
+
+/// The overlay of a shape's drawn text: the screen box of the glyphs
+/// the scene draws and the first line's font metrics (task P7-41 item
+/// 9), or `None` when the shape is not in the scene or the view values
+/// are unusable.
 ///
-/// The canvas passes its viewport, pan and zoom. Text is laid out in the
-/// block box, so the editor sits exactly over the text; the block's
-/// rotation is not applied to the egui field (egui text edits are
-/// axis-aligned), whose rectangle is the axis-aligned bounds of the
-/// rotated block.
+/// The canvas passes its viewport, pan and zoom. The block's rotation
+/// is not applied to the egui field (egui text edits are axis-aligned),
+/// whose rectangle is the axis-aligned bounds of the rotated text; the
+/// font metrics are `None` then as well (its first baseline is no
+/// axis' y).
 pub fn editor_rect(
     scene: &Scene,
     shape: ShapeId,
     viewport: egui::Rect,
     pan: Point,
     zoom: f64,
-) -> Option<egui::Rect> {
+) -> Option<EditorOverlay> {
     if !zoom.is_finite() || zoom <= 0.0 || !finite_rect(viewport) {
         return None;
     }
@@ -471,12 +537,45 @@ pub fn editor_rect(
         Transform::identity(),
         0,
     )?;
-    let page = node
+    let k = 96.0 * zoom;
+    // The drawn text's ink box and metrics when it draws ink (task
+    // P7-41 item 9), else the older text-block box with no metrics.
+    // The first baseline is an axis' y only for unrotated text (egui
+    // text edits are axis-aligned): rotated text gets the box only.
+    let rotated = node
         .text
         .as_ref()
-        .and_then(|text| text_block_bounds(text, transform))
-        .or_else(|| node_bounds(scene, &path).ok())?;
-    let k = 96.0 * zoom;
+        .is_some_and(|text| text.layout.rotation.radians() != 0.0);
+    let (page, font) = match node
+        .text
+        .as_ref()
+        .and_then(|text| text_ink(text, transform))
+    {
+        Some((page, size_pt, baseline_page_y, family)) => {
+            let size_pt = (size_pt * k / 72.0) as f32;
+            let baseline_y =
+                (f64::from(viewport.min.y) + ((pan.y + scene.height - baseline_page_y) * k)) as f32;
+            if rotated || !size_pt.is_finite() || size_pt <= 0.0 || !baseline_y.is_finite() {
+                (page, None)
+            } else {
+                (
+                    page,
+                    Some(EditorFont {
+                        size_pt,
+                        first_baseline_y: baseline_y,
+                        family,
+                    }),
+                )
+            }
+        }
+        None => (
+            node.text
+                .as_ref()
+                .and_then(|text| text_block_bounds(text, transform))
+                .or_else(|| node_bounds(scene, &path).ok())?,
+            None,
+        ),
+    };
     let min = egui::pos2(
         viewport.min.x + ((pan.x + page.min.x) * k) as f32,
         viewport.min.y + ((pan.y + scene.height - page.max.y) * k) as f32,
@@ -488,19 +587,23 @@ pub fn editor_rect(
     if !min.x.is_finite() || !min.y.is_finite() || !max.x.is_finite() || !max.y.is_finite() {
         return None;
     }
-    Some(egui::Rect::from_min_max(min, max))
+    Some(EditorOverlay {
+        rect: egui::Rect::from_min_max(min, max),
+        font,
+    })
 }
 
-/// The screen rectangle of a pending text box (task P7-25 item 9):
-/// `bounds` in page inches mapped through the canvas viewport, pan and
-/// zoom — the same mapping as [`editor_rect`].
+/// The overlay of a pending text box (task P7-25 item 9): `bounds` in
+/// page inches mapped through the canvas viewport, pan and zoom — the
+/// same mapping as [`editor_rect`]. The box has no drawn text to
+/// match, so its field stays plain (task P7-41 item 9).
 pub fn pending_editor_rect(
     viewport: egui::Rect,
     pan: Point,
     zoom: f64,
     page_height: f64,
     bounds: GeoRect,
-) -> Option<egui::Rect> {
+) -> Option<EditorOverlay> {
     if !zoom.is_finite() || zoom <= 0.0 || !finite_rect(viewport) || !page_height.is_finite() {
         return None;
     }
@@ -516,7 +619,112 @@ pub fn pending_editor_rect(
     if !min.x.is_finite() || !min.y.is_finite() || !max.x.is_finite() || !max.y.is_finite() {
         return None;
     }
-    Some(egui::Rect::from_min_max(min, max))
+    Some(EditorOverlay {
+        rect: egui::Rect::from_min_max(min, max),
+        font: None,
+    })
+}
+
+/// The drawn text's ink box in page inches, the first line's font size
+/// in points and the first baseline's page y (task P7-41 item 9): the
+/// union of the glyph outlines the renderer draws (the png backend's
+/// glyph chain, em units y up), placed at
+/// [`larrygram_render::scene::TextNode::origin`] (`origin + (x, -y)`)
+/// and mapped through the shape transform.
+///
+/// `None` when the text draws no ink (spaces only) or the values are
+/// unusable. At most [`MAX_INK_GLYPHS`] outlines are measured, so one
+/// call's work is bounded (AGENTS.md section 6).
+fn text_ink(
+    text: &larrygram_render::scene::TextNode,
+    transform: Transform,
+) -> Option<(GeoRect, f64, f64, String)> {
+    /// The most glyph outlines one overlay measures (AGENTS.md
+    /// section 6: bounded work per frame).
+    const MAX_INK_GLYPHS: usize = 512;
+    let origin = text.origin;
+    if !origin.x.is_finite() || !origin.y.is_finite() {
+        return None;
+    }
+    let (sin, cos) = text.layout.rotation.radians().sin_cos();
+    if !sin.is_finite() || !cos.is_finite() {
+        return None;
+    }
+    let mut ink: Option<(f64, f64, f64, f64)> = None;
+    let mut first: Option<(f64, f64)> = None;
+    let mut size_pt = f64::NAN;
+    let mut family = String::new();
+    for glyph in text
+        .layout
+        .lines
+        .iter()
+        .flat_map(|line| line.glyphs.iter())
+        .take(MAX_INK_GLYPHS)
+    {
+        let size_in = glyph.size / 72.0;
+        if !size_in.is_finite() || size_in <= 0.0 || !glyph.x.is_finite() || !glyph.y.is_finite() {
+            continue;
+        }
+        let Some(font) = text.fonts.get(glyph.font) else {
+            continue;
+        };
+        if first.is_none() {
+            first = Some((glyph.x, glyph.y));
+            size_pt = glyph.size;
+            family = font.family().to_owned();
+        }
+        let Ok(outline) = font.outline(glyph.glyph) else {
+            continue;
+        };
+        let Some(bounds) = outline.bounds() else {
+            continue;
+        };
+        // Em units (y up) to layout space (y down) about the glyph
+        // origin (the positions already carry the block rotation).
+        for (px, py) in [
+            (bounds.min.x, bounds.min.y),
+            (bounds.max.x, bounds.min.y),
+            (bounds.min.x, bounds.max.y),
+            (bounds.max.x, bounds.max.y),
+        ] {
+            let (vx, vy) = (size_in * px, -size_in * py);
+            let x = glyph.x + vx * cos - vy * sin;
+            let y = glyph.y + vx * sin + vy * cos;
+            if !x.is_finite() || !y.is_finite() {
+                return None;
+            }
+            ink = Some(match ink {
+                Some((x0, x1, y0, y1)) => (x0.min(x), x1.max(x), y0.min(y), y1.max(y)),
+                None => (x, x, y, y),
+            });
+        }
+    }
+    let (x0, x1, y0, y1) = ink?;
+    let (first_x, first_y) = first?;
+    if !size_pt.is_finite() || size_pt <= 0.0 {
+        return None;
+    }
+    // The corners of the ink box and the first baseline's point, in
+    // the text-block convention `origin + (x, -y)`, through the shape
+    // transform (the `text_block_bounds` mapping).
+    let mut page: Option<GeoRect> = None;
+    for (x, y) in [(x0, y0), (x1, y0), (x0, y1), (x1, y1)] {
+        let local = Point::new(origin.x + x, origin.y - y);
+        let mapped = transform.apply(local);
+        if !mapped.x.is_finite() || !mapped.y.is_finite() {
+            return None;
+        }
+        let point = GeoRect::new(mapped, mapped);
+        page = Some(match page {
+            Some(bounds) => bounds.union(point),
+            None => point,
+        });
+    }
+    let baseline = transform.apply(Point::new(origin.x + first_x, origin.y - first_y));
+    if !baseline.x.is_finite() || !baseline.y.is_finite() {
+        return None;
+    }
+    Some((page?, size_pt, baseline.y, family))
 }
 
 /// Finds one model shape's node, turning its ancestor transforms into
@@ -823,7 +1031,7 @@ mod tests {
         node.text = Some(text_node);
         scene.nodes.push(Node::Shape(Box::new(node)));
         let viewport = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(800.0, 600.0));
-        let rect = editor_rect(
+        let overlay = editor_rect(
             &scene,
             ShapeId { index: 2 },
             viewport,
@@ -831,6 +1039,9 @@ mod tests {
             1.0,
         )
         .expect("rect");
+        // The text draws no glyphs (no lines): the block box, plain.
+        assert!(overlay.font.is_none(), "{overlay:?}");
+        let rect = overlay.rect;
         // origin (1, 3), block 2 x 1 in: page y 2..3 maps down, x 1..3.
         assert!((rect.min.x - 106.0).abs() < 0.01, "{rect:?}");
         assert!((rect.min.y - (20.0 + 8.0 * 96.0)).abs() < 0.01, "{rect:?}");
@@ -879,7 +1090,7 @@ mod tests {
             }))],
         };
         nested.nodes.push(Node::Group(group));
-        let rect = editor_rect(
+        let overlay = editor_rect(
             &nested,
             ShapeId { index: 7 },
             viewport,
@@ -887,7 +1098,97 @@ mod tests {
             1.0,
         )
         .expect("grouped shape");
+        let rect = overlay.rect;
         assert!(rect.width() >= 0.0 && rect.height() >= 0.0);
+    }
+
+    /// A text node with one glyph at (0.5, 0.2) layout inches over the
+    /// bundled Carlito face (task P7-41 item 9's fixture).
+    fn ink_node() -> TextNode {
+        let font = larrygram_text::Font::from_bytes(larrygram_text::CARLITO[0].bytes.to_vec())
+            .expect("the bundled face parses");
+        let mut text_node = TextNode {
+            fonts: vec![font],
+            runs: Vec::new(),
+            layout: Default::default(),
+            color: Rgba::opaque(0, 0, 0),
+            origin: Point::new(1.0, 3.0),
+        };
+        text_node.layout.lines.push(larrygram_text::Line {
+            glyphs: vec![larrygram_text::GlyphPos {
+                glyph: larrygram_text::GlyphId(0),
+                font: 0,
+                x: 0.5,
+                y: 0.2,
+                run: 0,
+                size: 72.0,
+            }],
+            baseline: 0.2,
+            width: 0.5,
+            paragraph: 0,
+        });
+        text_node
+    }
+
+    /// Task P7-41 item 9: the ink box measures the glyph outlines, the
+    /// first baseline and the drawn family.
+    #[test]
+    fn text_ink_measures_the_glyphs_the_first_baseline_and_the_family() {
+        let node = ink_node();
+        let (page, size_pt, baseline, family) =
+            text_ink(&node, Transform::identity()).expect("ink");
+        assert!((size_pt - 72.0).abs() < 1.0e-9, "{size_pt}");
+        // The glyph's baseline sits at layout y 0.2: page y 2.8.
+        assert!((baseline - 2.8).abs() < 1.0e-9, "{baseline}");
+        assert_eq!(family, "Carlito");
+        // The ink box wraps the one-inch-em outline about the glyph
+        // origin (page (1.5, 2.8)): right of the origin (the left side
+        // bearing) and tall as the ink above the baseline.
+        assert!(page.min.x > 1.5 && page.min.x < 1.6, "{page:?}");
+        assert!(page.max.x > page.min.x + 0.1, "{page:?}");
+        assert!(page.min.y <= 2.8 + 1.0e-9, "{page:?}");
+        assert!(page.max.y > page.min.y + 0.2, "{page:?}");
+    }
+
+    /// The unusable cases answer `None` (task P7-41 item 9).
+    #[test]
+    fn text_ink_rejects_unusable_values_and_inkless_text() {
+        let empty = TextNode {
+            fonts: Vec::new(),
+            runs: Vec::new(),
+            layout: Default::default(),
+            color: Rgba::opaque(0, 0, 0),
+            origin: Point::new(0.0, 0.0),
+        };
+        assert_eq!(text_ink(&empty, Transform::identity()), None);
+
+        // A glyph with no font in the list: nothing measurable.
+        let mut node = ink_node();
+        node.fonts.clear();
+        assert_eq!(text_ink(&node, Transform::identity()), None);
+
+        // A non-finite origin is unusable.
+        let mut node = ink_node();
+        node.origin = Point::new(f64::NAN, 0.0);
+        assert_eq!(text_ink(&node, Transform::identity()), None);
+
+        // A non-finite glyph position or size draws no measurable ink.
+        let mut node = ink_node();
+        node.layout.lines[0].glyphs[0].x = f64::NAN;
+        assert_eq!(text_ink(&node, Transform::identity()), None);
+        let mut node = ink_node();
+        node.layout.lines[0].glyphs[0].size = 0.0;
+        assert_eq!(text_ink(&node, Transform::identity()), None);
+
+        // A rotated block keeps its box (the glyph corners carry the
+        // rotation) — `editor_rect` drops only the font metrics there.
+        let mut node = ink_node();
+        node.layout.rotation = Angle::from_radians(0.1);
+        let (page, .., baseline, family) =
+            text_ink(&node, Transform::identity()).expect("rotated ink");
+        assert_eq!(family, "Carlito");
+        assert!(page.width() > 0.0 && page.height() > 0.0, "{page:?}");
+        assert!(baseline.is_finite(), "{baseline}");
     }
 
     #[test]
@@ -995,8 +1296,9 @@ mod tests {
     fn a_pending_box_maps_to_a_screen_rectangle() {
         let bounds = GeoRect::new(Point::new(1.0, 2.0), Point::new(3.0, 2.5));
         let viewport = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(800.0, 600.0));
-        let rect =
-            pending_editor_rect(viewport, Point::new(0.0, 0.0), 1.0, 11.0, bounds).expect("rect");
+        let rect = pending_editor_rect(viewport, Point::new(0.0, 0.0), 1.0, 11.0, bounds)
+            .expect("rect")
+            .rect;
         // x 1..3 maps right; page y 2..2.5 maps down from height 11.
         assert!((rect.min.x - 106.0).abs() < 0.01, "{rect:?}");
         assert!((rect.min.y - (20.0 + 8.5 * 96.0)).abs() < 0.01, "{rect:?}");

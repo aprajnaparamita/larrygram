@@ -18,7 +18,7 @@ use larrygram_model::{
 };
 use larrygram_ui::shell::dispatch_one;
 use larrygram_ui::shortcuts::{self, ShortcutMap};
-use larrygram_ui::text_edit::{EditorAction, TextEditor};
+use larrygram_ui::text_edit::{EditorAction, EditorOverlay, TextEditor};
 use larrygram_ui::tools::{Modifiers, Tool, ToolEvent, ToolMachine};
 use larrygram_ui_spec::{Loader, ShortcutScope};
 
@@ -89,7 +89,7 @@ fn typing_into_the_editor_writes_the_shape_text() {
                 .expect("dispatch");
             harness_intents.borrow_mut().extend(produced);
             let mut editor = harness_editor.borrow_mut();
-            let produced = editor.show(ui, rect);
+            let produced = editor.show(ui, EditorOverlay { rect, font: None });
             if !matches!(produced, EditorAction::Pending) {
                 *harness_action.borrow_mut() = produced;
             }
@@ -154,7 +154,9 @@ fn the_text_shortcut_scope_is_active_while_the_editor_is_focused() {
                 .expect("dispatch");
             harness_intents.borrow_mut().extend(produced);
             drop(app);
-            harness_editor.borrow_mut().show(ui, rect);
+            harness_editor
+                .borrow_mut()
+                .show(ui, EditorOverlay { rect, font: None });
         });
     harness.run();
     harness.event(key_event(
@@ -195,7 +197,9 @@ fn escape_commits_and_leaves_the_editor_idle() {
     let mut harness = Harness::builder()
         .with_size(egui::vec2(400.0, 300.0))
         .build_ui(move |ui| {
-            let produced = harness_editor.borrow_mut().show(ui, rect);
+            let produced = harness_editor
+                .borrow_mut()
+                .show(ui, EditorOverlay { rect, font: None });
             if !matches!(produced, EditorAction::Pending) {
                 *harness_action.borrow_mut() = produced;
             }

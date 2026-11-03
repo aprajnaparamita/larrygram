@@ -72,6 +72,9 @@ proptest = "1"
 # item 3): the test asserts what the file holds, not what the document
 # holds after the fact.
 larrygram-vsdx = { path = "../vsdx" }
+# The bundled faces of the drawn text (task P7-41 item 9): the
+# text-ink unit tests measure real glyph outlines.
+larrygram-text = { path = "../text" }
 # Parses the committed YAML in the tests only (the runtime loader is
 # `larrygram-ui-spec`'s; MIT, the same YAML parser `xtask` uses, ADR
 # 0007): the `contexts.yaml` and layout cross-check (P7-08) and the
