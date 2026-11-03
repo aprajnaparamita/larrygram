@@ -42,6 +42,7 @@ mod placement;
 mod popups;
 mod review;
 mod surfaces;
+mod text_centered;
 mod text_controls;
 mod text_fixes;
 mod windows;
