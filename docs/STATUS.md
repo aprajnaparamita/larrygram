@@ -69,7 +69,8 @@ Phase 7: Panel and Classic layouts, the Larrygram rename and the welcome wizard.
 | [P7-41](tasks/P7-41.md) | implementer | P7-37, P7-40, P7-42 | I | waits (format clicks keep the editor open, save commits the box, no hand-kept trigger list, undo while a box is open) | — |
 | [P7-42](tasks/P7-42.md) | implementer | P7-37 | I | ready, **high priority** (unsaved changes are never tracked: close and quit ask nothing; Save / Don't Save / Cancel, the title marker) | — |
 | [P7-43](tasks/P7-43.md) | test-engineer | P7-38 | I | merged with P7-38 (the 3× fallback, no stale PNGs, a state check per shot, no transparent edge, caret blink off) | `ecf9d2b` |
-| [P7-44](tasks/P7-44.md) | implementer | — | I | ready (text in our shapes is centred, as Visio's styles make it; the Shape Data value field shows its value) | — |
+| [P7-44](tasks/P7-44.md) | implementer | — | I | handed off; Opus review: the pane too narrow for the 30-character case, drawn shapes still top-left, the ellipsis stored in the buffer; fixes in P7-45 on the same branch | — |
+| [P7-45](tasks/P7-45.md) | implementer | P7-44 | I | ready, on `agent/P7-44` (a 240-point pane, Rectangle and Ellipse centred, the ellipsis drawn not stored, local alignment and round-trip tests) | — |
 | [P7-38](tasks/P7-38.md) | test-engineer | — | I | merged with P7-43 (`cargo xtask screenshots [--only <id>] [--to <dir>]`; 7 shots on the website as of 2026-11-03, text-editing held back for P7-41; re-run after P7-32–P7-36, P7-41, P7-44) | `ecf9d2b` |
 
 Tasks start as soon as their own dependencies merge (no whole-group waits); run at most twelve workers at once across Phase 7 and Phase 8.
