@@ -83,7 +83,13 @@ jobs:
 
       # Each platform builds its own package on its native runner
       # (task R9 goal 5); `cargo xtask dist` refuses any other host.
+      # The build id (task R11 goal 1): the About window and
+      # `larrygram-cli --version` show `<version> (<short sha>)`, baked
+      # in from `LARRYGRAM_BUILD_SHA` here (otherwise the id falls back
+      # to git in a checkout, then 'dev'; resolution never fails).
       - name: Build the package
+        env:
+          LARRYGRAM_BUILD_SHA: ${{ github.sha }}
         run: cargo xtask dist ${{ matrix.platform }}
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

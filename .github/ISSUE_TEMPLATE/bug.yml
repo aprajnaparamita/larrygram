@@ -1,0 +1,68 @@
+# The bug issue template (task R11 goal 5): our own words. The form
+# asks for what happened, the steps, the release tag and build id,
+# the operating system and an optional drawing. testers.md points
+# here.
+name: Bug report
+description: Report something that went wrong in Larrygram.
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for testing Larrygram. One problem per report, please.
+        Your report is read by people who were not there: say what you
+        did and what you saw.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what happened instead. Paste any error text you saw.
+      placeholder: I expected the shape to move with the connector, but the connector stayed behind and ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The shortest list of steps that shows the problem, from a fresh start.
+      placeholder: |
+        1. Open the attached drawing.
+        2. Select the middle shape.
+        3. Press Delete.
+    validations:
+      required: true
+
+  - type: input
+    id: release-tag
+    attributes:
+      label: Release tag
+      description: The tag from the top of the release page you downloaded from (for example v1.0.0-alpha.1).
+    validations:
+      required: true
+
+  - type: input
+    id: build-id
+    attributes:
+      label: Build id
+      description: The part in brackets in Help > About (for example abc1234).
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      description: For example macOS 15.1, Windows 11, or Ubuntu 24.04.
+    validations:
+      required: true
+
+  - type: textarea
+    id: drawing
+    attributes:
+      label: Drawing
+      description: Optional. Drag in a small .vsdx or .vsd that shows the problem, if you can share it.
+    validations:
+      required: false

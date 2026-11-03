@@ -323,20 +323,8 @@ pub fn dist_mac(sys: &mut dyn Sys, layout: &Layout, os: &str, arch: &str) -> Res
     let version = version_from_root(root)?;
     println!("dist mac: building Larrygram {version} for {TARGET}");
 
-    // 1. The release binaries (AGENTS.md section 2: no CARGO_TARGET_DIR).
-    sys.run(
-        &crate::util::cargo(),
-        &[
-            "build",
-            "--release",
-            "-p",
-            "larrygram",
-            "-p",
-            "larrygram-cli",
-            "--target",
-            TARGET,
-        ],
-    )?;
+    // 1. The release binaries: the shared build step (task R12 goal 2).
+    super::build_release(sys, TARGET)?;
     let mut executables = Vec::new();
     for binary in BINARIES {
         let built = layout.binary(TARGET, binary);

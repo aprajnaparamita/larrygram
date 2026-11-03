@@ -32,7 +32,7 @@ use super::{
     BINARIES, ICON_SVG, LINUX_TARGET, Layout, Sys, check_host, licence_entries, licence_files,
     package_dir_name, package_name, render_png, version_from_root,
 };
-use crate::util::{self, Result};
+use crate::util::Result;
 
 /// The only supported target triple (task R9 decisions).
 pub const TARGET: &str = LINUX_TARGET;
@@ -334,20 +334,8 @@ pub fn dist_linux(
     let version = version_from_root(root)?;
     println!("dist linux: building Larrygram {version} for {TARGET}");
 
-    // 1. The release binaries (AGENTS.md section 2: no CARGO_TARGET_DIR).
-    sys.run(
-        &util::cargo(),
-        &[
-            "build",
-            "--release",
-            "-p",
-            "larrygram",
-            "-p",
-            "larrygram-cli",
-            "--target",
-            TARGET,
-        ],
-    )?;
+    // 1. The release binaries: the shared build step (task R12 goal 2).
+    super::build_release(sys, TARGET)?;
     for binary in BINARIES {
         let built = layout.binary(TARGET, binary);
         if !built.is_file() {
@@ -385,6 +373,7 @@ pub fn dist_linux(
 mod tests {
     use super::*;
     use crate::dist::fakes::{FakeSys, TempDir};
+    use crate::util;
 
     /// A temp workspace with the Cargo.toml, the licence sources, the
     /// icon source and the desktop entry the package copies (task R9

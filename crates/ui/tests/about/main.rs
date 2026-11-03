@@ -115,6 +115,24 @@ fn the_video_button_returns_watch_video_without_a_tracking_id() {
 }
 
 #[test]
+fn the_version_line_renders() {
+    // Task R11 goal 1: the About window shows `1.0.0-alpha.1
+    // (abc1234)`, with the build id from `larrygram_commands::build`.
+    let rig = Rig::new();
+    let root = rig.harness.root();
+    let line = about::version_line();
+    assert!(
+        root.query_all_by_label(line).next().is_some(),
+        "the version line renders: {line}"
+    );
+    assert!(
+        line.starts_with(larrygram_commands::build::VERSION),
+        "{line}"
+    );
+    assert!(line.ends_with(')'), "{line}");
+}
+
+#[test]
 fn close_returns_close() {
     let mut rig = Rig::new();
     rig.click("Close");
