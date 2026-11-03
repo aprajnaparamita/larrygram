@@ -16,6 +16,9 @@ pub use crate::util::test_support::TempDir;
 pub struct FakeSys {
     /// The calls recorded so far, one line each.
     pub calls: Vec<String>,
+    /// The environment of each recorded call, in the same order
+    /// (task R12 goal 2: the build step sets one variable).
+    pub envs: Vec<Vec<(String, String)>>,
     /// The release directory the fake `cargo` writes into.
     bin_dir: PathBuf,
     /// The binary file names the fake `cargo` writes there.
@@ -28,6 +31,7 @@ impl FakeSys {
     pub fn new(bin_dir: &Path, names: &'static [&'static str]) -> Self {
         FakeSys {
             calls: Vec::new(),
+            envs: Vec::new(),
             bin_dir: bin_dir.to_path_buf(),
             names,
         }
@@ -36,7 +40,12 @@ impl FakeSys {
 
 impl Sys for FakeSys {
     fn run(&mut self, program: &str, args: &[&str]) -> Result<()> {
+        self.run_env(program, args, &[])
+    }
+
+    fn run_env(&mut self, program: &str, args: &[&str], env: &[(String, String)]) -> Result<()> {
         self.calls.push(format!("{program} {}", args.join(" ")));
+        self.envs.push(env.to_vec());
         let name = Path::new(program)
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())

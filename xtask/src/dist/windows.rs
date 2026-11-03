@@ -26,7 +26,7 @@ use super::{
     BINARIES, Layout, Sys, WINDOWS_TARGET, check_host, licence_files, package_dir_name,
     package_name, version_from_root,
 };
-use crate::util::{self, Result};
+use crate::util::Result;
 
 /// The only supported target triple (task R9 decisions).
 pub const TARGET: &str = WINDOWS_TARGET;
@@ -139,20 +139,8 @@ pub fn dist_windows(sys: &mut dyn Sys, layout: &Layout, os: &str, arch: &str) ->
     let version = version_from_root(root)?;
     println!("dist windows: building Larrygram {version} for {TARGET}");
 
-    // 1. The release binaries (AGENTS.md section 2: no CARGO_TARGET_DIR).
-    sys.run(
-        &util::cargo(),
-        &[
-            "build",
-            "--release",
-            "-p",
-            "larrygram",
-            "-p",
-            "larrygram-cli",
-            "--target",
-            TARGET,
-        ],
-    )?;
+    // 1. The release binaries: the shared build step (task R12 goal 2).
+    super::build_release(sys, TARGET)?;
     let mut binaries = Vec::new();
     for name in binary_names() {
         let built = layout.binary(TARGET, &name);

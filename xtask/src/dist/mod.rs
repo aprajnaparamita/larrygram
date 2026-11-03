@@ -103,6 +103,16 @@ pub trait Sys {
     /// Runs `program args`, inheriting stdio. Fails naming the command
     /// when the command fails.
     fn run(&mut self, program: &str, args: &[&str]) -> Result<()>;
+
+    /// Runs `program args` with `env` (name, value pairs) set on the
+    /// child process (task R12 goal 2). The default delegates to
+    /// [`run`] and ignores `env`: a fake that records calls keeps
+    /// recording them the same way whatever the environment.
+    /// [`StdSys`] sets the variables.
+    fn run_env(&mut self, program: &str, args: &[&str], env: &[(String, String)]) -> Result<()> {
+        let _ = env;
+        self.run(program, args)
+    }
 }
 
 /// The real [`Sys`]: every command runs in the workspace root.
@@ -111,6 +121,73 @@ pub struct StdSys;
 impl Sys for StdSys {
     fn run(&mut self, program: &str, args: &[&str]) -> Result<()> {
         util::run(Command::new(program).args(args))
+    }
+
+    fn run_env(&mut self, program: &str, args: &[&str], env: &[(String, String)]) -> Result<()> {
+        let mut cmd = Command::new(program);
+        cmd.args(args).envs(
+            env.iter()
+                .map(|(name, value)| (name.as_str(), value.as_str())),
+        );
+        util::run(&mut cmd)
+    }
+}
+
+/// The build step every pipeline starts with (task R12 goal 2): the
+/// release binaries of `larrygram` and `larrygram-cli` for `target`
+/// (AGENTS.md section 2: no `CARGO_TARGET_DIR` of our own), with
+/// `LARRYGRAM_BUILD_SHA` set from `git rev-parse --short HEAD` in the
+/// workspace root — the build id the About window and
+/// `larrygram-cli --version` show. Git missing or failing builds
+/// without the variable (the build id then reads `dev`) and prints
+/// one line saying so. The probe runs once per build.
+pub fn build_release(sys: &mut dyn Sys, target: &str) -> Result<()> {
+    build_release_with(sys, &mut Command::new("git"), target)
+}
+
+/// The build step through an explicit `git` command (the test seam of
+/// [`build_release`], as [`metadata_target_dir`] takes its cargo).
+pub fn build_release_with(sys: &mut dyn Sys, git: &mut Command, target: &str) -> Result<()> {
+    let sha = git_short_sha(git);
+    if sha.is_none() {
+        println!(
+            "dist: no git commit found; building without LARRYGRAM_BUILD_SHA (the build id reads 'dev')"
+        );
+    }
+    let env = build_env(sha.as_deref());
+    let args = [
+        "build",
+        "--release",
+        "-p",
+        "larrygram",
+        "-p",
+        "larrygram-cli",
+        "--target",
+        target,
+    ];
+    sys.run_env(&util::cargo(), &args, &env)
+}
+
+/// `git rev-parse --short HEAD` through `git` (a bare command like
+/// [`metadata_target_dir`]'s; the tests pass their own program), run
+/// in the workspace root. A missing git, a non-repository or a
+/// failing command is [`None`], never an error (task R12 goal 2).
+pub fn git_short_sha(git: &mut Command) -> Option<String> {
+    let sha = util::output(git.args(["rev-parse", "--short", "HEAD"])).ok()?;
+    let sha = sha.trim();
+    if sha.is_empty() {
+        None
+    } else {
+        Some(sha.to_owned())
+    }
+}
+
+/// The one environment variable of the release build (task R12 goal
+/// 2): `LARRYGRAM_BUILD_SHA` when the id resolved, nothing otherwise.
+pub fn build_env(sha: Option<&str>) -> Vec<(String, String)> {
+    match sha {
+        Some(sha) => vec![("LARRYGRAM_BUILD_SHA".to_owned(), sha.to_owned())],
+        None => Vec::new(),
     }
 }
 
@@ -573,5 +650,74 @@ mod tests {
     fn render_png_reports_a_broken_svg() {
         let err = render_png("not an svg", 32).unwrap_err();
         assert!(err.contains("cannot parse"), "{err}");
+    }
+
+    /// Task R12 goal 2: one `LARRYGRAM_BUILD_SHA` pair when the id
+    /// resolved, nothing when it did not.
+    #[test]
+    fn build_env_is_one_pair_or_nothing() {
+        assert_eq!(
+            build_env(Some("abc1234")),
+            vec![("LARRYGRAM_BUILD_SHA".to_owned(), "abc1234".to_owned())]
+        );
+        assert!(build_env(None).is_empty());
+    }
+
+    /// The probe reads the short SHA and treats a failing or empty
+    /// probe as no id (task R12 goal 2). `echo` stands in for git
+    /// (it prints its arguments) and `false`/`true` for a failing and
+    /// an empty probe.
+    #[test]
+    fn git_short_sha_reads_the_probe_output() {
+        assert_eq!(
+            git_short_sha(&mut Command::new("echo")),
+            Some("rev-parse --short HEAD".to_owned())
+        );
+        assert_eq!(git_short_sha(&mut Command::new("true")), None);
+        assert_eq!(git_short_sha(&mut Command::new("false")), None);
+    }
+
+    /// The build step runs the release build through the existing
+    /// fake [`Sys`] and sets `LARRYGRAM_BUILD_SHA` on it (task R12
+    /// goal 2); without git it builds without the variable.
+    #[test]
+    fn build_release_sets_the_build_id_on_the_cargo_build() {
+        let temp = TempDir::new("build-release-env");
+        let mut sys = super::fakes::FakeSys::new(temp.path(), &["larrygram"]);
+        build_release_with(
+            &mut sys,
+            &mut Command::new("echo"),
+            "x86_64-unknown-linux-gnu",
+        )
+        .expect("the build step runs");
+        assert_eq!(sys.calls.len(), 1, "{:?}", sys.calls);
+        assert!(
+            sys.calls[0].contains("cargo build --release -p larrygram -p larrygram-cli"),
+            "{:?}",
+            sys.calls
+        );
+        assert!(
+            sys.calls[0].contains("--target x86_64-unknown-linux-gnu"),
+            "{:?}",
+            sys.calls
+        );
+        assert_eq!(
+            sys.envs[0],
+            vec![(
+                "LARRYGRAM_BUILD_SHA".to_owned(),
+                "rev-parse --short HEAD".to_owned()
+            )],
+            "the probe's short SHA reaches the cargo build"
+        );
+
+        let mut sys = super::fakes::FakeSys::new(temp.path(), &["larrygram"]);
+        build_release_with(&mut sys, &mut Command::new("false"), "aarch64-apple-darwin")
+            .expect("the build step runs without git");
+        assert_eq!(sys.calls.len(), 1, "{:?}", sys.calls);
+        assert!(
+            sys.envs[0].is_empty(),
+            "no git, no LARRYGRAM_BUILD_SHA: {:?}",
+            sys.envs
+        );
     }
 }
