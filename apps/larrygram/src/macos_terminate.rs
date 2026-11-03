@@ -320,7 +320,7 @@ mod tests {
     use objc2::rc::Retained;
     use objc2::runtime::ClassBuilder;
 
-        /// The serial lock of the tests that touch the module's globals.
+    /// The serial lock of the tests that touch the module's globals.
     fn serial() -> std::sync::MutexGuard<'static, ()> {
         test_serial()
     }
@@ -432,10 +432,7 @@ mod tests {
         // cannot run in the harness; the state is what the test can
         // pin).
         reply_termination(false);
-        assert!(
-            !TERMINATE_LATER.load(Ordering::SeqCst),
-            "the walk answered"
-        );
+        assert!(!TERMINATE_LATER.load(Ordering::SeqCst), "the walk answered");
         reply_termination(true);
     }
 
@@ -546,5 +543,4 @@ mod tests {
         // `applicationShouldTerminate:` signature (ADR 0074).
         unsafe { std::mem::transmute::<ShouldTerminate, Imp>(foreign_should_terminate) }
     }
-
 }

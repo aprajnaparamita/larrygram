@@ -662,3 +662,218 @@ fn the_window_title_follows_the_marker_with_one_command_per_change() {
         "an unchanged frame repeats nothing"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Task P7-46 goal 7: the review's missing flows.
+// ---------------------------------------------------------------------------
+
+/// A picker whose every save is cancelled (task P7-46 goal 7: the
+/// walk stops and the drawing stays open and changed).
+struct CancelledPicker;
+
+impl FilePicker for CancelledPicker {
+    fn open(&self, _request: &OpenRequest) -> Result<Option<FileChoice>, UiError> {
+        Ok(None)
+    }
+
+    fn save(&self, _request: &SaveRequest, _data: &[u8]) -> Result<Option<FileChoice>, UiError> {
+        Ok(None)
+    }
+
+    fn poll(&self) -> PickState {
+        PickState::Idle
+    }
+}
+
+/// Asks for the window to close the way the close button does (task
+/// P7-46 goal 7): one `close_requested` event and one frame.
+fn request_window_close(rig: &mut ShellRig) {
+    {
+        let harness = rig.harness();
+        let viewports = harness
+            .input_mut()
+            .viewports
+            .entry(egui::ViewportId::ROOT)
+            .or_default();
+        viewports.events.push(egui::ViewportEvent::Close);
+    }
+    rig.harness().step();
+}
+
+/// Save inside a quit walk: the drawing is written (a temp path
+/// through the test file picker) and the walk goes on to the next
+/// drawing in turn (task P7-46 goal 7).
+#[test]
+fn save_inside_a_quit_walk_writes_the_drawing_and_the_walk_goes_on() {
+    for kind in LAYOUTS {
+        let target = temp_target("walk-save");
+        let picker = TempPicker::new(target.clone());
+        let mut rig = two_drawing_rig(kind);
+        rig.shell.borrow_mut().set_picker(Box::new(picker));
+        edit_shape(&mut rig);
+        {
+            let mut shell = rig.shell.borrow_mut();
+            shell.app.active = Some(1);
+        }
+        rig.run();
+        edit_shape(&mut rig);
+        {
+            let mut shell = rig.shell.borrow_mut();
+            shell.app.active = Some(0);
+        }
+        rig.run();
+
+        quit(&mut rig, kind);
+        assert!(
+            dialog_names(&mut rig, "Untitled"),
+            "{kind:?}: the first drawing is asked about"
+        );
+        dialog_click(&mut rig, SAVE);
+        assert!(target.is_file(), "{kind:?}: the drawing was written");
+        assert!(
+            dialog_names(&mut rig, SECOND),
+            "{kind:?}: the walk goes on to the next drawing"
+        );
+        let _ = std::fs::remove_file(&target);
+    }
+}
+
+/// A cancelled picker on Save: the walk stops and the drawing stays
+/// open and changed (task P7-46 goal 7).
+#[test]
+fn a_cancelled_save_stops_the_walk_and_keeps_the_drawing() {
+    for kind in LAYOUTS {
+        let mut rig = two_drawing_rig(kind);
+        rig.shell.borrow_mut().set_picker(Box::new(CancelledPicker));
+        edit_shape(&mut rig);
+        {
+            let mut shell = rig.shell.borrow_mut();
+            shell.app.active = Some(1);
+        }
+        rig.run();
+        edit_shape(&mut rig);
+        {
+            let mut shell = rig.shell.borrow_mut();
+            shell.app.active = Some(0);
+        }
+        rig.run();
+
+        quit(&mut rig, kind);
+        assert!(
+            dialog_names(&mut rig, "Untitled"),
+            "{kind:?}: the first drawing is asked about"
+        );
+        dialog_click(&mut rig, SAVE);
+        assert!(
+            !dialog_names(&mut rig, SECOND),
+            "{kind:?}: the walk stopped at the cancelled save"
+        );
+        assert!(
+            !rig.shell.borrow().quit_requested(),
+            "{kind:?}: the quit stops with the walk"
+        );
+        let shell = rig.shell.borrow();
+        assert_eq!(
+            shell.app.documents.len(),
+            2,
+            "{kind:?}: both drawings are still open"
+        );
+        let session = shell.app.active_document().expect("the first drawing");
+        assert!(session.is_dirty(), "{kind:?}: still changed");
+    }
+}
+
+/// The close button with no changed drawing: no `CancelClose` and the
+/// window closes (task P7-46 goal 7: a logout-style clean exit is
+/// never interrupted).
+#[test]
+fn the_close_button_with_no_changed_drawing_closes_at_once() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        request_window_close(&mut rig);
+        assert!(
+            !sent(&mut rig, |command| {
+                matches!(command, egui::ViewportCommand::CancelClose)
+            }),
+            "{kind:?}: nothing to ask about, nothing cancelled"
+        );
+        assert!(
+            sent(&mut rig, |command| {
+                matches!(command, egui::ViewportCommand::Close)
+            }),
+            "{kind:?}: the window closes"
+        );
+    }
+}
+
+/// The close button path runs to the end after the user answers (task
+/// P7-46 goal 7): Don't Save on the dialog resolves the last changed
+/// drawing and the window close goes to the viewport.
+#[test]
+fn the_close_button_path_finishes_after_the_answer() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        edit_shape(&mut rig);
+        request_window_close(&mut rig);
+        assert!(
+            dialog_names(&mut rig, "Untitled"),
+            "{kind:?}: the close button shows the dialog"
+        );
+        dialog_press(&mut rig, DONT_SAVE);
+        assert!(
+            quit_completed(&mut rig),
+            "{kind:?}: the walk finishes and the window closes"
+        );
+    }
+}
+
+/// A second quit request while a Close dialog is up keeps the quit
+/// (task P7-46 goal 2, its UI half): the walk asks about the other
+/// changed drawing in turn instead of stopping at the first.
+#[test]
+fn a_quit_during_a_close_walk_keeps_the_quit() {
+    for kind in LAYOUTS {
+        let mut rig = two_drawing_rig(kind);
+        edit_shape(&mut rig);
+        {
+            let mut shell = rig.shell.borrow_mut();
+            shell.app.active = Some(1);
+        }
+        rig.run();
+        edit_shape(&mut rig);
+        {
+            let mut shell = rig.shell.borrow_mut();
+            shell.app.active = Some(0);
+        }
+        rig.run();
+
+        // Close the first drawing: its Close dialog is up.
+        close_drawing(&mut rig, kind);
+        assert!(
+            dialog_names(&mut rig, "Untitled"),
+            "{kind:?}: the close dialog is up"
+        );
+        // A quit request while it runs: the walk keeps the quit and
+        // asks about the other changed drawing after this one.
+        quit(&mut rig, kind);
+        dialog_click(&mut rig, DONT_SAVE);
+        assert!(
+            dialog_names(&mut rig, SECOND),
+            "{kind:?}: the quit walk goes on to the second drawing"
+        );
+        dialog_click(&mut rig, CANCEL);
+        assert!(
+            !rig.shell.borrow().quit_requested(),
+            "{kind:?}: Cancel still stops the quit"
+        );
+        let shell = rig.shell.borrow();
+        assert_eq!(
+            shell.app.documents.len(),
+            1,
+            "{kind:?}: the answered drawing closed, the cancelled one stays"
+        );
+        let session = shell.app.active_document().expect("the second drawing");
+        assert_eq!(session.display_name(), SECOND, "{kind:?}");
+        assert!(session.is_dirty(), "{kind:?}: still changed");
+    }
+}
