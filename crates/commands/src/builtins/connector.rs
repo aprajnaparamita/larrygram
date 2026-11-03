@@ -200,18 +200,36 @@ fn connector_shape(ctx: &AppCtx, page: PageId, args: &Args) -> Result<ShapeId, C
     }
 }
 
-/// The target shape of a glue run.
+/// The target shape of a glue run. A 1-D shape is refused: connectors
+/// are never glue targets (ADR 0084 rule 1, task P7-49 goal 6).
 fn target_shape(ctx: &AppCtx, page: PageId, args: &Args) -> Result<ShapeId, CommandError> {
     let session = ctx.active_document().ok_or_else(no_document)?;
     let visio_id = need_integer(args, "target", "target shape id")?;
-    session
+    let target = session
         .document
         .shape_by_visio_id(page, visio_id)
         .ok_or_else(|| {
             CommandError::invalid_args(format!(
                 "unknown target shape id {visio_id} on the active page"
             ))
-        })
+        })?;
+    refuse_connector_target(&session.document, target, visio_id)?;
+    Ok(target)
+}
+
+/// Refuses a 1-D shape as a glue target (task P7-49 goal 6): the
+/// connector itself included, for every source.
+fn refuse_connector_target(
+    doc: &Document,
+    target: ShapeId,
+    visio_id: i32,
+) -> Result<(), CommandError> {
+    if doc.is_connector(target) {
+        return Err(CommandError::invalid_args(format!(
+            "target shape {visio_id} is a 1-D shape: connectors are never glue targets"
+        )));
+    }
+    Ok(())
 }
 
 /// The `Connect` record for one endpoint glue.
@@ -1007,6 +1025,7 @@ fn run_draw(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError>
                             "unknown glue target {target_visio_id} on the active page"
                         ))
                     })?;
+                refuse_connector_target(doc, target, target_visio_id)?;
                 glue_record(connector, target, target_visio_id, point, end, doc)?
             };
             records[end.slot()] = Some(record);
@@ -3109,6 +3128,51 @@ mod tests {
             path_points(&ctx, connector).first(),
             Some(&Point::new(0.0, 1.5))
         );
+    }
+
+    #[test]
+    fn connectors_are_never_glue_targets() {
+        let (mut ctx, _session, page, _connector, _left, _right) = fixture();
+        let line = {
+            let session = ctx.active_document_mut().expect("session");
+            session
+                .document
+                .insert_shape(page, one_d(7, (1.0, 1.0), (5.0, 1.0), false), None)
+                .expect("line")
+        };
+        let visio = ctx
+            .active_document()
+            .expect("session")
+            .document
+            .shape(line)
+            .expect("line")
+            .visio_id;
+
+        // Gluing the line to itself: refused, for any source.
+        let error = dispatch(
+            &mut ctx,
+            "connector.glue_begin",
+            args(&[
+                ("connector", i64::from(visio)),
+                ("target", i64::from(visio)),
+            ]),
+        )
+        .expect_err("the connector itself");
+        assert!(error.to_string().contains("never glue targets"), "{error}");
+
+        // And through a draw.
+        let error = dispatch(
+            &mut ctx,
+            "connector.draw",
+            Args::new()
+                .with("stencil", ArgValue::Text("Basic Flowchart".to_owned()))
+                .with("master", ArgValue::Text("Connector".to_owned()))
+                .with("x", ArgValue::Number(1.0))
+                .with("y", ArgValue::Number(1.0))
+                .with("end_target", ArgValue::Integer(i64::from(visio))),
+        )
+        .expect_err("a 1-D target through the draw");
+        assert!(error.to_string().contains("never glue targets"), "{error}");
     }
 
     #[test]
