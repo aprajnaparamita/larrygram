@@ -1656,23 +1656,66 @@ mod tests {
     }
 
     /// The no-target save of a never-saved document suggests the name
-    /// of its kind (task P8-09 goal 2).
+    /// of its kind (task P8-09 goal 2): the stencil and template kinds
+    /// name themselves, the drawing is the default.
     #[test]
     fn the_no_target_save_suggests_a_name_of_the_document_kind() {
-        let mut document = Document::new();
-        document.kind = DocumentKind::Stencil;
-        let mut ctx = AppCtx::new(crate::Settings::default());
-        ctx.open_document(DocumentSession::new(document, None));
-        let error =
-            run_save(&mut ctx, &Invocation::new(Args::new(), Source::Ui)).expect_err("no target");
-        let CommandError::NeedsInput(NeededInput::Path {
-            purpose: PathPurpose::SaveFile,
-            suggested,
-        }) = error
-        else {
-            panic!("expected a save-path request, got {error}");
-        };
-        assert_eq!(suggested, Some(PathBuf::from("stencil.vssx")));
+        for (kind, name) in [
+            (DocumentKind::Stencil, "stencil.vssx"),
+            (DocumentKind::Template, "template.vstx"),
+            (DocumentKind::Drawing, "drawing.vsdx"),
+        ] {
+            let mut document = Document::new();
+            document.kind = kind;
+            let mut ctx = AppCtx::new(crate::Settings::default());
+            ctx.open_document(DocumentSession::new(document, None));
+            let error = run_save(&mut ctx, &Invocation::new(Args::new(), Source::Ui))
+                .expect_err("no target");
+            let CommandError::NeedsInput(NeededInput::Path {
+                purpose: PathPurpose::SaveFile,
+                suggested,
+            }) = error
+            else {
+                panic!("expected a save-path request, got {error}");
+            };
+            assert_eq!(suggested, Some(PathBuf::from(name)), "{kind:?}");
+        }
+    }
+
+    /// The JPEG scan of `image_size` (task P7-22's parser) is pinned
+    /// at the byte level: a frame is found around fill bytes and
+    /// standalone markers, a non-frame segment is skipped by its
+    /// length, and a broken stream answers `None` (task P7-46: the
+    /// coverage ratchet wants these branches exercised).
+    #[test]
+    fn image_size_reads_jpeg_frames_and_refuses_broken_streams() {
+        // SOI, a standalone marker, a restart marker, a fill byte and
+        // a start-of-frame with height 2 and width 3.
+        let frame: Vec<u8> = vec![
+            0xFF, 0xD8, 0xFF, 0x01, 0xFF, 0xD0, 0xFF, 0xFF, 0xC0, 0x00, 0x0B, 0x08, 0x00, 0x02,
+            0x00, 0x03, 0x00,
+        ];
+        assert_eq!(image_size(&frame), Some(("JPEG", 3, 2)));
+        // A segment that is not a frame is skipped by its length.
+        let skipped: Vec<u8> = vec![
+            0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x04, 0x00, 0x00, 0xFF, 0xC0, 0x00, 0x0B, 0x08, 0x00,
+            0x05, 0x00, 0x07, 0x00,
+        ];
+        assert_eq!(image_size(&skipped), Some(("JPEG", 7, 5)));
+        // Broken streams: no marker where one belongs, a truncated
+        // marker, an early EOI or SOS, a truncated length, 64 segments
+        // without a frame and a stream that is not an image at all.
+        assert_eq!(image_size(&[0xFF, 0xD8, 0xC0]), None);
+        assert_eq!(image_size(&[0xFF, 0xD8, 0xFF]), None);
+        assert_eq!(image_size(&[0xFF, 0xD8, 0xFF, 0xD9]), None);
+        assert_eq!(image_size(&[0xFF, 0xD8, 0xFF, 0xDA]), None);
+        assert_eq!(image_size(&[0xFF, 0xD8, 0xFF, 0xC0, 0x00]), None);
+        let mut many = vec![0xFF, 0xD8];
+        for _ in 0..64 {
+            many.extend_from_slice(&[0xFF, 0xE0, 0x00, 0x04, 0x00, 0x00]);
+        }
+        assert_eq!(image_size(&many), None);
+        assert_eq!(image_size(b"not an image"), None);
     }
 
     /// The Phase 8 acceptance criterion: a corpus `.vsd` opens through

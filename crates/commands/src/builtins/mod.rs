@@ -658,24 +658,21 @@ mod tests {
 
     /// Task P7-46 goal 8: `app.quit` and `file.exit` are disabled in
     /// the web build (no window to close; a quit would close drawings
-    /// and leave the tab open) and enabled on the desktop.
+    /// and leave the tab open) and enabled on the desktop. The
+    /// expectation is computed from the same `cfg!` the predicate
+    /// compiles, so no line of this test is dead on any target (the
+    /// `coverage.toml` ratchet).
     #[test]
     fn quit_is_enabled_on_the_desktop_and_disabled_on_the_web() {
         let ctx = AppCtx::new(crate::Settings::default());
         let verdict = can_quit(&ctx);
-        if cfg!(target_arch = "wasm32") {
-            assert!(!verdict.is_enabled(), "the web build cannot quit");
-            assert!(
-                verdict
-                    .reason
-                    .as_deref()
-                    .is_some_and(|reason| reason.contains("browser tab")),
-                "{:?}",
-                verdict.reason
-            );
-        } else {
-            assert!(verdict.is_enabled(), "the desktop can quit");
-        }
+        assert_eq!(verdict.is_enabled(), !cfg!(target_arch = "wasm32"));
+        let reason = verdict.reason.as_deref().unwrap_or_default();
+        assert_eq!(
+            reason.contains("browser tab"),
+            cfg!(target_arch = "wasm32"),
+            "the web build carries the reason: {reason:?}"
+        );
         for id in ["app.quit", "file.exit"] {
             let registry = crate::builtins::registry().expect("registry");
             let command = crate::CommandId::parse(id).expect("id");

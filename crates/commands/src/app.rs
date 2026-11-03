@@ -942,6 +942,14 @@ mod tests {
         assert_eq!(session.display_name(), "a.vsdx");
     }
 
+    /// A path with no file name (a directory) displays as "Untitled"
+    /// (the `display_name` fallback).
+    #[test]
+    fn a_path_without_a_file_name_displays_untitled() {
+        let session = DocumentSession::new(Document::new(), Some(PathBuf::from("/")));
+        assert_eq!(session.display_name(), "Untitled");
+    }
+
     #[test]
     fn document_session_keeps_the_source_package() {
         let mut document = Document::new();

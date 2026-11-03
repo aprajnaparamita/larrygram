@@ -606,6 +606,15 @@ mod tests {
         }
     }
 
+    /// The two test edits carry their own labels (the undo menu seam
+    /// `Edit::label` provides).
+    #[test]
+    fn the_test_edits_label_themselves() {
+        let log = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        assert_eq!(Edit::label(&MarkEdit { mark: 'a', log }), "mark");
+        assert_eq!(Edit::label(&AddPageEdit), "add page");
+    }
+
     /// One step that adds a page (apply) or removes it again (revert):
     /// the document restoration `cancel_group` promises is observable.
     struct AddPageEdit;
