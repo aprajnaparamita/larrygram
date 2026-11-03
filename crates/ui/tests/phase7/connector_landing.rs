@@ -8,7 +8,11 @@
 //!   move to the top and bottom midpoints and the picture shows a
 //!   vertical run with no segment along a shape's edge;
 //! - a drag that ends on a connection point glues to that point;
-//! - a drag that ends over a connector does not glue to the connector.
+//! - a drag that ends over a connector does not glue to the connector;
+//! - a drag to a group member's connection point names the member
+//!   and that row (task P7-50 goal 4);
+//! - a press outside a diamond's outline, in its box corner, does
+//!   not glue (task P7-50 minor 1).
 
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
@@ -104,6 +108,12 @@ fn rig(kind: LayoutKind, with_points: bool) -> ShellRig {
 /// [`rig`] with the right shape at `right`.
 fn rig_with(kind: LayoutKind, with_points: bool, right: (f64, f64)) -> ShellRig {
     let (app, _, _) = two_shapes(kind, with_points, right);
+    centred(app)
+}
+
+/// A shell over `app` with the fixtures centred in the viewport (the
+/// text fixtures' rule).
+fn centred(app: AppCtx) -> ShellRig {
     let mut rig = ShellRig::with_app(app);
     rig.harness().ctx.options_mut(|options| {
         options.input_options.max_double_click_delay = 10.0;
@@ -127,6 +137,94 @@ fn rig_with(kind: LayoutKind, with_points: bool, right: (f64, f64)) -> ShellRig 
     rig.run();
     rig.run();
     rig
+}
+
+/// The page point of the member's connection point in
+/// [`group_member_rig`] (the member's local `(0.25, 0.25)` at [`A`]).
+const MEMBER_POINT: (f64, f64) = (2.25, 2.75);
+
+/// Task P7-50 goal 4: a group whose member carries one connection
+/// point. The group's pin equals its local pin, so its transform is
+/// the identity and the member sits at [`A`] with its connection point
+/// at [`MEMBER_POINT`].
+fn group_member_rig(kind: LayoutKind) -> ShellRig {
+    let mut document = Document::new();
+    let mut page = Page::new(PageId { index: 0 }, 1);
+    page.name = "Page-1".to_owned();
+    let member = shape_with_point(A.0, A.1, 2, (0.25, 0.25));
+    let member = document.add_shape(member);
+    let mut group = fixture_shape(1.0, 0.5, 1);
+    group.children = Vec::new();
+    let group = document.add_shape(group);
+    page.shapes.push(group);
+    if let Some(entity) = document.shape_mut(group) {
+        entity.children.push(member);
+    }
+    if let Some(entity) = document.shape_mut(member) {
+        entity.parent = Some(group);
+    }
+    document.pages.push(page);
+    let mut app = AppCtx::new(settings_for(kind));
+    app.open_document(DocumentSession::new(document, None));
+    app.selection.page = Some(PageId { index: 0 });
+    centred(app)
+}
+
+/// Task P7-50 minor 1: one unfilled diamond at `(3, 3)`: its box is
+/// `(2, 2.5)..(4, 3.5)`, its outline the inscribed rhombus.
+fn diamond_rig(kind: LayoutKind) -> ShellRig {
+    let mut document = Document::new();
+    let mut page = Page::new(PageId { index: 0 }, 1);
+    page.name = "Page-1".to_owned();
+    let mut diamond = fixture_shape(3.0, 3.0, 1);
+    for entry in &mut diamond.sheet.cells {
+        if entry.name.as_str() == "FillPattern" {
+            entry.value = Some(CellValue::Number(0.0));
+        }
+    }
+    diamond.sheet.sections.clear();
+    let mut geometry = Section::new(SectionName::from_static("Geometry"));
+    for (ix, (row_type, px, py)) in [
+        ("MoveTo", 1.0, 0.0),
+        ("LineTo", 2.0, 0.5),
+        ("LineTo", 1.0, 1.0),
+        ("LineTo", 0.0, 0.5),
+        ("LineTo", 1.0, 0.0),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut row = Row::new();
+        row.row_type = Some(row_type.to_owned());
+        row.ix = Some(i32::try_from(ix).unwrap_or(0));
+        row.cells = vec![cell("X", px), cell("Y", py)];
+        geometry.rows.push(row);
+    }
+    diamond.sheet.sections.push(geometry);
+    let diamond = document.add_shape(diamond);
+    page.shapes.push(diamond);
+    document.pages.push(page);
+    let mut app = AppCtx::new(settings_for(kind));
+    app.open_document(DocumentSession::new(document, None));
+    app.selection.page = Some(PageId { index: 0 });
+    centred(app)
+}
+
+/// The last shape on the page: the connector the drag drew.
+fn drawn_last(app: &AppCtx) -> ShapeId {
+    let session = app.active_document().expect("session");
+    let page = session.active_page.expect("page");
+    let shapes = session.document.page(page).expect("page").shapes.clone();
+    *shapes.last().expect("the drawn connector")
+}
+
+/// The records one shape's connector ends own.
+fn records_of(document: &Document, shape: ShapeId) -> Vec<larrygram_model::Connect> {
+    let visio = document.shape(shape).expect("shape").visio_id;
+    records(document)
+        .into_iter()
+        .filter(|record| record.from_sheet == visio)
+        .collect()
 }
 
 /// The screen point of a page point in `rig`'s canvas.
@@ -459,11 +557,19 @@ fn a_drag_that_ends_on_a_connection_point_glues_to_that_point(kind: LayoutKind) 
         .expect("the end's record");
     assert_eq!(end.to_cell, "Connections.X1");
 
-    // The picture shows the line (task P7-49 goal 11).
+    // The picture shows the line (task P7-49 goal 11). The connection
+    // points sit inside their shapes and both exits point left (the
+    // nearest side's normal), so the route wraps below both shapes
+    // (rule 4's same-side case, the fallback of task P7-50 goal 3): a
+    // horizontal run at y = 2.25 and short jogs at x = 2 and x = 6.
     let image = rig.render();
-    for x in [3.0, 4.5, 5.5] {
-        assert!(inked(&image, &rig, x, 2.75), "no line ink at ({x}, 2.75)");
+    for (x, y) in [(2.0f64, 2.35f64), (3.0, 2.25), (4.5, 2.25), (5.5, 2.25), (6.0, 2.35)] {
+        assert!(inked(&image, &rig, x, y), "no line ink at ({x}, {y})");
     }
+    assert!(
+        !inked(&image, &rig, 4.5, 2.75),
+        "no straight run between the shapes"
+    );
 }
 
 /// One layout's flow: a connector lying over a shape, with the drop on
@@ -567,33 +673,104 @@ fn a_drag_that_ends_over_a_connector_does_not_glue_to_the_connector(kind: Layout
     // The picture shows the second line ending over the first (task
     // P7-49 goal 11).
     let image = rig.render();
-    eprintln!(
-        "DBG second begin {:?} end {:?} rows {:?}",
-        (
-            number(&document, second, "BeginX"),
-            number(&document, second, "BeginY")
-        ),
-        (
-            number(&document, second, "EndX"),
-            number(&document, second, "EndY")
-        ),
-        document
-            .shape_geometry(second)
-            .expect("g")
-            .paths
-            .first()
-            .expect("p")
-            .rows
-    );
-    for (x, y) in [(4.25f64, 3.0f64), (4.5, 3.0), (5.5, 3.0), (4.25, 3.3)] {
-        eprintln!("DBG ink ({x},{y}) = {}", inked(&image, &rig, x, y));
-    }
     assert!(inked(&image, &rig, 4.25, 3.0), "the second line's ink");
     let end_x = number(&document, second, "EndX");
     assert!(
         (end_x - 5.0).abs() < 0.5,
         "the free end sits where the drag released: {end_x}"
     );
+}
+
+/// Task P7-50 goal 4, real input: a group whose member has a
+/// connection point; the drag snaps to it, the glue record names the
+/// member and that row, and the end sits on that point.
+fn a_drag_to_a_group_members_connection_point_glues_to_the_member(kind: LayoutKind) {
+    let mut rig = group_member_rig(kind);
+    click(&mut rig, Role::Button, connector_tool_button(kind));
+    let from = screen(&rig, 6.0, 4.5);
+    let to = screen(&rig, MEMBER_POINT.0, MEMBER_POINT.1);
+    drag(&mut rig, from, to);
+
+    let document = rig
+        .shell
+        .borrow()
+        .app
+        .active_document()
+        .expect("session")
+        .document
+        .clone();
+    let connector = drawn_last(&rig.shell.borrow().app);
+    assert_eq!(
+        (
+            number(&document, connector, "EndX"),
+            number(&document, connector, "EndY"),
+        ),
+        MEMBER_POINT,
+        "the end sits on the member's connection point"
+    );
+    let end = records_of(&document, connector)
+        .into_iter()
+        .find(|record| record.from_cell == "EndX")
+        .expect("the end's record");
+    assert_eq!(end.to_sheet, 2, "the record names the member");
+    assert_eq!(end.to_cell, "Connections.X1", "and that row");
+    assert_eq!(end.to_part, 100, "VisToParts 100 + the row index");
+    assert_eq!(
+        formula(&document, connector, "EndX"),
+        Some("PAR(PNT(Sheet.2!Connections.X1,Sheet.2!Connections.Y1))".to_owned()),
+        "the point-glue formula names the member"
+    );
+}
+
+/// Task P7-50 minor 1, real input: a press in the corner area of a
+/// diamond's box, outside the diamond's outline, does not glue; a
+/// press inside the outline does.
+fn a_press_outside_a_diamonds_outline_does_not_glue(kind: LayoutKind) {
+    let mut rig = diamond_rig(kind);
+    click(&mut rig, Role::Button, connector_tool_button(kind));
+    // The corner area of the box (3.75, 3.25) is outside the rhombus.
+    let from = screen(&rig, 3.75, 3.25);
+    let to = screen(&rig, 5.5, 4.5);
+    drag(&mut rig, from, to);
+    let document = rig
+        .shell
+        .borrow()
+        .app
+        .active_document()
+        .expect("session")
+        .document
+        .clone();
+    let outside = drawn_last(&rig.shell.borrow().app);
+    assert!(
+        records_of(&document, outside).is_empty(),
+        "no glue outside the outline: {:?}",
+        records_of(&document, outside)
+    );
+    assert_eq!(
+        formula(&document, outside, "BeginX"),
+        None,
+        "the begin end stays free"
+    );
+
+    // A press inside the outline (the centre) glues dynamically.
+    click(&mut rig, Role::Button, connector_tool_button(kind));
+    let from = screen(&rig, 3.0, 3.0);
+    let to = screen(&rig, 5.5, 4.5);
+    drag(&mut rig, from, to);
+    let document = rig
+        .shell
+        .borrow()
+        .app
+        .active_document()
+        .expect("session")
+        .document
+        .clone();
+    let inside = drawn_last(&rig.shell.borrow().app);
+    let begin = records_of(&document, inside)
+        .into_iter()
+        .find(|record| record.from_cell == "BeginX")
+        .expect("the begin's record");
+    assert_eq!(begin.to_sheet, 1, "dynamic glue to the diamond");
 }
 
 #[test]
@@ -654,4 +831,24 @@ fn a_drag_that_ends_over_a_connector_does_not_glue_to_the_connector_in_panel_mod
 #[test]
 fn a_drag_that_ends_over_a_connector_does_not_glue_to_the_connector_in_panel_classic() {
     a_drag_that_ends_over_a_connector_does_not_glue_to_the_connector(LayoutKind::PanelClassic);
+}
+
+#[test]
+fn a_drag_to_a_group_members_connection_point_glues_to_the_member_in_panel_modern() {
+    a_drag_to_a_group_members_connection_point_glues_to_the_member(LayoutKind::PanelModern);
+}
+
+#[test]
+fn a_drag_to_a_group_members_connection_point_glues_to_the_member_in_panel_classic() {
+    a_drag_to_a_group_members_connection_point_glues_to_the_member(LayoutKind::PanelClassic);
+}
+
+#[test]
+fn a_press_outside_a_diamonds_outline_does_not_glue_in_panel_modern() {
+    a_press_outside_a_diamonds_outline_does_not_glue(LayoutKind::PanelModern);
+}
+
+#[test]
+fn a_press_outside_a_diamonds_outline_does_not_glue_in_panel_classic() {
+    a_press_outside_a_diamonds_outline_does_not_glue(LayoutKind::PanelClassic);
 }
