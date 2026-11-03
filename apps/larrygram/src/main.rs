@@ -354,6 +354,9 @@ impl LarrygramApp {
         if let Err(error) = self.shell.dispatch(&intents) {
             self.shell.note_error(error.to_string());
         }
+        // Again after this frame's edits, so a quit that arrives
+        // before the next frame sees them.
+        self.publish_changed();
         self.answer_deferred_termination();
     }
 
