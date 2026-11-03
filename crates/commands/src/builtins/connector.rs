@@ -710,14 +710,14 @@ fn glue(ctx: &mut AppCtx, inv: &Invocation, end: End) -> Result<Outcome, Command
     };
     let mut edit = staged?;
     edit.apply(ctx)?;
-    let _ = reroute_after_edit(ctx, page, &[connector]);
+    let routes = reroute_connectors(ctx, page, &[connector])?;
     Ok(edit_outcome(
         match end {
             End::Begin => format!("Connector begin glued to shape {target_visio_id}"),
             End::End => format!("Connector end glued to shape {target_visio_id}"),
         },
         warnings,
-        Box::new(edit),
+        with_routes(Box::new(edit), routes),
     ))
 }
 
@@ -761,14 +761,14 @@ pub(super) fn run_unglue(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, 
     };
     edit.apply(ctx)?;
     let warnings = Vec::new();
-    let _ = reroute_after_edit(ctx, page, &[connector]);
+    let routes = reroute_connectors(ctx, page, &[connector])?;
     Ok(edit_outcome(
         match end {
             End::Begin => "Connector begin unglued",
             End::End => "Connector end unglued",
         },
         warnings,
-        Box::new(edit),
+        with_routes(Box::new(edit), routes),
     ))
 }
 
@@ -854,7 +854,7 @@ pub(super) fn run_style(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, C
         }
     }
     edit.apply(ctx)?;
-    let _ = reroute_after_edit(ctx, page, &targets);
+    let routes = reroute_connectors(ctx, page, &targets)?;
     Ok(edit_outcome(
         if style == RouteStyle::Straight {
             "Connector style: straight"
@@ -862,7 +862,7 @@ pub(super) fn run_style(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, C
             "Connector style: right angle"
         },
         Vec::new(),
-        Box::new(edit),
+        with_routes(Box::new(edit), routes),
     ))
 }
 
@@ -1662,11 +1662,14 @@ pub(crate) fn rebind_copied_glue(
 enum Scope<'a> {
     /// Every glued connector on the page (`connector.reroute_all`).
     All,
-    /// The shapes one edit changed: the pass re-routes only connectors
-    /// with an end glued to one of them (or to a member of a changed
-    /// group) and connectors the edit changed itself (its own ends,
-    /// glue or style).
+    /// The shapes one edit changed: the pass re-routes connectors with
+    /// an end glued to one of them (or to a member of a changed group),
+    /// except connectors the edit itself moved (rule 1's translation
+    /// already wrote their path).
     Changed(&'a [ShapeId]),
+    /// The connectors whose own ends, glue or style the edit changed:
+    /// exactly these re-route.
+    Forced(&'a [ShapeId]),
 }
 
 /// Recomputes the routes the edit's shapes changed on `page` (ADR 0084
@@ -1681,83 +1684,188 @@ enum Scope<'a> {
 /// detached is dropped with one warning line. A missing page or session
 /// is `Ok(0)`: a re-route pass never fails an edit that already
 /// succeeded.
+/// One undoable record of the rows a re-route rewrote (task P7-49
+/// goal 1): `revert` puts the old rows back byte for byte and `apply`
+/// (redo) the new ones, so one undo restores the shapes and the routes
+/// together and a stored custom or Visio route survives both.
+#[derive(Debug)]
+pub(crate) struct RouteEdit {
+    session: SessionId,
+    /// The connectors the pass rewrote, with their sheets around it.
+    entries: Vec<RouteSheet>,
+}
+
+/// One connector's sheet before and after the pass rewrote it.
+#[derive(Debug)]
+struct RouteSheet {
+    shape: ShapeId,
+    before: Sheet,
+    after: Sheet,
+}
+
+impl Edit for RouteEdit {
+    fn label(&self) -> &str {
+        "Route connector"
+    }
+
+    fn apply(&mut self, ctx: &mut AppCtx) -> Result<(), CommandError> {
+        let session = self.session;
+        let doc = document_mut(ctx, session)?;
+        for entry in &self.entries {
+            if let Some(entity) = doc.shape_mut(entry.shape) {
+                entity.sheet = entry.after.clone();
+            }
+        }
+        ctx.touch_session(session);
+        Ok(())
+    }
+
+    fn revert(&mut self, ctx: &mut AppCtx) -> Result<(), CommandError> {
+        let session = self.session;
+        let doc = document_mut(ctx, session)?;
+        for entry in self.entries.iter().rev() {
+            if let Some(entity) = doc.shape_mut(entry.shape) {
+                entity.sheet = entry.before.clone();
+            }
+        }
+        ctx.touch_session(session);
+        Ok(())
+    }
+}
+
+/// Folds a re-route's snapshot into the step it belongs to (task P7-49
+/// goal 1): one undo restores the shapes and the routes together, and
+/// redo puts the recorded rows back with no recompute.
+pub(crate) fn with_routes(step: Box<dyn Edit>, routes: Option<Box<dyn Edit>>) -> Box<dyn Edit> {
+    match routes {
+        Some(routes) => {
+            let mut composite = CompositeEdit::new(step.label().to_owned());
+            composite.push(step);
+            composite.push(routes);
+            Box::new(composite)
+        }
+        None => step,
+    }
+}
+
+/// The scoped re-route after an editing command that moved, resized,
+/// rotated, flipped or deleted shapes (ADR 0084 rule 5): connectors
+/// with an end glued to one of `changed` (a group's members count with
+/// it). Every other connector keeps its stored geometry rows byte for
+/// byte.
+///
+/// Returns the snapshot edit the caller folds into its step, `None`
+/// when the pass rewrote nothing. One warning line per dropped glue;
+/// a missing page or session is `Ok(None)`: a re-route pass never
+/// fails an edit that already succeeded.
 pub(crate) fn reroute_after_edit(
     ctx: &mut AppCtx,
     page: PageId,
     changed: &[ShapeId],
-) -> Result<usize, CommandError> {
-    reroute_scoped(ctx, page, Scope::Changed(changed))
+) -> Result<Option<Box<dyn Edit>>, CommandError> {
+    let (_, routes) = reroute_scoped(ctx, page, Scope::Changed(changed))?;
+    Ok(routes)
+}
+
+/// The forced re-route of the connectors whose own ends, glue or style
+/// the edit changed (glue, unglue, style): exactly these connectors
+/// re-route, whatever the scope says.
+pub(crate) fn reroute_connectors(
+    ctx: &mut AppCtx,
+    page: PageId,
+    connectors: &[ShapeId],
+) -> Result<Option<Box<dyn Edit>>, CommandError> {
+    let (_, routes) = reroute_scoped(ctx, page, Scope::Forced(connectors))?;
+    Ok(routes)
 }
 
 /// The full pass of `connector.reroute_all`: every glued connector on
-/// the page (ADR 0045), not scoped to one edit.
+/// the page (ADR 0045), not scoped to one edit and not an edit itself.
 pub(crate) fn reroute_all_on(ctx: &mut AppCtx, page: PageId) -> Result<usize, CommandError> {
-    reroute_scoped(ctx, page, Scope::All)
+    let (count, _) = reroute_scoped(ctx, page, Scope::All)?;
+    Ok(count)
 }
 
 /// The shared hook body: one pass on the active document, one warning
 /// line per dropped glue, never a failed edit (the
 /// [`reroute_after_edit`] contract).
-fn reroute_scoped(ctx: &mut AppCtx, page: PageId, scope: Scope<'_>) -> Result<usize, CommandError> {
+fn reroute_scoped(
+    ctx: &mut AppCtx,
+    page: PageId,
+    scope: Scope<'_>,
+) -> Result<(usize, Option<Box<dyn Edit>>), CommandError> {
     // `PageId` is a position, so only the active document can own it: the
     // editing commands and undo/redo all act on the active document.
     let Some(slot) = ctx.active_document_mut() else {
-        return Ok(0);
+        return Ok((0, None));
     };
     if slot.document.page(page).is_none() {
-        return Ok(0);
+        return Ok((0, None));
     }
     let session = slot.id;
     let mut warnings = Vec::new();
-    let count = reroute_document(&mut slot.document, page, scope, &mut warnings)?;
+    let (count, entries) = reroute_document(&mut slot.document, page, scope, &mut warnings)?;
     for line in warnings {
         ctx.record_warning(line);
     }
     ctx.touch_session(session);
-    Ok(count)
-}
-
-/// Re-routes the active page's affected connectors after an editing
-/// command that moved, deleted or glued shapes (ADR 0084 rule 5).
-///
-/// One pass after the edit, and one warning line when the pass cannot
-/// run: the edit itself already succeeded and stays applied (the
-/// [`reroute_after_edit`] contract).
-pub(crate) fn reroute_quietly(ctx: &mut AppCtx, changed: &[ShapeId]) {
-    let page = ctx
-        .active_document()
-        .and_then(|session| session.active_page);
-    if let Some(page) = page {
-        reroute_quietly_on(ctx, page, changed);
-    }
+    // The pass writes values only (the rows and the cached endpoint
+    // points), so the snapshot dirties nothing: recalc owns no cell it
+    // must recompute, and a recompute would replace cached values the
+    // file kept (task P7-49 goal 1).
+    let edit = (count > 0).then(|| Box::new(RouteEdit { session, entries }) as Box<dyn Edit>);
+    Ok((count, edit))
 }
 
 /// One re-route pass on `page`, with one warning line when the pass
 /// cannot run (task P5-19 coverage: the one helper and the one spelling
-/// of the "connectors were not re-routed" message).
-pub(crate) fn reroute_quietly_on(ctx: &mut AppCtx, page: PageId, changed: &[ShapeId]) {
-    if let Err(error) = reroute_after_edit(ctx, page, changed) {
-        ctx.record_warning(format!("connectors were not re-routed: {error}"));
+/// of the "connectors were not re-routed" message). The returned edit
+/// is the caller's to fold into its step.
+pub(crate) fn reroute_quietly(ctx: &mut AppCtx, changed: &[ShapeId]) -> Option<Box<dyn Edit>> {
+    let page = ctx
+        .active_document()
+        .and_then(|session| session.active_page);
+    page.and_then(|page| reroute_quietly_on(ctx, page, changed))
+}
+
+/// One re-route pass on `page`, with one warning line when the pass
+/// cannot run (task P5-19 coverage: the one helper and the one spelling
+/// of the "connectors were not re-routed" message). The returned edit
+/// is the caller's to fold into its step.
+pub(crate) fn reroute_quietly_on(
+    ctx: &mut AppCtx,
+    page: PageId,
+    changed: &[ShapeId],
+) -> Option<Box<dyn Edit>> {
+    match reroute_after_edit(ctx, page, changed) {
+        Ok(routes) => routes,
+        Err(error) => {
+            ctx.record_warning(format!("connectors were not re-routed: {error}"));
+            None
+        }
     }
 }
 
 /// The re-route pass over one document (ADR 0084 rule 5).
 ///
-/// The candidates are the connectors the page's records name, plus the
-/// connectors `scope` changed. The pass recomputes only the ones the
-/// scope picks: glued to a changed shape, or changed themselves.
+/// The candidates are the connectors the page's records name. The pass
+/// recomputes only the ones the scope picks: glued to a changed shape,
+/// or (for [`Scope::Forced`]) named outright. It returns the sheets it
+/// rewrote, around the write, so the caller's undo step can put them
+/// back.
 fn reroute_document(
     doc: &mut Document,
     page: PageId,
     scope: Scope<'_>,
     warnings: &mut Vec<String>,
-) -> Result<usize, CommandError> {
+) -> Result<(usize, Vec<RouteSheet>), CommandError> {
     let connector_ids = connector_visio_ids(doc, page)?;
     let changed_visio = match scope {
-        Scope::All => Vec::new(),
+        Scope::All | Scope::Forced(_) => Vec::new(),
         Scope::Changed(changed) => subtree_visio_ids(doc, changed),
     };
     let mut routed = 0usize;
+    let mut entries: Vec<RouteSheet> = Vec::new();
     for visio_id in connector_ids {
         let Some(connector) = doc.shape_by_visio_id(page, visio_id) else {
             drop_all_for(doc, page, visio_id);
@@ -1771,18 +1879,21 @@ fn reroute_document(
         if ends.first().is_none_or(Option::is_none) && ends.get(1).is_none_or(Option::is_none) {
             continue;
         }
-        let visio_id = doc
-            .shape(connector)
-            .map(|entity| entity.visio_id)
-            .unwrap_or_default();
-        if !picks(scope, &changed_visio, &ends, visio_id) {
+        if !picks(scope, &changed_visio, &ends, connector) {
             continue;
         }
-        routed = routed.saturating_add(route_one(doc, page, connector, &ends, warnings)?);
+        routed = routed.saturating_add(route_one(
+            doc,
+            page,
+            connector,
+            &ends,
+            warnings,
+            &mut entries,
+        )?);
     }
     // Connectors the edit changed that no record names (their ends are
     // free): the scope still re-routes them (rule 5, "their own ends").
-    if let Scope::Changed(changed) = scope {
+    if let Scope::Changed(changed) | Scope::Forced(changed) = scope {
         for &connector in changed {
             if !doc.is_connector(connector) {
                 continue;
@@ -1793,43 +1904,56 @@ fn reroute_document(
             if glued {
                 continue; // the record loop above already picked it
             }
-            routed = routed.saturating_add(route_one(doc, page, connector, &ends, warnings)?);
+            routed = routed.saturating_add(route_one(
+                doc,
+                page,
+                connector,
+                &ends,
+                warnings,
+                &mut entries,
+            )?);
         }
     }
-    Ok(routed)
+    Ok((routed, entries))
 }
 
 /// Whether the scope picks one connector (ADR 0084 rule 5): it has an
-/// end glued to a changed shape, or the edit changed the connector
-/// itself (its own ends, glue or style). Both sides count a group's
-/// members with it, so the pass after a step and the pass after its
-/// undo or redo see the same scope.
+/// end glued to a changed shape (a group's members count with it), or
+/// the scope names it outright. A connector in the changed set itself
+/// is skipped (task P7-49 goal 2): its edit already wrote its path
+/// (rule 1's translation), and a move that keeps its path must not be
+/// replaced.
 fn picks(
     scope: Scope<'_>,
     changed_visio: &[i32],
     ends: &[Option<Connect>; 2],
-    connector_visio: i32,
+    connector: ShapeId,
 ) -> bool {
     match scope {
         Scope::All => true,
-        Scope::Changed(_) => {
+        Scope::Forced(connectors) => connectors.contains(&connector),
+        Scope::Changed(changed) => {
+            if changed.contains(&connector) {
+                return false;
+            }
             ends.iter()
                 .flatten()
                 .any(|connect| changed_visio.contains(&connect.to_sheet))
-                || changed_visio.contains(&connector_visio)
         }
     }
 }
 
-/// The routes one connector fresh and writes its path; `1` when it
-/// rewrote the rows, `0` when it left them alone (a formula-driven
-/// geometry belongs to recalc, ADR 0056).
+/// The routes one connector fresh and writes its path, recording its
+/// sheet around the write; `1` when it rewrote the rows, `0` when it
+/// left them alone (a formula-driven geometry belongs to recalc, ADR
+/// 0056).
 fn route_one(
     doc: &mut Document,
     page: PageId,
     connector: ShapeId,
     ends: &[Option<Connect>; 2],
     warnings: &mut Vec<String>,
+    entries: &mut Vec<RouteSheet>,
 ) -> Result<usize, CommandError> {
     // ADR 0056: a connector whose geometry rows carry formulas is
     // owned by recalc (a master-driven dynamic connector); the
@@ -1873,7 +1997,20 @@ fn route_one(
     let points = route(begin.point, end.point, &options).map_err(|error| {
         CommandError::failed(format!("cannot route connector {visio_id}: {error}"))
     })?;
+    let before = doc
+        .shape(connector)
+        .map(|entity| entity.sheet.clone())
+        .unwrap_or_default();
     write_path(doc, connector, &points)?;
+    let after = doc
+        .shape(connector)
+        .map(|entity| entity.sheet.clone())
+        .unwrap_or_default();
+    entries.push(RouteSheet {
+        shape: connector,
+        before,
+        after,
+    });
     Ok(1)
 }
 
@@ -2759,16 +2896,20 @@ mod tests {
 
         // The second document also has a page 0, but it is the active one:
         // the pass must not touch the first document.
-        assert_eq!(
-            reroute_after_edit(&mut ctx, page, &[connector]).expect("reroute"),
-            0
+        assert!(
+            reroute_connectors(&mut ctx, page, &[connector])
+                .expect("reroute")
+                .is_none(),
+            "the pass rewrites nothing on the other document"
         );
         assert_eq!(ctx.documents.get(first).expect("first").changes, before);
 
         ctx.active = Some(first);
-        assert_eq!(
-            reroute_after_edit(&mut ctx, page, &[connector]).expect("reroute"),
-            1
+        assert!(
+            reroute_connectors(&mut ctx, page, &[connector])
+                .expect("reroute")
+                .is_some(),
+            "the pass rewrites the connector on its own document"
         );
     }
 
@@ -2881,8 +3022,12 @@ mod tests {
             .document
             .detach_shape(connector)
             .expect("detach");
-        let count = reroute_after_edit(&mut ctx, page, &[]).expect("reroute");
-        assert_eq!(count, 0);
+        assert!(
+            reroute_after_edit(&mut ctx, page, &[])
+                .expect("reroute")
+                .is_none(),
+            "nothing was routed"
+        );
         let doc = &ctx.active_document().expect("session").document;
         assert!(doc.page(page).expect("page").connects.is_empty());
         assert_eq!(
@@ -2895,16 +3040,10 @@ mod tests {
     #[test]
     fn a_re_route_without_a_page_or_connectors_is_a_no_op() {
         let mut ctx = AppCtx::new(Settings::default());
-        assert_eq!(
-            reroute_after_edit(&mut ctx, PageId { index: 0 }, &[]),
-            Ok(0)
-        );
+        assert!(reroute_after_edit(&mut ctx, PageId { index: 0 }, &[]).is_ok());
         let (mut ctx, _session, page, _connector, _left, _right) = fixture();
-        assert_eq!(reroute_after_edit(&mut ctx, page, &[]), Ok(0));
-        assert_eq!(
-            reroute_after_edit(&mut ctx, PageId { index: 9 }, &[]),
-            Ok(0)
-        );
+        assert!(reroute_after_edit(&mut ctx, page, &[]).is_ok());
+        assert!(reroute_after_edit(&mut ctx, PageId { index: 9 }, &[]).is_ok());
     }
 
     #[test]
@@ -2921,7 +3060,7 @@ mod tests {
             connect.to_part = mutate::VIS_CONNECTION_POINT + 8;
             doc.document.add_connect(page, connect).expect("connect");
         }
-        reroute_after_edit(&mut ctx, page, &[connector]).expect("reroute");
+        reroute_connectors(&mut ctx, page, &[connector]).expect("reroute");
         assert!(
             ctx.warnings
                 .iter()
@@ -3083,9 +3222,10 @@ mod tests {
     #[test]
     fn a_reroute_with_no_document_is_a_no_op() {
         let mut ctx = AppCtx::new(Settings::default());
-        assert_eq!(
-            reroute_after_edit(&mut ctx, PageId { index: 0 }, &[]).expect("no document"),
-            0
+        assert!(
+            reroute_after_edit(&mut ctx, PageId { index: 0 }, &[])
+                .expect("no document")
+                .is_none()
         );
     }
 

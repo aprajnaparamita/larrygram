@@ -257,22 +257,15 @@ fn an_edit_that_cannot_re_route_still_succeeds_with_one_warning() {
         ctx.warnings
     );
 
-    // Undo restores the shapes and the glue; the undo runner re-routes
-    // the connectors the step's shapes affect, so the broken one fails
-    // again, with one warning (the undo itself succeeds).
+    // Undo restores the shapes, the glue and the rows together (task
+    // P7-49 goal 1): the step's snapshot puts the routes back, so the
+    // undo needs no pass and warns nothing.
     let warnings_before = ctx.warnings.len();
     dispatch(&mut ctx, &registry, "edit.undo", Args::new()).expect("undo");
     assert_eq!(
         ctx.warnings.len(),
-        warnings_before + 1,
-        "{:?}",
-        ctx.warnings
-    );
-    assert!(
-        ctx.warnings
-            .last()
-            .is_some_and(|warning| warning.starts_with("connectors were not re-routed:")),
-        "{:?}",
+        warnings_before,
+        "the undo restores everything with no pass: {:?}",
         ctx.warnings
     );
     assert_eq!(
@@ -289,27 +282,44 @@ fn an_edit_that_cannot_re_route_still_succeeds_with_one_warning() {
 }
 
 #[test]
-fn a_paste_that_cannot_re_route_still_succeeds_with_one_warning() {
+fn a_paste_keeps_the_pasted_connectors_translated_rows() {
     let (mut ctx, registry, page) = fixture();
     dispatch(&mut ctx, &registry, "connector.glue_begin", glue_args(3, 2)).expect("glue");
     corrupt_connector_transform(&mut ctx, page);
-    // Pasting the broken connector together with its glue target makes
-    // the scoped pass re-route the pasted copy (ADR 0084 rule 5): the
-    // copy carries the corrupt transform and fails, with one warning.
+    // A pasted connector's copy keeps the rows the paste gave it: the
+    // scoped pass never re-routes a connector the edit itself moved or
+    // copied (task P7-49 goal 2, rule 1's translation).
     select(&mut ctx, page, &[2, 3]);
     dispatch(&mut ctx, &registry, "edit.copy", Args::new()).expect("copy");
+    let source_rows = geometry_rows(&ctx, 3);
     let warnings_before = ctx.warnings.len();
     dispatch(&mut ctx, &registry, "edit.paste", Args::new()).expect("paste still succeeds");
-
-    assert!(
-        ctx.warnings
-            .iter()
-            .skip(warnings_before)
-            .any(|warning| warning
-                .starts_with("connectors were not re-routed: cannot route connector ")),
-        "{:?}",
+    assert_eq!(
+        ctx.warnings.len(),
+        warnings_before,
+        "the paste re-routes nothing: {:?}",
         ctx.warnings
     );
+    assert_eq!(
+        geometry_rows(&ctx, 5),
+        source_rows,
+        "the copy keeps its translated rows"
+    );
+}
+
+/// The geometry rows of the shape with the Visio id.
+fn geometry_rows(ctx: &AppCtx, visio_id: i32) -> Vec<larrygram_model::GeometryRow> {
+    let doc = &ctx.active_document().expect("session").document;
+    let shape = doc
+        .shape_by_visio_id(PageId { index: 0 }, visio_id)
+        .expect("shape");
+    doc.shape_geometry(shape)
+        .expect("geometry")
+        .paths
+        .first()
+        .expect("a path")
+        .rows
+        .clone()
 }
 
 #[test]

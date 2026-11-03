@@ -34,7 +34,7 @@ use crate::recalc::{formula_is_guarded, literal_number, subtree_addresses};
 use crate::undo::Edit;
 use crate::{Invocation, Outcome};
 
-use super::connector::reroute_quietly_on;
+use super::connector::{reroute_quietly_on, with_routes};
 use super::{
     CommandTable, edit_outcome, has_pages, has_selection, model_error, no_document, outcome,
 };
@@ -1249,9 +1249,7 @@ pub(super) fn run_delete(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome,
         }
     }
     edit.apply(ctx)?;
-    if let Some(page) = page {
-        reroute_quietly_on(ctx, page, &targets);
-    }
+    let routes = page.and_then(|page| reroute_quietly_on(ctx, page, &targets));
 
     // The detached shapes (and anything inside them) leave the selection.
     let AppCtx {
@@ -1279,7 +1277,7 @@ pub(super) fn run_delete(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome,
     Ok(edit_outcome(
         count_label("Deleted", targets.len()),
         warnings,
-        Box::new(edit),
+        with_routes(Box::new(edit), routes),
     ))
 }
 

@@ -10,7 +10,6 @@
 use crate::app::AppCtx;
 use crate::edit::CompositeEdit;
 use crate::error::CommandError;
-use larrygram_model::{ShapeId, SheetRef};
 use larrygram_shapesheet::CellAddress;
 
 /// Runs `step` with the undo-recording gate closed (ADR 0040 rule 2).
@@ -301,72 +300,6 @@ impl UndoStack {
         self.cursor = self.cursor.saturating_add(1);
         Ok(Some(edit.label().to_owned()))
     }
-
-    /// The shapes whose glue or route the step an [`UndoStack::undo`]
-    /// just reverted changed: the entry the cursor points at afterwards
-    /// (the step [`UndoStack::redo`] re-applies next).
-    ///
-    /// The re-route hook scopes its pass after an undo with them (task
-    /// P7-32, ADR 0084 rule 5: "the shapes the edit changed").
-    pub fn undone_step_shapes(&self) -> Vec<ShapeId> {
-        self.entry_shapes(self.cursor)
-    }
-
-    /// The shapes whose glue or route the step an [`UndoStack::redo`]
-    /// just re-applied changed: the entry before the cursor afterwards
-    /// (the step [`UndoStack::undo`] reverts next).
-    pub fn redone_step_shapes(&self) -> Vec<ShapeId> {
-        self.entry_shapes(self.cursor.saturating_sub(1))
-    }
-
-    /// The distinct shapes the entry `index` moved, resized, rotated,
-    /// flipped, re-glued or re-styled: the shapes whose dirty cells
-    /// move a glue landing or a route (ADR 0084 rule 5's categories).
-    /// A step that only changed text or formatting names none: it
-    /// re-routes nothing, exactly as its own run did.
-    fn entry_shapes(&self, index: usize) -> Vec<ShapeId> {
-        let Some(edit) = self.entries.get(index) else {
-            return Vec::new();
-        };
-        let mut shapes: Vec<ShapeId> = Vec::new();
-        for cell in edit.dirty_cells().iter().filter(|cell| moves_glue(cell)) {
-            if let SheetRef::Shape(shape) = cell.sheet
-                && !shapes.contains(&shape)
-            {
-                shapes.push(shape);
-            }
-        }
-        shapes
-    }
-}
-
-/// Whether one dirty cell moves a glue landing or a route (ADR 0084
-/// rule 5): the transform cells, the 1-D endpoint cells and their
-/// triggers, the route style, and every `Connection` row cell.
-fn moves_glue(address: &larrygram_shapesheet::CellAddress) -> bool {
-    const MOVING: [&str; 16] = [
-        "PinX",
-        "PinY",
-        "Width",
-        "Height",
-        "LocPinX",
-        "LocPinY",
-        "Angle",
-        "FlipX",
-        "FlipY",
-        "BeginX",
-        "BeginY",
-        "EndX",
-        "EndY",
-        "BegTrigger",
-        "EndTrigger",
-        "ShapeRouteStyle",
-    ];
-    address
-        .section
-        .as_ref()
-        .is_some_and(|section| section.as_str() == "Connection")
-        || MOVING.contains(&address.cell.as_str())
 }
 
 #[cfg(test)]

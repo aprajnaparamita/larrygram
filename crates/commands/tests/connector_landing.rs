@@ -244,6 +244,123 @@ fn an_unrelated_edit_keeps_a_third_connectors_rows_byte_for_byte() {
     assert_eq!(rows(&back, reopened), before, "through a save and reopen");
 }
 
+/// Undo restores the rows byte for byte and redo puts the step's rows
+/// back exactly (task P7-49 goal 1): a stored custom 4-point route
+/// survives a move of one glued target and its undo and redo.
+#[test]
+fn undo_restores_a_stored_route_and_redo_the_steps() {
+    let (mut ctx, registry, page) = fixture();
+    let drawn = draw(&mut ctx, &registry, 1, 2);
+
+    // A stored custom route: four points, not one the router would
+    // draw again (as a moved segment leaves behind).
+    let custom = vec![
+        larrygram_geom::Point::new(4.0, 3.0),
+        larrygram_geom::Point::new(4.5, 3.2),
+        larrygram_geom::Point::new(5.5, 3.2),
+        larrygram_geom::Point::new(6.0, 3.0),
+    ];
+    {
+        let doc = &mut ctx.active_document_mut().expect("session").document;
+        doc.write_connector_path(drawn, &custom)
+            .expect("custom rows");
+    }
+    let stored = rows(&document(&ctx), drawn);
+    assert_eq!(stored.len(), 4, "the custom route: {stored:?}");
+
+    // The move re-routes the connector glued to the moved box.
+    move_shape(&mut ctx, &registry, page, 2, -4.0, 3.0);
+    let moved_rows = rows(&document(&ctx), drawn);
+    assert_ne!(moved_rows, stored, "the step rewrote the rows");
+
+    // Undo puts the stored route back byte for byte.
+    dispatch(&mut ctx, &registry, "edit.undo", Args::new()).expect("undo");
+    assert_eq!(
+        rows(&document(&ctx), drawn),
+        stored,
+        "undo restores the stored route byte for byte"
+    );
+
+    // Redo puts the step's rows back exactly.
+    dispatch(&mut ctx, &registry, "edit.redo", Args::new()).expect("redo");
+    assert_eq!(rows(&document(&ctx), drawn), moved_rows, "redo is exact");
+}
+
+/// A glue and a delete on a corpus connector with a Visio route: undo
+/// puts the Visio rows back byte for byte (task P7-49 goal 1).
+#[test]
+fn a_glue_and_a_delete_restore_a_corpus_route_on_undo() {
+    let files = corpus_files();
+    if skip_without_corpus(&files) {
+        return;
+    }
+    let path = files
+        .iter()
+        .find(|path| {
+            path.file_name()
+                .is_some_and(|name| name == "testfile3.vsdx")
+        })
+        .cloned()
+        .expect("corpus/vsdx/testfile3.vsdx (corpus/PROVENANCE.md)");
+    let document = read_corpus_file(&path);
+    let mut found = None;
+    for entity in &document.pages {
+        if let Some(found_at) = glued_connector(&document, entity.id) {
+            found = Some((entity.id, found_at));
+            break;
+        }
+    }
+    let (page, (connector, targets)) = found.expect("a glued connector in the corpus file");
+    let stored = rows(&document, connector);
+    let visio = document.shape(connector).expect("connector").visio_id;
+
+    // The first target is what a delete removes; an unrelated shape is
+    // what a glue names.
+    let mut ctx = AppCtx::new(Settings::default());
+    ctx.open_document(DocumentSession::new(document, None));
+    let registry = registry().expect("registry");
+    let end_visio = targets[0];
+
+    // A glue: re-glue the begin end to the same target again (its own
+    // glue changed, so the pass re-routes it).
+    dispatch(
+        &mut ctx,
+        &registry,
+        "connector.glue_begin",
+        Args::new()
+            .with("connector", ArgValue::Integer(i64::from(visio)))
+            .with("target", ArgValue::Integer(i64::from(end_visio))),
+    )
+    .expect("glue");
+    assert_ne!(
+        rows(&ctx.active_document().expect("s").document, connector),
+        stored
+    );
+    dispatch(&mut ctx, &registry, "edit.undo", Args::new()).expect("undo");
+    assert_eq!(
+        rows(&ctx.active_document().expect("s").document, connector),
+        stored,
+        "the glue's undo restores the Visio rows byte for byte"
+    );
+
+    // A delete of the glue target: the ends keep their points and the
+    // stored route (ADR 0084 rule 5 as amended), and undo restores
+    // both.
+    select(&mut ctx, page, &[end_visio]);
+    dispatch(&mut ctx, &registry, "edit.delete", Args::new()).expect("delete");
+    assert_eq!(
+        rows(&ctx.active_document().expect("s").document, connector),
+        stored,
+        "the delete keeps the stored route"
+    );
+    dispatch(&mut ctx, &registry, "edit.undo", Args::new()).expect("undo");
+    assert_eq!(
+        rows(&ctx.active_document().expect("s").document, connector),
+        stored,
+        "the delete's undo restores the Visio rows byte for byte"
+    );
+}
+
 /// One connector with a glue record to a shape on `page`, as the file
 /// carries it (the `FromSheet` of a connector-end record).
 fn glued_connector(doc: &Document, page: PageId) -> Option<(ShapeId, Vec<i32>)> {
