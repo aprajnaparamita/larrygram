@@ -287,10 +287,14 @@ fn undo_restores_a_stored_route_and_redo_the_steps() {
     assert_eq!(rows(&document(&ctx), drawn), moved_rows, "redo is exact");
 }
 
-/// A glue and a delete on a corpus connector with a Visio route: undo
-/// puts the Visio rows back byte for byte (task P7-49 goal 1).
+/// A glue on a corpus connector with a Visio route: undo puts the
+/// Visio rows back byte for byte (task P7-49 goal 1). (The paired
+/// delete half went with task P7-50 minor 4: `detach_shape` removes
+/// the `Connects` records before any pass runs, so no pass can pick
+/// the connector and "the delete keeps the rows" held with or without
+/// every P7-49 change; it pinned nothing.)
 #[test]
-fn a_glue_and_a_delete_restore_a_corpus_route_on_undo() {
+fn a_glue_restores_a_corpus_route_on_undo() {
     let files = corpus_files();
     if skip_without_corpus(&files) {
         return;
@@ -311,12 +315,10 @@ fn a_glue_and_a_delete_restore_a_corpus_route_on_undo() {
             break;
         }
     }
-    let (page, (connector, targets)) = found.expect("a glued connector in the corpus file");
+    let (_page, (connector, targets)) = found.expect("a glued connector in the corpus file");
     let stored = rows(&document, connector);
     let visio = document.shape(connector).expect("connector").visio_id;
 
-    // The first target is what a delete removes; an unrelated shape is
-    // what a glue names.
     let mut ctx = AppCtx::new(Settings::default());
     ctx.open_document(DocumentSession::new(document, None));
     let registry = registry().expect("registry");
@@ -342,23 +344,6 @@ fn a_glue_and_a_delete_restore_a_corpus_route_on_undo() {
         rows(&ctx.active_document().expect("s").document, connector),
         stored,
         "the glue's undo restores the Visio rows byte for byte"
-    );
-
-    // A delete of the glue target: the ends keep their points and the
-    // stored route (ADR 0084 rule 5 as amended), and undo restores
-    // both.
-    select(&mut ctx, page, &[end_visio]);
-    dispatch(&mut ctx, &registry, "edit.delete", Args::new()).expect("delete");
-    assert_eq!(
-        rows(&ctx.active_document().expect("s").document, connector),
-        stored,
-        "the delete keeps the stored route"
-    );
-    dispatch(&mut ctx, &registry, "edit.undo", Args::new()).expect("undo");
-    assert_eq!(
-        rows(&ctx.active_document().expect("s").document, connector),
-        stored,
-        "the delete's undo restores the Visio rows byte for byte"
     );
 }
 

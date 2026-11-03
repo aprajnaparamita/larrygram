@@ -116,9 +116,9 @@ and the `Connects` record together, in one undoable edit:
 | Unglued | literal value, no formula | literal | `_XFTRIGGER(EventXFMod)` | none |
 
 - The cached `V` of every endpoint cell is the resolved point (rule 3)
-  in **the parent's coordinates** (amended 2026-11-04, P7-49: a
-  connector inside a group keeps its endpoint cells in the parent's
-  coordinates, the same as its geometry rows).
+  in **the parent's coordinates** (amended 2026-11-04, P7-49 and
+  P7-50: the endpoint cells are in the parent's coordinates; the
+  geometry rows are in the connector's own box).
 - A glue, re-glue or unglue **replaces** the end's formulas and
   trigger, including formulas that Visio wrote. No stale
   `Sheet.<old>` reference survives.

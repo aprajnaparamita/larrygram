@@ -28,8 +28,8 @@ use larrygram_geom::{
 };
 use larrygram_model::CellReader;
 use larrygram_model::{
-    CellLookup, CellName, CellValue, CellWrite, Connect, ConnectorEnd, Document, EndGlue, PageId,
-    Resolved, Row, RowTarget, Section, Shape, ShapeId, Sheet, SheetRef, mutate,
+    Cell, CellLookup, CellName, CellValue, CellWrite, Connect, ConnectorEnd, Document, EndGlue,
+    PageId, Resolved, Row, RowTarget, Section, Shape, ShapeId, Sheet, SheetRef, mutate,
 };
 use larrygram_shapesheet::CellAddress;
 
@@ -1710,20 +1710,106 @@ enum Scope<'a> {
 /// One undoable record of the rows a re-route rewrote (task P7-49
 /// goal 1): `revert` puts the old rows back byte for byte and `apply`
 /// (redo) the new ones, so one undo restores the shapes and the routes
-/// together and a stored custom or Visio route survives both.
+/// together and a stored custom or Visio route survives both. It keeps
+/// only what `write_path` touches — the `Geometry` sections and the
+/// endpoint, pin and size cells (task P7-50 minor 5) — not two whole
+/// sheets. `connector.reroute_all` is **not** an edit (ADR 0040 rule
+/// 3) and records nothing here.
 #[derive(Debug)]
 pub(crate) struct RouteEdit {
     session: SessionId,
-    /// The connectors the pass rewrote, with their sheets around it.
-    entries: Vec<RouteSheet>,
+    /// The connectors the pass rewrote, with their path rows around it.
+    entries: Vec<RouteRows>,
 }
 
-/// One connector's sheet before and after the pass rewrote it.
+/// One connector's path rows before and after the pass rewrote it
+/// (task P7-50 minor 5: only what `write_path` touches).
 #[derive(Debug)]
-struct RouteSheet {
+struct RouteRows {
     shape: ShapeId,
-    before: Sheet,
-    after: Sheet,
+    before: PathRows,
+    after: PathRows,
+}
+
+/// The rows and cells one path write touches (task P7-50 minor 5):
+/// the `Geometry` sections and the 1-D endpoint, pin and size cells,
+/// each with the position it holds in the sheet.
+#[derive(Debug, Clone, Default)]
+struct PathRows {
+    geometry: Vec<(usize, Section)>,
+    cells: Vec<(usize, Cell)>,
+}
+
+/// The cells a path write writes or derives: the four endpoint cells,
+/// the pin and size cells of ADR 0084 rule 1 (`write_connector_ends`
+/// and `write_connector_pins`), and the `LocPin*` and `Txt*`
+/// derivations of `write_cell` from `Width` and `Height` (the model's
+/// documented-defaults table).
+const PATH_CELLS: [&str; 17] = [
+    "BeginX",
+    "BeginY",
+    "EndX",
+    "EndY",
+    "PinX",
+    "PinY",
+    "Width",
+    "Height",
+    "LocPinX",
+    "LocPinY",
+    "Angle",
+    "TxtPinX",
+    "TxtPinY",
+    "TxtLocPinX",
+    "TxtLocPinY",
+    "TxtWidth",
+    "TxtHeight",
+];
+
+impl PathRows {
+    /// The shape's `Geometry` sections and path cells, with their
+    /// positions (a path write touches nothing else in the sheet).
+    fn capture(doc: &Document, shape: ShapeId) -> Self {
+        let mut out = Self::default();
+        if let Some(entity) = doc.shape(shape) {
+            for (index, section) in entity.sheet.sections.iter().enumerate() {
+                if section.name.as_str() == "Geometry" {
+                    out.geometry.push((index, section.clone()));
+                }
+            }
+            for (index, cell) in entity.sheet.cells.iter().enumerate() {
+                if PATH_CELLS.contains(&cell.name.as_str()) {
+                    out.cells.push((index, cell.clone()));
+                }
+            }
+        }
+        out
+    }
+
+    /// Puts the captured rows and cells back: every `Geometry` section
+    /// and path cell the write changed (or added) goes, and the
+    /// captured ones return at their recorded positions (ascending, so
+    /// every index is still the right slot).
+    fn restore(&self, doc: &mut Document, shape: ShapeId) {
+        let Some(entity) = doc.shape_mut(shape) else {
+            return;
+        };
+        entity
+            .sheet
+            .sections
+            .retain(|section| section.name.as_str() != "Geometry");
+        for (index, section) in &self.geometry {
+            let at = (*index).min(entity.sheet.sections.len());
+            entity.sheet.sections.insert(at, section.clone());
+        }
+        entity
+            .sheet
+            .cells
+            .retain(|cell| !PATH_CELLS.contains(&cell.name.as_str()));
+        for (index, cell) in &self.cells {
+            let at = (*index).min(entity.sheet.cells.len());
+            entity.sheet.cells.insert(at, cell.clone());
+        }
+    }
 }
 
 impl Edit for RouteEdit {
@@ -1735,9 +1821,7 @@ impl Edit for RouteEdit {
         let session = self.session;
         let doc = document_mut(ctx, session)?;
         for entry in &self.entries {
-            if let Some(entity) = doc.shape_mut(entry.shape) {
-                entity.sheet = entry.after.clone();
-            }
+            entry.after.restore(doc, entry.shape);
         }
         ctx.touch_session(session);
         Ok(())
@@ -1747,9 +1831,7 @@ impl Edit for RouteEdit {
         let session = self.session;
         let doc = document_mut(ctx, session)?;
         for entry in self.entries.iter().rev() {
-            if let Some(entity) = doc.shape_mut(entry.shape) {
-                entity.sheet = entry.before.clone();
-            }
+            entry.before.restore(doc, entry.shape);
         }
         ctx.touch_session(session);
         Ok(())
@@ -1881,14 +1963,14 @@ fn reroute_document(
     page: PageId,
     scope: Scope<'_>,
     warnings: &mut Vec<String>,
-) -> Result<(usize, Vec<RouteSheet>), CommandError> {
+) -> Result<(usize, Vec<RouteRows>), CommandError> {
     let connector_ids = connector_visio_ids(doc, page)?;
     let changed_visio = match scope {
         Scope::All | Scope::Forced(_) => Vec::new(),
         Scope::Changed(changed) => subtree_visio_ids(doc, changed),
     };
     let mut routed = 0usize;
-    let mut entries: Vec<RouteSheet> = Vec::new();
+    let mut entries: Vec<RouteRows> = Vec::new();
     for visio_id in connector_ids {
         let Some(connector) = doc.shape_by_visio_id(page, visio_id) else {
             drop_all_for(doc, page, visio_id);
@@ -1984,7 +2066,7 @@ fn route_one(
     connector: ShapeId,
     ends: &[Option<Connect>; 2],
     warnings: &mut Vec<String>,
-    entries: &mut Vec<RouteSheet>,
+    entries: &mut Vec<RouteRows>,
 ) -> Result<usize, CommandError> {
     // ADR 0056: a connector whose geometry rows carry formulas is
     // owned by recalc (a master-driven dynamic connector); the
@@ -2033,16 +2115,10 @@ fn route_one(
     let points = route(begin.point, end.point, &options).map_err(|error| {
         CommandError::failed(format!("cannot route connector {visio_id}: {error}"))
     })?;
-    let before = doc
-        .shape(connector)
-        .map(|entity| entity.sheet.clone())
-        .unwrap_or_default();
+    let before = PathRows::capture(doc, connector);
     write_path(doc, connector, &points)?;
-    let after = doc
-        .shape(connector)
-        .map(|entity| entity.sheet.clone())
-        .unwrap_or_default();
-    entries.push(RouteSheet {
+    let after = PathRows::capture(doc, connector);
+    entries.push(RouteRows {
         shape: connector,
         before,
         after,
@@ -3181,6 +3257,91 @@ mod tests {
         edit.revert(&mut ctx).expect("revert");
         edit.apply(&mut ctx).expect("apply");
         assert_eq!(sheet(&ctx), before, "apply writes the same sheets");
+    }
+
+    /// Task P7-50 minor 5: the re-route snapshot keeps only what
+    /// `write_path` touches (the `Geometry` sections and the endpoint,
+    /// pin and size cells) and restores the sheet exactly, the cells
+    /// the write added included, with the unrelated cell and section
+    /// never in the snapshot.
+    #[test]
+    fn the_route_snapshot_restores_only_what_the_path_write_touches() {
+        let mut doc = Document::new();
+        let page = doc.add_page("Page-1").expect("page");
+        // A 1-D shape with no local-pin or angle cells (the path write
+        // adds them), an unrelated cell and an unrelated section.
+        let mut shape = Shape::new(ShapeId { index: 0 }, 1);
+        shape.sheet.cells = vec![
+            cell("BeginX", 1.0),
+            cell("BeginY", 1.0),
+            cell("EndX", 3.0),
+            cell("EndY", 1.0),
+            cell("PinX", 2.0),
+            cell("PinY", 1.0),
+            cell("Width", 2.0),
+            cell("Height", 0.2),
+        ];
+        shape.sheet.cells.push(Cell {
+            name: CellName::new("Comment"),
+            formula: None,
+            value: Some(CellValue::Str("keep me".to_owned())),
+            unit: larrygram_geom::Unit::Unitsless,
+            preserved: Preserved::new(),
+        });
+        let mut geometry = Section::new(SectionName::from_static("Geometry"));
+        for (ix, (kind, x, y)) in [("MoveTo", 0.0, 0.1), ("LineTo", 2.0, 0.1)]
+            .into_iter()
+            .enumerate()
+        {
+            let mut row = Row::new();
+            row.row_type = Some(kind.to_owned());
+            row.ix = Some(i32::try_from(ix).unwrap_or(0));
+            row.cells = vec![cell("X", x), cell("Y", y)];
+            geometry.rows.push(row);
+        }
+        shape.sheet.sections.push(geometry);
+        shape
+            .sheet
+            .sections
+            .push(Section::new(SectionName::from_static("Character")));
+        let id = doc.insert_shape(page, shape, None).expect("shape");
+        let original = doc.shape(id).expect("shape").sheet.clone();
+        let before = PathRows::capture(&doc, id);
+        assert!(
+            !before
+                .cells
+                .iter()
+                .any(|(_, cell)| cell.name.as_str() == "Comment"),
+            "the snapshot holds no unrelated cell"
+        );
+        assert!(
+            before
+                .geometry
+                .iter()
+                .all(|(_, section)| section.name.as_str() == "Geometry"),
+            "the snapshot holds no unrelated section"
+        );
+        write_path(&mut doc, id, &[Point::new(2.0, 2.0), Point::new(5.0, 4.0)]).expect("write");
+        let written = doc.shape(id).expect("shape").sheet.clone();
+        let after = PathRows::capture(&doc, id);
+        assert!(
+            before.cells.len() < after.cells.len(),
+            "the write added the pin cells: {} < {}",
+            before.cells.len(),
+            after.cells.len()
+        );
+        before.restore(&mut doc, id);
+        assert_eq!(
+            doc.shape(id).expect("shape").sheet,
+            original,
+            "revert is exact"
+        );
+        after.restore(&mut doc, id);
+        assert_eq!(
+            doc.shape(id).expect("shape").sheet,
+            written,
+            "redo is exact"
+        );
     }
 
     #[test]

@@ -563,7 +563,13 @@ fn a_drag_that_ends_on_a_connection_point_glues_to_that_point(kind: LayoutKind) 
     // (rule 4's same-side case, the fallback of task P7-50 goal 3): a
     // horizontal run at y = 2.25 and short jogs at x = 2 and x = 6.
     let image = rig.render();
-    for (x, y) in [(2.0f64, 2.35f64), (3.0, 2.25), (4.5, 2.25), (5.5, 2.25), (6.0, 2.35)] {
+    for (x, y) in [
+        (2.0f64, 2.35f64),
+        (3.0, 2.25),
+        (4.5, 2.25),
+        (5.5, 2.25),
+        (6.0, 2.35),
+    ] {
         assert!(inked(&image, &rig, x, y), "no line ink at ({x}, {y})");
     }
     assert!(
