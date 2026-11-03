@@ -491,6 +491,22 @@ fn drawing_shape(drawing: Drawing, x: f64, y: f64, width: f64, height: f64) -> S
         Drawing::Ellipse => ellipse_geometry(width, height),
         Drawing::Line => line_geometry(width, height),
     });
+    // Task P7-45 goal 3: a drawn rectangle or ellipse centres its text
+    // like our masters carry (`VerticalAlign` 1 and one `Paragraph` row
+    // with `HorzAlign` 1). The text box keeps its own alignment until
+    // the Visio black-box check (P7-44 open issue 1).
+    if matches!(drawing, Drawing::Rectangle | Drawing::Ellipse) {
+        shape
+            .sheet
+            .cells
+            .push(number_cell("VerticalAlign", 1.0, Unit::Unitsless));
+        let mut paragraph = Section::new(SectionName::from_static("Paragraph"));
+        let mut row = Row::new();
+        row.ix = Some(0);
+        row.cells = vec![number_cell("HorzAlign", 1.0, Unit::Unitsless)];
+        paragraph.rows.push(row);
+        shape.sheet.sections.push(paragraph);
+    }
     shape
 }
 
