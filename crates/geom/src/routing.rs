@@ -11,6 +11,7 @@
 use crate::error::Error;
 use crate::point::Point;
 use crate::rect::Rect;
+use crate::transform::Transform;
 
 /// How a connector path is routed (ADR 0045).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -23,6 +24,80 @@ pub enum RouteStyle {
     RightAngle,
 }
 
+/// A glue target's box as the router clears it: the rectangle in its
+/// own frame and the transform into the page (an **oriented** box in
+/// the page frame, task P7-50 goal 3). The route never enters the
+/// box's interior; a boundary touch does not count.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Obstacle {
+    /// The box in the target's own frame.
+    pub local: Rect,
+    /// The target's own frame to the page.
+    pub transform: Transform,
+}
+
+impl Obstacle {
+    /// The page-space bounding box of the oriented box (the route's
+    /// channels clear it).
+    pub fn bounds(&self) -> Rect {
+        let Rect { min, max } = self.local;
+        let mut low = Point::new(f64::INFINITY, f64::INFINITY);
+        let mut high = Point::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
+        for corner in [min, Point::new(max.x, min.y), max, Point::new(min.x, max.y)] {
+            let point = self.transform.apply(corner);
+            low = Point::new(low.x.min(point.x), low.y.min(point.y));
+            high = Point::new(high.x.max(point.x), high.y.max(point.y));
+        }
+        Rect::new(low, high)
+    }
+
+    /// Whether the segment from `p` to `q` crosses the box's interior:
+    /// the segment is mapped into the box's own frame and tested for a
+    /// strictly interior point there (a boundary touch does not cross,
+    /// task P7-50 goal 3). A transform that cannot be inverted leaves
+    /// no interior to cross.
+    pub fn crossed_by(&self, p: Point, q: Point) -> bool {
+        let Ok(inverse) = self.transform.invert() else {
+            return false;
+        };
+        interior_crossing(inverse.apply(p), inverse.apply(q), self.local)
+    }
+}
+
+/// Whether the segment `a`..`b` has a point strictly inside `rect`.
+fn interior_crossing(a: Point, b: Point, rect: Rect) -> bool {
+    let x = strictly_inside_1d(a.x, b.x, rect.min.x, rect.max.x);
+    let y = strictly_inside_1d(a.y, b.y, rect.min.y, rect.max.y);
+    match (x, y) {
+        (Some((x_lo, x_hi)), Some((y_lo, y_hi))) => x_lo.max(y_lo) < x_hi.min(y_hi),
+        _ => false,
+    }
+}
+
+/// The margin a point must sit inside a box's side to count as
+/// strictly interior (inches). An end lands exactly on its box's
+/// boundary and a round trip through the transform can land it a few
+/// ULP inside; without the margin its own stub leg would count as a
+/// crossing (task P7-50 goal 3).
+const INTERIOR_EPS: f64 = 1e-9;
+
+/// The open parameter interval of `t` in `[0, 1]` where the lerp of
+/// `a` to `b` is strictly between `low` and `high`, or `None` when the
+/// axis is never strictly inside (a degenerate side is never inside).
+fn strictly_inside_1d(a: f64, b: f64, low: f64, high: f64) -> Option<(f64, f64)> {
+    let (low, high) = (low + INTERIOR_EPS, high - INTERIOR_EPS);
+    let Some(std::cmp::Ordering::Less) = low.partial_cmp(&high) else {
+        return None;
+    };
+    if a == b {
+        return (a > low && a < high).then_some((0.0, 1.0));
+    }
+    let (t0, t1) = ((low - a) / (b - a), (high - a) / (b - a));
+    let lo = t0.min(t1).max(0.0);
+    let hi = t0.max(t1).min(1.0);
+    (lo < hi).then_some((lo, hi))
+}
+
 /// Routing options (ADR 0045).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RouteOptions {
@@ -32,11 +107,11 @@ pub struct RouteOptions {
     pub begin_exit: Option<Point>,
     /// The end end's exit direction.
     pub end_exit: Option<Point>,
-    /// The begin glue target's page-space box: the route clears it
-    /// (task P7-49 goal 3).
-    pub begin_box: Option<Rect>,
-    /// The end glue target's page-space box.
-    pub end_box: Option<Rect>,
+    /// The begin glue target's box: the route clears its interior
+    /// (task P7-50 goal 3).
+    pub begin_box: Option<Obstacle>,
+    /// The end glue target's box.
+    pub end_box: Option<Obstacle>,
 }
 
 impl RouteOptions {
@@ -61,9 +136,12 @@ impl RouteOptions {
         self
     }
 
-    /// The options with the two glue targets' page-space boxes: the
-    /// route's turns clear their interiors (task P7-49 goal 3).
-    pub const fn with_boxes(mut self, begin: Option<Rect>, end: Option<Rect>) -> Self {
+    /// The options with the two glue targets' boxes: the route's turns
+    /// clear their interiors (task P7-50 goal 3). The boxes are
+    /// oriented (their own frame and transform), so a rotated target's
+    /// own stub leg leaves its box instead of crossing its
+    /// axis-aligned bounds.
+    pub const fn with_boxes(mut self, begin: Option<Obstacle>, end: Option<Obstacle>) -> Self {
         self.begin_box = begin;
         self.end_box = end;
         self
@@ -129,7 +207,7 @@ fn right_angle_with_exits(
     end: Point,
     begin_exit: Option<Point>,
     end_exit: Option<Point>,
-    boxes: [Option<Rect>; 2],
+    boxes: [Option<Obstacle>; 2],
 ) -> Vec<Point> {
     let (begin_stub, end_stub) = stub_lengths(start, end, begin_exit, end_exit);
     let out = exit_point(start, begin_exit, begin_stub);
@@ -188,8 +266,10 @@ fn exit_point(point: Point, exit: Option<Point>, stub: f64) -> Point {
 /// stub or runs through a shape is replaced by a detour the way the
 /// wrap is. The candidates are the two one-corner elbows in the exit
 /// order, then the two-corner channels beyond both boxes, then the
-/// three-corner wraps. Without a valid candidate the first elbow is
-/// the answer (never an error, never a panic).
+/// three-corner wraps and four-corner staples. Without a qualifying
+/// candidate the fallback is the first with no 180-degree turn, and
+/// the first elbow only when none qualifies (task P7-50 goal 3, never
+/// an error, never a panic).
 fn join(
     start: Point,
     out: Point,
@@ -197,7 +277,7 @@ fn join(
     end: Point,
     begin_exit: Option<Point>,
     end_exit: Option<Point>,
-    boxes: [Option<Rect>; 2],
+    boxes: [Option<Obstacle>; 2],
 ) -> Vec<Point> {
     let horizontal_first = match (begin_exit.map(axis), end_exit.map(axis)) {
         (Some(Axis::Horizontal), _) => true,
@@ -264,7 +344,28 @@ fn join(
             return corners.clone();
         }
     }
-    candidates.remove(0)
+    // The fallback (task P7-50 goal 3): the first candidate with no
+    // 180-degree turn, ignoring the box check (a check that fails
+    // every candidate must not answer a route that turns back through
+    // a shape); the first elbow only when none qualifies.
+    for corners in &candidates {
+        if turns_no_180(start, out, corners, back, end) {
+            return corners.clone();
+        }
+    }
+    candidates.into_iter().next().unwrap_or_default()
+}
+
+/// The full route of one candidate: start, stub out, corners, stub
+/// back and end.
+fn full_route(start: Point, out: Point, corners: &[Point], back: Point, end: Point) -> Vec<Point> {
+    let mut full: Vec<Point> = Vec::with_capacity(corners.len() + 4);
+    full.push(start);
+    full.push(out);
+    full.extend(corners.iter().copied());
+    full.push(back);
+    full.push(end);
+    full
 }
 
 /// Whether one candidate's full route is sound: it turns no 180
@@ -276,15 +377,16 @@ fn valid(
     corners: &[Point],
     back: Point,
     end: Point,
-    boxes: [Option<Rect>; 2],
+    boxes: [Option<Obstacle>; 2],
 ) -> bool {
-    let mut full: Vec<Point> = Vec::with_capacity(corners.len() + 4);
-    full.push(start);
-    full.push(out);
-    full.extend(corners.iter().copied());
-    full.push(back);
-    full.push(end);
-    // The stub directions at the two ends frame the join legs.
+    turns_no_180(start, out, corners, back, end)
+        && clears_boxes(start, out, corners, back, end, boxes)
+}
+
+/// Whether one candidate's full route turns no 180 degrees (the two
+/// stubs frame the join legs).
+fn turns_no_180(start: Point, out: Point, corners: &[Point], back: Point, end: Point) -> bool {
+    let full = full_route(start, out, corners, back, end);
     let mut previous: Option<Point> = None;
     for pair in full.windows(2) {
         let leg = pair[1].sub(pair[0]);
@@ -297,10 +399,25 @@ fn valid(
             return false;
         }
         previous = Some(leg);
-        for box_ in boxes {
-            if let Some(box_) = box_
-                && crosses(pair[0], pair[1], box_)
-            {
+    }
+    true
+}
+
+/// Whether no segment of one candidate's full route (stubs included)
+/// crosses the interior of either glue target's oriented box (a
+/// boundary touch does not count, task P7-50 goal 3).
+fn clears_boxes(
+    start: Point,
+    out: Point,
+    corners: &[Point],
+    back: Point,
+    end: Point,
+    boxes: [Option<Obstacle>; 2],
+) -> bool {
+    let full = full_route(start, out, corners, back, end);
+    for pair in full.windows(2) {
+        for box_ in boxes.into_iter().flatten() {
+            if box_.crossed_by(pair[0], pair[1]) {
                 return false;
             }
         }
@@ -308,31 +425,22 @@ fn valid(
     true
 }
 
-/// Whether the segment from `p` to `q` crosses the interior of `rect`.
-/// A segment along the boundary touches but does not cross.
-fn crosses(p: Point, q: Point, rect: Rect) -> bool {
-    let (Rect { min, max }, _ignore) = (rect, ());
-    if (p.y - q.y).abs() == 0.0 {
-        // Horizontal: strictly inside the y range and across the x range.
-        p.y > min.y && p.y < max.y && p.x.min(q.x) < max.x && p.x.max(q.x) > min.x
-    } else if (p.x - q.x).abs() == 0.0 {
-        p.x > min.x && p.x < max.x && p.y.min(q.y) < max.y && p.y.max(q.y) > min.y
-    } else {
-        // A non-axis-aligned leg: treat it as crossing when it meets
-        // the interior (the exits are snapped, so this is only the
-        // no-exit elbow's corner case).
-        p.x.min(q.x) < max.x && p.x.max(q.x) > min.x && p.y.min(q.y) < max.y && p.y.max(q.y) > min.y
-    }
-}
-
 /// The coordinate on `axis` that clears both points and both boxes on
-/// `beyond`, by the push distance.
-fn channel(out: Point, back: Point, boxes: [Option<Rect>; 2], axis: Axis, beyond: Beyond) -> f64 {
+/// `beyond`, by the push distance (the boxes' page-space bounds, which
+/// contain the oriented boxes).
+fn channel(
+    out: Point,
+    back: Point,
+    boxes: [Option<Obstacle>; 2],
+    axis: Axis,
+    beyond: Beyond,
+) -> f64 {
     let mut low = axis_value(out, axis).min(axis_value(back, axis));
     let mut high = axis_value(out, axis).max(axis_value(back, axis));
     for box_ in boxes.into_iter().flatten() {
-        low = low.min(axis_value(box_.min, axis));
-        high = high.max(axis_value(box_.max, axis));
+        let bounds = box_.bounds();
+        low = low.min(axis_value(bounds.min, axis));
+        high = high.max(axis_value(bounds.max, axis));
     }
     match beyond {
         Beyond::Low => low - STUB,
@@ -484,6 +592,7 @@ fn drop_repeats(points: &mut Vec<Point>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Angle;
 
     #[test]
     fn options_hold_their_style() {
@@ -604,15 +713,69 @@ mod tests {
     }
 
     #[test]
-    fn crosses_detects_the_interior_and_the_diagonal() {
+    fn interior_crossing_detects_the_interior_and_the_boundary_touch() {
         let rect = Rect::new(Point::new(0.0, 0.0), Point::new(2.0, 2.0));
-        assert!(crosses(Point::new(-1.0, 1.0), Point::new(3.0, 1.0), rect));
-        assert!(!crosses(Point::new(-1.0, 3.0), Point::new(3.0, 3.0), rect));
+        assert!(interior_crossing(
+            Point::new(-1.0, 1.0),
+            Point::new(3.0, 1.0),
+            rect
+        ));
+        assert!(!interior_crossing(
+            Point::new(-1.0, 3.0),
+            Point::new(3.0, 3.0),
+            rect
+        ));
         assert!(
-            !crosses(Point::new(0.0, 1.0), Point::new(0.0, 3.0), rect),
+            !interior_crossing(Point::new(0.0, 1.0), Point::new(0.0, 3.0), rect),
             "the boundary touches but does not cross"
         );
-        assert!(crosses(Point::new(-1.0, -1.0), Point::new(3.0, 3.0), rect));
+        assert!(interior_crossing(
+            Point::new(-1.0, -1.0),
+            Point::new(3.0, 3.0),
+            rect
+        ));
+        assert!(
+            !interior_crossing(Point::new(-1.0, 1.0), Point::new(1.0, -1.0), rect),
+            "a corner point is a touch, not a crossing"
+        );
+        let flat = Rect::new(Point::new(0.0, 1.0), Point::new(2.0, 1.0));
+        assert!(!interior_crossing(
+            Point::new(-1.0, 1.0),
+            Point::new(3.0, 1.0),
+            flat
+        ));
+    }
+
+    #[test]
+    fn an_obstacle_tests_crossings_in_its_own_frame() {
+        // A 2 x 1 box rotated 30 degrees about the origin.
+        let obstacle = Obstacle {
+            local: Rect::new(Point::new(0.0, 0.0), Point::new(2.0, 1.0)),
+            transform: Transform::rotate(Angle::from_radians(std::f64::consts::FRAC_PI_6)),
+        };
+        // The top side's midpoint and its outward normal (the stub
+        // leg): on the boundary and outwards, never a crossing.
+        let midpoint = obstacle.transform.apply(Point::new(1.0, 1.0));
+        let outward = obstacle.transform.apply(Point::new(1.0, 1.25));
+        assert!(!obstacle.crossed_by(midpoint, outward), "the stub leaves");
+        // Straight through the middle crosses.
+        let through = (
+            obstacle.transform.apply(Point::new(-1.0, 0.5)),
+            obstacle.transform.apply(Point::new(3.0, 0.5)),
+        );
+        assert!(obstacle.crossed_by(through.0, through.1), "through it");
+        // A collapsed transform leaves no interior to cross.
+        let flat = Obstacle {
+            local: obstacle.local,
+            transform: Transform::scale(0.0, 0.0),
+        };
+        assert!(!flat.crossed_by(through.0, through.1));
+        // The bounds are the axis-aligned box of the rotated corners:
+        // max x = 2*cos(30) and max y = 1 + 2*sin(30)*... = 1 + cos(30).
+        let bounds = obstacle.bounds();
+        let cos30 = 3.0f64.sqrt() / 2.0;
+        assert!((bounds.max.x - 2.0 * cos30).abs() < 1e-9, "{bounds:?}");
+        assert!((bounds.max.y - (1.0 + cos30)).abs() < 1e-9, "{bounds:?}");
     }
 
     #[test]
@@ -623,7 +786,13 @@ mod tests {
         let points = route(
             Point::new(0.5, 0.5),
             Point::new(5.0, 0.5),
-            &RouteOptions::new(RouteStyle::RightAngle).with_boxes(Some(box_), None),
+            &RouteOptions::new(RouteStyle::RightAngle).with_boxes(
+                Some(Obstacle {
+                    local: box_,
+                    transform: Transform::identity(),
+                }),
+                None,
+            ),
         )
         .expect("route");
         assert_eq!(points.first(), Some(&Point::new(0.5, 0.5)));

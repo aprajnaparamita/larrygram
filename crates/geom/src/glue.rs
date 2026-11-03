@@ -96,18 +96,13 @@ impl GlueTarget {
             .collect()
     }
 
-    /// The target's local box mapped through the transform: the
-    /// page-space box the route's detours clear (task P7-49 goal 3).
-    pub fn page_box(&self) -> Rect {
-        let Rect { min, max } = self.local_box;
-        let mut low = Point::new(f64::INFINITY, f64::INFINITY);
-        let mut high = Point::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
-        for corner in [min, Point::new(max.x, min.y), max, Point::new(min.x, max.y)] {
-            let point = self.transform.apply(corner);
-            low = Point::new(low.x.min(point.x), low.y.min(point.y));
-            high = Point::new(high.x.max(point.x), high.y.max(point.y));
+    /// The target's box as the router clears it: the local box with the
+    /// transform (an oriented box in the page frame, task P7-50 goal 3).
+    pub fn obstacle(&self) -> crate::routing::Obstacle {
+        crate::routing::Obstacle {
+            local: self.local_box,
+            transform: self.transform,
         }
-        Rect::new(low, high)
     }
 
     /// A local direction through the transform's linear part, as a unit
@@ -566,23 +561,29 @@ mod tests {
     }
 
     #[test]
-    fn page_box_is_the_transformed_local_box() {
+    fn the_obstacle_is_the_local_box_with_the_transform() {
         let target = box_target();
-        let box_ = target.page_box();
-        assert_eq!(box_.min, Point::new(3.0, 3.0));
-        assert_eq!(box_.max, Point::new(5.0, 4.0));
+        let obstacle = target.obstacle();
+        assert_eq!(
+            obstacle.local,
+            Rect::new(Point::new(0.0, 0.0), Point::new(2.0, 1.0))
+        );
+        assert_eq!(
+            obstacle.bounds(),
+            Rect::new(Point::new(3.0, 3.0), Point::new(5.0, 4.0))
+        );
         let mut rotated = box_target();
         rotated.transform = Transform::rotate(Angle::from_radians(std::f64::consts::FRAC_PI_2));
-        let box_ = rotated.page_box();
+        let bounds = rotated.obstacle().bounds();
         assert!(
-            (box_.min.x + 1.0).abs() < 1e-9 && box_.min.y.abs() < 1e-9,
+            (bounds.min.x + 1.0).abs() < 1e-9 && bounds.min.y.abs() < 1e-9,
             "{:?}",
-            box_
+            bounds
         );
         assert!(
-            box_.max.x.abs() < 1e-9 && (box_.max.y - 2.0).abs() < 1e-9,
+            bounds.max.x.abs() < 1e-9 && (bounds.max.y - 2.0).abs() < 1e-9,
             "{:?}",
-            box_
+            bounds
         );
     }
 

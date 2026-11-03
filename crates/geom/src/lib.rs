@@ -34,7 +34,7 @@ pub use hit::{
 pub use path::{Path, Segment};
 pub use point::{Point, Size};
 pub use rect::Rect;
-pub use routing::{RouteOptions, RouteStyle, route};
+pub use routing::{Obstacle, RouteOptions, RouteStyle, route};
 pub use snap::{SnapCandidate, SnapKind, SnapResult, snap_axis, snap_grid, snap_point};
 pub use transform::Transform;
 pub use units::{Unit, UnitKind};

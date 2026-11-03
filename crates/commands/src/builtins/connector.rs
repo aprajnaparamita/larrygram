@@ -23,8 +23,8 @@
 //! is detached and re-writes only the affected connector paths.
 
 use larrygram_geom::{
-    Candidate, EndSpec, GlueEnd as GlueKind, GlueTarget, Point, Rect, RouteOptions, RouteStyle,
-    Transform, resolve_ends, route,
+    Candidate, EndSpec, GlueEnd as GlueKind, GlueTarget, Obstacle, Point, Rect, RouteOptions,
+    RouteStyle, Transform, resolve_ends, route,
 };
 use larrygram_model::CellReader;
 use larrygram_model::{
@@ -1138,7 +1138,7 @@ fn resolved_ends(
     records: [Option<&Connect>; 2],
     free_at: [Option<Point>; 2],
     warnings: &mut Vec<String>,
-) -> Result<(Candidate, Candidate, [Option<Rect>; 2]), CommandError> {
+) -> Result<(Candidate, Candidate, [Option<Obstacle>; 2]), CommandError> {
     let mut targets: [Option<GlueTarget>; 2] = [None, None];
     let mut kinds: [Option<GlueKind>; 2] = [None, None];
     let mut free: [Option<Point>; 2] = [None, None];
@@ -1237,11 +1237,11 @@ fn resolved_ends(
         targets
             .first()
             .and_then(Option::as_ref)
-            .map(GlueTarget::page_box),
+            .map(GlueTarget::obstacle),
         targets
             .get(1)
             .and_then(Option::as_ref)
-            .map(GlueTarget::page_box),
+            .map(GlueTarget::obstacle),
     ];
     Ok((begin, end, boxes))
 }

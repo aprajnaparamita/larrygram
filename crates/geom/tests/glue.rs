@@ -458,29 +458,43 @@ fn a_zero_gap_facing_pair_gets_zero_length_stubs() {
     assert_eq!(points, vec![Point::new(2.0, 0.5), Point::new(2.0, 2.5)]);
 }
 
-/// No segment of `points` crosses the interior of `box_`.
-fn clears(points: &[Point], box_: larrygram_geom::Rect) -> bool {
+/// No segment of `points` crosses the interior of the obstacle's
+/// oriented box (task P7-50 goal 3), tested in the box's own frame.
+fn clears(points: &[Point], box_: larrygram_geom::Obstacle) -> bool {
+    let Ok(inverse) = box_.transform.invert() else {
+        return true;
+    };
     for pair in points.windows(2) {
-        let (p, q) = (pair[0], pair[1]);
-        let (min, max) = (box_.min, box_.max);
-        if (p.y - q.y).abs() == 0.0
-            && p.y > min.y
-            && p.y < max.y
-            && p.x.min(q.x) < max.x
-            && p.x.max(q.x) > min.x
-        {
-            return false;
-        }
-        if (p.x - q.x).abs() == 0.0
-            && p.x > min.x
-            && p.x < max.x
-            && p.y.min(q.y) < max.y
-            && p.y.max(q.y) > min.y
-        {
+        if segment_crosses(inverse.apply(pair[0]), inverse.apply(pair[1]), box_.local) {
             return false;
         }
     }
     true
+}
+
+/// Whether the segment `a`..`b` has a point strictly inside `rect`
+/// (the open Liang-Barsky interval test with the router's 1e-9
+/// interior margin; a boundary touch does not count).
+fn segment_crosses(a: Point, b: Point, rect: larrygram_geom::Rect) -> bool {
+    let inside = |lo: f64, hi: f64, from: f64, to: f64| -> Option<(f64, f64)> {
+        let (lo, hi) = (lo + 1e-9, hi - 1e-9);
+        let Some(std::cmp::Ordering::Less) = lo.partial_cmp(&hi) else {
+            return None;
+        };
+        if from == to {
+            return (from > lo && from < hi).then_some((0.0, 1.0));
+        }
+        let (t0, t1) = ((lo - from) / (to - from), (hi - from) / (to - from));
+        let start = t0.min(t1).max(0.0);
+        let stop = t0.max(t1).min(1.0);
+        (start < stop).then_some((start, stop))
+    };
+    let x = inside(rect.min.x, rect.max.x, a.x, b.x);
+    let y = inside(rect.min.y, rect.max.y, a.y, b.y);
+    match (x, y) {
+        (Some((x_lo, x_hi)), Some((y_lo, y_hi))) => x_lo.max(y_lo) < x_hi.min(y_hi),
+        _ => false,
+    }
 }
 
 /// No turn of `points` reverses the previous leg (no 180 degrees).
@@ -504,6 +518,14 @@ type Probe = (
     Option<Point>,
     larrygram_geom::Rect,
 );
+
+/// The axis-aligned obstacles of the probe test.
+fn boxed(rect: larrygram_geom::Rect) -> larrygram_geom::Obstacle {
+    larrygram_geom::Obstacle {
+        local: rect,
+        transform: larrygram_geom::Transform::identity(),
+    }
+}
 
 /// The review's three probes (task P7-49 goal 3): the L must not run
 /// back through the begin shape or through the target, so each route
@@ -543,6 +565,7 @@ fn the_review_probes_clear_their_shapes_without_a_reversal() {
         } else {
             larrygram_geom::Rect::new(Point::new(-2.0, -0.5), Point::new(0.0, 0.5))
         };
+        let (begin_box, end_box) = (boxed(begin_box), boxed(end_box));
         let points = route(
             begin,
             end,
@@ -555,6 +578,59 @@ fn the_review_probes_clear_their_shapes_without_a_reversal() {
         );
         assert!(clears(&points, end_box), "enters the end box: {points:?}");
         assert!(no_reversal(&points), "a 180 turn: {points:?}");
+    }
+}
+
+/// Task P7-50 goal 3 (MA3): a 2 x 1 box rotated 30 degrees, each of
+/// its four side candidates routed to a shape below and to its left.
+/// No route turns 180 degrees or crosses either oriented box's
+/// interior: with the old axis-aligned check the end's own stub always
+/// crossed its bounds, every candidate failed and the fallback elbow
+/// could turn 180 degrees back through the shape.
+#[test]
+fn a_rotated_targets_candidates_route_clear_without_a_reversal() {
+    let begin_box = larrygram_geom::Obstacle {
+        local: larrygram_geom::Rect::new(Point::new(0.0, 0.0), Point::new(2.0, 1.0)),
+        transform: larrygram_geom::Transform::rotate(larrygram_geom::Angle::from_radians(
+            std::f64::consts::FRAC_PI_6,
+        )),
+    };
+    // The target below and to the left of the rotated box.
+    let end_box = larrygram_geom::Obstacle {
+        local: larrygram_geom::Rect::new(Point::new(0.0, 0.0), Point::new(2.0, 1.0)),
+        transform: larrygram_geom::Transform::translate(Point::new(-3.5, -3.0)),
+    };
+    let end = end_box.transform.apply(Point::new(1.0, 1.0));
+    let end_exit = Point::new(0.0, 1.0);
+    // The rotated box's four side midpoints with their outward normals.
+    for (local, normal) in [
+        (Point::new(1.0, 1.0), Point::new(0.0, 1.0)),
+        (Point::new(2.0, 0.5), Point::new(1.0, 0.0)),
+        (Point::new(1.0, 0.0), Point::new(0.0, -1.0)),
+        (Point::new(0.0, 0.5), Point::new(-1.0, 0.0)),
+    ] {
+        let begin = begin_box.transform.apply(local);
+        let exit = begin_box
+            .transform
+            .apply(normal)
+            .sub(begin_box.transform.apply(Point::new(0.0, 0.0)));
+        let points = route(
+            begin,
+            end,
+            &right_angle(Some(exit), Some(end_exit)).with_boxes(Some(begin_box), Some(end_box)),
+        )
+        .expect("route");
+        assert_eq!(points.first(), Some(&begin));
+        assert_eq!(points.last(), Some(&end));
+        assert!(no_reversal(&points), "a 180 turn: {points:?}");
+        assert!(
+            clears(&points, begin_box),
+            "enters the rotated box: {points:?}"
+        );
+        assert!(
+            clears(&points, end_box),
+            "enters the target box: {points:?}"
+        );
     }
 }
 
@@ -600,40 +676,46 @@ fn exits_never_break_the_route_contract() {
     }
 }
 
-/// One glue target of the proptest: a box and one of its side points
-/// with that side's outward normal, jittered (task P7-49 goal 4: the
-/// router snaps it back to the dominant axis).
+/// One glue target of the proptest: a box rotated by `angle` about its
+/// origin and placed at (`x`, `y`), and one of its side points with
+/// that side's outward normal, jittered. The wobble keeps the normal's
+/// axis dominant (task P7-50 minor 7), so the router's snap back to
+/// the dominant axis (task P7-49 goal 4) never leaves along the
+/// shape's own edge.
+#[allow(clippy::too_many_arguments)] // one proptest generator seam
 fn target(
     x: f64,
     y: f64,
     width: f64,
     height: f64,
+    angle: f64,
     side: u8,
     along: f64,
     jitter: (f64, f64),
-) -> (Point, Option<Point>, larrygram_geom::Rect) {
-    let box_ = larrygram_geom::Rect::new(Point::new(x, y), Point::new(x + width, y + height));
-    let (point, normal) = match side % 4 {
-        0 => (Point::new(x + width * along, y), Point::new(0.0, -1.0)),
-        1 => (
-            Point::new(x + width, y + height * along),
-            Point::new(1.0, 0.0),
-        ),
-        2 => (
-            Point::new(x + width * along, y + height),
-            Point::new(0.0, 1.0),
-        ),
-        _ => (Point::new(x, y + height * along), Point::new(-1.0, 0.0)),
+) -> (Point, Option<Point>, larrygram_geom::Obstacle) {
+    let transform = larrygram_geom::Transform::rotate(larrygram_geom::Angle::from_radians(angle))
+        .then(larrygram_geom::Transform::translate(Point::new(x, y)));
+    let obstacle = larrygram_geom::Obstacle {
+        local: larrygram_geom::Rect::new(Point::new(0.0, 0.0), Point::new(width, height)),
+        transform,
+    };
+    let (local, normal) = match side % 4 {
+        0 => (Point::new(width * along, 0.0), Point::new(0.0, -1.0)),
+        1 => (Point::new(width, height * along), Point::new(1.0, 0.0)),
+        2 => (Point::new(width * along, height), Point::new(0.0, 1.0)),
+        _ => (Point::new(0.0, height * along), Point::new(-1.0, 0.0)),
     };
     // The wobble keeps the outward sign on the normal's axis and adds
-    // a parallel component: the snapped exit may run along the side
-    // but never into the box.
+    // a smaller parallel component: the normal's axis stays dominant
+    // and the exit never points into the box.
     let parallel = Point::new(normal.y, -normal.x);
-    let exit = Point::new(
+    let local_exit = Point::new(
         normal.x * (0.5 + jitter.0.abs()) + parallel.x * jitter.1,
         normal.y * (0.5 + jitter.0.abs()) + parallel.y * jitter.1,
     );
-    (point, Some(exit), box_)
+    let at = |point: Point| transform.apply(point);
+    let exit = at(local_exit).sub(at(Point::new(0.0, 0.0)));
+    (at(local), Some(exit), obstacle)
 }
 
 proptest! {
@@ -672,35 +754,40 @@ proptest! {
         }
     }
 
-    /// Every route between two glue targets clears both boxes and
-    /// turns no 180 degrees, even with jittered (non-axis-aligned)
-    /// exits: every segment is horizontal or vertical (task P7-49
-    /// goals 3 and 4).
+    /// Every route between two glue targets rotated by any angle
+    /// clears both oriented boxes' interiors and turns no 180 degrees,
+    /// even with jittered (non-axis-aligned) exits: every segment is
+    /// horizontal or vertical (task P7-49 goals 3 and 4, task P7-50
+    /// goal 3).
     #[test]
     fn every_route_clears_its_shapes_and_turns_no_180(
         x in -20.0f64..20.0,
         y in -20.0f64..20.0,
         width in 0.5f64..3.0,
         height in 0.5f64..2.0,
+        angle_a in -std::f64::consts::PI..std::f64::consts::PI,
+        angle_b in -std::f64::consts::PI..std::f64::consts::PI,
         side_a in 0u8..4,
         side_b in 0u8..4,
         along_a in 0.1f64..0.9,
         along_b in 0.1f64..0.9,
         dx in -12.0f64..12.0,
         dy in -12.0f64..12.0,
-        jitter_a in (-0.4f64..0.4, -1.2f64..1.2),
-        jitter_b in (-0.4f64..0.4, -1.2f64..1.2),
+        jitter_a in (-0.4f64..0.4, -0.4f64..0.4),
+        jitter_b in (-0.4f64..0.4, -0.4f64..0.4),
     ) {
         let (begin, begin_exit, begin_box) =
-            target(x, y, width, height, side_a, along_a, jitter_a);
-        // The end target sits clear of the begin one on one axis (two
-        // glue targets never overlap).
+            target(x, y, width, height, angle_a, side_a, along_a, jitter_a);
+        // The end target's anchor sits clear of the begin one: the gap
+        // exceeds twice the boxes' diagonal however they rotate, so
+        // the two glue targets never overlap.
+        let gap = 2.0 * (width + height) + 2.0;
         let (bx, by) = if dx.abs() > dy.abs() {
-            (x + width + 1.0 + dx.abs(), y + dy)
+            (x + gap + dx.abs(), y + dy)
         } else {
-            (x + dx, y + height + 1.0 + dy.abs())
+            (x + dx, y + gap + dy.abs())
         };
-        let (end, end_exit, end_box) = target(bx, by, width, height, side_b, along_b, jitter_b);
+        let (end, end_exit, end_box) = target(bx, by, width, height, angle_b, side_b, along_b, jitter_b);
         let points = route(
             begin,
             end,

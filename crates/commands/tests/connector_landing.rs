@@ -772,7 +772,9 @@ fn draw_free(ctx: &mut AppCtx, registry: &Registry) -> ShapeId {
             .with("end_y", ArgValue::Number(8.0)),
     )
     .expect("draw free");
-    ctx.selection.anchor.expect("the new connector is the anchor")
+    ctx.selection
+        .anchor
+        .expect("the new connector is the anchor")
 }
 
 /// Task P7-50 goal 1: a group and an ungroup re-base the endpoint

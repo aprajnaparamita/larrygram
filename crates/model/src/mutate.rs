@@ -2810,9 +2810,7 @@ mod tests {
 
         // The members' bounding box is (4, 2.25)..(11, 10.5), so the
         // map into the group's coordinates is a shift by (-4, -2.25).
-        let group = doc
-            .group_shapes(page, &[target, connector])
-            .expect("group");
+        let group = doc.group_shapes(page, &[target, connector]).expect("group");
         assert_eq!(
             value(&doc, connector, "BeginX"),
             Some(CellValue::Number(0.0)),
@@ -2829,8 +2827,7 @@ mod tests {
             Some(CellValue::Number(0.25))
         );
         assert!(
-            formula(&doc, connector, "BeginX")
-                .is_some_and(|text| text.starts_with("PAR(PNT(")),
+            formula(&doc, connector, "BeginX").is_some_and(|text| text.starts_with("PAR(PNT(")),
             "the glue formula survives the re-base"
         );
         assert_eq!(
@@ -2842,13 +2839,18 @@ mod tests {
         // Ungroup maps the same cells back through the group's frame.
         let members = doc.ungroup_shape(group).expect("ungroup");
         assert!(members.contains(&connector));
-        assert_eq!(value(&doc, connector, "BeginX"), Some(CellValue::Number(4.0)));
-        assert_eq!(value(&doc, connector, "BeginY"), Some(CellValue::Number(2.5)));
+        assert_eq!(
+            value(&doc, connector, "BeginX"),
+            Some(CellValue::Number(4.0))
+        );
+        assert_eq!(
+            value(&doc, connector, "BeginY"),
+            Some(CellValue::Number(2.5))
+        );
         assert_eq!(value(&doc, connector, "EndX"), Some(CellValue::Number(6.0)));
         assert_eq!(value(&doc, connector, "EndY"), Some(CellValue::Number(2.5)));
         assert!(
-            formula(&doc, connector, "BeginX")
-                .is_some_and(|text| text.starts_with("PAR(PNT(")),
+            formula(&doc, connector, "BeginX").is_some_and(|text| text.starts_with("PAR(PNT(")),
             "the glue formula survives the round trip"
         );
         assert_eq!(
@@ -2879,9 +2881,7 @@ mod tests {
         let connector = doc
             .insert_shape(page, one_d((4.0, 2.5), (6.0, 2.5)), None)
             .expect("connector");
-        let group = doc
-            .group_shapes(page, &[target, connector])
-            .expect("group");
+        let group = doc.group_shapes(page, &[target, connector]).expect("group");
         // A quarter turn of the group about its pin.
         doc.write_cell(
             SheetRef::Shape(group),
@@ -2908,16 +2908,14 @@ mod tests {
         let begin = doc
             .connector_end(connector, ConnectorEnd::Begin)
             .expect("begin");
-        let end = doc.connector_end(connector, ConnectorEnd::End).expect("end");
+        let end = doc
+            .connector_end(connector, ConnectorEnd::End)
+            .expect("end");
         // The shape transform recipe (translate `-LocPin`, rotate,
         // translate `Pin`) for a quarter turn: (x, y) maps to
         // (PinX - (y - LocPinY), PinY + (x - LocPinX)).
-        let rotate = |point: Point| {
-            Point::new(
-                pin.x - (point.y - loc_pin.y),
-                pin.y + (point.x - loc_pin.x),
-            )
-        };
+        let rotate =
+            |point: Point| Point::new(pin.x - (point.y - loc_pin.y), pin.y + (point.x - loc_pin.x));
         let members = doc.ungroup_shape(group).expect("ungroup");
         assert!(members.contains(&connector));
         let expect_begin = rotate(begin);
@@ -2925,7 +2923,9 @@ mod tests {
         let got_begin = doc
             .connector_end(connector, ConnectorEnd::Begin)
             .expect("begin");
-        let got_end = doc.connector_end(connector, ConnectorEnd::End).expect("end");
+        let got_end = doc
+            .connector_end(connector, ConnectorEnd::End)
+            .expect("end");
         assert!(
             (got_begin.x - expect_begin.x).abs() < 1e-9
                 && (got_begin.y - expect_begin.y).abs() < 1e-9,
@@ -2945,7 +2945,9 @@ mod tests {
     fn mapped_ends_skip_what_they_cannot_map() {
         use crate::connector::ConnectorEnd;
         let (mut doc, page) = document();
-        let plain = doc.insert_shape(page, box_shape(2.0, 1.0), None).expect("p");
+        let plain = doc
+            .insert_shape(page, box_shape(2.0, 1.0), None)
+            .expect("p");
         let connector = doc
             .insert_shape(page, one_d((4.0, 2.5), (6.0, 2.5)), None)
             .expect("c");
