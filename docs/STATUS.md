@@ -71,8 +71,8 @@ Phase 7: Panel and Classic layouts, the Larrygram rename and the welcome wizard.
 | [P7-46](tasks/P7-46.md) | implementer | P7-42 | I | ready, on `agent/P7-42`, **high priority** (restart and shutdown go through, a quit during Close is kept, sound hook tests, the missing UI tests, no quit on the web) | — |
 | [P7-47](tasks/P7-47.md) | implementer | P7-42, P7-46 | I | waits (saving an untitled drawing keeps the picked path) | — |
 | [P7-43](tasks/P7-43.md) | test-engineer | P7-38 | I | merged with P7-38 (the 3× fallback, no stale PNGs, a state check per shot, no transparent edge, caret blink off) | `ecf9d2b` |
-| [P7-44](tasks/P7-44.md) | implementer | — | I | handed off; Opus review: the pane too narrow for the 30-character case, drawn shapes still top-left, the ellipsis stored in the buffer; fixes in P7-45 on the same branch | — |
-| [P7-45](tasks/P7-45.md) | implementer | P7-44 | I | ready, on `agent/P7-44` (a 240-point pane, Rectangle and Ellipse centred, the ellipsis drawn not stored, local alignment and round-trip tests) | — |
+| [P7-44](tasks/P7-44.md) | implementer | — | I | merged with P7-45 (our masters and drawn shapes centre their text; the Shape Data value field fills its row; hand-off gate green at `f4ec7b9`) | `230519c` |
+| [P7-45](tasks/P7-45.md) | implementer | P7-44 | I | merged with P7-44 (240-point panes, Rectangle and Ellipse centred, the ellipsis drawn not stored, local alignment and round-trip tests) | `230519c` |
 | [P7-38](tasks/P7-38.md) | test-engineer | — | I | merged with P7-43 (`cargo xtask screenshots [--only <id>] [--to <dir>]`; 7 shots on the website as of 2026-11-03, text-editing held back for P7-41; re-run after P7-32–P7-36, P7-41, P7-44) | `ecf9d2b` |
 
 Tasks start as soon as their own dependencies merge (no whole-group waits); run at most twelve workers at once across Phase 7 and Phase 8.
