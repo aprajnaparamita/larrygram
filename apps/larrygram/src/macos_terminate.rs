@@ -273,7 +273,10 @@ mod tests {
             flag.store(true, Ordering::SeqCst);
         }));
         let answer = unsafe { should_terminate(&object, sel!(applicationShouldTerminate:), None) };
-        assert_eq!(answer, TERMINATE_CANCEL, "the direct termination is refused");
+        assert_eq!(
+            answer, TERMINATE_CANCEL,
+            "the direct termination is refused"
+        );
         assert!(take_quit(), "the quit is queued for the UI thread");
         assert!(!take_quit(), "the queue drains once");
         assert!(woke.load(Ordering::SeqCst), "the UI is woken");

@@ -179,8 +179,7 @@ fn every_kind_of_edit_marks_the_drawing_changed() {
     let (mut ctx, _session, page, shapes) = fixture(1);
     select(&mut ctx, page, &shapes);
     assert!(!dirty(&ctx));
-    run(&mut ctx, "shape.set.width", number_args(&[("width", 3.0)]))
-        .expect("set.width runs");
+    run(&mut ctx, "shape.set.width", number_args(&[("width", 3.0)])).expect("set.width runs");
     assert!(dirty(&ctx), "a cell write marks the drawing changed");
 
     // A structural step: `edit.delete` (a `StructuralEdit`).
@@ -192,8 +191,12 @@ fn every_kind_of_edit_marks_the_drawing_changed() {
     // A composite step: `shape.move` (a `CompositeEdit`).
     let (mut ctx, _session, page, shapes) = fixture(1);
     select(&mut ctx, page, &shapes);
-    run(&mut ctx, "shape.move", number_args(&[("dx", 1.0), ("dy", 0.0)]))
-        .expect("move runs");
+    run(
+        &mut ctx,
+        "shape.move",
+        number_args(&[("dx", 1.0), ("dy", 0.0)]),
+    )
+    .expect("move runs");
     assert!(dirty(&ctx), "a move marks the drawing changed");
 }
 
@@ -204,12 +207,14 @@ fn every_kind_of_edit_marks_the_drawing_changed() {
 fn undo_and_redo_keep_the_drawing_changed() {
     let (mut ctx, _session, page, shapes) = fixture(1);
     select(&mut ctx, page, &shapes);
-    run(&mut ctx, "shape.set.width", number_args(&[("width", 3.0)]))
-        .expect("set.width runs");
+    run(&mut ctx, "shape.set.width", number_args(&[("width", 3.0)])).expect("set.width runs");
     assert!(dirty(&ctx));
 
     run(&mut ctx, "edit.undo", Args::new()).expect("undo runs");
-    assert!(dirty(&ctx), "undoing back to the saved state still reads as changed");
+    assert!(
+        dirty(&ctx),
+        "undoing back to the saved state still reads as changed"
+    );
 
     run(&mut ctx, "edit.redo", Args::new()).expect("redo runs");
     assert!(dirty(&ctx), "redo reads as changed");
@@ -224,8 +229,7 @@ fn save_and_save_as_clear_the_changed_state() {
     // `file.save_as` writes the target and records it as the save.
     let (mut ctx, _session, page, shapes) = fixture(1);
     select(&mut ctx, page, &shapes);
-    run(&mut ctx, "shape.set.width", number_args(&[("width", 3.0)]))
-        .expect("set.width runs");
+    run(&mut ctx, "shape.set.width", number_args(&[("width", 3.0)])).expect("set.width runs");
     run(
         &mut ctx,
         "file.save_as",
@@ -237,8 +241,7 @@ fn save_and_save_as_clear_the_changed_state() {
 
     // An edit marks it changed again; `file.save` writes the session
     // path and records the save.
-    run(&mut ctx, "shape.set.width", number_args(&[("width", 4.0)]))
-        .expect("set.width runs");
+    run(&mut ctx, "shape.set.width", number_args(&[("width", 4.0)])).expect("set.width runs");
     assert!(dirty(&ctx));
     run(&mut ctx, "file.save", Args::new()).expect("save runs");
     assert!(!dirty(&ctx), "save leaves the drawing unchanged");
@@ -265,11 +268,13 @@ fn a_cancelled_undo_group_leaves_the_drawing_unchanged() {
     .expect("set.width runs");
     assert!(dirty(&ctx), "the group's edits count while it runs");
     ctx.cancel_group(session).expect("cancel");
-    assert!(!dirty(&ctx), "a cancelled group leaves the drawing unchanged");
+    assert!(
+        !dirty(&ctx),
+        "a cancelled group leaves the drawing unchanged"
+    );
 
     // A group that saw a changed drawing restores "changed".
-    run(&mut ctx, "shape.set.width", number_args(&[("width", 5.0)]))
-        .expect("set.width runs");
+    run(&mut ctx, "shape.set.width", number_args(&[("width", 5.0)])).expect("set.width runs");
     ctx.begin_group(session, "Insert Text Box").expect("begin");
     run_from(
         &mut ctx,
@@ -321,21 +326,22 @@ fn file_close_asks_interactive_sources_and_closes_programmatic_ones() {
     ] {
         let (mut ctx, _session, page, shapes) = fixture(1);
         select(&mut ctx, page, &shapes);
-        run(&mut ctx, "shape.set.width", number_args(&[("width", 3.0)]))
-            .expect("set.width runs");
+        run(&mut ctx, "shape.set.width", number_args(&[("width", 3.0)])).expect("set.width runs");
         let outcome = run_from(&mut ctx, "file.close", Args::new(), source).expect("close");
         match &outcome.ui_request {
             Some(UiRequest::ConfirmClose { name }) => assert_eq!(name, "Untitled", "{source:?}"),
             other => panic!("{source:?}: expected ConfirmClose, got {other:?}"),
         }
-        assert!(ctx.active_document().is_some(), "{source:?}: nothing closed");
+        assert!(
+            ctx.active_document().is_some(),
+            "{source:?}: nothing closed"
+        );
     }
 
     for source in [Source::Cli, Source::Control, Source::Mcp, Source::Test] {
         let (mut ctx, _session, page, shapes) = fixture(1);
         select(&mut ctx, page, &shapes);
-        run(&mut ctx, "shape.set.width", number_args(&[("width", 3.0)]))
-            .expect("set.width runs");
+        run(&mut ctx, "shape.set.width", number_args(&[("width", 3.0)])).expect("set.width runs");
         let outcome = run_from(&mut ctx, "file.close", Args::new(), source).expect("close");
         assert!(
             outcome.ui_request.is_none(),
@@ -348,15 +354,17 @@ fn file_close_asks_interactive_sources_and_closes_programmatic_ones() {
     for source in [Source::Ui, Source::Cli] {
         let (mut ctx, _session, _page, _shapes) = fixture(1);
         let outcome = run_from(&mut ctx, "file.close", Args::new(), source).expect("close");
-        assert!(outcome.ui_request.is_none(), "{source:?}: nothing to ask about");
+        assert!(
+            outcome.ui_request.is_none(),
+            "{source:?}: nothing to ask about"
+        );
         assert!(ctx.active_document().is_none());
     }
 
     // The Don't Save answer: `confirm` closes without asking.
     let (mut ctx, _session, page, shapes) = fixture(1);
     select(&mut ctx, page, &shapes);
-    run(&mut ctx, "shape.set.width", number_args(&[("width", 3.0)]))
-        .expect("set.width runs");
+    run(&mut ctx, "shape.set.width", number_args(&[("width", 3.0)])).expect("set.width runs");
     run(
         &mut ctx,
         "file.close",
@@ -376,8 +384,7 @@ fn file_close_save_writes_the_file_and_closes_on_success_only() {
     // With a target the save writes it and the drawing closes.
     let (mut ctx, _session, page, shapes) = fixture(1);
     select(&mut ctx, page, &shapes);
-    run(&mut ctx, "shape.set.width", number_args(&[("width", 3.0)]))
-        .expect("set.width runs");
+    run(&mut ctx, "shape.set.width", number_args(&[("width", 3.0)])).expect("set.width runs");
     let outcome = run(
         &mut ctx,
         "file.close",
@@ -387,7 +394,10 @@ fn file_close_save_writes_the_file_and_closes_on_success_only() {
     )
     .expect("save and close");
     assert!(
-        outcome.message.as_deref().is_some_and(|m| m.starts_with("Saved and closed")),
+        outcome
+            .message
+            .as_deref()
+            .is_some_and(|m| m.starts_with("Saved and closed")),
         "{:?}",
         outcome.message
     );
@@ -398,8 +408,7 @@ fn file_close_save_writes_the_file_and_closes_on_success_only() {
     // close before the write succeeded).
     let (mut ctx, _session, page, shapes) = fixture(1);
     select(&mut ctx, page, &shapes);
-    run(&mut ctx, "shape.set.width", number_args(&[("width", 3.0)]))
-        .expect("set.width runs");
+    run(&mut ctx, "shape.set.width", number_args(&[("width", 3.0)])).expect("set.width runs");
     let error = run(
         &mut ctx,
         "file.close",
@@ -470,8 +479,7 @@ fn a_cancelled_group_restores_changed_over_a_save_inside_it() {
     let target = dir.join("mid.vsdx");
     let (mut ctx, session, page, shapes) = fixture(1);
     select(&mut ctx, page, &shapes);
-    run(&mut ctx, "shape.set.width", number_args(&[("width", 3.0)]))
-        .expect("set.width runs");
+    run(&mut ctx, "shape.set.width", number_args(&[("width", 3.0)])).expect("set.width runs");
     ctx.begin_group(session, "Insert Text Box").expect("begin");
     run_from(
         &mut ctx,
@@ -502,7 +510,11 @@ fn a_cancelled_group_restores_changed_over_a_save_inside_it() {
         dirty(&ctx),
         "the cancelled group restores the changed state it saw"
     );
-    assert_eq!(width_of(&ctx, shapes[0]), 3.0, "the cancel reverted its step");
+    assert_eq!(
+        width_of(&ctx, shapes[0]),
+        3.0,
+        "the cancel reverted its step"
+    );
     std::fs::remove_dir_all(&dir).expect("clean up");
 }
 
@@ -519,10 +531,7 @@ fn the_no_target_save_ask_names_the_kind() {
     )
     .expect_err("no save target");
     match error {
-        CommandError::NeedsInput(larrygram_commands::NeededInput::Path {
-            purpose,
-            suggested,
-        }) => {
+        CommandError::NeedsInput(larrygram_commands::NeededInput::Path { purpose, suggested }) => {
             assert_eq!(purpose, larrygram_commands::PathPurpose::SaveFile);
             assert_eq!(suggested, Some(PathBuf::from("drawing.vsdx")));
         }

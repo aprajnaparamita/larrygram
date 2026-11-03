@@ -380,7 +380,8 @@ impl LarrygramApp {
                 larrygram_commands::Invocation::empty(Source::Menu),
             ),
             Err(error) => {
-                self.shell.note_error(format!("cannot dispatch app.quit: {error}"));
+                self.shell
+                    .note_error(format!("cannot dispatch app.quit: {error}"));
                 return;
             }
         };
