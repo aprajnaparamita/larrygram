@@ -386,6 +386,63 @@ fn moving_one_target_with_the_connector_frees_only_the_other_end() {
     assert_cells_match_path(&after, connector);
 }
 
+/// S1 (task P7-49 goal 2): moving only the connector translates its
+/// stored route, bends and stubs kept (rule 1), with no fresh route
+/// replacing it.
+#[test]
+fn moving_only_the_connector_translates_its_stored_route() {
+    let (mut ctx, registry, page) = fixture();
+    draw_glued(&mut ctx, &registry);
+    let connector = connectors(doc(&ctx), page)[0];
+    // A route with a bend: move one target off the line first.
+    let left = shape(&ctx, page, 1);
+    select(&mut ctx, &[left]);
+    move_by(&mut ctx, &registry, 0.0, -1.5);
+    let before = drawn(&snapshot(&ctx), connector);
+    assert!(before.len() >= 3, "a route with a bend: {before:?}");
+
+    select(&mut ctx, &[connector]);
+    move_by(&mut ctx, &registry, 1.0, 0.5);
+    let after = drawn(&snapshot(&ctx), connector);
+    assert_eq!(after.len(), before.len(), "the route keeps its shape");
+    for (b, a) in before.iter().zip(after.iter()) {
+        assert!(close(*a, b.add(Point::new(1.0, 0.5))), "{b:?} -> {a:?}");
+    }
+
+    dispatch(&mut ctx, &registry, "edit.undo", Args::new()).expect("undo");
+    assert_eq!(drawn(&snapshot(&ctx), connector), before, "undo is exact");
+    dispatch(&mut ctx, &registry, "edit.redo", Args::new()).expect("redo");
+    assert_eq!(drawn(&snapshot(&ctx), connector), after, "redo is exact");
+}
+
+/// S1b (task P7-49 goal 2): moving the connector and both targets
+/// together translates the stored route (rule 1); the scoped pass
+/// never replaces it.
+#[test]
+fn moving_the_connector_and_both_targets_translates_the_stored_route() {
+    let (mut ctx, registry, page) = fixture();
+    draw_glued(&mut ctx, &registry);
+    let connector = connectors(doc(&ctx), page)[0];
+    let (left, right) = (shape(&ctx, page, 1), shape(&ctx, page, 2));
+    select(&mut ctx, &[left]);
+    move_by(&mut ctx, &registry, 0.0, -1.5);
+    let before = drawn(&snapshot(&ctx), connector);
+    assert!(before.len() >= 3, "a route with a bend: {before:?}");
+
+    select(&mut ctx, &[left, right, connector]);
+    move_by(&mut ctx, &registry, 1.0, 0.5);
+    let after = drawn(&snapshot(&ctx), connector);
+    assert_eq!(after.len(), before.len(), "the route keeps its shape");
+    for (b, a) in before.iter().zip(after.iter()) {
+        assert!(close(*a, b.add(Point::new(1.0, 0.5))), "{b:?} -> {a:?}");
+    }
+
+    dispatch(&mut ctx, &registry, "edit.undo", Args::new()).expect("undo");
+    assert_eq!(drawn(&snapshot(&ctx), connector), before, "undo is exact");
+    dispatch(&mut ctx, &registry, "edit.redo", Args::new()).expect("redo");
+    assert_eq!(drawn(&snapshot(&ctx), connector), after, "redo is exact");
+}
+
 #[test]
 fn set_pin_moves_a_connector_by_its_midpoint() {
     let (mut ctx, registry, page) = fixture();

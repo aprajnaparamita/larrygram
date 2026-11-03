@@ -1891,9 +1891,11 @@ fn reroute_document(
             &mut entries,
         )?);
     }
-    // Connectors the edit changed that no record names (their ends are
-    // free): the scope still re-routes them (rule 5, "their own ends").
-    if let Scope::Changed(changed) | Scope::Forced(changed) = scope {
+    // A forced scope also re-routes its connectors when no record
+    // names them (free ends and a style change). A moved connector is
+    // never one of them: its edit translated its path (task P7-49
+    // goal 2, rule 1).
+    if let Scope::Forced(changed) = scope {
         for &connector in changed {
             if !doc.is_connector(connector) {
                 continue;
