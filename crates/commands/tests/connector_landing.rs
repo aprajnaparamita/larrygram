@@ -1,0 +1,449 @@
+//! Where connector ends land (task P7-32, ADR 0084 rules 3 to 5).
+//!
+//! The audit's reproduction: draw between two shapes, then an unrelated
+//! edit, then a move of one shape — both ends sit on the rule's points
+//! at every step, one undo restores the shape and the route, and a
+//! third connector between untouched shapes keeps its geometry rows
+//! byte for byte through it all and a save. A corpus connector Visio
+//! routed keeps its rows through an unrelated edit and a save. A
+//! connector inside a group keeps its endpoint cells in the parent's
+//! coordinates.
+
+#![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
+
+#[path = "crosscheck/mod.rs"]
+mod helpers;
+
+mod support;
+
+use helpers::{corpus_files, read_corpus_file, skip_without_corpus};
+use support::dispatch;
+
+use larrygram_commands::app::{AppCtx, DocumentSession, Settings};
+use larrygram_commands::builtins::registry;
+use larrygram_commands::{ArgValue, Args, Registry};
+use larrygram_model::{
+    Cell, CellName, CellValue, ConnectorEnd, Document, GeometryRow, PageId, Preserved, Shape,
+    ShapeId,
+};
+use larrygram_vsdx::{Limits, Package, read_document, write_document};
+
+fn cell(name: &str, value: f64) -> Cell {
+    Cell {
+        name: CellName::new(name),
+        formula: Some(format!("{value}")),
+        value: Some(CellValue::Number(value)),
+        unit: larrygram_geom::Unit::Inches,
+        preserved: Preserved::new(),
+    }
+}
+
+/// A 2 x 1 in box at `(x, y)` with no connection points: a dynamic end
+/// lands on one of its four side midpoints (ADR 0084 rule 3).
+fn box_shape(visio_id: i32, x: f64, y: f64) -> Shape {
+    let mut shape = Shape::new(ShapeId { index: 0 }, visio_id);
+    shape.sheet.cells = vec![
+        cell("Width", 2.0),
+        cell("Height", 1.0),
+        cell("PinX", x),
+        cell("PinY", y),
+        cell("LocPinX", 1.0),
+        cell("LocPinY", 0.5),
+        cell("Angle", 0.0),
+    ];
+    shape
+}
+
+/// Two pairs of side-by-side boxes (1 and 2, 3 and 4) and one lone box
+/// (5) for the unrelated edit.
+fn fixture() -> (AppCtx, Registry, PageId) {
+    let mut doc = Document::new();
+    let page = doc.add_page("Page-1").expect("page");
+    for (visio_id, x, y) in [
+        (1, 3.0, 3.0),
+        (2, 7.0, 3.0),
+        (3, 3.0, 7.0),
+        (4, 7.0, 7.0),
+        (5, 11.0, 3.0),
+    ] {
+        doc.insert_shape(page, box_shape(visio_id, x, y), None)
+            .expect("insert");
+    }
+    let mut ctx = AppCtx::new(Settings::default());
+    ctx.open_document(DocumentSession::new(doc, None));
+    (ctx, registry().expect("registry"), page)
+}
+
+fn select(ctx: &mut AppCtx, page: PageId, visio_ids: &[i32]) {
+    let doc = &ctx.active_document().expect("session").document;
+    let shapes: Vec<ShapeId> = visio_ids
+        .iter()
+        .filter_map(|id| doc.shape_by_visio_id(page, *id))
+        .collect();
+    ctx.selection.anchor = shapes.last().copied();
+    ctx.selection.shapes = shapes;
+    ctx.selection.page = Some(page);
+}
+
+/// One `connector.draw` from `begin` to `end` (dynamic glue on both
+/// ends: the drag runs from shape to shape).
+fn draw(ctx: &mut AppCtx, registry: &Registry, begin: i32, end: i32) -> ShapeId {
+    dispatch(
+        ctx,
+        registry,
+        "connector.draw",
+        Args::new()
+            .with("stencil", ArgValue::Text("Basic Flowchart".to_owned()))
+            .with("master", ArgValue::Text("Connector".to_owned()))
+            .with("x", ArgValue::Number(4.0))
+            .with("y", ArgValue::Number(3.0))
+            .with("begin_target", ArgValue::Integer(i64::from(begin)))
+            .with("end_target", ArgValue::Integer(i64::from(end))),
+    )
+    .expect("draw");
+    ctx.selection.anchor.expect("the new connector is the anchor")
+}
+
+fn document(ctx: &AppCtx) -> Document {
+    ctx.active_document().expect("session").document.clone()
+}
+
+/// The endpoint cells' cached points (page inches on a top-level
+/// connector; the parent's coordinates inside a group).
+fn ends(doc: &Document, connector: ShapeId) -> (larrygram_geom::Point, larrygram_geom::Point) {
+    (
+        doc.connector_end(connector, ConnectorEnd::Begin).expect("begin"),
+        doc.connector_end(connector, ConnectorEnd::End).expect("end"),
+    )
+}
+
+/// The connector's geometry rows (the literal path, byte for byte).
+fn rows(doc: &Document, connector: ShapeId) -> Vec<GeometryRow> {
+    let geometry = doc.shape_geometry(connector).expect("geometry");
+    geometry
+        .paths
+        .first()
+        .expect("a path")
+        .rows
+        .clone()
+}
+
+fn move_shape(
+    ctx: &mut AppCtx,
+    registry: &Registry,
+    page: PageId,
+    visio_id: i32,
+    dx: f64,
+    dy: f64,
+) {
+    select(ctx, page, &[visio_id]);
+    dispatch(
+        ctx,
+        registry,
+        "shape.move",
+        Args::new()
+            .with("dx", ArgValue::Number(dx))
+            .with("dy", ArgValue::Number(dy)),
+    )
+    .expect("move");
+}
+
+/// The audit's reproduction (task P7-30): draw between two shapes,
+/// then an unrelated edit, then a move of one shape. Both ends sit on
+/// the rule's points at every step, and one undo restores the shape
+/// and the route.
+#[test]
+fn the_audit_reproduction_lands_on_the_rules_points_at_every_step() {
+    let (mut ctx, registry, page) = fixture();
+    let drawn = draw(&mut ctx, &registry, 1, 2);
+
+    // Draw time: the facing side midpoints, and a straight horizontal
+    // run between them.
+    let doc = document(&ctx);
+    assert_eq!(
+        ends(&doc, drawn),
+        (
+            larrygram_geom::Point::new(4.0, 3.0),
+            larrygram_geom::Point::new(6.0, 3.0),
+        ),
+        "the facing side midpoints"
+    );
+    let before = rows(&doc, drawn);
+    assert_eq!(before.len(), 2, "a straight run: {before:?}");
+
+    // The unrelated edit touches nothing the connector knows.
+    move_shape(&mut ctx, &registry, page, 5, 0.5, 0.5);
+    let doc = document(&ctx);
+    assert_eq!(ends(&doc, drawn), (larrygram_geom::Point::new(4.0, 3.0), larrygram_geom::Point::new(6.0, 3.0)));
+    assert_eq!(rows(&doc, drawn), before, "the unrelated edit keeps the route");
+
+    // One target moves below the other: the ends walk to the facing
+    // top and bottom midpoints (the nearest pair).
+    move_shape(&mut ctx, &registry, page, 2, -4.0, 3.0);
+    let doc = document(&ctx);
+    assert_eq!(
+        ends(&doc, drawn),
+        (
+            larrygram_geom::Point::new(3.0, 3.5),
+            larrygram_geom::Point::new(3.0, 5.5),
+        ),
+        "the top and bottom midpoints"
+    );
+    let moved_rows = rows(&doc, drawn);
+    assert_eq!(moved_rows.len(), 2, "a vertical run: {moved_rows:?}");
+
+    // One undo restores the shape and the route together.
+    dispatch(&mut ctx, &registry, "edit.undo", Args::new()).expect("undo");
+    let doc = document(&ctx);
+    assert_eq!(
+        ends(&doc, drawn),
+        (
+            larrygram_geom::Point::new(4.0, 3.0),
+            larrygram_geom::Point::new(6.0, 3.0),
+        )
+    );
+    assert_eq!(rows(&doc, drawn), before, "one undo restores the route");
+}
+
+/// A third connector between untouched shapes keeps its geometry rows
+/// byte for byte through the unrelated edit, the move and its undo,
+/// and a save and reopen.
+#[test]
+fn an_unrelated_edit_keeps_a_third_connectors_rows_byte_for_byte() {
+    let (mut ctx, registry, page) = fixture();
+    let _drawn = draw(&mut ctx, &registry, 1, 2);
+    let third = draw(&mut ctx, &registry, 3, 4);
+    let before = rows(&document(&ctx), third);
+
+    move_shape(&mut ctx, &registry, page, 5, 0.5, 0.5);
+    assert_eq!(rows(&document(&ctx), third), before, "through the unrelated edit");
+    move_shape(&mut ctx, &registry, page, 2, -4.0, 3.0);
+    assert_eq!(rows(&document(&ctx), third), before, "through the move");
+    dispatch(&mut ctx, &registry, "edit.undo", Args::new()).expect("undo");
+    assert_eq!(rows(&document(&ctx), third), before, "through the undo");
+
+    let doc = document(&ctx);
+    let bytes = write_document(&doc, &Package::new()).expect("save");
+    let back = read_document(&bytes, &Limits::DEFAULT).expect("reopen");
+    let reopened = back
+        .shape_by_visio_id(page, doc.shape(third).expect("third").visio_id)
+        .expect("the third connector");
+    assert_eq!(rows(&back, reopened), before, "through a save and reopen");
+}
+
+/// One connector with a glue record to a shape on `page`, as the file
+/// carries it (the `FromSheet` of a connector-end record).
+fn glued_connector(doc: &Document, page: PageId) -> Option<(ShapeId, Vec<i32>)> {
+    let entity = doc.page(page)?;
+    for connect in &entity.connects {
+        let from_begin = connect.from_cell.starts_with("Begin") || connect.from_cell.starts_with("End");
+        if !from_begin {
+            continue;
+        }
+        let shape = doc.shape_by_visio_id(page, connect.from_sheet)?;
+        let targets: Vec<i32> = entity
+            .connects
+            .iter()
+            .filter(|record| record.from_sheet == connect.from_sheet)
+            .map(|record| record.to_sheet)
+            .collect();
+        return Some((shape, targets));
+    }
+    None
+}
+
+/// A corpus connector Visio routed keeps its geometry rows byte for
+/// byte through an unrelated edit and a save (rule 5: the scoped pass
+/// never picks it).
+#[test]
+fn a_corpus_connector_visio_routed_keeps_its_rows_through_an_unrelated_edit_and_a_save() {
+    let files = corpus_files();
+    if skip_without_corpus(&files) {
+        return;
+    }
+    let path = files
+        .iter()
+        .find(|path| path.file_name().is_some_and(|name| name == "testfile3.vsdx"))
+        .cloned()
+        .expect("corpus/vsdx/testfile3.vsdx (corpus/PROVENANCE.md)");
+    let document = read_corpus_file(&path);
+    let mut found = None;
+    for entity in &document.pages {
+        if let Some(found_at) = glued_connector(&document, entity.id) {
+            found = Some((entity.id, found_at));
+            break;
+        }
+    }
+    let (page, (connector, targets)) = found.expect("a glued connector in the corpus file");
+    let before = rows(&document, connector);
+    let visio = document.shape(connector).expect("connector").visio_id;
+
+    // An unrelated edit: move a shape the connector does not know.
+    let unrelated = document
+        .page(page)
+        .expect("page")
+        .shapes
+        .iter()
+        .copied()
+        .find(|shape| {
+            let id = document.shape(*shape).map(|entry| entry.visio_id);
+            id.is_some_and(|id| id != visio && !targets.contains(&id))
+        })
+        .expect("an unrelated shape");
+    let unrelated_visio = document.shape(unrelated).expect("unrelated").visio_id;
+    let mut ctx = AppCtx::new(Settings::default());
+    ctx.open_document(DocumentSession::new(document, None));
+    select(&mut ctx, page, &[unrelated_visio]);
+    dispatch(
+        &mut ctx,
+        &registry().expect("registry"),
+        "shape.move",
+        Args::new()
+            .with("dx", ArgValue::Number(0.1))
+            .with("dy", ArgValue::Number(0.1)),
+    )
+    .expect("the unrelated move");
+    let moved = &ctx.active_document().expect("session").document;
+    assert_eq!(
+        rows(moved, connector),
+        before,
+        "the scoped pass never picks the Visio-routed connector"
+    );
+
+    // And a save and reopen.
+    let bytes = write_document(moved, &Package::new()).expect("save");
+    let back = read_document(&bytes, &Limits::DEFAULT).expect("reopen");
+    let reopened = back.shape_by_visio_id(page, visio).expect("the connector");
+    assert_eq!(rows(&back, reopened), before, "through a save");
+}
+
+/// A connector inside a group keeps its endpoint cells in the parent's
+/// coordinates (the group translates by (10, 0)): the glue write and
+/// the path write agree, and no later path write corrects the other.
+#[test]
+fn a_connector_inside_a_group_keeps_its_cells_in_the_parents_coordinates() {
+    let (mut ctx, registry, page) = fixture();
+    let drawn = draw(&mut ctx, &registry, 1, 2);
+
+    // Wrap the connector in a group that translates by (10, 0).
+    let group = {
+        let doc = &mut ctx.active_document_mut().expect("session").document;
+        let mut shape = Shape::new(ShapeId { index: 0 }, 99);
+        shape.sheet.cells = vec![
+            cell("Width", 1.0),
+            cell("Height", 1.0),
+            cell("PinX", 10.0),
+            cell("PinY", 0.0),
+            cell("LocPinX", 0.0),
+            cell("LocPinY", 0.0),
+            cell("Angle", 0.0),
+        ];
+        let group = doc.add_shape(shape);
+        if let Some(entity) = doc.pages.get_mut(page.index as usize) {
+            entity.shapes.push(group);
+        }
+        if let Some(entity) = doc.shape_mut(group) {
+            entity.children.push(drawn);
+        }
+        if let Some(entity) = doc.shape_mut(drawn) {
+            entity.parent = Some(group);
+        }
+        group
+    };
+
+    // Re-glue the end: the resolution lands on (6, 3) in page inches
+    // and the cells take (-4, 3), the parent's coordinates.
+    let drawn_visio = document(&ctx).shape(drawn).expect("connector").visio_id;
+    dispatch(
+        &mut ctx,
+        &registry,
+        "connector.glue_end",
+        Args::new()
+            .with("connector", ArgValue::Integer(i64::from(drawn_visio)))
+            .with("target", ArgValue::Integer(2)),
+    )
+    .expect("glue end");
+    let doc = document(&ctx);
+    let (_begin, end) = ends(&doc, drawn);
+    assert_eq!(
+        end,
+        larrygram_geom::Point::new(-4.0, 3.0),
+        "the cached value is the parent's coordinates"
+    );
+    assert_eq!(
+        formula(&doc, drawn, "EndX"),
+        Some("_WALKGLUE(EndTrigger,BegTrigger,WalkPreference)".to_owned()),
+        "the glue formula is unchanged"
+    );
+
+    // The path write agrees with the cells: the rows map through the
+    // connector's own box to the same parent-space points.
+    dispatch(&mut ctx, &registry, "connector.reroute_all", Args::new()).expect("reroute");
+    let doc = document(&ctx);
+    let (begin, end) = ends(&doc, drawn);
+    assert_eq!(begin, larrygram_geom::Point::new(-6.0, 3.0));
+    assert_eq!(end, larrygram_geom::Point::new(-4.0, 3.0));
+    let path = rows(&doc, drawn);
+    let first = row_point(path.first().expect("a first row"));
+    let last = row_point(path.last().expect("a last row"));
+    assert!(
+        close(local_to_parent(&doc, drawn, first), begin),
+        "the path's first row {first:?} agrees with the cells {begin:?}"
+    );
+    assert!(
+        close(local_to_parent(&doc, drawn, last), end),
+        "the path's last row {last:?} agrees with the cells {end:?}"
+    );
+    let _ = group;
+}
+
+/// The typed point of one geometry row.
+fn row_point(row: &GeometryRow) -> larrygram_geom::Point {
+    match row {
+        GeometryRow::MoveTo { x, y } | GeometryRow::LineTo { x, y } => {
+            larrygram_geom::Point::new(*x, *y)
+        }
+        other => panic!("unexpected row {other:?}"),
+    }
+}
+
+/// One row's point in the connector's parent's space (the inverse of
+/// `write_connector_path`'s own box mapping).
+fn local_to_parent(doc: &Document, connector: ShapeId, local: larrygram_geom::Point) -> larrygram_geom::Point {
+    let number = |name: &str| -> f64 {
+        doc.shape(connector)
+            .and_then(|entity| {
+                entity
+                    .sheet
+                    .cells
+                    .iter()
+                    .find(|cell| cell.name.as_str() == name)
+            })
+            .and_then(|cell| match &cell.value {
+                Some(CellValue::Number(value)) => Some(*value),
+                _ => None,
+            })
+            .unwrap_or(0.0)
+    };
+    let (pin_x, pin_y) = (number("PinX"), number("PinY"));
+    let (loc_x, loc_y) = (number("LocPinX"), number("LocPinY"));
+    let angle = number("Angle");
+    let (dx, dy) = (local.x - loc_x, local.y - loc_y);
+    let (sin, cos) = angle.sin_cos();
+    larrygram_geom::Point::new(pin_x + dx * cos - dy * sin, pin_y + dx * sin + dy * cos)
+}
+
+/// Whether two page points agree.
+fn close(a: larrygram_geom::Point, b: larrygram_geom::Point) -> bool {
+    (a.x - b.x).abs() < 1e-6 && (a.y - b.y).abs() < 1e-6
+}
+
+/// The formula of the shape's own cell.
+fn formula(doc: &Document, shape: ShapeId, name: &str) -> Option<String> {
+    doc.shape(shape)?
+        .sheet
+        .cells
+        .iter()
+        .find(|cell| cell.name.as_str() == name)
+        .and_then(|cell| cell.formula.clone())
+}
