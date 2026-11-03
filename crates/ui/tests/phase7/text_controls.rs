@@ -2187,3 +2187,53 @@ fn editing_a_turned_shape_works() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Item 8 (task P7-48, the review's minor 3): a popup's own field keeps
+// its typing.
+// ---------------------------------------------------------------------------
+
+/// A press in a popup hands the keyboard back to the editor only when
+/// the popup has no focusable field of its own (task P7-48 item 8):
+/// the digits land in the Size picker's field, not in the shape text.
+#[test]
+fn a_popup_field_keeps_its_typing_while_editing() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        type_a_new_box(&mut rig, kind, "Hi");
+        open_size_list(&mut rig, kind);
+        {
+            rig.run();
+            let root = rig.harness().root();
+            let node = root
+                .query_all_by_role_and_label(Role::TextInput, "Size")
+                .next()
+                .expect("the Size picker's field");
+            node.click();
+            node.type_text("36");
+        }
+        rig.run();
+        {
+            let root = rig.harness().root();
+            let value = root
+                .query_all_by_role_and_label(Role::TextInput, "Size")
+                .next()
+                .and_then(|node| node.value());
+            assert_eq!(
+                value.as_deref(),
+                Some("36"),
+                "{kind:?}: the digits land in the picker's field"
+            );
+        }
+        // The shape text kept its own: the popup's typing never
+        // reached it.
+        press_key(&mut rig, egui::Key::Escape);
+        press_key(&mut rig, egui::Key::Escape);
+        let box_ = last_shape(&rig.shell.borrow().app);
+        assert_eq!(
+            shape_text(&rig, box_).as_deref(),
+            Some("Hi"),
+            "{kind:?}: not in the shape text"
+        );
+    }
+}

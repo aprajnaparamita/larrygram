@@ -363,7 +363,11 @@ fn font_list(ui: &mut Ui, nav: &mut Nav, source: Source, out: &mut Vec<Intent>) 
 /// size ladder.
 fn font_size(ui: &mut Ui, nav: &mut Nav, source: Source, out: &mut Vec<Intent>) -> bool {
     let mut chosen = false;
-    let mut buffer = String::new();
+    // The typed buffer persists while the picker draws (task P7-48
+    // item 8: the field keeps its typing — a buffer local to the call
+    // would empty the field on every later frame).
+    let key = egui::Id::unique("larrygram-picker-size-field");
+    let mut buffer: String = ui.data_mut(|data| data.get_temp(key)).unwrap_or_default();
     let mut typed = None;
     ui.horizontal(|ui| {
         ui.label("Size:");
@@ -380,8 +384,10 @@ fn font_size(ui: &mut Ui, nav: &mut Nav, source: Source, out: &mut Vec<Intent>) 
     });
     if let Some(points) = typed {
         push_size(out, points, source);
+        buffer.clear();
         chosen = true;
     }
+    ui.data_mut(|data| data.insert_temp(key, buffer));
     ui.separator();
     for size in SIZE_LADDER {
         let highlighted = nav.highlighted();

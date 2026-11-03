@@ -219,7 +219,6 @@ impl TextEditor {
         };
         let open_focus = std::mem::take(&mut self.focus_requested);
         let refocus = std::mem::take(&mut self.refocus_requested);
-        let request_focus = open_focus || refocus;
         // The caret goes to the end of the buffer when the editor
         // opens (task P7-29 item 2).
         let buffer_chars = self.buffer.chars().count();
@@ -268,8 +267,10 @@ impl TextEditor {
                 // The editor's accessible name (task P7-24: the tests
                 // and screen readers find the field by it).
                 output.response.response = output.response.response.clone().accessible_name("Text");
-                if request_focus {
+                if open_focus {
                     output.response.request_focus();
+                } else if refocus {
+                    hand_keyboard(ui.ctx(), output.response.id);
                 }
                 if open_focus {
                     // The caret sits at the end of the text when the
@@ -313,7 +314,7 @@ impl TextEditor {
                     PressRule::Commit => true,
                     PressRule::KeepAndRefocus => {
                         if let Some((_, id)) = field {
-                            ui.ctx().memory_mut(|memory| memory.request_focus(id));
+                            hand_keyboard(ui.ctx(), id);
                         }
                         false
                     }
@@ -440,6 +441,18 @@ pub fn other_layer_open(ctx: &egui::Context, shape: Option<ShapeId>) -> bool {
             .iter()
             .any(|layer| layer.order == egui::Order::Foreground && layer.id != own)
     })
+}
+
+/// Hands the keyboard back to the editor's field `id` (task P7-41
+/// item 1) — but only when nothing else holds it (task P7-48 item 8):
+/// a popup's own field keeps its typing.
+fn hand_keyboard(ctx: &egui::Context, id: egui::Id) {
+    let taken = ctx
+        .memory(|memory| memory.focused())
+        .is_some_and(|focused| focused != id);
+    if !taken {
+        ctx.memory_mut(|memory| memory.request_focus(id));
+    }
 }
 
 /// What a press at `pos` does to the open editor (task P7-41 item 1).
