@@ -83,10 +83,12 @@ jobs:
 
       # Each platform builds its own package on its native runner
       # (task R9 goal 5); `cargo xtask dist` refuses any other host.
-      # The build id (task R11 goal 1): the About window and
+      # The build id (task R11 goal 1, task R12): the About window and
       # `larrygram-cli --version` show `<version> (<short sha>)`, baked
-      # in from `LARRYGRAM_BUILD_SHA` here (otherwise the id falls back
-      # to git in a checkout, then 'dev'; resolution never fails).
+      # in at compile time from `LARRYGRAM_BUILD_SHA`. `cargo xtask
+      # dist` sets it for its cargo build from `git rev-parse --short
+      # HEAD` in the checkout, which overrides the value here (the same
+      # commit); without git the id reads 'dev'.
       - name: Build the package
         env:
           LARRYGRAM_BUILD_SHA: ${{ github.sha }}
