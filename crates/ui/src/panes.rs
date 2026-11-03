@@ -98,13 +98,27 @@ const FORMULA_HINT: &str = "This cell carries a formula: read-only in this relea
 /// The status line of a refused edit of a formula cell (ADR 0058).
 const FORMULA_REFUSAL: &str = "is a formula cell; formulas are read-only in this release";
 
-/// The width of a typed field, in points.
-const FIELD_WIDTH: f32 = 140.0;
+/// The widest a typed field grows to, in points (task P7-44: the value
+/// field fills its row, so an ordinary value shows whole at the
+/// default pane width).
+const FIELD_WIDTH: f32 = 400.0;
+
+/// The narrowest a typed field shrinks to, in points.
+const FIELD_MIN_WIDTH: f32 = 40.0;
 
 /// How far a text box insets its text (egui's default `TextEdit`
 /// margin): read-only values start that far in to line up with typed
 /// ones.
 const FIELD_TEXT_INSET: f32 = 4.0;
+
+/// The gap between a pane's label and value columns, in points (task
+/// P7-45 goal 2: back to the ordinary 8 points, which the wider pane
+/// leaves room for).
+const FIELD_GAP: f32 = 8.0;
+
+/// The safety margin kept between a typed field and the pane edge, in
+/// points (task P7-44).
+const FIELD_SLACK: f32 = 1.0;
 
 /// One label/value row of a pane (ADR 0035).
 #[derive(Debug, Clone, PartialEq)]
@@ -252,7 +266,8 @@ impl Entry {
 /// The buffer of one typed field between frames.
 #[derive(Debug, Clone)]
 struct FieldState {
-    /// The text shown in the field.
+    /// The text shown in the field: always the whole value (task
+    /// P7-45 goal 4; only the drawing is ever cut).
     text: String,
     /// Whether the user is editing it (the buffer wins over the row).
     editing: bool,
@@ -1004,6 +1019,65 @@ fn typed_entry(text: &str, unit: EntryUnit) -> Result<f64, String> {
     }
 }
 
+/// The display width of `text` in the field's font, in points (task
+/// P7-44).
+fn text_width(ui: &Ui, text: &str) -> f32 {
+    let font = egui::TextStyle::Body.resolve(ui.style());
+    ui.ctx()
+        .fonts_mut(|fonts| fonts.layout_no_wrap(text.to_owned(), font, egui::Color32::WHITE))
+        .rect
+        .width()
+}
+
+/// The width of one typed field, in points (task P7-44): the pane's
+/// width minus the widest row label, the column gap, the formula
+/// marker and a small safety margin, capped at [`FIELD_WIDTH`] and
+/// never below [`FIELD_MIN_WIDTH`]. The field fills its row this way,
+/// so an ordinary value shows whole at the default pane width whatever
+/// its row's own label; the field's own text insets and cursor stay
+/// inside this width.
+fn field_width(ui: &Ui, entry: &Entry, pane_width: f32, widest_label: f32) -> f32 {
+    let marker = if entry.formula {
+        text_width(ui, FORMULA_MARKER) + FIELD_GAP
+    } else {
+        0.0
+    };
+    let chrome = FIELD_GAP + FIELD_SLACK;
+    (pane_width - widest_label - marker - chrome).clamp(FIELD_MIN_WIDTH, FIELD_WIDTH)
+}
+
+/// The ellipsis a cut value draws (task P7-45 goal 4).
+const ELLIPSIS: char = '\u{2026}';
+
+/// The layout job of one field's drawn text (task P7-45 goal 4): the
+/// text is always the whole value, and `cut` only changes the drawing
+/// — one row that elides at `wrap_width` with [`ELLIPSIS`]
+/// (`TextWrapping::max_rows` 1). The `line_height` mirrors egui's own
+/// text-edit layouter, so an uncut field draws exactly as egui would.
+fn field_layout_job(
+    text: &str,
+    font_id: egui::FontId,
+    color: egui::Color32,
+    line_height: f32,
+    wrap_width: f32,
+    cut: bool,
+) -> egui::text::LayoutJob {
+    let mut job = egui::text::LayoutJob::simple_singleline(text.to_owned(), font_id, color);
+    job.keep_trailing_whitespace = true;
+    for section in &mut job.sections {
+        section.format.line_height = Some(line_height);
+    }
+    if cut {
+        job.wrap = egui::text::TextWrapping {
+            max_width: wrap_width,
+            max_rows: 1,
+            break_anywhere: true,
+            overflow_character: Some(ELLIPSIS),
+        };
+    }
+    job
+}
+
 /// Draws one pane: its title and the rows as a two-column grid. With
 /// no rows it draws `empty` instead of the grid (task P7-23).
 fn show_pane(
@@ -1023,27 +1097,36 @@ fn show_pane(
         return Vec::new();
     }
     let mut intents = Vec::new();
-    egui::Grid::new(title).striped(true).show(ui, |ui| {
-        for entry in entries {
-            let mut label = ui.label(entry.row.label.as_str());
-            if let Some(note) = &entry.note {
-                label = label.on_hover_text(note.as_str());
+    let pane_width = ui.available_width();
+    let widest_label = entries
+        .iter()
+        .map(|entry| text_width(ui, entry.row.label.as_str()))
+        .fold(0.0, f32::max);
+    egui::Grid::new(title)
+        .striped(true)
+        .spacing(egui::vec2(FIELD_GAP, ui.spacing().item_spacing.y))
+        .show(ui, |ui| {
+            for entry in entries {
+                let mut label = ui.label(entry.row.label.as_str());
+                if let Some(note) = &entry.note {
+                    label = label.on_hover_text(note.as_str());
+                }
+                drop(label);
+                ui.horizontal(|ui| {
+                    if matches!(entry.field, Field::Typed(_) | Field::Value(_)) {
+                        let width = field_width(ui, entry, pane_width, widest_label);
+                        intents.append(&mut edit_field(ui, app, title, entry, width));
+                    } else {
+                        intents.append(&mut show_value(ui, entry));
+                    }
+                    if entry.formula {
+                        ui.label(RichText::new(FORMULA_MARKER).weak())
+                            .on_hover_text(FORMULA_HINT);
+                    }
+                });
+                ui.end_row();
             }
-            drop(label);
-            ui.horizontal(|ui| {
-                if matches!(entry.field, Field::Typed(_) | Field::Value(_)) {
-                    intents.append(&mut edit_field(ui, app, title, entry));
-                } else {
-                    intents.append(&mut show_value(ui, entry));
-                }
-                if entry.formula {
-                    ui.label(RichText::new(FORMULA_MARKER).weak())
-                        .on_hover_text(FORMULA_HINT);
-                }
-            });
-            ui.end_row();
-        }
-    });
+        });
     intents
 }
 
@@ -1088,8 +1171,19 @@ fn show_value(ui: &mut Ui, entry: &Entry) -> Vec<Intent> {
 ///
 /// A formula cell refuses the edit with one status line and a bad entry
 /// is refused the same way; both change nothing (no intent, no model
-/// write).
-fn edit_field(ui: &mut Ui, app: &mut AppCtx, title: &str, entry: &Entry) -> Vec<Intent> {
+/// write). The field is `width` points wide (task P7-44): its buffer
+/// always holds the whole value, and while the field is not focused
+/// only the drawing is cut, one row with an ellipsis (task P7-45 goal
+/// 4); the full text goes in the tooltip. The focus is read from
+/// egui's memory at layout time under the field's own id, so the first
+/// focused frame draws the whole text.
+fn edit_field(
+    ui: &mut Ui,
+    app: &mut AppCtx,
+    title: &str,
+    entry: &Entry,
+    width: f32,
+) -> Vec<Intent> {
     let id = egui::Id::unique(("pane-field", title, entry.row.label.as_str()));
     let mut state = ui.data_mut(|data| {
         data.get_temp::<FieldState>(id)
@@ -1102,22 +1196,53 @@ fn edit_field(ui: &mut Ui, app: &mut AppCtx, title: &str, entry: &Entry) -> Vec<
         state.text = entry.row.value.clone();
     }
     let mut text = state.text.clone();
+    // The text area: the field's two text insets (the cursor shows
+    // only while the field has the focus, when nothing is cut).
+    let inner = (width - 2.0 * FIELD_TEXT_INSET).max(1.0);
     // The field's `control.border` edge and field fill (task P7-19,
     // the P7-18 design pass's `raise_controls`).
     let response = ui
         .scope(|ui| {
             crate::theme::raise_controls(ui);
+            let font_id = egui::TextStyle::Body.resolve(ui.style());
+            let color = ui.visuals().text_color();
+            let line_height = ui.fonts_mut(|fonts| fonts.row_height(&font_id))
+                + ui.spacing().extra_text_line_spacing;
             ui.add(
                 egui::TextEdit::singleline(&mut text)
-                    .desired_width(ui.available_width().clamp(40.0, FIELD_WIDTH))
-                    .hint_text(entry.row.label.as_str()),
+                    // The grid's sizing pass offers a cell almost no
+                    // width, and `desired_width` alone would shrink to
+                    // it (the old 40-point field, task P7-44);
+                    // `min_size` overrides the available width.
+                    .id(id)
+                    .desired_width(width)
+                    .min_size(egui::vec2(width, 0.0))
+                    .hint_text(entry.row.label.as_str())
+                    .layouter(&mut |ui, buffer, wrap_width| {
+                        let cut = !ui.memory(|memory| memory.has_focus(id));
+                        let job = field_layout_job(
+                            buffer.as_str(),
+                            font_id.clone(),
+                            color,
+                            line_height,
+                            wrap_width,
+                            cut,
+                        );
+                        ui.fonts_mut(|fonts| fonts.layout_job(job))
+                    }),
             )
         })
         .inner;
-    state.text = text;
     if response.changed() {
         state.editing = true;
+        state.text = text;
     }
+    // A drawn cut keeps the whole text in the tooltip (task P7-44).
+    let response = if text_width(ui, &state.text) > inner {
+        response.on_hover_text(state.text.as_str())
+    } else {
+        response
+    };
     let mut intents = Vec::new();
     let enter = ui.input(|input| input.key_pressed(egui::Key::Enter));
     if state.editing && (response.lost_focus() || (enter && response.has_focus())) {
@@ -1346,6 +1471,45 @@ mod tests {
     use larrygram_commands::{DocumentSession, Settings};
     use larrygram_geom::Unit as GeomUnit;
     use larrygram_model::{Cell, Color, Document, Page, PageId, Property, Row, Section, Shape};
+
+    #[test]
+    fn a_cut_value_draws_an_ellipsis_and_keeps_its_whole_text() {
+        // Task P7-45 goal 4: the buffer is the whole value; the galley
+        // (what the field draws) is one elided row ending in the
+        // ellipsis.
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(Default::default(), |ctx| {
+            let font_id = egui::FontId::new(12.0, egui::FontFamily::Proportional);
+            let full = "This is a much longer value string";
+            let job = field_layout_job(full, font_id, egui::Color32::WHITE, 14.0, 80.0, true);
+            assert_eq!(job.text, full, "the buffer is whole");
+            let galley = ctx.fonts_mut(|fonts| fonts.layout_job(job));
+            assert!(galley.elided, "the drawing is cut");
+            let drawn = galley.rows.last().expect("a row").text();
+            assert!(
+                drawn.ends_with(ELLIPSIS),
+                "the drawn text ends in the ellipsis: {drawn:?}"
+            );
+            assert!(drawn.chars().count() < full.chars().count());
+        });
+        output.textures_delta.clear();
+    }
+
+    #[test]
+    fn an_uncut_value_draws_whole() {
+        // The same job with `cut` false (the field has the focus):
+        // nothing is elided and the whole value draws.
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(Default::default(), |ctx| {
+            let font_id = egui::FontId::new(12.0, egui::FontFamily::Proportional);
+            let full = "This is a much longer value string";
+            let job = field_layout_job(full, font_id, egui::Color32::WHITE, 14.0, 80.0, false);
+            let galley = ctx.fonts_mut(|fonts| fonts.layout_job(job));
+            assert!(!galley.elided, "the focused field draws whole");
+            assert_eq!(galley.rows.last().expect("a row").text(), full);
+        });
+        output.textures_delta.clear();
+    }
 
     /// A page with the given name and an 8.5 x 11 in sheet.
     fn page(name: &str) -> Page {

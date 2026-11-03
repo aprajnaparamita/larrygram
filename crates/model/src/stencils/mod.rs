@@ -294,6 +294,20 @@ fn master_sheet(def: &MasterDef) -> Sheet {
         f64::from(def.fill.back),
         Unit::Unitsless,
     ));
+    // The text cells (task P7-44): every master draws its text centred,
+    // both ways — `VerticalAlign` 1 (middle) and the `Paragraph` row's
+    // `HorzAlign` 1 (centre). The values are ShapeSheet facts (the
+    // `VerticalAlign` cell page's enumeration; `HorzAlign` as in the
+    // `format.text.*` commands) and Visio's own files reach the same
+    // picture through their document styles (the `No Style` row of the
+    // corpus files carries `VerticalAlign` 1 and `HorzAlign` 1). Our
+    // masters carry the cells themselves, so a dropped instance
+    // resolves them through the master rung in any drawing, with no
+    // style to link.
+    sheet
+        .cells
+        .push(number_cell("VerticalAlign", 1.0, Unit::Unitsless));
+    sheet.sections.push(paragraph_section());
     sheet.sections.push(geometry_section(&def.geometry));
     if !def.shape_data.is_empty() {
         sheet.sections.push(property_section(&def.shape_data));
@@ -457,6 +471,17 @@ fn geometry_row(row: &GeometryRow) -> Row {
         }
     }
     mapped
+}
+
+/// The `Paragraph` section of one master: one default row (`IX` 0) with
+/// the centre alignment (task P7-44).
+fn paragraph_section() -> Section {
+    let mut section = Section::new(SectionName::from_static("Paragraph"));
+    let mut row = Row::new();
+    row.ix = Some(0);
+    row.cells = vec![number_cell("HorzAlign", 1.0, Unit::Unitsless)];
+    section.rows.push(row);
+    section
 }
 
 /// The `Shape Data` section of one master: one row per `(label, value)`.
@@ -728,6 +753,88 @@ mod tests {
         assert_eq!((line.color, line.pattern), (0, 1));
         let fill = FillDefaults::default();
         assert_eq!((fill.pattern, fill.fore, fill.back), (1, 1, 1));
+    }
+
+    #[test]
+    fn every_master_centres_its_text() {
+        // Task P7-44: `VerticalAlign` 1 (middle) and the `Paragraph`
+        // row's `HorzAlign` 1 (centre) on every master's own sheet.
+        for stencil in catalog() {
+            for master in &stencil.masters {
+                let sheet = master_sheet(master);
+                let vertical = sheet
+                    .cells
+                    .iter()
+                    .find(|cell| cell.name.as_str() == "VerticalAlign")
+                    .unwrap_or_else(|| panic!("{}: VerticalAlign", master.name_u));
+                assert_eq!(
+                    vertical.value,
+                    Some(CellValue::Number(1.0)),
+                    "{}: VerticalAlign",
+                    master.name_u
+                );
+                let paragraph = sheet
+                    .sections
+                    .iter()
+                    .find(|section| section.name.as_str() == "Paragraph")
+                    .unwrap_or_else(|| panic!("{}: Paragraph", master.name_u));
+                assert_eq!(paragraph.rows.len(), 1, "{}: one row", master.name_u);
+                assert_eq!(paragraph.rows[0].ix, Some(0), "{}: row IX", master.name_u);
+                let horz = paragraph.rows[0]
+                    .cells
+                    .iter()
+                    .find(|cell| cell.name.as_str() == "HorzAlign")
+                    .unwrap_or_else(|| panic!("{}: HorzAlign", master.name_u));
+                assert_eq!(
+                    horz.value,
+                    Some(CellValue::Number(1.0)),
+                    "{}: HorzAlign",
+                    master.name_u
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_dropped_master_resolves_centred_text_in_a_new_drawing() {
+        // Task P7-44: the alignment cells a dropped master resolves to
+        // in a new drawing (an empty `Document`) are 1 (middle /
+        // centre), from the master rung.
+        let mut document = Document::new();
+        for stencil in catalog() {
+            for def in &stencil.masters {
+                let shape = instantiate(&mut document, def);
+                let mut reader = crate::values::CellReader::new(&document);
+                let vertical = reader
+                    .number(
+                        crate::values::SheetRef::Shape(shape),
+                        &CellName::new("VerticalAlign"),
+                    )
+                    .expect("VerticalAlign");
+                assert_eq!(vertical, 1.0, "{}: VerticalAlign", def.name_u);
+                let horz = reader
+                    .row_number(
+                        crate::values::SheetRef::Shape(shape),
+                        "Paragraph",
+                        crate::values::RowTarget::at(0),
+                        &CellName::new("HorzAlign"),
+                    )
+                    .expect("HorzAlign");
+                assert_eq!(horz, 1.0, "{}: HorzAlign", def.name_u);
+                // The value is the master's own, not a default.
+                let resolved = crate::lookup::CellLookup::resolve(
+                    &document,
+                    shape,
+                    &CellName::new("VerticalAlign"),
+                )
+                .expect("resolve");
+                assert!(
+                    matches!(resolved.source, crate::lookup::ValueSource::Master(_)),
+                    "{}: resolved through the master rung",
+                    def.name_u
+                );
+            }
+        }
     }
 
     #[test]
