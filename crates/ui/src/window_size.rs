@@ -18,6 +18,11 @@ pub const WIZARD_WINDOW: &str = "larrygram.window.wizard";
 /// The egui id source of the About window.
 pub const ABOUT_WINDOW: &str = "larrygram.window.about";
 
+/// The egui id source of the unsaved-changes dialog (task P7-42: its
+/// area's id is `egui::Id::unique(UNSAVED_WINDOW)`, so tests and the
+/// shell can find its window).
+pub const UNSAVED_WINDOW: &str = "larrygram.window.unsaved";
+
 /// The height of the footer row that holds a window's buttons.
 pub const FOOTER_HEIGHT: f32 = 40.0;
 

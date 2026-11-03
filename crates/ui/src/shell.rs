@@ -124,6 +124,11 @@ const TEXT_BOX_TRIGGERS: &[&str] = &[
     "view.ui_layout.panel_modern",
 ];
 
+/// The marker a changed drawing gets before its name (task P7-42 goal
+/// 4: our own marker, a dot before the name). It is applied in
+/// [`Shell::title_text`] alone, so every title shows the same mark.
+const CHANGED_MARKER: &str = "• ";
+
 /// The settings key of the Shapes window width.
 const SHAPES_PANE: &str = "shapes";
 
@@ -373,6 +378,9 @@ pub struct Shell {
     /// ADR 0040 amendment 2026-11-03): one three-way dialog per
     /// changed drawing, in turn.
     walk: Option<UnsavedWalk>,
+    /// The OS window title last sent to the viewport (task P7-42 goal
+    /// 4; [`Shell::sync_window_title`] sends a change once).
+    window_title_sent: Option<String>,
     /// The window was asked to close; sent to the viewport in
     /// [`Shell::show_in`].
     quit_requested: bool,
@@ -444,6 +452,7 @@ impl Shell {
             wizard: None,
             welcome_pending,
             walk: None,
+            window_title_sent: None,
             quit_requested: false,
         }
     }
@@ -675,13 +684,17 @@ impl Shell {
             let had_walk = self.walk.is_some();
             self.begin_quit();
             if had_walk || self.walk.is_some() {
-                ui.ctx().send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                ui.ctx()
+                    .send_viewport_cmd(egui::ViewportCommand::CancelClose);
             }
         }
         if self.quit_requested {
             self.quit_requested = false;
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
         }
+        // The OS window title follows the marked document name (task
+        // P7-42 goal 4).
+        self.sync_window_title(ui.ctx());
         // The default layout follows the active one (task P7-09 Goal
         // 6) and the first launch opens the welcome wizard before any
         // document is drawn (ADR 0066).
@@ -2537,6 +2550,7 @@ impl Shell {
             egui::Window::new("Unsaved changes")
                 .collapsible(false)
                 .resizable(false)
+                .id(egui::Id::unique(crate::window_size::UNSAVED_WINDOW))
                 .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
                 .show(ui.ctx(), |ui| {
                     ui.label(format!("Unsaved changes in {name}."));
@@ -2572,11 +2586,44 @@ impl Shell {
         self.last_page = current;
     }
 
-    /// The title strip's document text.
-    fn title_text(&self) -> String {
+    /// The title strip's document text: the document name with the
+    /// changed marker before it (task P7-42 goal 4).
+    ///
+    /// This is the one place the marked name is computed (the goal's
+    /// "keep one place for it"): every layout's title bar and the OS
+    /// window title draw it.
+    pub fn title_text(&self) -> String {
         match self.app.active_document() {
-            Some(session) => session.display_name(),
+            Some(session) => {
+                let name = session.display_name();
+                if session.is_dirty() {
+                    format!("{CHANGED_MARKER}{name}")
+                } else {
+                    name
+                }
+            }
             None => "No document".to_owned(),
+        }
+    }
+
+    /// The OS window title (task P7-42 goal 4): the marked document
+    /// name and the app name, "• Untitled - Larrygram". With no
+    /// document it is the app name alone.
+    pub fn window_title(&self) -> String {
+        match self.app.active_document() {
+            Some(_) => format!("{} - Larrygram", self.title_text()),
+            None => "Larrygram".to_owned(),
+        }
+    }
+
+    /// Keeps the OS window title in step with the marked document name
+    /// (task P7-42 goal 4): [`Shell::window_title`] is sent whenever
+    /// it changed, one viewport command per change.
+    fn sync_window_title(&mut self, ctx: &Context) {
+        let title = self.window_title();
+        if self.window_title_sent.as_deref() != Some(title.as_str()) {
+            self.window_title_sent = Some(title.clone());
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
         }
     }
 
