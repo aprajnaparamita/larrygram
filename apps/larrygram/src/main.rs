@@ -711,6 +711,33 @@ mod tests {
         assert_eq!(app.saved_settings, unchanged);
     }
 
+    /// Task P7-42: a queued app-menu Quit drains as one `app.quit`
+    /// dispatch, whose unsaved-changes walk takes it from there (no
+    /// documents open: the quit completes at once). Off macOS the
+    /// queue does not exist and the drain is a no-op.
+    #[test]
+    fn a_queued_app_menu_quit_runs_the_quit_walk() {
+        let mut app = LarrygramApp::new(
+            build_shell(
+                None,
+                larrygram_commands::builtins::registry().expect("registry"),
+                Loader::from_embedded().expect("layouts"),
+                None,
+            )
+            .expect("shell"),
+        );
+        #[cfg(target_os = "macos")]
+        macos_terminate::queue_quit();
+        app.run_queued_quit();
+        #[cfg(target_os = "macos")]
+        assert!(
+            app.shell.quit_requested(),
+            "the walk completes at once with no documents"
+        );
+        #[cfg(not(target_os = "macos"))]
+        assert!(!app.shell.quit_requested(), "off macOS nothing drains");
+    }
+
     #[test]
     fn saving_persists_the_settings() {
         let mut app = LarrygramApp::new(

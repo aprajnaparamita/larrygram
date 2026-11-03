@@ -68,8 +68,9 @@ pub(crate) fn take_quit() -> bool {
 }
 
 /// Queues an app-menu Quit for the next frame and wakes the UI (task
-/// P7-42). Never panics (AGENTS.md section 6).
-fn queue_quit() {
+/// P7-42). Never panics (AGENTS.md section 6). The delegate callback
+/// calls it; the app's tests queue a quit through it too.
+pub(crate) fn queue_quit() {
     QUIT_REQUESTED.store(true, Ordering::SeqCst);
     let hook = WAKE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     if let Some(hook) = hook.as_ref() {
