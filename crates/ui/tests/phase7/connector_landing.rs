@@ -64,9 +64,13 @@ fn shape_with_point(x: f64, y: f64, visio_id: i32, point: (f64, f64)) -> Shape {
     shape
 }
 
-/// Two 2 x 1 in rectangles at [`A`] and [`B`] (`with_points` adds one
-/// connection point per shape, at the local `(0.25, 0.25)`).
-fn two_shapes(kind: LayoutKind, with_points: bool) -> (AppCtx, ShapeId, ShapeId) {
+/// Two 2 x 1 in rectangles at [`A`] and at `right` (`with_points` adds
+/// one connection point per shape, at the local `(0.25, 0.25)`).
+fn two_shapes(
+    kind: LayoutKind,
+    with_points: bool,
+    right: (f64, f64),
+) -> (AppCtx, ShapeId, ShapeId) {
     let mut document = Document::new();
     let mut page = Page::new(PageId { index: 0 }, 1);
     page.name = "Page-1".to_owned();
@@ -76,9 +80,9 @@ fn two_shapes(kind: LayoutKind, with_points: bool) -> (AppCtx, ShapeId, ShapeId)
         fixture_shape(A.0, A.1, 1)
     };
     let right = if with_points {
-        shape_with_point(B.0, B.1, 2, (0.25, 0.25))
+        shape_with_point(right.0, right.1, 2, (0.25, 0.25))
     } else {
-        fixture_shape(B.0, B.1, 2)
+        fixture_shape(right.0, right.1, 2)
     };
     let left = document.add_shape(left);
     let right = document.add_shape(right);
@@ -94,7 +98,12 @@ fn two_shapes(kind: LayoutKind, with_points: bool) -> (AppCtx, ShapeId, ShapeId)
 /// A shell over [`two_shapes`] with the midpoint of the two shapes
 /// centred in the viewport (the text fixtures' rule).
 fn rig(kind: LayoutKind, with_points: bool) -> ShellRig {
-    let (app, _, _) = two_shapes(kind, with_points);
+    rig_with(kind, with_points, B)
+}
+
+/// [`rig`] with the right shape at `right`.
+fn rig_with(kind: LayoutKind, with_points: bool, right: (f64, f64)) -> ShellRig {
+    let (app, _, _) = two_shapes(kind, with_points, right);
     let mut rig = ShellRig::with_app(app);
     rig.harness().ctx.options_mut(|options| {
         options.input_options.max_double_click_delay = 10.0;
@@ -198,13 +207,17 @@ fn drag_exact(rig: &mut ShellRig, from: egui::Pos2, to: egui::Pos2) {
     rig.run();
 }
 
-/// Draws one connector with a real drag between the two fixture
-/// shapes' centres.
-fn draw_connector(rig: &mut ShellRig, kind: LayoutKind) {
+/// Draws one connector with a real drag between [`A`] and `to`.
+fn draw_connector_to(rig: &mut ShellRig, kind: LayoutKind, to: (f64, f64)) {
     click(rig, Role::Button, connector_tool_button(kind));
     let from = screen(rig, A.0, A.1);
-    let to = screen(rig, B.0, B.1);
+    let to = screen(rig, to.0, to.1);
     drag(rig, from, to);
+}
+
+/// Draws one connector between the two fixture shapes' centres.
+fn draw_connector(rig: &mut ShellRig, kind: LayoutKind) {
+    draw_connector_to(rig, kind, B);
 }
 
 /// The `n`th drawn connector (the shapes after the two fixtures).
@@ -365,6 +378,49 @@ fn the_ends_walk_when_one_shape_moves_below_the_other(kind: LayoutKind) {
     );
 }
 
+/// One layout's flow: shapes offset so the route has stubs and a bend:
+/// the picture shows both legs and nothing in the hollow (task P7-49
+/// goal 11).
+fn the_route_keeps_its_stubs_and_bends_in_the_picture(kind: LayoutKind) {
+    let mut rig = rig_with(kind, false, (7.0, 5.0));
+    draw_connector_to(&mut rig, kind, (7.0, 5.0));
+
+    let document = rig
+        .shell
+        .borrow()
+        .app
+        .active_document()
+        .expect("session")
+        .document
+        .clone();
+    let connector = drawn(&rig.shell.borrow().app, 0);
+    assert_eq!(
+        (
+            number(&document, connector, "BeginX"),
+            number(&document, connector, "BeginY"),
+        ),
+        (4.0, 3.0)
+    );
+    assert_eq!(
+        (
+            number(&document, connector, "EndX"),
+            number(&document, connector, "EndY"),
+        ),
+        (6.0, 5.0)
+    );
+    let geometry = document.shape_geometry(connector).expect("geometry");
+    let path = &geometry.paths.first().expect("a path").rows;
+    assert_eq!(path.len(), 4, "the stubs and the bend: {path:?}");
+
+    // The picture: the horizontal leg, the vertical leg and the two
+    // stubs; nothing in the hollow of the Z.
+    let image = rig.render();
+    for (x, y) in [(4.5, 3.0), (5.75, 4.2), (5.75, 4.8)] {
+        assert!(inked(&image, &rig, x, y), "no line ink at ({x}, {y})");
+    }
+    assert!(!inked(&image, &rig, 4.8, 4.0), "the hollow stays clear");
+}
+
 /// One layout's flow: a drag that ends on a connection point glues to
 /// that point.
 fn a_drag_that_ends_on_a_connection_point_glues_to_that_point(kind: LayoutKind) {
@@ -402,6 +458,70 @@ fn a_drag_that_ends_on_a_connection_point_glues_to_that_point(kind: LayoutKind) 
         .find(|record| record.from_cell == "EndX")
         .expect("the end's record");
     assert_eq!(end.to_cell, "Connections.X1");
+
+    // The picture shows the line (task P7-49 goal 11).
+    let image = rig.render();
+    for x in [3.0, 4.5, 5.5] {
+        assert!(inked(&image, &rig, x, 2.75), "no line ink at ({x}, 2.75)");
+    }
+}
+
+/// One layout's flow: a connector lying over a shape, with the drop on
+/// it: the end glues to the shape underneath, not to the connector
+/// (task P7-49 goal 11).
+fn a_drop_on_a_connector_over_a_shape_glues_to_the_shape_underneath(kind: LayoutKind) {
+    let mut rig = rig(kind, false);
+    // A third box under the first connector's line.
+    {
+        let mut shell = rig.shell.borrow_mut();
+        let session = shell.app.active_document_mut().expect("session");
+        let third = session.document.add_shape(fixture_shape(5.0, 3.0, 3));
+        if let Some(entity) = session.document.pages.get_mut(0) {
+            entity.shapes.push(third);
+        }
+    }
+    rig.run();
+    draw_connector(&mut rig, kind);
+    click(&mut rig, Role::Button, connector_tool_button(kind));
+    let from = screen(&rig, A.0, A.1);
+    let to = screen(&rig, 5.0, 3.0);
+    drag(&mut rig, from, to);
+
+    let document = rig
+        .shell
+        .borrow()
+        .app
+        .active_document()
+        .expect("session")
+        .document
+        .clone();
+    let page_shapes = document
+        .page(PageId { index: 0 })
+        .expect("page")
+        .shapes
+        .clone();
+    let first = page_shapes[3];
+    let second = page_shapes[4];
+    let first_visio = document.shape(first).expect("first").visio_id;
+    let of_second: Vec<_> = records(&document)
+        .into_iter()
+        .filter(|record| record.from_sheet == document.shape(second).expect("second").visio_id)
+        .collect();
+    assert!(
+        of_second
+            .iter()
+            .all(|record| record.to_sheet != first_visio),
+        "never the connector: {of_second:?}"
+    );
+    assert_eq!(
+        of_second.len(),
+        2,
+        "both ends glue to shapes: {of_second:?}"
+    );
+    assert!(
+        of_second.iter().any(|record| record.to_sheet == 3),
+        "the drop glues to the shape underneath: {of_second:?}"
+    );
 }
 
 /// One layout's flow: a drag that ends over a connector does not glue
@@ -444,6 +564,31 @@ fn a_drag_that_ends_over_a_connector_does_not_glue_to_the_connector(kind: Layout
         None,
         "the free end keeps a literal point"
     );
+    // The picture shows the second line ending over the first (task
+    // P7-49 goal 11).
+    let image = rig.render();
+    eprintln!(
+        "DBG second begin {:?} end {:?} rows {:?}",
+        (
+            number(&document, second, "BeginX"),
+            number(&document, second, "BeginY")
+        ),
+        (
+            number(&document, second, "EndX"),
+            number(&document, second, "EndY")
+        ),
+        document
+            .shape_geometry(second)
+            .expect("g")
+            .paths
+            .first()
+            .expect("p")
+            .rows
+    );
+    for (x, y) in [(4.25f64, 3.0f64), (4.5, 3.0), (5.5, 3.0), (4.25, 3.3)] {
+        eprintln!("DBG ink ({x},{y}) = {}", inked(&image, &rig, x, y));
+    }
+    assert!(inked(&image, &rig, 4.25, 3.0), "the second line's ink");
     let end_x = number(&document, second, "EndX");
     assert!(
         (end_x - 5.0).abs() < 0.5,
@@ -459,6 +604,16 @@ fn the_ends_land_on_the_facing_side_midpoints_in_panel_modern() {
 #[test]
 fn the_ends_land_on_the_facing_side_midpoints_in_panel_classic() {
     the_ends_land_on_the_facing_side_midpoints(LayoutKind::PanelClassic);
+}
+
+#[test]
+fn the_route_keeps_its_stubs_and_bends_in_the_picture_in_panel_modern() {
+    the_route_keeps_its_stubs_and_bends_in_the_picture(LayoutKind::PanelModern);
+}
+
+#[test]
+fn the_route_keeps_its_stubs_and_bends_in_the_picture_in_panel_classic() {
+    the_route_keeps_its_stubs_and_bends_in_the_picture(LayoutKind::PanelClassic);
 }
 
 #[test]
@@ -479,6 +634,16 @@ fn a_drag_that_ends_on_a_connection_point_glues_to_that_point_in_panel_modern() 
 #[test]
 fn a_drag_that_ends_on_a_connection_point_glues_to_that_point_in_panel_classic() {
     a_drag_that_ends_on_a_connection_point_glues_to_that_point(LayoutKind::PanelClassic);
+}
+
+#[test]
+fn a_drop_on_a_connector_over_a_shape_glues_to_the_shape_underneath_in_panel_modern() {
+    a_drop_on_a_connector_over_a_shape_glues_to_the_shape_underneath(LayoutKind::PanelModern);
+}
+
+#[test]
+fn a_drop_on_a_connector_over_a_shape_glues_to_the_shape_underneath_in_panel_classic() {
+    a_drop_on_a_connector_over_a_shape_glues_to_the_shape_underneath(LayoutKind::PanelClassic);
 }
 
 #[test]
