@@ -402,7 +402,15 @@ pub fn keep_editing_rect(
     rect: egui::Rect,
     editor_keeps_keyboard: bool,
 ) {
-    if !command.is_some_and(larrygram_commands::builtins::is_text_format) {
+    // A text-format control's press keeps the edit (task P7-41 item
+    // 1), and so does an Undo or Redo press (task P7-48 item 5): their
+    // command commits the open edit — cancelling an untyped box,
+    // undoing a typed one whole — when it runs.
+    let keep = command.is_some_and(|command| {
+        larrygram_commands::builtins::is_text_format(command)
+            || matches!(command, "edit.undo" | "edit.redo" | "edit.redo.or.repeat")
+    });
+    if !keep {
         return;
     }
     let pass = ctx.cumulative_pass_nr();

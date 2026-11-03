@@ -1977,3 +1977,107 @@ fn file_exit_from_the_menu_with_typed_text_asks() {
     );
     unsaved_dialog_click(&mut rig, "Cancel");
 }
+
+// ---------------------------------------------------------------------------
+// Item 5 (task P7-48, the review's minor 1): Undo and Redo with an
+// open undo group.
+// ---------------------------------------------------------------------------
+
+/// The Undo label names the open group's step and one click undoes
+/// that step only (a typed box is committed and undone whole); Redo
+/// is disabled while the group is open and works afterwards (task
+/// P7-48 item 5, the labels and enabled state through accesskit).
+#[test]
+fn undo_names_the_open_group_and_redo_comes_back_after() {
+    {
+        // The dynamic label seam is Panel Modern's (task P7-48 item 5).
+        let kind = LayoutKind::PanelModern;
+        let mut rig = shell_rig(kind);
+        type_a_new_box(&mut rig, kind, "Hi");
+        // The group's step is what Undo names, and it is enabled.
+        assert!(
+            has(&mut rig, Role::Button, "Undo Insert Text Box"),
+            "{kind:?}: the Undo label names the group's step"
+        );
+        assert!(
+            !disabled(&mut rig, Role::Button, "Undo Insert Text Box"),
+            "{kind:?}: Undo is enabled with the group open"
+        );
+        // Redo is disabled while the group is open.
+        assert!(
+            has(&mut rig, Role::Button, "Can't Redo"),
+            "{kind:?}: Redo reads as disabled"
+        );
+        assert!(
+            disabled(&mut rig, Role::Button, "Can't Redo"),
+            "{kind:?}: Redo is disabled with the group open"
+        );
+
+        // One click undoes that step only: the typed box is committed
+        // and undone whole.
+        let before = shape_count(&rig);
+        click(&mut rig, Role::Button, "Undo Insert Text Box");
+        assert!(!editing(&mut rig), "{kind:?}: the edit ended");
+        assert_eq!(shape_count(&rig), before - 1, "{kind:?}: the box is gone");
+        assert!(undo_labels(&rig).is_empty(), "{kind:?}: the step is undone");
+
+        // Afterwards Redo comes back and restores the box with its text.
+        assert!(
+            has(&mut rig, Role::Button, "Repeat Insert Text Box"),
+            "{kind:?}: Redo names the undone step"
+        );
+        assert!(
+            !disabled(&mut rig, Role::Button, "Repeat Insert Text Box"),
+            "{kind:?}: Redo is enabled afterwards"
+        );
+        click(&mut rig, Role::Button, "Repeat Insert Text Box");
+        assert_eq!(shape_count(&rig), before, "{kind:?}: the box is back");
+        let box_ = last_shape(&rig.shell.borrow().app);
+        assert_eq!(
+            shape_text(&rig, box_).as_deref(),
+            Some("Hi"),
+            "{kind:?}: with its text"
+        );
+    }
+}
+
+/// Undo with an untyped box: the box is cancelled and nothing else is
+/// undone, with no error (task P7-48 item 5).
+#[test]
+fn undo_on_an_untyped_box_cancels_it_and_undoes_nothing_else() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        // One earlier step to survive the Undo: a committed first box.
+        type_a_new_box(&mut rig, kind, "First");
+        press_key(&mut rig, egui::Key::Escape);
+        assert_eq!(
+            undo_labels(&rig),
+            vec!["Insert Text Box".to_owned()],
+            "{kind:?}: the first box is one step"
+        );
+        let with_first = shape_count(&rig);
+
+        // A second box at another empty spot, nothing typed: Undo
+        // cancels it and keeps the first box and its step.
+        choose_text_tool(&mut rig, kind);
+        let pos = screen(&rig, 6.5, 5.5);
+        click_at(&mut rig, pos);
+        assert!(editing(&mut rig), "{kind:?}: the second box opens");
+        undo_button(&mut rig);
+        assert!(!editing(&mut rig), "{kind:?}: the edit ended");
+        assert_eq!(
+            shape_count(&rig),
+            with_first,
+            "{kind:?}: the empty box is cancelled"
+        );
+        assert_eq!(
+            undo_labels(&rig),
+            vec!["Insert Text Box".to_owned()],
+            "{kind:?}: the first box's step is not undone"
+        );
+        assert!(
+            rig.shell.borrow().app.warnings.is_empty(),
+            "{kind:?}: no error was noted"
+        );
+    }
+}

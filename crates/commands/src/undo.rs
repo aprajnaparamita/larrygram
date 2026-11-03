@@ -142,8 +142,22 @@ impl UndoStack {
     }
 
     /// Whether a redo step is available.
+    ///
+    /// Redo is disabled while a non-empty group is open (task P7-48
+    /// item 5): its step is what Undo would reach first, and folding
+    /// it drops the redo tail.
     pub fn can_redo(&self) -> bool {
-        self.cursor < self.entries.len()
+        self.cursor < self.entries.len() && self.pending_label().is_none()
+    }
+
+    /// The label of the open group's pending step (task P7-48 item
+    /// 5): the step its `end_group` becomes. `None` without an open
+    /// group or with an empty one.
+    pub fn pending_label(&self) -> Option<&str> {
+        self.group
+            .as_ref()
+            .filter(|group| !group.edits.is_empty())
+            .map(|group| group.label.as_str())
     }
 
     /// Number of entries on the stack (undoable and redoable).
@@ -701,6 +715,31 @@ mod tests {
         assert!(!stack.has_group());
         assert_eq!(stack.len(), 1, "no entry was pushed");
         assert!(stack.can_redo(), "the redo tail survived");
+    }
+
+    /// Task P7-48 item 5: the pending step's label and Redo's state.
+    #[test]
+    fn the_pending_step_names_itself_and_disables_redo() {
+        let mut stack = UndoStack::new(UndoStack::DEFAULT_CAPACITY);
+        let mut ctx = AppCtx::new(Settings::default());
+        stack.push(Box::new(NamedEdit("one")));
+        stack.undo(&mut ctx).expect("undo");
+        assert!(stack.can_redo(), "a redo tail without a group");
+        assert_eq!(stack.pending_label(), None);
+
+        stack.begin_group("Insert Text Box", false).expect("begin");
+        assert_eq!(stack.pending_label(), None, "an empty group has no step");
+        assert!(stack.can_redo(), "an empty group keeps Redo");
+        stack.push(Box::new(NamedEdit("in group")));
+        assert_eq!(stack.pending_label(), Some("Insert Text Box"));
+        assert!(
+            !stack.can_redo(),
+            "Redo is disabled while the group is open"
+        );
+
+        stack.end_group();
+        assert_eq!(stack.pending_label(), None);
+        assert!(!stack.can_redo(), "the fold dropped the redo tail");
     }
 
     /// A non-empty open group is undoable and an empty one is not

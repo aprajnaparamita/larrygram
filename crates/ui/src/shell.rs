@@ -2895,8 +2895,19 @@ impl Shell {
             // (task P7-37 item 5, task P7-41 item 4): the typed text is
             // written and a new box's group closes before it runs. The
             // text-format commands and the editor's own commands run
-            // over the open edit.
+            // over the open edit. An untyped new box cancels on the
+            // commit, so an Undo or Redo over it does nothing else
+            // (task P7-48 item 5).
+            let cancelled_box = self.text_box.is_some() && self.editor.buffer.is_empty();
             self.commit_open_edit();
+            if cancelled_box
+                && matches!(
+                    intent.command.as_str(),
+                    "edit.undo" | "edit.redo" | "edit.redo.or.repeat"
+                )
+            {
+                return Ok(Ok(Outcome::message("The empty text box was cancelled")));
+            }
         }
         let source = intent.invocation.source;
         let first = dispatch_one(
