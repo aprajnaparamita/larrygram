@@ -1238,6 +1238,13 @@ fn ink_top_left(ink: ((f64, f64), (f64, f64))) -> (f64, f64) {
     ((ink.0).0, (ink.1).1)
 }
 
+/// The ink's centre in page inches, the anchor of a middle-centred
+/// laid out text (task P7-45 goal 3: the rectangle tool's text is
+/// centred like the masters' now).
+fn ink_center(ink: ((f64, f64), (f64, f64))) -> (f64, f64) {
+    (((ink.0).0 + (ink.1).0) / 2.0, ((ink.0).1 + (ink.1).1) / 2.0)
+}
+
 /// Item 1: a block resize on the fixture (explicit `Txt*` cells)
 /// lands where the preview frame put it: the ink keeps its place at
 /// the block's top-left corner and the cells carry the pin's offset
@@ -1358,12 +1365,13 @@ fn a_rectangle_tool_shape_resizes_onto_the_preview_too() {
             (number(&rig, shape, "TxtLocPinY") - height / 2.0).abs() < 1.0e-9,
             "{kind:?}: TxtLocPinY follows the shape's height"
         );
-        // The ink runs (min - 0.4, max + 0.17) at its lowest: keep
-        // the region over the page area both layouts show.
-        let region = (min.0 - 1.0, min.1 + 0.2, min.0 + 1.5, min.1 + 1.5);
+        // The ink is middle-centred in the block (task P7-45 goal 3),
+        // and the resize moves its centre right and up: keep the
+        // region over the page area both layouts show.
+        let region = (min.0 - 1.0, min.1 + 0.2, min.0 + 1.9, min.1 + 1.5);
         deselect(&mut rig);
         let image = quiet_picture(&mut rig);
-        let before = ink_top_left(ink_box(&rig, &image, region));
+        let before = ink_center(ink_box(&rig, &image, region));
 
         // Resize the text block (the whole shape box) from its
         // north-east corner: +1 in width and +0.5 in height.
@@ -1387,11 +1395,11 @@ fn a_rectangle_tool_shape_resizes_onto_the_preview_too() {
         );
         deselect(&mut rig);
         let image = quiet_picture(&mut rig);
-        let after = ink_top_left(ink_box(&rig, &image, region));
+        let after = ink_center(ink_box(&rig, &image, region));
         // The preview keeps the block's south-west corner (task P7-26
-        // item 8): the left edge stands still and only the top edge
-        // rises, so the ink follows the top edge alone.
-        let expected = (before.0, before.1 + 0.5);
+        // item 8): the block grows right and up, so the centred ink
+        // follows its middle half as far again.
+        let expected = (before.0 + 0.5, before.1 + 0.25);
         assert!(
             (after.0 - expected.0).abs() < 0.05 && (after.1 - expected.1).abs() < 0.05,
             "{kind:?}: the ink sits where the preview showed it: {before:?} to {after:?}"
