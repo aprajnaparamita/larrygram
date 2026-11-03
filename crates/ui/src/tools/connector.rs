@@ -10,11 +10,11 @@
 use larrygram_commands::{AppCtx, ArgValue, Args, CommandId, Invocation, Source};
 use larrygram_geom::{Point, RouteOptions, RouteStyle, route};
 use larrygram_model::stencils;
-use larrygram_render::{Overlay, OverlayMark, node_bounds};
+use larrygram_render::{HitOptions, Overlay, OverlayMark, hit_test};
 
 use super::{Modifiers, ToolEffect, ToolEvent, ToolMachine};
 use crate::UiError;
-use crate::handles::{node_entries, scene_for};
+use crate::handles::{node_entries, render_error, scene_for};
 
 /// The snap distance for connector endpoints, in screen pixels (ADR
 /// 0043's default `Snapper` distance).
@@ -226,8 +226,11 @@ fn preview(state: &ToolMachine, style: RouteStyle) -> ToolEffect {
     }
 }
 
-/// Snaps `pos` to a connection point (highest priority), then to the
-/// alignment/grid snapper, and names the outline shape under the point.
+/// The glue rule of one endpoint (ADR 0084 rule 6): point glue within
+/// the snap distance of a connection point, otherwise dynamic glue to
+/// the topmost non-connector shape whose outline contains the pointer,
+/// otherwise free. Connectors are never glue targets. Alt suppresses
+/// glue entirely.
 fn locate(
     ctx: &AppCtx,
     pos: Point,
@@ -251,6 +254,9 @@ fn locate(
         let Some(shape) = doc.shape(entry.shape) else {
             continue;
         };
+        if doc.is_connector(entry.shape) {
+            continue;
+        }
         for (ix, local) in doc.connection_points_indexed(entry.shape) {
             let point = entry.transform.apply(local);
             if !point.x.is_finite() || !point.y.is_finite() {
@@ -279,14 +285,14 @@ fn locate(
         let result = snapper.snap_point(ctx, None, pos, zoom, false)?;
         result.point
     };
-    let outline = entries.iter().rev().find(|entry| {
-        node_bounds(&scene, &entry.path)
-            .map(|bounds| bounds.contains(snapped))
-            .unwrap_or(false)
-    });
-    let glue = outline.and_then(|entry| {
-        doc.shape(entry.shape).map(|shape| Glue {
-            visio_id: shape.visio_id,
+    let hits = hit_test(&scene, pos, &HitOptions::new(max_distance)).map_err(render_error)?;
+    let glue = hits.iter().find_map(|hit| {
+        let shape = hit.shape_id?;
+        if doc.is_connector(shape) {
+            return None;
+        }
+        doc.shape(shape).map(|found| Glue {
+            visio_id: found.visio_id,
             point: None,
         })
     });
