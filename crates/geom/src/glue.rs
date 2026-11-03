@@ -163,8 +163,9 @@ pub enum EndSpec<'a> {
 /// One end's resolved place: a fixed point or a target that still
 /// chooses.
 enum Slot<'a> {
-    /// The end lands on this candidate whatever the other end does.
-    Fixed(Candidate),
+    /// The end lands on this candidate (at this index on its target)
+    /// whatever the other end does.
+    Fixed(Candidate, Option<usize>),
     /// The end is dynamic glue on this target.
     Dynamic(&'a GlueTarget),
 }
@@ -189,17 +190,29 @@ pub fn resolve_ends(begin: &EndSpec<'_>, end: &EndSpec<'_>) -> (Candidate, Candi
     let mut missing_row = false;
     let begin_slot = slot(begin, &mut missing_row);
     let end_slot = slot(end, &mut missing_row);
+    // Both ends on one target resolve to distinct candidates when the
+    // choice is free: no zero-length self-loop (task P7-49 goal 7).
+    let same_target = matches!(
+        (begin, end),
+        (EndSpec::Glued(a, _), EndSpec::Glued(b, _)) if a == b
+    );
     let (begin, end) = match (begin_slot, end_slot) {
-        (Slot::Fixed(b), Slot::Fixed(e)) => (b, e),
-        (Slot::Fixed(b), Slot::Dynamic(target)) => {
-            let e = choose(target, Some(b.point));
+        (Slot::Fixed(b, _), Slot::Fixed(e, _)) => (b, e),
+        (Slot::Fixed(b, b_index), Slot::Dynamic(target)) => {
+            let e = choose(target, Some(b.point), same_target.then_some(b_index).flatten());
             (b, e)
         }
-        (Slot::Dynamic(target), Slot::Fixed(e)) => {
-            let b = choose(target, Some(e.point));
+        (Slot::Dynamic(target), Slot::Fixed(e, e_index)) => {
+            let b = choose(target, Some(e.point), same_target.then_some(e_index).flatten());
             (b, e)
         }
-        (Slot::Dynamic(bt), Slot::Dynamic(et)) => pair(bt, et),
+        (Slot::Dynamic(bt), Slot::Dynamic(et)) => {
+            if same_target {
+                pair_distinct(bt)
+            } else {
+                pair(bt, et)
+            }
+        }
     };
     (begin, end, missing_row)
 }
@@ -209,19 +222,21 @@ pub fn resolve_ends(begin: &EndSpec<'_>, end: &EndSpec<'_>) -> (Candidate, Candi
 /// point falls back to dynamic glue and sets `missing_row`.
 fn slot<'a>(spec: &EndSpec<'a>, missing_row: &mut bool) -> Slot<'a> {
     match spec {
-        EndSpec::Free(point) => Slot::Fixed(Candidate {
-            point: *point,
-            exit: None,
-        }),
+        EndSpec::Free(point) => {
+            Slot::Fixed(
+                Candidate {
+                    point: *point,
+                    exit: None,
+                },
+                None,
+            )
+        }
         EndSpec::Glued(target, GlueEnd::Shape) => Slot::Dynamic(target),
         EndSpec::Glued(target, GlueEnd::Point(ix)) => {
-            let found = target
-                .points
-                .iter()
-                .position(|(row, _, _)| row == ix)
-                .and_then(|position| target.candidates().into_iter().nth(position));
+            let position = target.points.iter().position(|(row, _, _)| row == ix);
+            let found = position.and_then(|position| target.candidates().into_iter().nth(position));
             match found {
-                Some(candidate) if finite(candidate.point) => Slot::Fixed(candidate),
+                Some(candidate) if finite(candidate.point) => Slot::Fixed(candidate, position),
                 _ => {
                     *missing_row = true;
                     Slot::Dynamic(target)
@@ -232,13 +247,54 @@ fn slot<'a>(spec: &EndSpec<'a>, missing_row: &mut bool) -> Slot<'a> {
 }
 
 /// The candidate a dynamic end takes against `reference` (the other
-/// end's fixed point when there is one). A non-finite reference falls
-/// back to the target's first candidate.
-fn choose(target: &GlueTarget, reference: Option<Point>) -> Candidate {
+/// end's fixed point when there is one), never `exclude` when the two
+/// ends share a target (task P7-49 goal 7). A non-finite reference
+/// falls back to the target's first candidate.
+fn choose(target: &GlueTarget, reference: Option<Point>, exclude: Option<usize>) -> Candidate {
     let candidates = target.candidates();
+    let free: Vec<Candidate> = candidates
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| Some(*index) != exclude)
+        .map(|(_, candidate)| *candidate)
+        .collect();
+    let pool = if free.is_empty() {
+        candidates.as_slice()
+    } else {
+        free.as_slice()
+    };
     match reference.filter(|point| finite(*point)) {
-        Some(reference) => nearest(&candidates, reference),
-        None => first(&candidates, target),
+        Some(reference) => nearest(pool, reference),
+        None => first(pool, target),
+    }
+}
+
+/// Both ends dynamic on one target: the nearest pair of distinct
+/// candidates (task P7-49 goal 7); a target with one candidate answers
+/// it twice.
+fn pair_distinct(target: &GlueTarget) -> (Candidate, Candidate) {
+    let candidates = target.candidates();
+    let mut best: Option<(f64, (usize, usize))> = None;
+    for (i, a) in candidates.iter().enumerate() {
+        for (j, b) in candidates.iter().enumerate() {
+            if i == j {
+                continue;
+            }
+            let delta = a.point.sub(b.point);
+            let distance = distance_or_infinite(delta);
+            if best.as_ref().is_none_or(|(best, _)| distance < *best) {
+                best = Some((distance, (i, j)));
+            }
+        }
+    }
+    match best.and_then(|(_, (i, j))| {
+        Some((candidates.get(i).copied()?, candidates.get(j).copied()?))
+    }) {
+        Some(picked) => picked,
+        None => {
+            let only = first(&candidates, target);
+            (only, only)
+        }
     }
 }
 

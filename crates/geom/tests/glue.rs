@@ -216,6 +216,47 @@ fn a_missing_point_row_falls_back_to_dynamic_glue_and_is_reported() {
 }
 
 #[test]
+fn both_ends_on_one_shape_resolve_to_distinct_candidates() {
+    let target = box_target(0.0, 0.0);
+    // Two dynamic ends: the nearest distinct pair, no zero-length loop.
+    let begin = EndSpec::Glued(&target, GlueEnd::Shape);
+    let end = EndSpec::Glued(&target, GlueEnd::Shape);
+    let (begin, end, _) = resolve_ends(&begin, &end);
+    assert_ne!(begin.point, end.point, "distinct candidates");
+
+    // A point-glued end and a dynamic one on the same shape: the
+    // dynamic end takes another candidate.
+    let mut pointed = box_target(0.0, 0.0);
+    pointed.points = vec![
+        (0, Point::new(1.0, 1.0), None),
+        (1, Point::new(2.0, 0.5), None),
+    ];
+    let fixed = EndSpec::Glued(&pointed, GlueEnd::Point(0));
+    let dynamic = EndSpec::Glued(&pointed, GlueEnd::Shape);
+    let (fixed, dynamic, _) = resolve_ends(&fixed, &dynamic);
+    assert_ne!(fixed.point, dynamic.point, "distinct candidates");
+
+    // The route between them has at least two distinct points and no
+    // repeated point.
+    let points = route(
+        begin.point,
+        end.point,
+        &right_angle(begin.exit, end.exit),
+    )
+    .expect("route");
+    let mut distinct: Vec<Point> = Vec::new();
+    for point in &points {
+        if !distinct.contains(point) {
+            distinct.push(*point);
+        }
+    }
+    assert!(distinct.len() >= 2, "two distinct points: {points:?}");
+    for pair in points.windows(2) {
+        assert_ne!(pair[0], pair[1], "no repeated point: {points:?}");
+    }
+}
+
+#[test]
 fn free_ends_stay_on_their_points() {
     let begin = EndSpec::Free(Point::new(1.5, -2.0));
     let end = EndSpec::Free(Point::new(3.0, 4.0));
