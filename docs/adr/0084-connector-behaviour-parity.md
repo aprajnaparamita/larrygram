@@ -1,7 +1,7 @@
 # 0084: Connector behaviour parity: the alpha scope
 
 - Status: accepted (drafted by P7-30; revised by the master after the
-  Opus review, 2026-11-02; amended 2026-11-04 by P7-49)
+  Opus review, 2026-11-02; amended 2026-11-04 by P7-49 and P7-50)
 - Date: 2026-11-02
 - Task: P7-30
 - Amends: ADR 0045 rules 1, 3 and 4
@@ -186,9 +186,13 @@ After an edit, the re-route pass recomputes only:
 A **deleted** target keeps the stored route (amended 2026-11-04,
 P7-49): the delete clears the glue and the ends keep their points
 (rule 2), so nothing moved and no fresh route replaces the stored
-one. A connector the edit itself translated keeps its translated path
-(rule 1); one inside a moved group re-routes, because its ends moved
-in the page even though its rows stand still.
+one. Under a move's scope a connector re-routes **only** when a glued
+end's target and the connector are on different sides of the move:
+the target is in the moved set (or its subtree) and the connector is
+not, or the other way round (amended 2026-11-04, P7-50). A rigid move
+carries a connector and both its targets together, so a stored route
+survives it byte for byte; a connector the edit itself translated
+keeps its translated path (rule 1).
 
 Every other connector keeps its stored geometry, including routes
 Visio drew and segments the user moved (rule 7). The stored geometry

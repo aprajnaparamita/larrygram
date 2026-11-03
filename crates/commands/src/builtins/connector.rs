@@ -18,10 +18,9 @@
 //! - `connector.style` — arg `style` (`"straight"` / `"right_angle"`)
 //!   for the selected shapes/connectors.
 //!
-//! [`reroute_after_edit`] is the one hook the editing commands call after
-//! a move, resize, rotate or delete (and the undo/redo runner after a
-//! step): it drops glue whose target is detached and re-writes every
-//! affected connector path.
+//! [`reroute_after_edit`] is the one hook the editing commands call
+//! after a move, resize, rotate or delete: it drops glue whose target
+//! is detached and re-writes only the affected connector paths.
 
 use larrygram_geom::{
     Candidate, EndSpec, GlueEnd as GlueKind, GlueTarget, Point, Rect, RouteOptions, RouteStyle,
@@ -1696,28 +1695,18 @@ pub(crate) fn rebind_copied_glue(
 enum Scope<'a> {
     /// Every glued connector on the page (`connector.reroute_all`).
     All,
-    /// The shapes one edit changed: the pass re-routes connectors with
-    /// an end glued to one of them (or to a member of a changed group),
-    /// except connectors the edit itself moved (rule 1's translation
-    /// already wrote their path).
+    /// The shapes one edit changed: the pass re-routes connectors
+    /// whose glued end and the connector sit on **different sides** of
+    /// the move — the target is in the moved set (or its subtree) and
+    /// the connector is not, or the other way round (task P7-50 goal
+    /// 2). A rigid move carries a connector and both targets together,
+    /// so its stored route survives it byte for byte.
     Changed(&'a [ShapeId]),
     /// The connectors whose own ends, glue or style the edit changed:
     /// exactly these re-route.
     Forced(&'a [ShapeId]),
 }
 
-/// Recomputes the routes the edit's shapes changed on `page` (ADR 0084
-/// rule 5): connectors with an end glued to one of `changed` (or to a
-/// member of a changed group), and connectors `changed` names itself.
-/// Every other connector keeps its stored geometry rows byte for byte.
-///
-/// The editing commands call this after a move/resize/rotate/delete,
-/// and the undo/redo runner after a step. It is idempotent, not
-/// undoable, and returns the number of connectors whose path it
-/// rewrote. It acts on the active document only. A glue whose target is
-/// detached is dropped with one warning line. A missing page or session
-/// is `Ok(0)`: a re-route pass never fails an edit that already
-/// succeeded.
 /// One undoable record of the rows a re-route rewrote (task P7-49
 /// goal 1): `revert` puts the old rows back byte for byte and `apply`
 /// (redo) the new ones, so one undo restores the shapes and the routes
@@ -1783,10 +1772,10 @@ pub(crate) fn with_routes(step: Box<dyn Edit>, routes: Option<Box<dyn Edit>>) ->
 }
 
 /// The scoped re-route after an editing command that moved, resized,
-/// rotated, flipped or deleted shapes (ADR 0084 rule 5): connectors
-/// with an end glued to one of `changed` (a group's members count with
-/// it). Every other connector keeps its stored geometry rows byte for
-/// byte.
+/// rotated, flipped or deleted shapes (ADR 0084 rule 5, amended
+/// 2026-11-04 for task P7-50 goal 2): connectors whose glued end and
+/// own body sit on different sides of the move. Every other connector
+/// keeps its stored geometry rows byte for byte.
 ///
 /// Returns the snapshot edit the caller folds into its step, `None`
 /// when the pass rewrote nothing. One warning line per dropped glue;
@@ -1883,10 +1872,10 @@ pub(crate) fn reroute_quietly_on(
 /// The re-route pass over one document (ADR 0084 rule 5).
 ///
 /// The candidates are the connectors the page's records name. The pass
-/// recomputes only the ones the scope picks: glued to a changed shape,
-/// or (for [`Scope::Forced`]) named outright. It returns the sheets it
-/// rewrote, around the write, so the caller's undo step can put them
-/// back.
+/// recomputes only the ones the scope picks: on different sides of a
+/// move (rule 5), or (for [`Scope::Forced`]) named outright. It
+/// returns the sheets it rewrote, around the write, so the caller's
+/// undo step can put them back.
 fn reroute_document(
     doc: &mut Document,
     page: PageId,
@@ -1957,12 +1946,15 @@ fn reroute_document(
     Ok((routed, entries))
 }
 
-/// Whether the scope picks one connector (ADR 0084 rule 5): it has an
-/// end glued to a changed shape (a group's members count with it), or
-/// the scope names it outright. A connector in the changed set itself
-/// is skipped (task P7-49 goal 2): its edit already wrote its path
-/// (rule 1's translation), and a move that keeps its path must not be
-/// replaced.
+/// Whether the scope picks one connector (ADR 0084 rule 5, amended
+/// 2026-11-04 for task P7-50 goal 2): under [`Scope::Changed`] a
+/// connector re-routes only when a glued end's target and the
+/// connector are on different sides of the move — the target is in the
+/// moved set (or its subtree) and the connector is not, or the other
+/// way round. A rigid group move carries a connector and both its
+/// targets together, so a stored route survives it byte for byte; a
+/// connector whose own ends, glue or style changed is named outright
+/// by [`Scope::Forced`].
 fn picks(
     scope: Scope<'_>,
     changed_visio: &[i32],
@@ -1973,18 +1965,11 @@ fn picks(
     match scope {
         Scope::All => true,
         Scope::Forced(connectors) => connectors.contains(&connector),
-        Scope::Changed(changed) => {
-            if changed.contains(&connector) {
-                // The edit translated its rows itself (rule 1).
-                return false;
-            }
+        Scope::Changed(_) => {
+            let moved = changed_visio.contains(&connector_visio);
             ends.iter()
                 .flatten()
-                .any(|connect| changed_visio.contains(&connect.to_sheet))
-                // A connector inside a moved group ends elsewhere in
-                // the page even though its rows stand still: its ends
-                // changed, so it re-routes (rule 5, "its own ends").
-                || changed_visio.contains(&connector_visio)
+                .any(|connect| changed_visio.contains(&connect.to_sheet) != moved)
         }
     }
 }
