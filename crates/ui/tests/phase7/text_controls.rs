@@ -2139,3 +2139,51 @@ fn an_empty_new_box_marks_nothing_in_the_title() {
         press_key(&mut rig, egui::Key::Escape);
     }
 }
+
+// ---------------------------------------------------------------------------
+// Item 7 (task P7-48, the review's minor 2): a turned or flipped
+// shape drops the font metrics — and keeps working.
+// ---------------------------------------------------------------------------
+
+/// The editor works over a shape turned 30 degrees (task P7-48 item
+/// 7): the metrics drop (its first baseline is no screen axis' y) but
+/// the edit opens, takes typing and commits.
+#[test]
+fn editing_a_turned_shape_works() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        let shape = {
+            let shell = rig.shell.borrow();
+            rectangle(&shell.app)
+        };
+        {
+            let mut shell = rig.shell.borrow_mut();
+            let session = shell.app.active_document_mut().expect("session");
+            let cell = session
+                .document
+                .shape_mut(shape)
+                .expect("shape")
+                .sheet
+                .cells
+                .iter_mut()
+                .find(|cell| cell.name.as_str() == "Angle")
+                .expect("the Angle cell");
+            cell.value = Some(CellValue::Number(30.0f64.to_radians()));
+        }
+        rig.run();
+        rig.run();
+        let pos = screen(&rig, SHAPE.0, SHAPE.1);
+        double_click_at(&mut rig, pos);
+        assert!(
+            editing(&mut rig),
+            "{kind:?}: the edit opens on the turned shape"
+        );
+        type_into_editor(&mut rig, "Turned");
+        press_key(&mut rig, egui::Key::Escape);
+        assert_eq!(
+            shape_text(&rig, shape).as_deref(),
+            Some("Turned"),
+            "{kind:?}: the text commits on the turned shape"
+        );
+    }
+}

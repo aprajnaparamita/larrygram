@@ -580,8 +580,9 @@ pub fn editor_rect(
     // the commit test, the fill and the wrap width follow the block,
     // not the laid-out glyphs); the font size and the first baseline
     // come from the drawn first glyph (task P7-41 item 9). The metrics
-    // drop for rotated text (a tilted first baseline is no axis' y;
-    // egui text edits are axis-aligned).
+    // drop when the text or the shape is turned or flipped (task P7-48
+    // item 7): a tilted or mirrored first baseline is no axis' y, and
+    // egui text edits are axis-aligned.
     let page = node
         .text
         .as_ref()
@@ -590,7 +591,7 @@ pub fn editor_rect(
     let font = node
         .text
         .as_ref()
-        .filter(|text| text.layout.rotation.radians() == 0.0)
+        .filter(|text| text.layout.rotation.radians() == 0.0 && axis_aligned(transform))
         .and_then(|text| drawn_font(text, transform))
         .and_then(|(size_pt, baseline_page_y, family)| {
             let size_pt = (size_pt * k / 72.0) as f32;
@@ -649,6 +650,20 @@ pub fn pending_editor_rect(
         rect: egui::Rect::from_min_max(min, max),
         font: None,
     })
+}
+
+/// Whether the shape's transform is axis-aligned and unflipped (task
+/// P7-48 item 7): no rotation, skew or mirror, only a positive scale
+/// and a translation. Only then does the drawn first baseline keep a
+/// screen axis' direction.
+fn axis_aligned(transform: Transform) -> bool {
+    /// The largest off-diagonal count and the smallest scale that
+    /// still count as axis-aligned and unflipped.
+    const EPS: f64 = 1.0e-9;
+    transform.m12.abs() <= EPS
+        && transform.m21.abs() <= EPS
+        && transform.m11 > EPS
+        && transform.m22 > EPS
 }
 
 /// The drawn text's font metrics (task P7-41 item 9): the first
@@ -1183,7 +1198,7 @@ mod tests {
         let mut rotated = font_node();
         rotated.layout.rotation = Angle::from_radians(0.1);
         node.text = Some(rotated);
-        scene.nodes = vec![Node::Shape(Box::new(node))];
+        scene.nodes = vec![Node::Shape(Box::new(node.clone()))];
         let overlay = editor_rect(
             &scene,
             ShapeId { index: 3 },
@@ -1194,6 +1209,29 @@ mod tests {
         .expect("rect");
         assert!(overlay.font.is_none(), "{overlay:?}");
         assert!(overlay.rect.width() > 0.0, "{overlay:?}");
+
+        // Task P7-48 item 7: a shape turned 30 degrees or flipped
+        // keeps its box and drops the metrics too — its first baseline
+        // is no screen axis' y.
+        for transform in [
+            Transform::rotate(Angle::from_degrees(30.0)),
+            Transform::scale(1.0, -1.0),
+            Transform::rotate(Angle::from_degrees(90.0)),
+        ] {
+            node.transform = transform;
+            node.text = Some(font_node());
+            scene.nodes = vec![Node::Shape(Box::new(node.clone()))];
+            let overlay = editor_rect(
+                &scene,
+                ShapeId { index: 3 },
+                viewport,
+                Point::new(0.0, 0.0),
+                1.0,
+            )
+            .expect("rect");
+            assert!(overlay.font.is_none(), "{transform:?}: {overlay:?}");
+            assert!(overlay.rect.width() > 0.0, "{transform:?}");
+        }
     }
 
     #[test]
