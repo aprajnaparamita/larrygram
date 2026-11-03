@@ -1250,7 +1250,7 @@ pub(super) fn run_delete(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome,
     }
     edit.apply(ctx)?;
     if let Some(page) = page {
-        reroute_quietly_on(ctx, page);
+        reroute_quietly_on(ctx, page, &targets);
     }
 
     // The detached shapes (and anything inside them) leave the selection.

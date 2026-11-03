@@ -152,9 +152,9 @@ pub(super) fn run_insert_shape(
     );
     let edit = staged?;
     if glue_to.is_some() {
-        // Glue-on-drop: "any glued connector endpoints on the page
-        // re-route" (ADR 0046).
-        super::connector::reroute_quietly(ctx);
+        // Glue-on-drop: the connectors glued to the drop's shapes
+        // re-route (ADR 0046, scoped as ADR 0084 rule 5).
+        super::connector::reroute_quietly(ctx, &[shape]);
     }
     select_new(ctx, session, page, shape)?;
     ctx.touch_session(session);

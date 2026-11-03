@@ -191,10 +191,10 @@ fn the_facing_case_zigs_once_between_the_two_stubs() {
         vec![
             Point::new(2.0, 0.5),
             Point::new(2.25, 0.5),
-            Point::new(3.75, 0.5),
-            Point::new(3.75, 2.5),
+            Point::new(2.25, 2.5),
             Point::new(4.0, 2.5),
-        ]
+        ],
+        "the turn comes right after the begin stub"
     );
     assert!(
         !overlaps_side(&points, (Point::new(2.0, 0.0), Point::new(2.0, 1.0))),
@@ -219,9 +219,7 @@ fn the_perpendicular_case_turns_once() {
         points,
         vec![
             Point::new(2.0, 0.5),
-            Point::new(2.25, 0.5),
             Point::new(5.0, 0.5),
-            Point::new(5.0, 1.75),
             Point::new(5.0, 2.0),
         ]
     );
@@ -246,16 +244,42 @@ fn the_same_side_case_goes_around_and_never_along_the_edge() {
         points,
         vec![
             Point::new(2.0, 0.5),
-            Point::new(2.25, 0.5),
             Point::new(2.5, 0.5),
             Point::new(2.5, 2.5),
-            Point::new(2.25, 2.5),
             Point::new(2.0, 2.5),
         ],
         "the U runs back beyond both stubs"
     );
     assert!(!overlaps_side(&points, (Point::new(2.0, 0.0), Point::new(2.0, 1.0))));
     assert!(!overlaps_side(&points, (Point::new(2.0, 2.0), Point::new(2.0, 3.0))));
+}
+
+#[test]
+fn two_exits_pointing_away_wrap_around() {
+    // A's bottom-left corner at (0, 0) leaving leftward, C's top-right
+    // corner at (4, 3) leaving rightward.
+    let points = route(
+        Point::new(0.0, 0.0),
+        Point::new(4.0, 3.0),
+        &right_angle(Some(Point::new(-1.0, 0.0)), Some(Point::new(1.0, 0.0))),
+    )
+    .expect("route");
+    assert_eq!(
+        points,
+        vec![
+            Point::new(0.0, 0.0),
+            Point::new(-0.25, 0.0),
+            Point::new(-0.25, -0.25),
+            Point::new(4.5, -0.25),
+            Point::new(4.5, 3.0),
+            Point::new(4.0, 3.0),
+        ],
+        "out of the begin side, around, and back into the end side"
+    );
+    for pair in points.windows(2) {
+        assert_ne!(pair[0], pair[1], "no repeated point: {points:?}");
+    }
+    assert!(!overlaps_side(&points, (Point::new(0.0, -1.0), Point::new(2.0, -1.0))));
 }
 
 #[test]

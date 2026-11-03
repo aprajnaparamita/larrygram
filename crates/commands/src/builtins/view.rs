@@ -35,9 +35,16 @@ pub(super) fn run_undo(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, C
     let page = ctx
         .active_document()
         .and_then(|session| session.active_page);
-    match with_undo(ctx, |stack, ctx| stack.undo(ctx))? {
+    let (label, changed) = with_undo(ctx, |stack, ctx| {
+        let label = stack.undo(ctx)?;
+        // The re-route hook scopes after the step with the shapes it
+        // changed (ADR 0084 rule 5): one undo restores the shapes and
+        // the routes together.
+        Ok((label, stack.undone_step_shapes()))
+    })?;
+    match label {
         Some(label) => {
-            reroute_after_step(ctx, page);
+            reroute_after_step(ctx, page, &changed);
             Ok(outcome(format!("Undo {label}"), Vec::new()))
         }
         None => Ok(outcome("Nothing to undo", Vec::new())),
@@ -49,19 +56,28 @@ pub(super) fn run_redo(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, C
     let page = ctx
         .active_document()
         .and_then(|session| session.active_page);
-    match with_undo(ctx, |stack, ctx| stack.redo(ctx))? {
+    let (label, changed) = with_undo(ctx, |stack, ctx| {
+        let label = stack.redo(ctx)?;
+        Ok((label, stack.redone_step_shapes()))
+    })?;
+    match label {
         Some(label) => {
-            reroute_after_step(ctx, page);
+            reroute_after_step(ctx, page, &changed);
             Ok(outcome(format!("Redo {label}"), Vec::new()))
         }
         None => Ok(outcome("Nothing to redo", Vec::new())),
     }
 }
 
-/// Re-routes the glued connectors after an undo or redo step (ADR 0045).
-fn reroute_after_step(ctx: &mut AppCtx, page: Option<larrygram_model::PageId>) {
+/// Re-routes the connectors the undone or redone step's shapes affect
+/// (ADR 0084 rule 5).
+fn reroute_after_step(
+    ctx: &mut AppCtx,
+    page: Option<larrygram_model::PageId>,
+    changed: &[larrygram_model::ShapeId],
+) {
     if let Some(page) = page {
-        reroute_quietly_on(ctx, page);
+        reroute_quietly_on(ctx, page, changed);
     }
 }
 
@@ -76,10 +92,10 @@ fn reroute_after_step(ctx: &mut AppCtx, page: Option<larrygram_model::PageId>) {
 /// [`SessionId`](crate::SessionId), even when the step opens or closes
 /// documents and the index moves (P4-15 review minor 3). When the step
 /// closed its own session, the stack dies with it.
-fn with_undo(
+fn with_undo<T>(
     ctx: &mut AppCtx,
-    step: fn(&mut crate::undo::UndoStack, &mut AppCtx) -> Result<Option<String>, CommandError>,
-) -> Result<Option<String>, CommandError> {
+    step: impl FnOnce(&mut crate::undo::UndoStack, &mut AppCtx) -> Result<T, CommandError>,
+) -> Result<T, CommandError> {
     let Some(index) = ctx.active else {
         return Err(no_document());
     };

@@ -93,9 +93,39 @@ pub fn route(start: Point, end: Point, options: &RouteOptions) -> Result<Vec<Poi
             if begin_exit.is_none() && end_exit.is_none() {
                 Ok(elbow(start, end))
             } else {
-                Ok(right_angle_with_exits(start, end, begin_exit, end_exit))
+                let mut points = right_angle_with_exits(start, end, begin_exit, end_exit);
+                collapse_collinear(&mut points);
+                Ok(points)
             }
         }
+    }
+}
+
+/// Drops interior points that only continue the previous direction, so
+/// a straight run stays `start`, `end` and the stub points remain only
+/// where the route turns.
+fn collapse_collinear(points: &mut Vec<Point>) {
+    if points.len() < 3 {
+        return;
+    }
+    let mut kept: Vec<Point> = Vec::with_capacity(points.len());
+    for (index, point) in points.iter().enumerate() {
+        let turn = match (index.checked_sub(1).and_then(|i| points.get(i)), points.get(index + 1)) {
+            (Some(previous), Some(next)) => {
+                let in_leg = point.sub(*previous);
+                let out_leg = next.sub(*point);
+                let cross = in_leg.x * out_leg.y - in_leg.y * out_leg.x;
+                let dot = in_leg.x * out_leg.x + in_leg.y * out_leg.y;
+                cross != 0.0 || dot <= 0.0
+            }
+            _ => true,
+        };
+        if turn {
+            kept.push(*point);
+        }
+    }
+    if kept.len() >= 2 {
+        *points = kept;
     }
 }
 
@@ -181,7 +211,9 @@ fn exit_point(point: Point, exit: Option<Point>, stub: f64) -> Point {
 /// The axis-aligned corners that join `out` to `back`, honouring the
 /// exits (ADR 0084 rule 4): each side leaves along its own exit's axis,
 /// facing exits make the Z, same-side exits make the U (with the return
-/// leg pushed beyond both stubs), and free ends take the plain elbow.
+/// leg pushed beyond both stubs), and two exits pointing away from each
+/// other wrap around. The route never runs back along a shape's own
+/// edge. Free ends take the plain elbow.
 fn join(out: Point, back: Point, begin_exit: Option<Point>, end_exit: Option<Point>) -> Vec<Point> {
     const PUSH: f64 = 0.25;
     let begin_axis = begin_exit.map(axis);
@@ -190,6 +222,14 @@ fn join(out: Point, back: Point, begin_exit: Option<Point>, end_exit: Option<Poi
         (Some(a), Some(b)) if a == b => {
             let begin_sign = axis_sign(begin_exit.unwrap_or(Point::new(0.0, 0.0)), a);
             let end_sign = axis_sign(end_exit.unwrap_or(Point::new(0.0, 0.0)), a);
+            let gap = axis_value(back, a) - axis_value(out, a);
+            let gap_sign = if gap > 0.0 {
+                1.0
+            } else if gap < 0.0 {
+                -1.0
+            } else {
+                0.0
+            };
             if begin_sign == end_sign {
                 // The same side: out, across and back, with the return
                 // leg beyond both stubs (never along the shape's edge).
@@ -203,9 +243,26 @@ fn join(out: Point, back: Point, begin_exit: Option<Point>, end_exit: Option<Poi
                 let mut corners = vec![first];
                 push_unique(&mut corners, second);
                 corners
+            } else if begin_sign == gap_sign || gap_sign == 0.0 {
+                // Facing: one turn right after the begin stub, so no
+                // long leg runs along the begin shape's own side.
+                vec![cross(out, back, other(a))]
             } else {
-                // Facing: one turn on the begin side's axis.
-                vec![cross(out, back, a)]
+                // Both exits point away from the gap: wrap around,
+                // out of the begin side and back into the end side,
+                // clear of both shapes.
+                let wrap = shorter_side(out, back, other(a));
+                let return_at = if end_sign > 0.0 {
+                    axis_value(out, a).max(axis_value(back, a)) + PUSH
+                } else {
+                    axis_value(out, a).min(axis_value(back, a)) - PUSH
+                };
+                let middle = with_axis(with_axis(out, a, return_at), other(a), wrap);
+                vec![
+                    with_axis(out, other(a), wrap),
+                    middle,
+                    with_axis(back, a, return_at),
+                ]
             }
         }
         (Some(a), None) => vec![cross(out, back, a)],
@@ -221,6 +278,21 @@ fn join(out: Point, back: Point, begin_exit: Option<Point>, end_exit: Option<Poi
                 Point::new(out.x, back.y)
             }]
         }
+    }
+}
+
+/// The coordinate on `axis` that clears both points by the push
+/// distance on the shorter side (a tie goes to the lower side).
+fn shorter_side(out: Point, back: Point, axis: Axis) -> f64 {
+    const PUSH: f64 = 0.25;
+    let low = axis_value(out, axis).min(axis_value(back, axis)) - PUSH;
+    let high = axis_value(out, axis).max(axis_value(back, axis)) + PUSH;
+    let travel_low = (axis_value(out, axis) - low).abs() + (axis_value(back, axis) - low).abs();
+    let travel_high = (axis_value(out, axis) - high).abs() + (axis_value(back, axis) - high).abs();
+    if travel_high < travel_low {
+        high
+    } else {
+        low
     }
 }
 

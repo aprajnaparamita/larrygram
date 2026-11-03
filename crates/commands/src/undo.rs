@@ -10,6 +10,7 @@
 use crate::app::AppCtx;
 use crate::edit::CompositeEdit;
 use crate::error::CommandError;
+use larrygram_model::{ShapeId, SheetRef};
 use larrygram_shapesheet::CellAddress;
 
 /// Runs `step` with the undo-recording gate closed (ADR 0040 rule 2).
@@ -299,6 +300,39 @@ impl UndoStack {
         run_suspended(ctx, |ctx| edit.apply(ctx))?;
         self.cursor = self.cursor.saturating_add(1);
         Ok(Some(edit.label().to_owned()))
+    }
+
+    /// The shapes whose cells the step an [`UndoStack::undo`] just
+    /// reverted writes: the entry the cursor points at afterwards (the
+    /// step [`UndoStack::redo`] re-applies next).
+    ///
+    /// The re-route hook scopes its pass after an undo with them (task
+    /// P7-32, ADR 0084 rule 5: "the shapes the edit changed").
+    pub fn undone_step_shapes(&self) -> Vec<ShapeId> {
+        self.entry_shapes(self.cursor)
+    }
+
+    /// The shapes whose cells the step an [`UndoStack::redo`] just
+    /// re-applied writes: the entry before the cursor afterwards (the
+    /// step [`UndoStack::undo`] reverts next).
+    pub fn redone_step_shapes(&self) -> Vec<ShapeId> {
+        self.entry_shapes(self.cursor.saturating_sub(1))
+    }
+
+    /// The distinct shapes named by the entry `index`'s dirty cells.
+    fn entry_shapes(&self, index: usize) -> Vec<ShapeId> {
+        let Some(edit) = self.entries.get(index) else {
+            return Vec::new();
+        };
+        let mut shapes: Vec<ShapeId> = Vec::new();
+        for cell in edit.dirty_cells() {
+            if let SheetRef::Shape(shape) = cell.sheet
+                && !shapes.contains(&shape)
+            {
+                shapes.push(shape);
+            }
+        }
+        shapes
     }
 }
 

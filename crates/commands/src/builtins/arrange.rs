@@ -266,7 +266,7 @@ fn align(ctx: &mut AppCtx, align: Align) -> Result<Outcome, CommandError> {
         }
     }
     edit.apply(ctx)?;
-    reroute_quietly(ctx);
+    reroute_quietly(ctx, &changed_ids(&targets));
     Ok(edit_outcome(
         align.label(targets.len()),
         warnings,
@@ -363,8 +363,14 @@ fn distribute(ctx: &mut AppCtx, axis: Axis) -> Result<Outcome, CommandError> {
         }
     }
     edit.apply(ctx)?;
-    reroute_quietly(ctx);
+    reroute_quietly(ctx, &changed_ids(&targets));
     Ok(edit_outcome(label, warnings, Box::new(edit)))
+}
+
+/// The arena ids of the frames an align or distribute run moved (the
+/// scoped re-route's "shapes the edit changed", ADR 0084 rule 5).
+fn changed_ids(targets: &[Target]) -> Vec<ShapeId> {
+    targets.iter().map(|target| target.id).collect()
 }
 
 /// The selected shapes with their frames and pins, and the page they are
@@ -516,7 +522,7 @@ fn run_group(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandErro
     let key = page_key(doc, page)?;
     let mut edit = GroupEdit::new(session, key, targets.clone());
     edit.apply(ctx)?;
-    reroute_quietly(ctx);
+    reroute_quietly(ctx, &targets);
     let group = edit.group;
     if let Some(group) = group {
         select(ctx, session, page, &[group]);
@@ -819,7 +825,7 @@ fn run_ungroup(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandEr
     if edit.is_empty() {
         return Err(CommandError::failed("no selected group to ungroup"));
     }
-    reroute_quietly(ctx);
+    reroute_quietly(ctx, &children);
     select(ctx, session, page, &children);
     Ok(edit_outcome(
         count_label("Ungroup", edit.len()),
@@ -1219,7 +1225,7 @@ fn rotate(ctx: &mut AppCtx, delta: f64, label: &str) -> Result<Outcome, CommandE
     // The glued connectors follow the rotated shape (the same quiet
     // re-route the moves do, task P7-21): the post state is what a
     // re-route on undo or redo recomputes (ADR 0045 rule 3).
-    reroute_quietly(ctx);
+    reroute_quietly(ctx, &targets);
     Ok(edit_outcome(label, warnings, Box::new(edit)))
 }
 
@@ -1273,7 +1279,7 @@ fn flip(ctx: &mut AppCtx, cell: &'static str, label: &str) -> Result<Outcome, Co
     // A glued connector derives its end through the shape's transform,
     // flips included: re-route like the moves do (task P7-21), so the
     // post state is what a re-route on undo or redo recomputes.
-    reroute_quietly(ctx);
+    reroute_quietly(ctx, &targets);
     Ok(edit_outcome(label, warnings, Box::new(edit)))
 }
 
@@ -1395,7 +1401,7 @@ fn distribute_centres(ctx: &mut AppCtx, axis: Axis) -> Result<Outcome, CommandEr
         }
     }
     edit.apply(ctx)?;
-    reroute_quietly(ctx);
+    reroute_quietly(ctx, &changed_ids(&targets));
     Ok(edit_outcome(label, warnings, Box::new(edit)))
 }
 

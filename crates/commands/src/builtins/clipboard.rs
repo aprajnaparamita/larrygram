@@ -157,7 +157,7 @@ fn paste_run(ctx: &mut AppCtx, inv: &Invocation, in_place: bool) -> Result<Outco
         ctx.clipboard.pastes = ctx.clipboard.pastes.saturating_add(1);
     }
     select_shapes(ctx, page, &roots);
-    super::connector::reroute_quietly(ctx);
+    super::connector::reroute_quietly(ctx, &roots);
     let message = if in_place {
         format!("Pasted {count} shapes in place")
     } else {
@@ -186,7 +186,7 @@ pub(super) fn run_duplicate(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outco
     )?;
     warnings.extend(paste_warnings);
     select_shapes(ctx, page, &roots);
-    super::connector::reroute_quietly(ctx);
+    super::connector::reroute_quietly(ctx, &roots);
     Ok(edit_outcome(
         format!("Duplicated {count} shapes"),
         warnings,
