@@ -1,27 +1,38 @@
-//! The macOS app-menu Quit (task P7-42).
+//! The macOS app-menu Quit (task P7-42, review M1 of task P7-46).
 //!
 //! Quit from the application menu — and its Cmd+Q key equivalent —
 //! calls `terminate:`, which asks the delegate
 //! `applicationShouldTerminate:` and, with no such method, terminates
-//! the process at once: no unsaved-changes prompt, and no settings
-//! flush (eframe persists when the event loop ends, which a direct
-//! termination skips). winit 0.30 (under eframe 0.37) implements no
-//! `applicationShouldTerminate:`, so the app must.
+//! the process at once: no unsaved-changes prompt. winit 0.30 (under
+//! eframe 0.37) implements no `applicationShouldTerminate:`, so the
+//! app must.
+//!
+//! A direct termination is fine when nothing is unsaved — the process
+//! ends cleanly and winit's `willTerminate` reaches eframe's `exiting`,
+//! which persists the settings. The hook exists for the prompt: when a
+//! drawing has unsaved work, the walk must ask before the app goes
+//! away. So the hook answers
+//!
+//! - [`NSApplicationTerminateReply::TerminateNow`] when no drawing is
+//!   changed (a logout, restart or shutdown goes straight through),
+//! - [`NSApplicationTerminateReply::TerminateLater`] when one is: the
+//!   UI thread runs the app-menu Quit as an `app.quit` dispatch
+//!   (`Source::Menu`), the same unsaved-changes walk as `file.exit`,
+//!   the Cmd+Q / Ctrl+Q chord and the window's close button, and the
+//!   walk answers the pending termination with
+//!   `replyToApplicationShouldTerminate:` — YES when it finishes, NO
+//!   when the user cancels.
+//!
+//! The "any changed drawing" state the hook reads is published by the
+//! UI thread ([`set_changed`]), updated when it changes.
 //!
 //! The hook is the same `NSObject` method injection as the
 //! open-documents hook (`macos_open_urls`, ADR 0074), for the same
 //! reason: winit asserts it still owns the application delegate slot,
 //! and taking that slot aborts the process (the task R8 crash). The
 //! method goes on `NSObject`, the root of the delegate's class
-//! hierarchy, and AppKit calls it like any delegate method.
-//!
-//! The hook refuses the direct termination (`NSTerminateCancel`) and
-//! queues a quit request for the UI thread, which runs it as an
-//! `app.quit` dispatch (`Source::Menu`). That is the same path as
-//! `file.exit`, the Cmd+Q / Ctrl+Q chord and the window's close
-//! button: the unsaved-changes walk of task P7-42 asks about each
-//! changed drawing and ends in the viewport close. Never a silent
-//! discard (AGENTS.md section 6).
+//! hierarchy, and AppKit calls it like any delegate method. Never a
+//! silent discard of unsaved work (AGENTS.md section 6).
 
 #![allow(unsafe_code)] // ADR 0074: one Objective-C method injection.
 
@@ -30,24 +41,28 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use objc2::ClassType;
 use objc2::MainThreadMarker;
-use objc2::encode::Encoding;
+use objc2::encode::{Encode, Encoding};
 use objc2::runtime::{AnyClass, AnyObject, Imp, Sel};
 use objc2::{ffi, sel};
-use objc2_app_kit::NSApplication;
+use objc2_app_kit::{NSApplication, NSApplicationTerminateReply};
 use objc2_foundation::NSObject;
 
 use crate::AppError;
-
-/// `NSApplicationTerminateReply::NSTerminateCancel`: do not terminate
-/// now; the queued quit walk closes the window when every changed
-/// drawing is resolved (task P7-42).
-const TERMINATE_CANCEL: isize = 0;
 
 /// Whether [`install`] already ran (a second call is a no-op).
 static INSTALLED: AtomicBool = AtomicBool::new(false);
 
 /// Whether an app-menu Quit is waiting for the UI thread (task P7-42).
 static QUIT_REQUESTED: AtomicBool = AtomicBool::new(false);
+
+/// Whether any drawing has unsaved changes (task P7-46 goal 1): the
+/// UI thread publishes it, the hook's answer reads it.
+static CHANGED: AtomicBool = AtomicBool::new(false);
+
+/// Whether a termination is waiting for the walk's answer (task
+/// P7-46 goal 1): the hook answered `NSTerminateLater`, and the walk
+/// must call [`reply_termination`] with its verdict.
+static TERMINATE_LATER: AtomicBool = AtomicBool::new(false);
 
 /// The hook that wakes the UI when a quit arrives (task P7-42): an
 /// idle window runs no frame until something requests a repaint. The
@@ -59,6 +74,13 @@ static WAKE: Mutex<Option<Box<dyn Fn() + Send + Sync>>> = Mutex::new(None);
 /// section 6): a poisoned mutex is recovered.
 pub(crate) fn set_wake(hook: Box<dyn Fn() + Send + Sync>) {
     *WAKE.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(hook);
+}
+
+/// Publishes whether any drawing has unsaved changes (task P7-46
+/// goal 1). The UI thread calls it when the answer changes; the hook
+/// reads it on the main thread (which is the UI thread).
+pub(crate) fn set_changed(changed: bool) {
+    CHANGED.store(changed, Ordering::SeqCst);
 }
 
 /// Takes the queued app-menu Quit, leaving the queue empty (task
@@ -78,16 +100,36 @@ pub(crate) fn queue_quit() {
     }
 }
 
+/// Answers a termination the hook deferred (task P7-46 goal 1): the
+/// unsaved-changes walk calls it with YES when every changed drawing
+/// is resolved and NO when the user cancels. Without a deferred
+/// termination this does nothing.
+pub(crate) fn reply_termination(should_terminate: bool) {
+    if !TERMINATE_LATER.swap(false, Ordering::SeqCst) {
+        return;
+    }
+    // SAFETY: the reply is the documented half of an
+    // `NSTerminateLater` answer, sent on the main thread (the UI
+    // thread, which is the AppKit main thread) while AppKit waits for
+    // it (the objc2-app-kit contract of
+    // `replyToApplicationShouldTerminate:`).
+    if let Some(mtm) = MainThreadMarker::new() {
+        let app = NSApplication::sharedApplication(mtm);
+        app.replyToApplicationShouldTerminate(should_terminate);
+    }
+}
+
 /// The Objective-C callback type of `applicationShouldTerminate:`:
 /// `NSInteger (id, SEL, NSApplication *)`.
 type ShouldTerminate = unsafe extern "C" fn(&AnyObject, Sel, Option<&NSApplication>) -> isize;
 
 /// The `@encode` spelling of [`ShouldTerminate`], as `class_addMethod`
-/// wants it.
+/// wants it. The return is an `NSInteger`, spelled as the `isize`
+/// encoding (task P7-46 goal 4).
 fn should_terminate_types() -> String {
     format!(
         "{}{}{}{}",
-        Encoding::Long,
+        <isize as Encode>::ENCODING,
         Encoding::Object,
         Encoding::Sel,
         Encoding::Object
@@ -95,21 +137,28 @@ fn should_terminate_types() -> String {
 }
 
 /// The Objective-C callback for `applicationShouldTerminate:` (task
-/// P7-42): queue the quit for the UI thread and refuse the direct
-/// termination, so the app keeps running until the unsaved-changes
-/// walk closes the window (or the user cancels).
+/// P7-42, review M1 of task P7-46): with no changed drawing it lets
+/// the termination through (`NSTerminateNow`), with one it queues the
+/// quit walk and defers (`NSTerminateLater`), so the walk can answer
+/// with [`reply_termination`].
 ///
 /// This crosses into AppKit's calling convention, so it must not
 /// unwind: the body runs inside [`guard`], and a failure answers
-/// `NSTerminateCancel` (never a silent termination).
+/// `NSTerminateCancel` (never a silent termination with unsaved work).
 unsafe extern "C" fn should_terminate(
     _this: &AnyObject,
     _cmd: Sel,
     _application: Option<&NSApplication>,
 ) -> isize {
     guard(|| {
+        if !CHANGED.load(Ordering::SeqCst) {
+            // Nothing to save: a logout, restart or shutdown goes
+            // through (review M1).
+            return NSApplicationTerminateReply::TerminateNow.0 as isize;
+        }
+        TERMINATE_LATER.store(true, Ordering::SeqCst);
         queue_quit();
-        TERMINATE_CANCEL
+        NSApplicationTerminateReply::TerminateLater.0 as isize
     })
 }
 
@@ -122,7 +171,7 @@ fn guard(body: impl FnOnce() -> isize) -> isize {
         Ok(value) => value,
         Err(_) => {
             eprintln!("warning: quit: the should-terminate callback failed");
-            TERMINATE_CANCEL
+            NSApplicationTerminateReply::TerminateCancel.0 as isize
         }
     }
 }
@@ -209,6 +258,59 @@ fn install_inner() -> Result<(), AppError> {
     add_hook(NSObject::class())
 }
 
+/// Checks that the class AppKit sends `applicationShouldTerminate:` to
+/// resolves the selector to **our** implementation (task P7-46 goal
+/// 3).
+///
+/// The hook lives on `NSObject`, the root of the delegate's hierarchy,
+/// so the application delegate (winit's `WinitApplicationDelegate`)
+/// reaches it by inheritance — unless that class ever starts defining
+/// the selector itself, in which case its implementation is the one
+/// AppKit calls and the app-menu Quit would skip the unsaved-changes
+/// prompt. [`verify_delegate_hook`] runs the check against the live
+/// application delegate; the app calls it once on its first frame and
+/// reports a failure on the status line (AGENTS.md section 6: the app
+/// never crashes on it).
+pub(crate) fn hook_is_reachable(delegate_class: &AnyClass) -> Result<(), AppError> {
+    let selector = sel!(applicationShouldTerminate:);
+    match delegate_class.instance_method(selector) {
+        Some(method) if std::ptr::fn_addr_eq(method.implementation(), should_terminate_imp()) => {
+            Ok(())
+        }
+        Some(_) => Err(AppError::new(
+            "quit: the application delegate answers applicationShouldTerminate: itself; \
+             the app-menu Quit would skip the unsaved-changes prompt",
+        )),
+        None => Err(AppError::new(
+            "quit: the application delegate does not reach the should-terminate hook",
+        )),
+    }
+}
+
+/// [`hook_is_reachable`] against the live application delegate (task
+/// P7-46 goal 3). `None` when there is no delegate yet; a failure is
+/// the message the app reports on its status line.
+pub(crate) fn verify_delegate_hook() -> Option<Result<(), AppError>> {
+    let mtm = MainThreadMarker::new()?;
+    let app = NSApplication::sharedApplication(mtm);
+    let delegate = app.delegate()?;
+    // The delegate's class, the plain Objective-C `class` message.
+    let class: &AnyClass = unsafe { objc2::msg_send![&*delegate, class] };
+    Some(hook_is_reachable(class))
+}
+
+/// One lock for every test that touches this module's globals
+/// (`QUIT_REQUESTED`, `CHANGED`, `TERMINATE_LATER`, `WAKE`): they run
+/// one at a time (task P7-46 goal 3). The app's own tests take it too
+/// when they queue a quit.
+#[cfg(test)]
+pub(crate) fn test_serial() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::OnceLock;
@@ -217,6 +319,11 @@ mod tests {
     use objc2::msg_send;
     use objc2::rc::Retained;
     use objc2::runtime::ClassBuilder;
+
+        /// The serial lock of the tests that touch the module's globals.
+    fn serial() -> std::sync::MutexGuard<'static, ()> {
+        test_serial()
+    }
 
     /// A stand-in for the application delegate's class: the hook
     /// target of the tests (registered once per process).
@@ -229,8 +336,18 @@ mod tests {
         })
     }
 
+    /// Sends `applicationShouldTerminate:` to `object` through the
+    /// Objective-C runtime (task P7-46 goal 3) and returns the reply.
+    fn send_should_terminate(object: &AnyObject) -> isize {
+        // SAFETY: the hook is installed on the object's class with the
+        // `applicationShouldTerminate:` signature, and the message
+        // takes no arguments (the test installs it first).
+        unsafe { msg_send![object, applicationShouldTerminate: Option::<&NSApplication>::None] }
+    }
+
     #[test]
     fn the_hook_adds_the_selector_with_the_right_signature() {
+        let _serial = serial();
         let class = target_class();
         add_hook(class).expect("the hook installs");
         let method = class
@@ -250,7 +367,7 @@ mod tests {
             .collect();
         assert_eq!(
             method.return_type().to_string_lossy(),
-            "l",
+            <isize as Encode>::ENCODING.to_string(),
             "the callback answers an NSInteger"
         );
         assert_eq!(
@@ -262,35 +379,172 @@ mod tests {
         add_hook(class).expect("the second install is a no-op");
     }
 
+    /// Task P7-46 goal 3: the hook answers both ways through the
+    /// Objective-C runtime — `NSTerminateNow` with no changed drawing
+    /// (a logout goes through, review M1) and `NSTerminateLater` with
+    /// one (the walk answers).
     #[test]
-    fn the_hook_queues_the_quit_and_refuses_the_termination() {
+    fn the_hook_answers_now_without_unsaved_work_and_later_with_it() {
+        let _serial = serial();
         let class = target_class();
         add_hook(class).expect("the hook installs");
         let object: Retained<AnyObject> = unsafe { msg_send![class, new] };
         take_quit();
+        TERMINATE_LATER.store(false, Ordering::SeqCst);
+
+        // Nothing changed: the termination goes through at once.
+        set_changed(false);
+        let answer = send_should_terminate(&object);
+        assert_eq!(
+            answer,
+            NSApplicationTerminateReply::TerminateNow.0 as isize,
+            "no changed drawing: the logout, restart or shutdown continues"
+        );
+        assert!(!take_quit(), "no walk is queued");
+        assert!(
+            !TERMINATE_LATER.load(Ordering::SeqCst),
+            "nothing waits for an answer"
+        );
+
+        // One changed drawing: the walk is queued and the termination
+        // waits for its answer.
+        set_changed(true);
         let woke = std::sync::Arc::new(AtomicBool::new(false));
         let flag = woke.clone();
         set_wake(Box::new(move || {
             flag.store(true, Ordering::SeqCst);
         }));
-        let answer = unsafe { should_terminate(&object, sel!(applicationShouldTerminate:), None) };
+        let answer = send_should_terminate(&object);
         assert_eq!(
-            answer, TERMINATE_CANCEL,
-            "the direct termination is refused"
+            answer,
+            NSApplicationTerminateReply::TerminateLater.0 as isize,
+            "a changed drawing defers the termination to the walk"
         );
         assert!(take_quit(), "the quit is queued for the UI thread");
         assert!(!take_quit(), "the queue drains once");
         assert!(woke.load(Ordering::SeqCst), "the UI is woken");
+        assert!(
+            TERMINATE_LATER.load(Ordering::SeqCst),
+            "the walk owes AppKit an answer"
+        );
+
+        // The walk's answer clears the debt (AppKit side effects
+        // cannot run in the harness; the state is what the test can
+        // pin).
+        reply_termination(false);
+        assert!(
+            !TERMINATE_LATER.load(Ordering::SeqCst),
+            "the walk answered"
+        );
+        reply_termination(true);
     }
 
+    /// Task P7-46 goal 3: `install` checks the main thread and the
+    /// method lands on `NSObject` (the class the delegate inherits
+    /// from). A spawned thread is never the main thread, so the test
+    /// takes the error path; the main-thread body is `add_hook` on the
+    /// root class, which the other half pins.
     #[test]
-    fn the_callback_never_changes_the_class_of_its_target() {
-        // The task R8 regression rule (ADR 0074): the hook adds a
-        // method only, never a delegate swap.
-        let class = target_class();
-        let object: Retained<AnyObject> = unsafe { msg_send![class, new] };
-        let before = object.class();
-        add_hook(class).expect("the hook installs");
-        assert_eq!(object.class(), before, "the class identity never changes");
+    fn install_checks_the_main_thread_and_lands_the_method_on_the_root_class() {
+        let _serial = serial();
+        let outcome = std::thread::spawn(install).join().expect("the thread runs");
+        let error = outcome.expect_err("off the main thread");
+        assert!(error.to_string().contains("main thread"), "{error}");
+
+        // The body `install` runs on the main thread (ADR 0074).
+        add_hook(NSObject::class()).expect("the hook lands on NSObject");
+        let method = NSObject::class()
+            .instance_method(sel!(applicationShouldTerminate:))
+            .expect("NSObject answers should-terminate");
+        assert!(
+            std::ptr::fn_addr_eq(method.implementation(), should_terminate_imp()),
+            "the method is ours"
+        );
+        add_hook(NSObject::class()).expect("a second add is a no-op");
     }
+
+    /// Task P7-46 goal 3: the reach check passes for a delegate class
+    /// that inherits our hook and fails clearly for one that answers
+    /// the selector itself (the shadow a future winit would add).
+    #[test]
+    fn the_reach_check_catches_a_delegate_that_shadows_the_hook() {
+        let _serial = serial();
+        add_hook(NSObject::class()).expect("the hook is on NSObject");
+        // A delegate that inherits ours: the check passes.
+        let inheriting = ClassBuilder::new(c"P746InheritsTerminate", NSObject::class())
+            .expect("the name is free")
+            .register();
+        hook_is_reachable(inheriting).expect("the inherited hook is the one AppKit reaches");
+
+        // A delegate that answers the selector itself: the check fails
+        // with the message the app reports on its status line.
+        let foreign = ClassBuilder::new(c"P746ShadowsTerminate", NSObject::class())
+            .expect("the name is free")
+            .register();
+        let types = std::ffi::CString::new(should_terminate_types()).expect("the encoding");
+        // SAFETY: `foreign_should_terminate_imp` has exactly the
+        // `applicationShouldTerminate:` signature, and `types` is that
+        // signature in `@encode` spelling (ADR 0074's rule, the same
+        // registration `add_hook` does).
+        unsafe {
+            ffi::class_addMethod(
+                foreign as *const AnyClass as *mut AnyClass,
+                sel!(applicationShouldTerminate:),
+                foreign_should_terminate_imp(),
+                types.as_ptr(),
+            );
+        }
+        let error = hook_is_reachable(foreign).expect_err("the shadow is caught");
+        assert!(
+            error
+                .to_string()
+                .contains("answers applicationShouldTerminate: itself"),
+            "{error}"
+        );
+    }
+
+    /// Task P7-46 goal 3: winit's own application delegate class must
+    /// not define `applicationShouldTerminate:` itself — if it ever
+    /// does, it is the one AppKit reaches and ours never runs. The
+    /// class registers with the Objective-C runtime when winit's event
+    /// loop starts; where it is present (the running app) this checks
+    /// it directly, and where it is not (a test process with no event
+    /// loop) [`hook_is_reachable`] is the check the app runs on its
+    /// first frame, against the real delegate class.
+    #[test]
+    fn winit_does_not_answer_should_terminate_itself() {
+        let _serial = serial();
+        add_hook(NSObject::class()).expect("the hook is on NSObject");
+        match AnyClass::get(c"WinitApplicationDelegate") {
+            Some(class) => hook_is_reachable(class).unwrap_or_else(|error| {
+                panic!("winit's delegate shadows the hook: {error}");
+            }),
+            // Not registered in this process (no event loop ran): the
+            // real-process check is the app's first frame.
+            None => {
+                assert!(
+                    hook_is_reachable(NSObject::class()).is_ok(),
+                    "NSObject carries our hook"
+                );
+            }
+        }
+    }
+
+    /// A stand-in `applicationShouldTerminate:` (the shadow a future
+    /// winit would define). It answers `NSTerminateCancel`.
+    unsafe extern "C" fn foreign_should_terminate(
+        _this: &AnyObject,
+        _cmd: Sel,
+        _application: Option<&NSApplication>,
+    ) -> isize {
+        NSApplicationTerminateReply::TerminateCancel.0 as isize
+    }
+
+    /// The implementation pointer of [`foreign_should_terminate`].
+    fn foreign_should_terminate_imp() -> Imp {
+        // SAFETY: `foreign_should_terminate` has exactly the
+        // `applicationShouldTerminate:` signature (ADR 0074).
+        unsafe { std::mem::transmute::<ShouldTerminate, Imp>(foreign_should_terminate) }
+    }
+
 }

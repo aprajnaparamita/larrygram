@@ -320,6 +320,9 @@ struct LarrygramApp {
     shell: Shell,
     /// The settings last written to the store (the dirty check).
     saved_settings: Settings,
+    /// Whether the should-terminate hook check ran once (task P7-46
+    /// goal 3; it runs on the first frame, while the app is idle).
+    quit_hook_checked: bool,
 }
 
 impl LarrygramApp {
@@ -329,6 +332,7 @@ impl LarrygramApp {
         Self {
             shell,
             saved_settings,
+            quit_hook_checked: false,
         }
     }
 
@@ -336,6 +340,8 @@ impl LarrygramApp {
     fn update_ui(&mut self, ui: &mut egui::Ui) {
         self.open_queued_paths();
         self.run_queued_quit();
+        self.publish_changed();
+        self.verify_quit_hook();
         let intents = match self.shell.show_in(ui) {
             Ok(intents) => intents,
             Err(error) => {
@@ -346,7 +352,64 @@ impl LarrygramApp {
         if let Err(error) = self.shell.dispatch(&intents) {
             self.shell.note_error(error.to_string());
         }
+        self.answer_deferred_termination();
     }
+
+    /// Checks once that the application delegate reaches the
+    /// should-terminate hook (task P7-46 goal 3): winit's delegate
+    /// class resolves the selector to the `NSObject` injection unless
+    /// a future winit shadows it, in which case the app-menu Quit
+    /// would skip the unsaved-changes prompt — the failure is reported
+    /// on the status line, never a crash (AGENTS.md section 6). Off
+    /// macOS there is no hook to check.
+    #[cfg(target_os = "macos")]
+    fn verify_quit_hook(&mut self) {
+        if self.quit_hook_checked {
+            return;
+        }
+        self.quit_hook_checked = true;
+        if let Some(Err(error)) = macos_terminate::verify_delegate_hook() {
+            self.shell.note_error(error.to_string());
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn verify_quit_hook(&mut self) {}
+
+    /// Publishes whether any drawing has unsaved changes (task P7-46
+    /// goal 1): the macOS `applicationShouldTerminate:` hook reads it
+    /// to decide between `NSTerminateNow` and `NSTerminateLater`. Off
+    /// macOS there is no hook to feed.
+    #[cfg(target_os = "macos")]
+    fn publish_changed(&mut self) {
+        let changed = self
+            .shell
+            .app
+            .documents
+            .iter()
+            .any(|session| session.is_dirty());
+        macos_terminate::set_changed(changed);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn publish_changed(&mut self) {}
+
+    /// Answers a termination the macOS hook deferred (task P7-46 goal
+    /// 1): the unsaved-changes walk takes one `app.quit` when it runs,
+    /// and when it stops this answers AppKit — YES when the walk
+    /// finished (every changed drawing resolved) and NO when the user
+    /// cancelled (the drawings stay open and changed). Off macOS there
+    /// is nothing to answer.
+    #[cfg(target_os = "macos")]
+    fn answer_deferred_termination(&mut self) {
+        if self.shell.unsaved_walk_running() {
+            return;
+        }
+        macos_terminate::reply_termination(self.shell.quit_requested());
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn answer_deferred_termination(&mut self) {}
 
     /// Opens the document paths queued since the last frame (task R8
     /// Goal 2: one `file.open` dispatch per URL, on the UI thread).
@@ -717,6 +780,10 @@ mod tests {
     /// queue does not exist and the drain is a no-op.
     #[test]
     fn a_queued_app_menu_quit_runs_the_quit_walk() {
+        // The queue is a module global: one test at a time (task
+        // P7-46 goal 3).
+        #[cfg(target_os = "macos")]
+        let _serial = macos_terminate::test_serial();
         let mut app = LarrygramApp::new(
             build_shell(
                 None,
