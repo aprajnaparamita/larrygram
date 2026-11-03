@@ -1287,6 +1287,7 @@ mod tests {
             runs: Vec::new(),
             layout,
             color: Rgba::opaque(0, 0, 0),
+            block: larrygram_geom::Size::new(block.width, block.height),
             origin: Point::new(1.0, 1.5),
         };
         scene_of(

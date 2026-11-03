@@ -1555,3 +1555,110 @@ fn a_file_command_over_an_open_edit_commits_it_first() {
         let _ = std::fs::remove_file(&target);
     }
 }
+
+// ---------------------------------------------------------------------------
+// Item 1 (task P7-48, the review's M1): the block is the box. The
+// commit test, the fill and the wrap width use the text block, joined
+// with the field's own rect.
+// ---------------------------------------------------------------------------
+
+/// The fixture rectangle's centre, in page inches, edited with its own
+/// text already drawn (the M1 flows need the drawn text to shrink the
+/// old ink box).
+fn edit_with_text(rig: &mut ShellRig, text: &str) {
+    select_shape(rig);
+    let pos = screen(rig, SHAPE.0, SHAPE.1);
+    double_click_at(rig, pos);
+    assert!(editing(rig), "the double click opens the editor");
+    type_into_editor(rig, text);
+    press_key(rig, egui::Key::Escape);
+    double_click_at(rig, pos);
+    assert!(editing(rig), "the editor re-opens over the drawn text");
+}
+
+/// A click just right of the last letter moves the caret and keeps the
+/// edit (task P7-48 item 1): the click lands inside the text block,
+/// outside the tight text.
+#[test]
+fn a_click_right_of_the_last_letter_keeps_the_edit() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        edit_with_text(&mut rig, "MMMM");
+        // Right of "MMMM" (which ends near x 2.55), on the first
+        // line, inside the text block (page y is up: the block's top
+        // edge is y 3.5 and the line sits just below it).
+        let pos = screen(&rig, 3.2, 3.35);
+        click_at(&mut rig, pos);
+        assert!(
+            editing(&mut rig),
+            "{kind:?}: the click right of the text keeps the edit"
+        );
+        type_into_editor(&mut rig, "X");
+        press_key(&mut rig, egui::Key::Escape);
+        let shape = rectangle(&rig.shell.borrow().app);
+        assert_eq!(
+            shape_text(&rig, shape).as_deref(),
+            Some("MMMMX"),
+            "{kind:?}: the caret moved to the click and typing lands"
+        );
+    }
+}
+
+/// A click on a newly typed second line keeps the edit, and so does a
+/// click on a line the field grew to below the text block (task P7-48
+/// item 1: the field's own response rect joins the commit test).
+#[test]
+fn a_click_on_a_typed_line_keeps_the_edit() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        edit_with_text(&mut rig, "MM");
+        // Enough text to wrap at the block width (about 14 M's a line
+        // at the drawn size): a second line appears below the first.
+        type_into_editor(&mut rig, &"M".repeat(20));
+        // The second line, inside the block but below the drawn text.
+        let pos = screen(&rig, 2.3, 3.15);
+        click_at(&mut rig, pos);
+        assert!(
+            editing(&mut rig),
+            "{kind:?}: the click on the second line keeps the edit"
+        );
+        // Enough text to grow the field past the block's height, then
+        // a click on a line below the block (the field's own rect
+        // joins the commit test).
+        type_into_editor(&mut rig, &"M".repeat(100));
+        let pos = screen(&rig, 2.3, 2.2);
+        click_at(&mut rig, pos);
+        assert!(
+            editing(&mut rig),
+            "{kind:?}: the click inside the grown field keeps the edit"
+        );
+        press_key(&mut rig, egui::Key::Escape);
+    }
+}
+
+/// The field wraps where the drawn text wraps (task P7-48 item 1): a
+/// long append wraps at the block width, not at 80 px.
+#[test]
+fn the_field_wraps_at_the_block_width() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        edit_with_text(&mut rig, "MM");
+        // Seven more M's: about 100 px of text — one line at the 192 px
+        // block width, two lines at the old 80 px wrap.
+        type_into_editor(&mut rig, &"M".repeat(7));
+        let band2 = ink(&mut rig, 2.05, 3.05, 3.95, 3.25);
+        assert_eq!(
+            band2, 0,
+            "{kind:?}: the append wraps at the block width, not at 80 px"
+        );
+        // The control: enough text wraps, and the second band shows it
+        // (the band sits where a wrapped line falls).
+        type_into_editor(&mut rig, &"M".repeat(30));
+        let band2 = ink(&mut rig, 2.05, 3.05, 3.95, 3.25);
+        assert!(
+            band2 > 0,
+            "{kind:?}: the long text wraps into the second band ({band2})"
+        );
+        press_key(&mut rig, egui::Key::Escape);
+    }
+}

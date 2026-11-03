@@ -223,6 +223,11 @@ pub struct TextNode {
     pub layout: Layout,
     /// The text colour (the runs carry their own colour).
     pub color: Rgba,
+    /// The block box's size, in shape-local inches: the box the text
+    /// lays out in at [`TextNode::origin`] (the wrap box, task P7-48
+    /// item 1: the in-place editor's box and wrap width follow it, not
+    /// the laid-out content).
+    pub block: Size,
     /// The block origin in shape-local coordinates, in inches: the
     /// position of the layout's `(0, 0)` (the unrotated block box's
     /// top-left corner). See the module docs for the full placement
@@ -372,6 +377,7 @@ mod tests {
                     ..Layout::default()
                 },
                 color: Rgba::opaque(255, 255, 255),
+                block: Size::new(1.0, 1.0),
                 origin: Point::new(0.1, 0.1),
             }),
         };

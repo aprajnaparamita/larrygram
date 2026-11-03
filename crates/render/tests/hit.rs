@@ -62,6 +62,7 @@ fn outlined(id: Option<ShapeId>, transform: Transform, width: f64, height: f64) 
 /// A text block at `origin`, `width` by `height` inches.
 fn text_block(origin: Point, width: f64, height: f64) -> TextNode {
     TextNode {
+        block: larrygram_geom::Size::new(width, height),
         fonts: Vec::new(),
         runs: Vec::new(),
         layout: Layout {

@@ -1937,6 +1937,7 @@ fn build_text(ctx: &mut Ctx<'_>, id: ShapeId, width: f64, height: f64) -> Option
         runs,
         layout,
         color,
+        block: Size::new(placement.width, placement.height),
         origin: placement.transform.apply(Point::new(0.0, placement.height)),
     })
 }

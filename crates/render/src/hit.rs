@@ -466,7 +466,7 @@ fn quad_path(points: [Point; 4]) -> Path {
 /// `scene`). `None` when the layout has no box (zero size) or a value is
 /// not finite.
 fn text_quad(text: &TextNode) -> Option<[Point; 4]> {
-    let (width, height) = (text.layout.width, text.layout.height);
+    let (width, height) = (text.block.width, text.block.height);
     if !finite(text.origin) || !width.is_finite() || !height.is_finite() {
         return None;
     }
@@ -657,6 +657,7 @@ mod tests {
                 ..larrygram_text::Layout::default()
             },
             color: crate::scene::Rgba::opaque(0, 0, 0),
+            block: larrygram_geom::Size::new(2.0, 1.0),
             origin: Point::new(1.0, 3.0),
         };
         let quad = text_quad(&text).expect("a laid-out block");
@@ -678,6 +679,7 @@ mod tests {
                 ..larrygram_text::Layout::default()
             },
             color: crate::scene::Rgba::opaque(0, 0, 0),
+            block: larrygram_geom::Size::new(1.0, 1.0),
             origin: Point::new(0.0, 0.0),
         };
         let moved = TextNode {
@@ -694,10 +696,7 @@ mod tests {
         };
         assert_eq!(text_quad(&turned), None);
         let shrunk = TextNode {
-            layout: larrygram_text::Layout {
-                height: 0.0,
-                ..base.layout.clone()
-            },
+            block: larrygram_geom::Size::new(1.0, 0.0),
             ..base
         };
         assert_eq!(text_quad(&shrunk), None);
