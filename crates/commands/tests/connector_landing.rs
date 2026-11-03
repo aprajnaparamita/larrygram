@@ -361,6 +361,219 @@ fn a_glue_and_a_delete_restore_a_corpus_route_on_undo() {
     );
 }
 
+/// The two parent kinds the group tests wrap a connector in (task
+/// P7-49 goal 5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GroupKind {
+    /// A parent that rotates 90 degrees about (10, 0).
+    Rotate,
+    /// A parent that flips X about x = 10.
+    Flip,
+}
+
+/// The parent-space point of a page point for one test group.
+fn to_parent(kind: GroupKind, page: larrygram_geom::Point) -> larrygram_geom::Point {
+    match kind {
+        GroupKind::Rotate => larrygram_geom::Point::new(page.y, 10.0 - page.x),
+        GroupKind::Flip => larrygram_geom::Point::new(10.0 - page.x, page.y),
+    }
+}
+
+/// The page point of a parent-space point for one test group.
+fn to_page(kind: GroupKind, parent: larrygram_geom::Point) -> larrygram_geom::Point {
+    match kind {
+        GroupKind::Rotate => larrygram_geom::Point::new(10.0 - parent.y, parent.x),
+        GroupKind::Flip => larrygram_geom::Point::new(10.0 - parent.x, parent.y),
+    }
+}
+
+/// Wraps `drawn` in a fresh group with the kind's transform.
+fn wrap_in_group(ctx: &mut AppCtx, page: PageId, drawn: ShapeId, kind: GroupKind) -> ShapeId {
+    let doc = &mut ctx.active_document_mut().expect("session").document;
+    let mut shape = Shape::new(ShapeId { index: 0 }, 99);
+    let angle = match kind {
+        GroupKind::Rotate => std::f64::consts::FRAC_PI_2,
+        GroupKind::Flip => 0.0,
+    };
+    shape.sheet.cells = vec![
+        cell("Width", 1.0),
+        cell("Height", 1.0),
+        cell("PinX", 10.0),
+        cell("PinY", 0.0),
+        cell("LocPinX", 0.0),
+        cell("LocPinY", 0.0),
+        cell("Angle", angle),
+        Cell {
+            name: CellName::new("FlipX"),
+            formula: Some(if matches!(kind, GroupKind::Flip) {
+                "1".to_owned()
+            } else {
+                "0".to_owned()
+            }),
+            value: Some(CellValue::Bool(matches!(kind, GroupKind::Flip))),
+            unit: larrygram_geom::Unit::Unitsless,
+            preserved: Preserved::new(),
+        },
+    ];
+    let group = doc.add_shape(shape);
+    if let Some(entity) = doc.pages.get_mut(page.index as usize) {
+        entity.shapes.push(group);
+    }
+    if let Some(entity) = doc.shape_mut(group) {
+        entity.children.push(drawn);
+    }
+    if let Some(entity) = doc.shape_mut(drawn) {
+        entity.parent = Some(group);
+    }
+    group
+}
+
+/// Asserts the two invariants of task P7-49 goal 5: the endpoint cells
+/// are in the parent's coordinates and the drawn ends sit on the page
+/// points in `expected`. `at` maps a parent-space point to the page
+/// through the group's current transform.
+fn assert_group_invariants(
+    ctx: &AppCtx,
+    drawn: ShapeId,
+    kind: GroupKind,
+    expected: [larrygram_geom::Point; 2],
+) {
+    let doc = document(ctx);
+    let parent = doc
+        .shape(drawn)
+        .expect("connector")
+        .parent
+        .expect("a parent");
+    let shift = larrygram_geom::Point::new(
+        number(&doc, parent, "PinX") - 10.0,
+        number(&doc, parent, "PinY"),
+    );
+    let at = |parent_point: larrygram_geom::Point| to_page(kind, parent_point).add(shift);
+    let (begin, end) = ends(&doc, drawn);
+    assert!(
+        close(at(begin), expected[0]),
+        "the begin cells are in the parent's coordinates: {:?}",
+        at(begin)
+    );
+    assert!(
+        close(at(end), expected[1]),
+        "the end cells are in the parent's coordinates: {:?}",
+        at(end)
+    );
+    let path = rows(&doc, drawn);
+    let first = row_point(path.first().expect("a first row"));
+    let last = row_point(path.last().expect("a last row"));
+    assert!(
+        close(local_to_parent(&doc, drawn, first), begin),
+        "the path and the cells agree: {first:?} vs {begin:?}"
+    );
+    assert!(
+        close(local_to_parent(&doc, drawn, last), end),
+        "the path and the cells agree: {last:?} vs {end:?}"
+    );
+    assert!(
+        close(at(local_to_parent(&doc, drawn, first)), expected[0]),
+        "the drawn begin sits on its point"
+    );
+    assert!(
+        close(at(local_to_parent(&doc, drawn, last)), expected[1]),
+        "the drawn end sits on its point"
+    );
+}
+
+/// The number of the shape's own cell.
+fn number(document: &Document, shape: ShapeId, name: &str) -> f64 {
+    document
+        .shape(shape)
+        .and_then(|entity| {
+            entity
+                .sheet
+                .cells
+                .iter()
+                .find(|cell| cell.name.as_str() == name)
+        })
+        .and_then(|cell| cell.value.clone())
+        .and_then(|value| match value {
+            CellValue::Number(number) => Some(number),
+            _ => None,
+        })
+        .unwrap_or(f64::NAN)
+}
+
+/// A parent that rotates or flips (task P7-49 goal 5): glue, unglue,
+/// move the group, move the connector and their undo and redo keep the
+/// endpoint cells in the parent's coordinates and the drawn ends on the
+/// targets' points.
+fn a_rotating_or_flipping_group_keeps_the_ends_on_the_targets(kind: GroupKind) {
+    let (mut ctx, registry, page) = fixture();
+    let drawn = draw(&mut ctx, &registry, 1, 2);
+    wrap_in_group(&mut ctx, page, drawn, kind);
+
+    // The targets' facing side midpoints: (4, 3) and (6, 3).
+    let left_point = larrygram_geom::Point::new(4.0, 3.0);
+    let right_point = larrygram_geom::Point::new(6.0, 3.0);
+
+    // Re-glue the end inside the rotated (or flipped) parent.
+    let drawn_visio = document(&ctx).shape(drawn).expect("connector").visio_id;
+    dispatch(
+        &mut ctx,
+        &registry,
+        "connector.glue_end",
+        Args::new()
+            .with("connector", ArgValue::Integer(i64::from(drawn_visio)))
+            .with("target", ArgValue::Integer(2)),
+    )
+    .expect("glue end");
+    assert_group_invariants(&ctx, drawn, kind, [left_point, right_point]);
+
+    // Unglue the begin: it keeps its point where it was.
+    dispatch(
+        &mut ctx,
+        &registry,
+        "connector.unglue",
+        Args::new()
+            .with("connector", ArgValue::Integer(i64::from(drawn_visio)))
+            .with("end", ArgValue::Text("begin".to_owned())),
+    )
+    .expect("unglue");
+    assert_group_invariants(&ctx, drawn, kind, [left_point, right_point]);
+
+    // Move the group: the glued end stays on the target, the free end
+    // travels with the group.
+    move_shape(&mut ctx, &registry, page, 99, 0.7, -0.3);
+    let free = larrygram_geom::Point::new(left_point.x + 0.7, left_point.y - 0.3);
+    assert_group_invariants(&ctx, drawn, kind, [free, right_point]);
+    let moved_rows = rows(&document(&ctx), drawn);
+
+    dispatch(&mut ctx, &registry, "edit.undo", Args::new()).expect("undo");
+    assert_group_invariants(&ctx, drawn, kind, [left_point, right_point]);
+    dispatch(&mut ctx, &registry, "edit.redo", Args::new()).expect("redo");
+    assert_eq!(rows(&document(&ctx), drawn), moved_rows, "redo is exact");
+
+    // Move the connector itself (OneDMoveEdit): both ends travel with
+    // it and come loose from the target.
+    move_shape(&mut ctx, &registry, page, drawn_visio, -0.2, 0.4);
+    let free2 = larrygram_geom::Point::new(free.x - 0.2, free.y + 0.4);
+    let end_free = larrygram_geom::Point::new(right_point.x - 0.2, right_point.y + 0.4);
+    assert_group_invariants(&ctx, drawn, kind, [free2, end_free]);
+    let moved_rows = rows(&document(&ctx), drawn);
+
+    dispatch(&mut ctx, &registry, "edit.undo", Args::new()).expect("undo");
+    assert_group_invariants(&ctx, drawn, kind, [free, right_point]);
+    dispatch(&mut ctx, &registry, "edit.redo", Args::new()).expect("redo");
+    assert_eq!(rows(&document(&ctx), drawn), moved_rows, "redo is exact");
+}
+
+#[test]
+fn a_rotating_group_keeps_the_ends_on_the_targets() {
+    a_rotating_or_flipping_group_keeps_the_ends_on_the_targets(GroupKind::Rotate);
+}
+
+#[test]
+fn a_flipping_group_keeps_the_ends_on_the_targets() {
+    a_rotating_or_flipping_group_keeps_the_ends_on_the_targets(GroupKind::Flip);
+}
+
 /// One connector with a glue record to a shape on `page`, as the file
 /// carries it (the `FromSheet` of a connector-end record).
 fn glued_connector(doc: &Document, page: PageId) -> Option<(ShapeId, Vec<i32>)> {

@@ -1893,7 +1893,11 @@ fn reroute_document(
         if ends.first().is_none_or(Option::is_none) && ends.get(1).is_none_or(Option::is_none) {
             continue;
         }
-        if !picks(scope, &changed_visio, &ends, connector) {
+        let visio_id = doc
+            .shape(connector)
+            .map(|entity| entity.visio_id)
+            .unwrap_or_default();
+        if !picks(scope, &changed_visio, &ends, connector, visio_id) {
             continue;
         }
         routed = routed.saturating_add(route_one(
@@ -1944,17 +1948,23 @@ fn picks(
     changed_visio: &[i32],
     ends: &[Option<Connect>; 2],
     connector: ShapeId,
+    connector_visio: i32,
 ) -> bool {
     match scope {
         Scope::All => true,
         Scope::Forced(connectors) => connectors.contains(&connector),
         Scope::Changed(changed) => {
             if changed.contains(&connector) {
+                // The edit translated its rows itself (rule 1).
                 return false;
             }
             ends.iter()
                 .flatten()
                 .any(|connect| changed_visio.contains(&connect.to_sheet))
+                // A connector inside a moved group ends elsewhere in
+                // the page even though its rows stand still: its ends
+                // changed, so it re-routes (rule 5, "its own ends").
+                || changed_visio.contains(&connector_visio)
         }
     }
 }
@@ -2326,9 +2336,12 @@ fn page_transform(doc: &Document, shape: ShapeId) -> Result<Transform, CommandEr
     }
     let mut reader = CellReader::new(doc);
     let mut transform = Transform::identity();
+    // Innermost first: each local transform runs before its parent's
+    // (task P7-49 goal 5: a translating parent hid the old reversed
+    // order).
     for id in chain.iter().rev() {
         let local = local_transform(&mut reader, *id)?;
-        transform = transform.then(local);
+        transform = local.then(transform);
     }
     Ok(transform)
 }
