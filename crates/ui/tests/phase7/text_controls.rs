@@ -1095,7 +1095,7 @@ fn closing_the_document_closes_the_new_box_first() {
             "{kind:?}: one step labelled as the insert"
         );
         assert!(
-            has(&mut rig, Role::Button, "Close without saving"),
+            has(&mut rig, Role::Button, "Don't Save"),
             "{kind:?}: the close waits for its confirmation"
         );
         drop(rig);
@@ -1117,7 +1117,7 @@ fn closing_the_document_closes_the_new_box_first() {
         assert_eq!(shape_count(&rig), before, "{kind:?}: no shape stays");
         assert!(undo_labels(&rig).is_empty(), "{kind:?}: no undo entry");
         assert!(
-            has(&mut rig, Role::Button, "Close without saving"),
+            has(&mut rig, Role::Button, "Don't Save"),
             "{kind:?}: the close waits for its confirmation"
         );
     }

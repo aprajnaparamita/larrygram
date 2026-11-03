@@ -200,6 +200,56 @@ struct TrackedBox {
     shape: larrygram_model::ShapeId,
 }
 
+/// What happens when an [`UnsavedWalk`] has resolved every drawing
+/// (task P7-42, ADR 0040 amendment 2026-11-03).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WalkThen {
+    /// `file.close`: the one drawing closes when it is resolved.
+    CloseDocument,
+    /// Quit: the window close goes to the viewport when all the
+    /// changed drawings are resolved.
+    Quit,
+}
+
+/// The unsaved-changes walk behind Close and Quit (task P7-42, ADR
+/// 0040 amendment 2026-11-03): one three-way dialog per changed
+/// drawing, in turn.
+///
+/// The dialog names the head of `pending`. Its answers re-dispatch
+/// `file.close` (`save` or `confirm`), which closes that drawing when
+/// the save succeeded; [`Shell::step_walk`] then moves on. A cancelled
+/// or failing save stops the walk: the drawing stays open and changed,
+/// and a quit with it.
+#[derive(Debug)]
+struct UnsavedWalk {
+    /// What to do when the last drawing is resolved.
+    then: WalkThen,
+    /// The drawings still to ask about, in order.
+    pending: Vec<SessionId>,
+    /// Whether the dialog is up for the head of `pending`; `false`
+    /// while an answer is in flight (the frame's `file.close` runs
+    /// after the dialog closed).
+    asking: bool,
+}
+
+impl UnsavedWalk {
+    /// The session the dialog is asking about.
+    fn head(&self) -> Option<SessionId> {
+        self.pending.first().copied()
+    }
+}
+
+/// The answer to the unsaved-changes dialog (task P7-42).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UnsavedAnswer {
+    /// Save the drawing and close it (`file.close` with `save`).
+    Save,
+    /// Close it without saving (`file.close` with `confirm`).
+    Discard,
+    /// Keep it open and changed; stop a quit.
+    Cancel,
+}
+
 /// The application shell (one per window, single window in Phase 4).
 pub struct Shell {
     /// The command registry every intent dispatches through (ADR 0028).
@@ -319,9 +369,10 @@ pub struct Shell {
     wizard: Option<wizard::State>,
     /// The first launch has not shown the wizard yet (ADR 0066).
     welcome_pending: bool,
-    /// The document name awaiting the close confirmation (ADR 0028
-    /// `ConfirmClose`).
-    confirm_close: Option<String>,
+    /// The unsaved-changes walk behind Close and Quit (task P7-42,
+    /// ADR 0040 amendment 2026-11-03): one three-way dialog per
+    /// changed drawing, in turn.
+    walk: Option<UnsavedWalk>,
     /// The window was asked to close; sent to the viewport in
     /// [`Shell::show_in`].
     quit_requested: bool,
@@ -392,7 +443,7 @@ impl Shell {
             format_shape: None,
             wizard: None,
             welcome_pending,
-            confirm_close: None,
+            walk: None,
             quit_requested: false,
         }
     }
@@ -615,6 +666,18 @@ impl Shell {
         self.sync_editing_text();
         self.sync_text_box();
         self.capture_escape(ui.ctx());
+        // The window's close button and the app-menu Quit path (task
+        // P7-42) go through one quit walk: the close request is
+        // cancelled (`ViewportCommand::CancelClose` on
+        // `close_requested`) while the walk is up or has something to
+        // ask, and with nothing to ask the quit completes below.
+        if ui.input(|input| input.viewport().close_requested()) {
+            let had_walk = self.walk.is_some();
+            self.begin_quit();
+            if had_walk || self.walk.is_some() {
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            }
+        }
         if self.quit_requested {
             self.quit_requested = false;
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
@@ -2190,7 +2253,7 @@ impl Shell {
             || self.fill_dialog.is_some()
             || self.line_dialog.is_some()
             || self.about_open
-            || self.confirm_close.is_some()
+            || self.walk.is_some()
         {
             return;
         }
@@ -2460,8 +2523,17 @@ impl Shell {
                 self.note_error(error.to_string());
             }
         }
-        if let Some(name) = self.confirm_close.clone() {
-            let mut answer: Option<bool> = None;
+        // The unsaved-changes walk (task P7-42): advance past an
+        // answered drawing, then show the three-way dialog for the
+        // drawing being asked about (ADR 0040 amendment 2026-11-03).
+        self.step_walk();
+        let asked = self
+            .walk
+            .as_ref()
+            .filter(|walk| walk.asking)
+            .and_then(UnsavedWalk::head);
+        if let Some(name) = asked.and_then(|session| self.session_name(session)) {
+            let mut answer: Option<UnsavedAnswer> = None;
             egui::Window::new("Unsaved changes")
                 .collapsible(false)
                 .resizable(false)
@@ -2469,21 +2541,19 @@ impl Shell {
                 .show(ui.ctx(), |ui| {
                     ui.label(format!("Unsaved changes in {name}."));
                     ui.horizontal(|ui| {
-                        if ui.button("Close without saving").clicked() {
-                            answer = Some(true);
+                        if ui.button("Save").clicked() {
+                            answer = Some(UnsavedAnswer::Save);
+                        }
+                        if ui.button("Don't Save").clicked() {
+                            answer = Some(UnsavedAnswer::Discard);
                         }
                         if ui.button("Cancel").clicked() {
-                            answer = Some(false);
+                            answer = Some(UnsavedAnswer::Cancel);
                         }
                     });
                 });
-            if let Some(close) = answer {
-                self.confirm_close = None;
-                if close && let Ok(command) = CommandId::parse("file.close") {
-                    let args =
-                        larrygram_commands::Args::new().with("confirm", ArgValue::Flag(true));
-                    intents.push(Intent::new(command, Invocation::new(args, Source::Ui)));
-                }
+            if let Some(answer) = answer {
+                self.answer_walk(answer, intents);
             }
         }
     }
@@ -2508,6 +2578,148 @@ impl Shell {
             Some(session) => session.display_name(),
             None => "No document".to_owned(),
         }
+    }
+
+    /// The display name of `session`, or `None` when it is gone (the
+    /// unsaved-changes walk names its drawings this way, task P7-42).
+    fn session_name(&self, session: SessionId) -> Option<String> {
+        self.app
+            .documents
+            .iter()
+            .find(|slot| slot.id == session)
+            .map(|slot| slot.display_name())
+    }
+
+    /// Makes `session` the active document (task P7-42: the walk asks
+    /// about each drawing in turn and its answers act on the active
+    /// one).
+    fn activate_session(&mut self, session: SessionId) {
+        if let Some(index) = self
+            .app
+            .documents
+            .iter()
+            .position(|slot| slot.id == session)
+        {
+            self.app.active = Some(index);
+        }
+    }
+
+    /// Starts the close walk for the active drawing (task P7-42): the
+    /// dialog `file.close`'s [`UiRequest::ConfirmClose`] asked for.
+    fn open_close_walk(&mut self) {
+        let Some(session) = self.app.active_document().map(|slot| slot.id) else {
+            return;
+        };
+        self.walk = Some(UnsavedWalk {
+            then: WalkThen::CloseDocument,
+            pending: vec![session],
+            asking: true,
+        });
+    }
+
+    /// Starts the quit walk (task P7-42): for each changed drawing in
+    /// turn the same three-way dialog, and the window close goes to
+    /// the viewport when the last one is resolved. With no changed
+    /// drawing the quit completes at once. A quit request while a walk
+    /// is already up does not restart it: the dialog answers it.
+    fn begin_quit(&mut self) {
+        if self.walk.is_some() {
+            return;
+        }
+        let pending: Vec<SessionId> = self
+            .app
+            .documents
+            .iter()
+            .filter(|slot| slot.is_dirty())
+            .map(|slot| slot.id)
+            .collect();
+        let Some(first) = pending.first().copied() else {
+            self.quit_requested = true;
+            return;
+        };
+        self.activate_session(first);
+        self.walk = Some(UnsavedWalk {
+            then: WalkThen::Quit,
+            pending,
+            asking: true,
+        });
+    }
+
+    /// Advances the unsaved-changes walk (task P7-42): the drawing an
+    /// answer closed moves the walk on to the next one in turn (or,
+    /// with none left, completes it), a drawing that is still open
+    /// after its answer means the save was cancelled or failed and the
+    /// walk stops there, and a drawing that went away underneath the
+    /// dialog counts as resolved.
+    fn step_walk(&mut self) {
+        let (asking, head) = match &self.walk {
+            Some(walk) => (walk.asking, walk.head()),
+            None => return,
+        };
+        let Some(session) = head else {
+            self.walk = None;
+            return;
+        };
+        let live = self.app.documents.iter().any(|slot| slot.id == session);
+        if live {
+            if !asking {
+                // The answer's `file.close` did not close the drawing
+                // (a cancelled picker or a failing save): the walk
+                // stops and the drawing stays open and changed.
+                self.walk = None;
+            }
+            return;
+        }
+        let Some(walk) = self.walk.as_mut() else {
+            return;
+        };
+        walk.pending.remove(0);
+        if walk.pending.is_empty() {
+            let quit = walk.then == WalkThen::Quit;
+            self.walk = None;
+            if quit {
+                self.quit_requested = true;
+            }
+            return;
+        }
+        let next = walk.head();
+        walk.asking = true;
+        if let Some(next) = next {
+            self.activate_session(next);
+        }
+    }
+
+    /// Answers the dialog of the walk (task P7-42). Save and Don't
+    /// Save re-dispatch `file.close` on the drawing being asked about
+    /// (the normal save — Save As through the picker for a drawing
+    /// with no path — for Save, the discard for Don't Save); the walk
+    /// moves on when the close lands. Cancel dispatches nothing and
+    /// stops the walk: the remaining drawings stay open and changed,
+    /// and a quit with them.
+    fn answer_walk(&mut self, answer: UnsavedAnswer, intents: &mut Vec<Intent>) {
+        if answer == UnsavedAnswer::Cancel {
+            self.walk = None;
+            return;
+        }
+        let Some(walk) = self.walk.as_mut() else {
+            return;
+        };
+        let Some(session) = walk.head() else {
+            self.walk = None;
+            return;
+        };
+        walk.asking = false;
+        self.activate_session(session);
+        let Ok(command) = CommandId::parse("file.close") else {
+            self.walk = None;
+            return;
+        };
+        let args = if answer == UnsavedAnswer::Save {
+            larrygram_commands::Args::new().with("save", ArgValue::Flag(true))
+        } else {
+            larrygram_commands::Args::new().with("confirm", ArgValue::Flag(true))
+        };
+        intents.push(Intent::new(command, Invocation::new(args, Source::Ui)));
     }
 
     /// Keeps the value of a widget call and shows its failure in the
@@ -2747,8 +2959,10 @@ impl Shell {
                     None => Some(panes::FormatShape::from_app(&self.app)),
                 };
             }
-            Some(UiRequest::ConfirmClose { name }) => self.confirm_close = Some(name.clone()),
-            Some(UiRequest::Quit) => self.quit_requested = true,
+            // The close confirmation and the quit ask (task P7-42):
+            // both walk the changed drawings with the same dialog.
+            Some(UiRequest::ConfirmClose { .. }) => self.open_close_walk(),
+            Some(UiRequest::Quit) => self.begin_quit(),
             // The Text tool on one selected shape (task P7-29 item 2):
             // the editor opens on the selection's anchor, caret at the
             // end (`text_edit::show`'s open rule).
