@@ -2244,7 +2244,9 @@ fn connection_rows(sections: &[Section]) -> Vec<&Row> {
 }
 
 /// The direction of the row whose `IX` is `ix`, scaled per axis like
-/// [`Document::connection_points_indexed`] scales its point.
+/// [`Document::connection_points_indexed`] scales its point. Only
+/// `DirX`/`DirY` are directions: an extended row's `A` and `B` are not
+/// (task P7-49 goal 9).
 fn row_direction(sections: &[Section], ix: i32, scale_x: f64, scale_y: f64) -> Option<Point> {
     for (position, row) in connection_rows(sections).into_iter().enumerate() {
         let row_ix = row
@@ -2254,12 +2256,8 @@ fn row_direction(sections: &[Section], ix: i32, scale_x: f64, scale_y: f64) -> O
         if row_ix != ix {
             continue;
         }
-        let x = row_number(row, "DirX")
-            .or_else(|| row_number(row, "A"))
-            .unwrap_or(0.0);
-        let y = row_number(row, "DirY")
-            .or_else(|| row_number(row, "B"))
-            .unwrap_or(0.0);
+        let x = row_number(row, "DirX").unwrap_or(0.0);
+        let y = row_number(row, "DirY").unwrap_or(0.0);
         let point = Point::new(x * scale_x, y * scale_y);
         if point.x.is_finite() && point.y.is_finite() && (point.x != 0.0 || point.y != 0.0) {
             return Some(point);
@@ -3127,6 +3125,38 @@ mod tests {
         assert_eq!(
             path_points(&ctx, connector).first(),
             Some(&Point::new(0.0, 1.5))
+        );
+    }
+
+    #[test]
+    fn an_extended_rows_a_and_b_are_not_a_direction() {
+        // A connection row with A/B (the extended spellings) but no
+        // DirX/DirY: the exit is the nearest side's normal, not A/B.
+        let mut doc = Document::new();
+        let page = doc.add_page("Page-1").expect("page");
+        let mut shape = shape_at(1, 2.0, 2.0, 2.0, 1.0);
+        let mut section = Section::new(SectionName::from_static("Connection"));
+        let mut row = Row::new();
+        row.row_type = Some("Connection".to_owned());
+        row.ix = Some(0);
+        row.cells = vec![
+            cell("X", 1.0),
+            cell("Y", 1.0),
+            cell("A", 3.0),
+            cell("B", 0.0),
+        ];
+        section.rows.push(row);
+        shape.sheet.sections.push(section);
+        let target = doc.insert_shape(page, shape, None).expect("target");
+        let mut ctx = AppCtx::new(Settings::default());
+        ctx.open_document(DocumentSession::new(doc, None));
+        let session = ctx.active_document().expect("session");
+        let built = glue_target(&session.document, target).expect("target");
+        let candidates = built.candidates();
+        assert_eq!(
+            candidates[0].exit,
+            Some(larrygram_geom::Point::new(0.0, 1.0)),
+            "the nearest side's normal (the row's top), not A/B"
         );
     }
 
