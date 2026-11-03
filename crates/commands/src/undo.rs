@@ -128,8 +128,17 @@ impl UndoStack {
     }
 
     /// Whether an undo step is available.
+    ///
+    /// A non-empty open group counts (task P7-41 item 5): its edits are
+    /// one step from the stack even before [`UndoStack::end_group`]
+    /// folds them, and Undo commits the interaction first and then
+    /// undoes the folded step whole. An empty group counts for nothing.
     pub fn can_undo(&self) -> bool {
         self.cursor > 0
+            || self
+                .group
+                .as_ref()
+                .is_some_and(|group| !group.edits.is_empty())
     }
 
     /// Whether a redo step is available.
@@ -692,6 +701,24 @@ mod tests {
         assert!(!stack.has_group());
         assert_eq!(stack.len(), 1, "no entry was pushed");
         assert!(stack.can_redo(), "the redo tail survived");
+    }
+
+    /// A non-empty open group is undoable and an empty one is not
+    /// (task P7-41 item 5).
+    #[test]
+    fn can_undo_counts_a_non_empty_open_group() {
+        let mut stack = UndoStack::new(UndoStack::DEFAULT_CAPACITY);
+        let mut ctx = AppCtx::new(Settings::default());
+        stack.begin_group("Insert Text Box", false).expect("begin");
+        assert!(!stack.can_undo(), "an empty group is nothing to undo");
+        stack.push(Box::new(NamedEdit("in group")));
+        assert!(stack.can_undo(), "a non-empty group is one step away");
+        assert_eq!(
+            stack.undo(&mut ctx).expect("undo").as_deref(),
+            Some("Insert Text Box"),
+            "the undo commits the group and undoes it whole"
+        );
+        assert!(!stack.can_undo(), "the folded step is gone again");
     }
 
     /// A group folds every push into one step: undo reverts the steps
