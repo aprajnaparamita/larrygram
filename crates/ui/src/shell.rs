@@ -596,6 +596,13 @@ impl Shell {
         self.quit_requested
     }
 
+    /// Whether the unsaved-changes walk is up (task P7-46 goal 1: the
+    /// macOS host answers a deferred `applicationShouldTerminate:`
+    /// while it runs, and answers for it when it stops).
+    pub fn unsaved_walk_running(&self) -> bool {
+        self.walk.is_some()
+    }
+
     /// Replaces the dialog seam (tests, and the web app's picker).
     pub fn set_picker(&mut self, picker: Box<dyn FilePicker>) {
         self.picker = picker;
@@ -2667,10 +2674,32 @@ impl Shell {
     /// Starts the quit walk (task P7-42): for each changed drawing in
     /// turn the same three-way dialog, and the window close goes to
     /// the viewport when the last one is resolved. With no changed
-    /// drawing the quit completes at once. A quit request while a walk
-    /// is already up does not restart it: the dialog answers it.
+    /// drawing the quit completes at once (task P7-46 goal 2: a quit
+    /// request while a walk is already up does not restart it — a
+    /// single-drawing Close walk becomes the quit walk with the
+    /// remaining changed drawings added, and a quit walk keeps going;
+    /// the ADR 0040 amendment 2026-11-03 says so).
     fn begin_quit(&mut self) {
-        if self.walk.is_some() {
+        if let Some(walk) = self.walk.as_mut() {
+            if walk.then == WalkThen::Quit {
+                return;
+            }
+            // A Close walk is asking about one drawing: the quit adds
+            // the changed drawings it has not asked about yet (the
+            // one being asked stays the head, its dialog unchanged).
+            let asked = walk.head();
+            let mut pending: Vec<SessionId> = self
+                .app
+                .documents
+                .iter()
+                .filter(|slot| slot.is_dirty() && Some(slot.id) != asked)
+                .map(|slot| slot.id)
+                .collect();
+            if let Some(asked) = asked {
+                pending.insert(0, asked);
+            }
+            walk.then = WalkThen::Quit;
+            walk.pending = pending;
             return;
         }
         let pending: Vec<SessionId> = self

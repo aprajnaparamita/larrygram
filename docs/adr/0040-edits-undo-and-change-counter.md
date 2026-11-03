@@ -202,7 +202,13 @@ both:
   window close goes to the viewport. The window close request is
   cancelled (`ViewportCommand::CancelClose`) while the dialog is open
   or has something to ask. On macOS, Quit from the app menu routes
-  into the same path (`applicationShouldTerminate:` refuses the direct
-  termination and queues the quit; task P7-42).
-- A quit request while the dialog is already up does not restart the
-  walk: the dialog answers it.
+  into the same path (task P7-46 goal 1: `applicationShouldTerminate:`
+  answers `NSTerminateNow` when no drawing is changed — a logout,
+  restart or shutdown goes through and the settings still save — and
+  defers with `NSTerminateLater` when one is, so the walk can answer
+  `replyToApplicationShouldTerminate:` with YES on finish and NO on
+  Cancel; task P7-42).
+- A quit request while a walk is already up does not restart it (task
+  P7-46 goal 2): a quit walk keeps going, and a single-drawing Close
+  walk becomes the quit walk, keeping the drawing being asked about as
+  the head and adding the changed drawings it has not asked about yet.
