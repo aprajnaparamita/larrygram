@@ -58,11 +58,12 @@ Phase 7: Panel and Classic layouts, the Larrygram rename and the welcome wizard.
 | [P7-29](tasks/P7-29.md) | implementer | P7-26, P7-27, P7-28 | I | merged (text controls follow the text, reversing P7-24 item 8; the Text tool on a selected shape; Edit Text in both context menus; follow-ups in P7-37) | `f8494d0` |
 | [P7-30](tasks/P7-30.md) | architect (Opus 5.5 or Fable 5.1) | P7-26 | A | merged (connector spec `docs/ui/connectors.md`, ADR 0084, the audit; the master revised ADR 0084 and the drafts after the Opus review: 1-D connector, glue formulas, pair resolution, scoped re-route) | `4d5e5e9` |
 | [P7-31](tasks/P7-31.md) | implementer | P7-30 | I | merged with P7-39 (the 1-D connector master, Visio's glue formulas, right angle by default) | `aea93c6` |
-| [P7-32](tasks/P7-32.md) | implementer | P7-31 | I | ready (glue lands on a sensible point: `larrygram_geom::glue`, exit directions, scoped re-route; parent-space points for grouped connectors) | — |
-| [P7-33](tasks/P7-33.md) | implementer | P7-32 | I | waits for P7-32 (end handles, re-glue, unglue, hover feedback, arrow-key unglue); parallel with P7-36 | — |
+| [P7-32](tasks/P7-32.md) | implementer | P7-31 | I | handed off at `1edab93`; Opus review: the L runs back through its shapes, a body move discards the route, undo recomputes routes; fixes in P7-49 on the same branch | — |
+| [P7-49](tasks/P7-49.md) | implementer | P7-32 | I | ready, on `agent/P7-32` (undo restores re-routed rows, moved connectors keep their path, routes clear both shapes, axis-aligned exits, rotated and flipped group tests) | — |
+| [P7-33](tasks/P7-33.md) | implementer | P7-32 | I | waits for P7-32 with P7-49 (end handles, re-glue, unglue, hover feedback, arrow-key unglue); parallel with P7-36 | — |
 | [P7-34](tasks/P7-34.md) | implementer | P7-33 | I | waits for P7-33 (connection points: view check, tool, type, glue renumbering); parallel with P7-35 | — |
 | [P7-35](tasks/P7-35.md) | implementer | P7-33, P7-36 | I | waits (segment drags, Reset Connector, reroute options) | — |
-| [P7-36](tasks/P7-36.md) | implementer | P7-32 | I | waits for P7-32 (right angle, straight and curved styles, the controls, the storage round trip); parallel with P7-33 | — |
+| [P7-36](tasks/P7-36.md) | implementer | P7-32 | I | waits for P7-32 with P7-49 (right angle, straight and curved styles, the controls, the storage round trip); parallel with P7-33 | — |
 | [P7-37](tasks/P7-37.md) | implementer | P7-29 | I | merged (a new text box is a shape inside an undo group; one allowlist rule for the text controls; Opus review: merge, follow-ups in P7-41 and P7-42) | `bc4e1ef` |
 | [P7-39](tasks/P7-39.md) | implementer | P7-31 | I | merged with P7-31 (1-D moves, copies and drops, group delete, routability: 4,692 of 37,876 glued 1-D shapes in the wide corpus are not routable) | `aea93c6` |
 | [P7-40](tasks/P7-40.md) | implementer | P7-37 | I | merged (`Document::effective_text`; the renderer, the text controls and the editor follow it; 25 corpus instances inherit text, 4 visible) | `6cda0fb` |
