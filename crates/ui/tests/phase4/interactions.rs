@@ -177,7 +177,10 @@ fn the_close_confirmation_dialog_closes_the_document_on_confirm() {
     rig.dispatch("file.new", Source::Ui).expect("file.new runs");
     {
         let mut shell = rig.shell.borrow_mut();
-        shell.app.active_document_mut().expect("a document").dirty = true;
+        {
+            let session = shell.app.active_document_mut().expect("a document");
+            session.changes = session.changes.wrapping_add(1);
+        }
     }
 
     // An interactive close of a dirty document asks first (ADR 0028):
@@ -192,10 +195,11 @@ fn the_close_confirmation_dialog_closes_the_document_on_confirm() {
     );
     assert_eq!(rig.shell.borrow().app.documents.len(), 1, "still open");
 
-    // The dialog's confirm button re-dispatches `file.close` with
-    // `confirm: true` and the document closes.
+    // The dialog's Don't Save button (task P7-42's three-way dialog)
+    // re-dispatches `file.close` with `confirm: true` and the document
+    // closes.
     rig.run();
-    rig.click(Role::Button, "Close without saving");
+    rig.click(Role::Button, "Don't Save");
     assert_eq!(rig.shell.borrow().app.documents.len(), 0, "closed");
 }
 

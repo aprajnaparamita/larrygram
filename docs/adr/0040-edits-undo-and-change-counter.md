@@ -148,3 +148,67 @@ one step.
   commit, Escape, a click elsewhere (P7-25), a layout switch, closing
   the document. Programmatic sources never see an open group; a
   command from the control channel ends it first.
+
+## Amendment 2026-11-03 (task P7-42): one rule for "changed since save"
+
+The P7-37 review found `DocumentSession::dirty` was never set in
+production code: only saves cleared it. The flag is gone. The rule is
+one comparison over counters the amendment above already moves:
+
+- A session is **changed** when `DocumentSession::changes` differs
+  from `DocumentSession::saved_changes`, the counter recorded at the
+  last open or save. `DocumentSession::is_dirty()` is the derived
+  read; `mark_saved()` records a save. There is no flag to remember.
+- Every edit, undo and redo moves the change counter (rule 3), so
+  **undoing back to the saved state still reads as changed**. That is
+  deliberate: simple and safe. The alternative (tracking the counter
+  value per undo step) buys a rare cosmetic win and risks a wrong
+  "clean" answer after a dropped step.
+- A fresh `file.new` drawing with no edits is not changed; neither is
+  a just-opened file.
+- The undo group's `unsaved` snapshot takes the same derived read when
+  the group opens, and `cancel_group` restores that verdict after the
+  reverts: a group that saw an unchanged drawing marks the reverted
+  state saved (a cancelled empty text box leaves the drawing
+  unchanged), and a group that saw a changed one keeps it changed even
+  when a save ran inside the group. The change counter itself still
+  only moves forward (rule 3).
+- A save runs outside an open group in the app (the shell writes the
+  typed text and closes the group before `file.save`, as for the other
+  interaction-ending commands), so the restored verdict is exact.
+
+## Amendment 2026-11-03 (task P7-42): closing and quitting ask
+
+The rule above feeds the close and quit prompts. One three-way dialog
+("Unsaved changes in `<name>`": **Save**, **Don't Save**, **Cancel**;
+labels are short command labels, the prompt text is our own) serves
+both:
+
+- `file.close` on a changed drawing, from an interactive source,
+  returns `UiRequest::ConfirmClose` and closes nothing (AGENTS.md
+  section 6: the command never opens a dialog). The dialog's answers
+  re-dispatch the command: **Save** as `file.close` with `save`
+  (the normal save body — Save As through the picker for a drawing
+  with no path — and the close runs only when the save succeeded),
+  **Don't Save** as `file.close` with `confirm`, **Cancel** as
+  nothing. Programmatic sources keep their rule: no dialog, and
+  `confirm` closes without asking.
+- `app.quit`, `file.exit`, the Cmd+Q / Ctrl+Q chord and the window's
+  close request go through one path in the shell: for each changed
+  drawing in turn the same dialog, and each answered drawing is closed
+  by the same `file.close` answer commands. **Cancel** stops the quit
+  with the remaining drawings open and changed; a cancelled or failing
+  save stops it too. When the last changed drawing is resolved the
+  window close goes to the viewport. The window close request is
+  cancelled (`ViewportCommand::CancelClose`) while the dialog is open
+  or has something to ask. On macOS, Quit from the app menu routes
+  into the same path (task P7-46 goal 1: `applicationShouldTerminate:`
+  answers `NSTerminateNow` when no drawing is changed — a logout,
+  restart or shutdown goes through and the settings still save — and
+  defers with `NSTerminateLater` when one is, so the walk can answer
+  `replyToApplicationShouldTerminate:` with YES on finish and NO on
+  Cancel; task P7-42).
+- A quit request while a walk is already up does not restart it (task
+  P7-46 goal 2): a quit walk keeps going, and a single-drawing Close
+  walk becomes the quit walk, keeping the drawing being asked about as
+  the head and adding the changed drawings it has not asked about yet.

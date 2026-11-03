@@ -33,6 +33,8 @@
 
 #[cfg(target_os = "macos")]
 mod macos_open_urls;
+#[cfg(target_os = "macos")]
+mod macos_terminate;
 mod open_documents;
 #[cfg(windows)]
 mod windows_console;
@@ -243,14 +245,21 @@ fn run_with(args: &[String]) -> Result<(), AppError> {
     // before the event loop starts: macOS can deliver the launch event
     // before the first frame, and a hook added later loses it to the
     // system document machinery (which shows a "could not be opened"
-    // dialog). A failure reaches the status line; the app still starts
-    // (AGENTS.md section 6).
+    // dialog). The app-menu Quit hook (task P7-42, the same ADR 0074
+    // pattern) goes in beside it, for the same reason: the first
+    // frame's menu can already ask the app to terminate. A failure
+    // reaches the status line; the app still starts (AGENTS.md
+    // section 6).
     #[cfg(target_os = "macos")]
-    let open_documents_error = macos_open_urls::install()
-        .err()
-        .map(|error| error.to_string());
+    let hook_errors: Vec<String> = [
+        macos_open_urls::install().map_err(|error| error.to_string()),
+        macos_terminate::install().map_err(|error| error.to_string()),
+    ]
+    .into_iter()
+    .filter_map(Result::err)
+    .collect();
     #[cfg(not(target_os = "macos"))]
-    let open_documents_error: Option<String> = None;
+    let hook_errors: Vec<String> = Vec::new();
     let native_options = native_options();
     eframe::run_native(
         APP_NAME,
@@ -258,11 +267,18 @@ fn run_with(args: &[String]) -> Result<(), AppError> {
         Box::new(move |cc| {
             larrygram_ui::install_image_loaders(&cc.egui_ctx);
             // Queued open paths wake the UI (task R8 Goal 2): an idle
-            // window runs no frame until a repaint is requested.
+            // window runs no frame until a repaint is requested. The
+            // app-menu Quit queue wakes it the same way (task P7-42).
             let repaint = cc.egui_ctx.clone();
             open_documents::set_wake(Box::new(move || repaint.request_repaint()));
+            // The app-menu Quit queue wakes it the same way (task P7-42).
+            #[cfg(target_os = "macos")]
+            {
+                let repaint = cc.egui_ctx.clone();
+                macos_terminate::set_wake(Box::new(move || repaint.request_repaint()));
+            }
             let mut shell = build_shell(cc.storage, registry, layouts, cli_layout)?;
-            if let Some(message) = open_documents_error {
+            for message in hook_errors {
                 shell.note_error(message);
             }
             // The command-line paths open at startup through
@@ -304,6 +320,11 @@ struct LarrygramApp {
     shell: Shell,
     /// The settings last written to the store (the dirty check).
     saved_settings: Settings,
+    /// Whether the should-terminate hook check ran once (task P7-46
+    /// goal 3; it runs on the first frame, while the app is idle). Off
+    /// macOS there is no hook to check.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    quit_hook_checked: bool,
 }
 
 impl LarrygramApp {
@@ -313,12 +334,16 @@ impl LarrygramApp {
         Self {
             shell,
             saved_settings,
+            quit_hook_checked: false,
         }
     }
 
     /// One UI pass: draw the frame and dispatch its intents.
     fn update_ui(&mut self, ui: &mut egui::Ui) {
         self.open_queued_paths();
+        self.run_queued_quit();
+        self.publish_changed();
+        self.verify_quit_hook();
         let intents = match self.shell.show_in(ui) {
             Ok(intents) => intents,
             Err(error) => {
@@ -329,13 +354,70 @@ impl LarrygramApp {
         if let Err(error) = self.shell.dispatch(&intents) {
             self.shell.note_error(error.to_string());
         }
+        self.answer_deferred_termination();
     }
+
+    /// Checks once that the application delegate reaches the
+    /// should-terminate hook (task P7-46 goal 3): winit's delegate
+    /// class resolves the selector to the `NSObject` injection unless
+    /// a future winit shadows it, in which case the app-menu Quit
+    /// would skip the unsaved-changes prompt — the failure is reported
+    /// on the status line, never a crash (AGENTS.md section 6). Off
+    /// macOS there is no hook to check.
+    #[cfg(target_os = "macos")]
+    fn verify_quit_hook(&mut self) {
+        if self.quit_hook_checked {
+            return;
+        }
+        self.quit_hook_checked = true;
+        if let Some(Err(error)) = macos_terminate::verify_delegate_hook() {
+            self.shell.note_error(error.to_string());
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn verify_quit_hook(&mut self) {}
+
+    /// Publishes whether any drawing has unsaved changes (task P7-46
+    /// goal 1): the macOS `applicationShouldTerminate:` hook reads it
+    /// to decide between `NSTerminateNow` and `NSTerminateLater`. Off
+    /// macOS there is no hook to feed.
+    #[cfg(target_os = "macos")]
+    fn publish_changed(&mut self) {
+        let changed = self
+            .shell
+            .app
+            .documents
+            .iter()
+            .any(|session| session.is_dirty());
+        macos_terminate::set_changed(changed);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn publish_changed(&mut self) {}
+
+    /// Answers a termination the macOS hook deferred (task P7-46 goal
+    /// 1): the unsaved-changes walk takes one `app.quit` when it runs,
+    /// and when it stops this answers AppKit — YES when the walk
+    /// finished (every changed drawing resolved) and NO when the user
+    /// cancelled (the drawings stay open and changed). Off macOS there
+    /// is nothing to answer.
+    #[cfg(target_os = "macos")]
+    fn answer_deferred_termination(&mut self) {
+        if self.shell.unsaved_walk_running() {
+            return;
+        }
+        macos_terminate::reply_termination(self.shell.quit_requested());
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn answer_deferred_termination(&mut self) {}
 
     /// Opens the document paths queued since the last frame (task R8
     /// Goal 2: one `file.open` dispatch per URL, on the UI thread).
     ///
     /// The macOS open-documents delegate fills the queue
-    /// (`macos_open_urls`); a path that does not open is the Open
+    /// (`macos_open_urls`); a path that does not open shows the Open
     /// dialog's status-line error and never a crash.
     fn open_queued_paths(&mut self) {
         let paths = open_documents::QUEUED.take_paths();
@@ -343,6 +425,39 @@ impl LarrygramApp {
             open_documents::dispatch_paths(&mut self.shell, &paths, Source::Ui);
         }
     }
+
+    /// Runs the quit the macOS application menu queued (task P7-42:
+    /// one `app.quit` dispatch, on the UI thread, through the same
+    /// unsaved-changes walk as every other quit).
+    ///
+    /// The `applicationShouldTerminate:` hook fills the queue
+    /// (`macos_terminate`); it refuses the direct termination, so the
+    /// app keeps running until this path closes the window (or the
+    /// user cancels the walk). Off macOS there is nothing to drain.
+    #[cfg(target_os = "macos")]
+    fn run_queued_quit(&mut self) {
+        if !macos_terminate::take_quit() {
+            return;
+        }
+        let intent = match larrygram_commands::CommandId::parse("app.quit") {
+            Ok(command) => larrygram_ui::Intent::new(
+                command,
+                larrygram_commands::Invocation::empty(Source::Menu),
+            ),
+            Err(error) => {
+                self.shell
+                    .note_error(format!("cannot dispatch app.quit: {error}"));
+                return;
+            }
+        };
+        if let Err(error) = self.shell.dispatch(std::slice::from_ref(&intent)) {
+            self.shell.note_error(error.to_string());
+        }
+    }
+
+    /// Off macOS the app-menu Quit queue does not exist (task P7-42).
+    #[cfg(not(target_os = "macos"))]
+    fn run_queued_quit(&mut self) {}
 
     /// Writes the settings into the storage slot (ADR 0032).
     fn persist(&mut self, storage: &mut dyn eframe::Storage) {
@@ -659,6 +774,37 @@ mod tests {
         let mut unchanged = app.shell.app.settings.clone();
         unchanged.last_core_tab = None;
         assert_eq!(app.saved_settings, unchanged);
+    }
+
+    /// Task P7-42: a queued app-menu Quit drains as one `app.quit`
+    /// dispatch, whose unsaved-changes walk takes it from there (no
+    /// documents open: the quit completes at once). Off macOS the
+    /// queue does not exist and the drain is a no-op.
+    #[test]
+    fn a_queued_app_menu_quit_runs_the_quit_walk() {
+        // The queue is a module global: one test at a time (task
+        // P7-46 goal 3).
+        #[cfg(target_os = "macos")]
+        let _serial = macos_terminate::test_serial();
+        let mut app = LarrygramApp::new(
+            build_shell(
+                None,
+                larrygram_commands::builtins::registry().expect("registry"),
+                Loader::from_embedded().expect("layouts"),
+                None,
+            )
+            .expect("shell"),
+        );
+        #[cfg(target_os = "macos")]
+        macos_terminate::queue_quit();
+        app.run_queued_quit();
+        #[cfg(target_os = "macos")]
+        assert!(
+            app.shell.quit_requested(),
+            "the walk completes at once with no documents"
+        );
+        #[cfg(not(target_os = "macos"))]
+        assert!(!app.shell.quit_requested(), "off macOS nothing drains");
     }
 
     #[test]

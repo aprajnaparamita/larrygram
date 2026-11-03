@@ -5,9 +5,16 @@
 # recorded here; no page prose is committed.
 # Snapshot URL: https://web.archive.org/web/20251205120214id_/https://support.microsoft.com/en-us/office/keyboard-shortcuts-for-visio-ee952f31-7e3e-4564-8116-f3ecbb733cc1
 # Source commit: web snapshot 20251205120214 (2025-12-05)
-# The Ctrl+N, Ctrl+O, Ctrl+S, Ctrl+Alt+P and Ctrl+, bindings
-# (OWN_SHORTCUTS, tasks P7-20 and P7-23) are our own, from the committed Panel
-# Classic layout data; the page does not list them.
+# The Ctrl+N, Ctrl+O, Ctrl+S, Ctrl+Alt+P, Ctrl+, and Ctrl+Q bindings
+# (OWN_SHORTCUTS, tasks P7-20, P7-23 and P7-42) are our own: the chords from
+# the committed Panel Classic layout data and one chord of our own choice
+# (Ctrl+Q); the page does not list them.
+- command: app.quit
+  scope: global
+  section: Common
+  sequence:
+    - - Ctrl
+      - Q
 - command: arrange.align_objects
   scope: selection
   section: Shapes

@@ -68,8 +68,10 @@ pub trait Edit: Send {
 struct Group {
     /// The label of the one step the group becomes.
     label: String,
-    /// The document's unsaved-changes state when the group opened;
-    /// [`UndoStack::cancel_group`] restores it.
+    /// The document's unsaved-changes state when the group opened, the
+    /// derived [`crate::DocumentSession::is_dirty`] answer (task
+    /// P7-42); [`UndoStack::cancel_group`] returns it so the caller
+    /// can restore that state.
     unsaved: bool,
     /// The collected steps, in push order.
     edits: Vec<Box<dyn Edit>>,
@@ -602,6 +604,15 @@ mod tests {
             }
             Ok(())
         }
+    }
+
+    /// The two test edits carry their own labels (the undo menu seam
+    /// `Edit::label` provides).
+    #[test]
+    fn the_test_edits_label_themselves() {
+        let log = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        assert_eq!(Edit::label(&MarkEdit { mark: 'a', log }), "mark");
+        assert_eq!(Edit::label(&AddPageEdit), "add page");
     }
 
     /// One step that adds a page (apply) or removes it again (revert):

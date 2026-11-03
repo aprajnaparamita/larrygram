@@ -37,15 +37,17 @@ pub const SNAPSHOT_URL: &str = "https://web.archive.org/web/20251205120214id_/ht
 /// The pinned source identifier recorded in the file header.
 pub const SOURCE_REVISION: &str = "web snapshot 20251205120214 (2025-12-05)";
 
-/// Our own bindings (tasks P7-20 and P7-23), appended to the
+/// Our own bindings (tasks P7-20, P7-23 and P7-42), appended to the
 /// page-derived rows.
 ///
 /// The chords come from the committed Panel Classic layout data
 /// (`shortcut:` on the menu and toolbar items, our own compiled data
 /// of `ui-spec/layouts/panel-classic.yaml`), not from the page: the
-/// page does not list them. No Microsoft content is involved
-/// (AGENTS.md section 4). Each entry is `(command, scope, group,
-/// chord)`; the chord is one chord of key tokens.
+/// page does not list them. One row is a pure choice of ours with no
+/// layout data behind it (the P7-42 quit chord; see its comment). No
+/// Microsoft content is involved (AGENTS.md section 4). Each entry is
+/// `(command, scope, group, chord)`; the chord is one chord of key
+/// tokens.
 pub const OWN_SHORTCUTS: &[(&str, &str, &str, &[&str])] = &[
     ("file.new.blank.drawing", "global", "Common", &["Ctrl", "N"]),
     ("file.open", "global", "Common", &["Ctrl", "O"]),
@@ -64,6 +66,12 @@ pub const OWN_SHORTCUTS: &[(&str, &str, &str, &[&str])] = &[
         "Common",
         &["Ctrl", ","],
     ),
+    // Quit (task P7-42): Cmd+Q on macOS (the `Ctrl` token is the
+    // command key there) and Ctrl+Q off it, both through `app.quit`
+    // and its unsaved-changes walk. On macOS the app menu's Quit item
+    // takes the chord before egui sees it; the app routes it into the
+    // same path (`applicationShouldTerminate:`).
+    ("app.quit", "global", "Common", &["Ctrl", "Q"]),
 ];
 
 /// Normalised action phrase -> Larrygram command id, keyed by the
@@ -1157,9 +1165,10 @@ fn render_shortcuts_yaml(entries: &[Value]) -> ExtractResult<String> {
     out.push_str(&format!("# Snapshot URL: {SNAPSHOT_URL}\n"));
     out.push_str(&format!("# Source commit: {SOURCE_REVISION}\n"));
     out.push_str(
-        "# The Ctrl+N, Ctrl+O, Ctrl+S, Ctrl+Alt+P and Ctrl+, bindings\n\
-         # (OWN_SHORTCUTS, tasks P7-20 and P7-23) are our own, from the committed Panel\n\
-         # Classic layout data; the page does not list them.\n",
+        "# The Ctrl+N, Ctrl+O, Ctrl+S, Ctrl+Alt+P, Ctrl+, and Ctrl+Q bindings\n\
+         # (OWN_SHORTCUTS, tasks P7-20, P7-23 and P7-42) are our own: the chords from\n\
+         # the committed Panel Classic layout data and one chord of our own choice\n\
+         # (Ctrl+Q); the page does not list them.\n",
     );
     out.push_str(&text);
     Ok(out)

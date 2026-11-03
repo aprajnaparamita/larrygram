@@ -723,7 +723,7 @@ fn save_document(
     if set_path || mapped {
         session.path = Some(path.clone());
     }
-    session.dirty = false;
+    session.mark_saved();
     // A saved file is a recent file too (task P7-20: the recent list
     // follows what the user actually worked on, as in Visio).
     remember_recent(&mut ctx.settings, path.clone());
@@ -765,7 +765,7 @@ fn payload_save(ctx: &mut AppCtx) -> Result<Outcome, CommandError> {
     let preserve = session.preserve.as_ref().unwrap_or(&empty);
     let bytes = write_document(&session.document, preserve).map_err(write_error_text)?;
     let name = download_name(&session.display_name(), session.document.kind);
-    session.dirty = false;
+    session.mark_saved();
     Ok(Outcome {
         message: Some(format!("Saved {name}")),
         payload: Some(crate::Payload::Bytes { name, data: bytes }),
@@ -790,18 +790,41 @@ fn download_name(display_name: &str, kind: DocumentKind) -> String {
 ///
 /// Unsaved work on an interactive source returns
 /// [`UiRequest::ConfirmClose`] instead of closing (AGENTS.md section 6:
-/// the command never opens the dialog itself); the caller answers by
-/// dispatching `file.close` again with `confirm: true`. Programmatic
-/// sources close without asking.
+/// the command never opens the dialog itself); the shell's three-way
+/// dialog (task P7-42) answers by dispatching the command again with
+/// `save` (Save) or `confirm` (Don't Save). `save` runs the normal
+/// save (`file.save`'s body, ADR 0036; Save As through the picker for
+/// a drawing with no path) and closes only when the save succeeds. A
+/// cancelled picker or a failing save leaves the drawing open and
+/// changed. Programmatic sources keep their rule: no dialog, and
+/// `confirm` closes without asking.
 pub(super) fn run_close(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError> {
     let Some(index) = ctx.active else {
         return Err(no_document());
     };
     let confirm = inv.args.flag("confirm").unwrap_or(false);
+    let save = inv.args.flag("save").unwrap_or(false);
+    if confirm && save {
+        return Err(CommandError::invalid_args(
+            "confirm and save are mutually exclusive",
+        ));
+    }
     let (name, dirty) = match ctx.active_document() {
-        Some(session) => (session.display_name(), session.dirty),
+        Some(session) => (session.display_name(), session.is_dirty()),
         None => return Err(no_document()),
     };
+    if save {
+        // The Save answer (task P7-42): save first, close after. The
+        // save's payload (the wasm download, ADR 0036) passes through
+        // to the close's outcome.
+        let saved = save_document(ctx, inv, true)?;
+        ctx.close_document(index);
+        return Ok(Outcome {
+            message: Some(format!("Saved and closed {name}")),
+            payload: saved.payload,
+            ..Outcome::default()
+        });
+    }
     if dirty && inv.source.is_interactive() && !confirm {
         return Ok(Outcome {
             message: Some(format!("Unsaved changes in {name}")),
@@ -1281,7 +1304,10 @@ mod tests {
             session.undo.is_empty(),
             "the fill-in pass must take no undo entry"
         );
-        assert!(!session.dirty, "the fill-in pass must not mark the session");
+        assert!(
+            !session.is_dirty(),
+            "the fill-in pass must not mark the session"
+        );
         assert_eq!(
             cell_value(&session.document, "Probe"),
             Some(CellValue::Number(2.0))
@@ -1318,7 +1344,7 @@ mod tests {
             assert!(!data.is_empty(), "a package was written");
         }
         let session = ctx.active_document().expect("session");
-        assert!(!session.dirty);
+        assert!(!session.is_dirty());
     }
 
     #[test]
@@ -1588,7 +1614,7 @@ mod tests {
         // The document edits before it saves (task P8-09 goal 1).
         let session = ctx.active_document_mut().expect("session");
         session.document.add_page("Page-2").expect("page");
-        session.dirty = true;
+        session.changes = session.changes.wrapping_add(1);
         let outcome = run_save(&mut ctx, &Invocation::new(Args::new(), Source::Ui)).expect("save");
         let vsdx = dir.join("plan.vsdx");
         assert_eq!(
@@ -1602,7 +1628,7 @@ mod tests {
         assert_eq!(document.pages.len(), 2, "the round trip keeps the edit");
         let session = ctx.active_document().expect("session");
         assert_eq!(session.path.as_deref(), Some(vsdx.as_path()));
-        assert!(!session.dirty);
+        assert!(!session.is_dirty());
         assert!(vsd.is_file(), "the read-only source is never overwritten");
         std::fs::remove_dir_all(&dir).expect("clean up");
     }
@@ -1630,23 +1656,66 @@ mod tests {
     }
 
     /// The no-target save of a never-saved document suggests the name
-    /// of its kind (task P8-09 goal 2).
+    /// of its kind (task P8-09 goal 2): the stencil and template kinds
+    /// name themselves, the drawing is the default.
     #[test]
     fn the_no_target_save_suggests_a_name_of_the_document_kind() {
-        let mut document = Document::new();
-        document.kind = DocumentKind::Stencil;
-        let mut ctx = AppCtx::new(crate::Settings::default());
-        ctx.open_document(DocumentSession::new(document, None));
-        let error =
-            run_save(&mut ctx, &Invocation::new(Args::new(), Source::Ui)).expect_err("no target");
-        let CommandError::NeedsInput(NeededInput::Path {
-            purpose: PathPurpose::SaveFile,
-            suggested,
-        }) = error
-        else {
-            panic!("expected a save-path request, got {error}");
-        };
-        assert_eq!(suggested, Some(PathBuf::from("stencil.vssx")));
+        for (kind, name) in [
+            (DocumentKind::Stencil, "stencil.vssx"),
+            (DocumentKind::Template, "template.vstx"),
+            (DocumentKind::Drawing, "drawing.vsdx"),
+        ] {
+            let mut document = Document::new();
+            document.kind = kind;
+            let mut ctx = AppCtx::new(crate::Settings::default());
+            ctx.open_document(DocumentSession::new(document, None));
+            let error = run_save(&mut ctx, &Invocation::new(Args::new(), Source::Ui))
+                .expect_err("no target");
+            let CommandError::NeedsInput(NeededInput::Path {
+                purpose: PathPurpose::SaveFile,
+                suggested,
+            }) = error
+            else {
+                panic!("expected a save-path request, got {error}");
+            };
+            assert_eq!(suggested, Some(PathBuf::from(name)), "{kind:?}");
+        }
+    }
+
+    /// The JPEG scan of `image_size` (task P7-22's parser) is pinned
+    /// at the byte level: a frame is found around fill bytes and
+    /// standalone markers, a non-frame segment is skipped by its
+    /// length, and a broken stream answers `None` (task P7-46: the
+    /// coverage ratchet wants these branches exercised).
+    #[test]
+    fn image_size_reads_jpeg_frames_and_refuses_broken_streams() {
+        // SOI, a standalone marker, a restart marker, a fill byte and
+        // a start-of-frame with height 2 and width 3.
+        let frame: Vec<u8> = vec![
+            0xFF, 0xD8, 0xFF, 0x01, 0xFF, 0xD0, 0xFF, 0xFF, 0xC0, 0x00, 0x0B, 0x08, 0x00, 0x02,
+            0x00, 0x03, 0x00,
+        ];
+        assert_eq!(image_size(&frame), Some(("JPEG", 3, 2)));
+        // A segment that is not a frame is skipped by its length.
+        let skipped: Vec<u8> = vec![
+            0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x04, 0x00, 0x00, 0xFF, 0xC0, 0x00, 0x0B, 0x08, 0x00,
+            0x05, 0x00, 0x07, 0x00,
+        ];
+        assert_eq!(image_size(&skipped), Some(("JPEG", 7, 5)));
+        // Broken streams: no marker where one belongs, a truncated
+        // marker, an early EOI or SOS, a truncated length, 64 segments
+        // without a frame and a stream that is not an image at all.
+        assert_eq!(image_size(&[0xFF, 0xD8, 0xC0]), None);
+        assert_eq!(image_size(&[0xFF, 0xD8, 0xFF]), None);
+        assert_eq!(image_size(&[0xFF, 0xD8, 0xFF, 0xD9]), None);
+        assert_eq!(image_size(&[0xFF, 0xD8, 0xFF, 0xDA]), None);
+        assert_eq!(image_size(&[0xFF, 0xD8, 0xFF, 0xC0, 0x00]), None);
+        let mut many = vec![0xFF, 0xD8];
+        for _ in 0..64 {
+            many.extend_from_slice(&[0xFF, 0xE0, 0x00, 0x04, 0x00, 0x00]);
+        }
+        assert_eq!(image_size(&many), None);
+        assert_eq!(image_size(b"not an image"), None);
     }
 
     /// The Phase 8 acceptance criterion: a corpus `.vsd` opens through

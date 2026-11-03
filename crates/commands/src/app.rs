@@ -245,8 +245,12 @@ pub struct DocumentSession {
     pub document: Document,
     /// Where it was loaded from or last saved to; `None` when never saved.
     pub path: Option<PathBuf>,
-    /// Whether it has unsaved changes.
-    pub dirty: bool,
+    /// The change counter recorded at the last open or save (task
+    /// P7-42, ADR 0040 amendment 2026-11-03). A session is changed
+    /// when this differs from [`Self::changes`], which every edit,
+    /// undo and redo moves; [`Self::is_dirty`] derives the answer and
+    /// [`Self::mark_saved`] records a save. No flag to remember.
+    pub saved_changes: u64,
     /// The page shown on the canvas, or `None` before the first page.
     pub active_page: Option<PageId>,
     /// Pan, zoom and the grid and rulers toggles.
@@ -278,7 +282,7 @@ impl DocumentSession {
             id: next_session_id(),
             document,
             path,
-            dirty: false,
+            saved_changes: 0,
             active_page,
             view: ViewState::new(),
             undo: UndoStack::new(UndoStack::DEFAULT_CAPACITY),
@@ -286,6 +290,26 @@ impl DocumentSession {
             graph: None,
             preserve: None,
         }
+    }
+
+    /// Whether the document changed since it was last opened or saved
+    /// (task P7-42, ADR 0040 amendment 2026-11-03).
+    ///
+    /// The rule is one comparison: [`Self::changes`] differs from
+    /// [`Self::saved_changes`]. Every edit, undo and redo moves the
+    /// counter, so this is a derived read, never a flag to set. Undoing
+    /// back to the saved state still reads as changed: simple and safe
+    /// (the counter only moves forward, ADR 0040 rule 3). A fresh
+    /// `file.new` drawing with no edits is not changed.
+    pub fn is_dirty(&self) -> bool {
+        self.changes != self.saved_changes
+    }
+
+    /// Records the current state as the saved one (task P7-42): the
+    /// save paths call this after writing the file, and an undo group
+    /// cancel restores a clean state with it.
+    pub fn mark_saved(&mut self) {
+        self.saved_changes = self.changes;
     }
 
     /// Keeps the package the document was read from (ADR 0018).
@@ -651,7 +675,9 @@ impl AppCtx {
     ///
     /// Only the shell opens a group (the shell always closes it), so
     /// programmatic sources never see one. Groups do not nest: a second
-    /// `begin_group` on the same session is an error.
+    /// `begin_group` on the same session is an error. The group's
+    /// unsaved-changes snapshot is the derived state
+    /// ([`DocumentSession::is_dirty`], task P7-42).
     pub fn begin_group(
         &mut self,
         session: SessionId,
@@ -662,7 +688,7 @@ impl AppCtx {
             .documents
             .iter()
             .find(|slot| slot.id == session)
-            .map(|slot| slot.dirty)
+            .map(|slot| slot.is_dirty())
             .ok_or_else(|| CommandError::failed("no document session for the undo group"))?;
         self.with_stack(session, |stack, _ctx| stack.begin_group(label, unsaved))??;
         Ok(())
@@ -680,14 +706,25 @@ impl AppCtx {
     /// Cancels the open group of `session` (ADR 0040, amendment
     /// 2026-11-03): the collected edits are reverted in reverse order
     /// and the document's unsaved-changes state is restored to what it
-    /// was when the group opened. Without an open group this does
-    /// nothing.
+    /// was when the group opened (task P7-42: a cancelled empty text
+    /// box leaves the drawing unchanged). Without an open group this
+    /// does nothing.
     pub fn cancel_group(&mut self, session: SessionId) -> Result<(), CommandError> {
         let unsaved = self.with_stack(session, |stack, ctx| stack.cancel_group(ctx))??;
         if let Some(unsaved) = unsaved
             && let Some(slot) = self.documents.iter_mut().find(|slot| slot.id == session)
         {
-            slot.dirty = unsaved;
+            if unsaved {
+                // The snapshot read as changed: keep it so, even when a
+                // save inside the group moved the saved marker forward.
+                if !slot.is_dirty() {
+                    slot.changes = slot.changes.wrapping_add(1);
+                }
+            } else {
+                // The snapshot read as unchanged: the reverts moved the
+                // change counter forward, so the marker follows them.
+                slot.mark_saved();
+            }
         }
         Ok(())
     }
@@ -894,7 +931,7 @@ mod tests {
         let session = DocumentSession::new(document, None);
         assert_eq!(session.active_page, Some(PageId { index: 0 }));
         assert_eq!(session.display_name(), "Untitled");
-        assert!(!session.dirty);
+        assert!(!session.is_dirty(), "a fresh session is not changed");
         assert!(!session.undo.can_undo());
 
         let mut document = Document::new();
@@ -903,6 +940,14 @@ mod tests {
             .push(larrygram_model::Page::new(PageId { index: 0 }, 0));
         let session = DocumentSession::new(document, Some(PathBuf::from("/tmp/a.vsdx")));
         assert_eq!(session.display_name(), "a.vsdx");
+    }
+
+    /// A path with no file name (a directory) displays as "Untitled"
+    /// (the `display_name` fallback).
+    #[test]
+    fn a_path_without_a_file_name_displays_untitled() {
+        let session = DocumentSession::new(Document::new(), Some(PathBuf::from("/")));
+        assert_eq!(session.display_name(), "Untitled");
     }
 
     #[test]
@@ -1203,25 +1248,60 @@ mod tests {
 
     /// `cancel_group` restores the document's unsaved-changes state to
     /// what it was when the group opened (ADR 0040, amendment
-    /// 2026-11-03).
+    /// 2026-11-03; task P7-42: the snapshot is the derived rule).
     #[test]
     fn cancel_group_restores_the_unsaved_changes_state() {
+        // The group saw a changed document: the cancel leaves it
+        // changed, even when something in the group saved it.
         let mut ctx = AppCtx::new(Settings::default());
         let index = ctx.open_document(DocumentSession::new(Document::new(), None));
         let id = ctx.documents.get(index).expect("session").id;
-        ctx.active_document_mut().expect("session").dirty = true;
+        // An earlier edit moved the change counter.
+        {
+            let session = ctx.active_document_mut().expect("session");
+            session.changes = session.changes.wrapping_add(1);
+        }
         ctx.begin_group(id, "Insert Text Box").expect("begin");
         ctx.push_edit(id, Box::new(LabelEdit("one"))).expect("push");
         // Something in the group marked the document saved again.
-        ctx.active_document_mut().expect("session").dirty = false;
+        ctx.active_document_mut().expect("session").mark_saved();
 
         ctx.cancel_group(id).expect("cancel");
         let session = ctx.documents.get(index).expect("session");
         assert!(
-            session.dirty,
+            session.is_dirty(),
             "the unsaved-changes state the group saw is restored"
         );
         assert!(session.undo.is_empty(), "no undo entry stays behind");
+    }
+
+    /// The other arm (task P7-42): a cancelled group on an unchanged
+    /// document leaves it unchanged — the reverts move the change
+    /// counter, and the saved marker follows them.
+    #[test]
+    fn a_cancelled_group_leaves_an_unchanged_document_unchanged() {
+        let mut ctx = AppCtx::new(Settings::default());
+        let index = ctx.open_document(DocumentSession::new(Document::new(), None));
+        let id = ctx.documents.get(index).expect("session").id;
+        ctx.begin_group(id, "Insert Text Box").expect("begin");
+        ctx.push_edit(id, Box::new(LabelEdit("one"))).expect("push");
+        {
+            // The step was already applied: its `apply` moved the
+            // change counter (the `Edit` contract, ADR 0040).
+            let session = ctx.active_document_mut().expect("session");
+            session.changes = session.changes.wrapping_add(1);
+        }
+        assert!(
+            ctx.active_document().expect("session").is_dirty(),
+            "the group's edits count as changes while it runs"
+        );
+
+        ctx.cancel_group(id).expect("cancel");
+        let session = ctx.documents.get(index).expect("session");
+        assert!(
+            !session.is_dirty(),
+            "a cancelled empty text box leaves the drawing unchanged"
+        );
     }
 
     /// The wrappers find their session by identity; a stale one is an
@@ -1243,7 +1323,7 @@ mod tests {
         ctx.end_group(id).expect("nothing to end");
         ctx.cancel_group(id).expect("nothing to cancel");
         let session = ctx.documents.get(index).expect("session");
-        assert!(!session.dirty, "a no-op cancel touches nothing");
+        assert!(!session.is_dirty(), "a no-op cancel touches nothing");
     }
 
     /// Groups do not nest through the wrappers either.
