@@ -136,7 +136,7 @@ const BUILTINS: &[(&str, &str, EnabledFn, RunFn)] = &[
         always,
         view::run_options,
     ),
-    ("app.quit", "Exit", always, file::run_quit),
+    ("app.quit", "Exit", can_quit, file::run_quit),
     ("file.new", "New", always, file::run_new),
     (
         "file.new.blank.drawing",
@@ -175,7 +175,7 @@ const BUILTINS: &[(&str, &str, EnabledFn, RunFn)] = &[
     ("file.inspect", "Inspect", always, file::run_inspect),
     ("file.render", "Render", always, file::run_render),
     ("file.export", "Export", always, file::run_export),
-    ("file.exit", "Exit", always, file::run_quit),
+    ("file.exit", "Exit", can_quit, file::run_quit),
     ("edit.undo", "Undo", can_undo, view::run_undo),
     ("edit.redo", "Redo", can_redo, view::run_redo),
     // Panel Modern's Quick Access Redo dispatches the repeat form
@@ -380,6 +380,23 @@ fn meta_for(
 /// Always enabled.
 pub(crate) fn always(_ctx: &AppCtx) -> Enabled {
     Enabled::yes()
+}
+
+/// Enabled where the app can quit (task P7-46 goal 8).
+///
+/// The web build runs in a browser tab: it has no window to close and
+/// no process to end, so a "quit" there would close some drawings and
+/// leave the tab open. `app.quit` and `file.exit` are disabled on wasm
+/// with that reason; the desktop builds keep them enabled.
+pub(crate) fn can_quit(_ctx: &AppCtx) -> Enabled {
+    #[cfg(target_arch = "wasm32")]
+    {
+        Enabled::no("the web app runs in a browser tab; close the tab to quit")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        Enabled::yes()
+    }
 }
 
 /// Enabled when a document is open (ADR 0029 state).
@@ -637,5 +654,36 @@ mod tests {
             has_pages(&ctx).reason.as_deref(),
             Some("the document has no pages")
         );
+    }
+
+    /// Task P7-46 goal 8: `app.quit` and `file.exit` are disabled in
+    /// the web build (no window to close; a quit would close drawings
+    /// and leave the tab open) and enabled on the desktop.
+    #[test]
+    fn quit_is_enabled_on_the_desktop_and_disabled_on_the_web() {
+        let ctx = AppCtx::new(crate::Settings::default());
+        let verdict = can_quit(&ctx);
+        if cfg!(target_arch = "wasm32") {
+            assert!(!verdict.is_enabled(), "the web build cannot quit");
+            assert!(
+                verdict
+                    .reason
+                    .as_deref()
+                    .is_some_and(|reason| reason.contains("browser tab")),
+                "{:?}",
+                verdict.reason
+            );
+        } else {
+            assert!(verdict.is_enabled(), "the desktop can quit");
+        }
+        for id in ["app.quit", "file.exit"] {
+            let registry = crate::builtins::registry().expect("registry");
+            let command = crate::CommandId::parse(id).expect("id");
+            assert_eq!(
+                registry.enabled(&command, &ctx),
+                verdict,
+                "{id} is the same verdict"
+            );
+        }
     }
 }
