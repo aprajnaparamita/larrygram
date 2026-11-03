@@ -233,17 +233,19 @@ fn choose(target: &GlueTarget, reference: Option<Point>) -> Candidate {
 fn pair(begin: &GlueTarget, end: &GlueTarget) -> (Candidate, Candidate) {
     let begin_candidates = begin.candidates();
     let end_candidates = end.candidates();
-    match resolve_pair(&begin_candidates, &end_candidates) {
-        Some((i, j)) => {
-            let b = begin_candidates.get(i).copied();
-            let e = end_candidates.get(j).copied();
-            match (b, e) {
-                (Some(b), Some(e)) => (b, e),
-                _ => (first(&begin_candidates, begin), first(&end_candidates, end)),
-            }
-        }
-        None => (first(&begin_candidates, begin), first(&end_candidates, end)),
-    }
+    let (i, j) = resolve_pair(&begin_candidates, &end_candidates).unwrap_or((0, 0));
+    // Both slices are never empty and `resolve_pair` never answers
+    // outside them, so the fallbacks only guard the no-panic contract.
+    (
+        begin_candidates
+            .get(i)
+            .copied()
+            .unwrap_or(first(&begin_candidates, begin)),
+        end_candidates
+            .get(j)
+            .copied()
+            .unwrap_or(first(&end_candidates, end)),
+    )
 }
 
 /// A target's first usable candidate (the first finite one, else the
@@ -253,7 +255,7 @@ fn first(candidates: &[Candidate], target: &GlueTarget) -> Candidate {
         .iter()
         .copied()
         .find(|candidate| finite(candidate.point))
-        .or_else(|| candidates.first().copied())
+        .or(candidates.first().copied())
         .unwrap_or(Candidate {
             point: target.transform.apply(Point::new(0.0, 0.0)),
             exit: None,
@@ -490,6 +492,15 @@ mod tests {
         assert_eq!(end.point, Point::new(3.0, 4.0));
         assert_eq!(begin.exit, None);
         assert!(!missing);
+    }
+
+    #[test]
+    fn a_non_finite_distance_counts_as_infinite() {
+        assert_eq!(distance_or_infinite(Point::new(3.0, 4.0)), 5.0);
+        assert_eq!(
+            distance_or_infinite(Point::new(f64::NAN, 1.0)),
+            f64::INFINITY
+        );
     }
 
     #[test]

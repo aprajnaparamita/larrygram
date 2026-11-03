@@ -96,6 +96,53 @@ fn a_rotated_shape_turns_its_points_and_its_exits() {
 // ---------------------------------------------------------------------------
 
 #[test]
+fn a_point_glue_begin_and_a_dynamic_end_resolve_together() {
+    let mut fixed = box_target(0.0, 0.0);
+    fixed.points = vec![(3, Point::new(1.0, 0.5), None)];
+    let mut free_target = box_target(6.0, 0.0);
+    free_target.points = Vec::new();
+    let begin = EndSpec::Glued(&fixed, GlueEnd::Point(3));
+    let end = EndSpec::Glued(&free_target, GlueEnd::Shape);
+    let (begin, end, missing) = resolve_ends(&begin, &end);
+    assert!(!missing);
+    assert_eq!(begin.point, Point::new(1.0, 0.5), "the row's point");
+    assert_eq!(
+        end.point,
+        Point::new(6.0, 0.5),
+        "the left midpoint is nearest"
+    );
+}
+
+#[test]
+fn connection_points_without_a_direction_take_the_nearest_sides_normals() {
+    let mut target = box_target(0.0, 0.0);
+    target.points = vec![
+        (0, Point::new(0.1, 0.5), None),
+        (1, Point::new(1.9, 0.5), None),
+    ];
+    let candidates = target.candidates();
+    assert_eq!(
+        candidates[0].exit,
+        Some(Point::new(-1.0, 0.0)),
+        "the left side"
+    );
+    assert_eq!(
+        candidates[1].exit,
+        Some(Point::new(1.0, 0.0)),
+        "the right side"
+    );
+}
+
+#[test]
+fn a_transform_that_collapses_a_direction_offers_no_exit() {
+    let mut target = box_target(0.0, 0.0);
+    target.transform = Transform::scale(0.0, 0.0);
+    let candidates = target.candidates();
+    assert_eq!(candidates.len(), 4);
+    assert!(candidates.iter().all(|candidate| candidate.exit.is_none()));
+}
+
+#[test]
 fn resolve_pair_takes_the_nearest_pair_and_the_lower_index_on_a_tie() {
     let a = vec![
         Candidate {
@@ -177,6 +224,26 @@ fn free_ends_stay_on_their_points() {
     assert_eq!(end.point, Point::new(3.0, 4.0));
     assert_eq!(begin.exit, None);
     assert!(!missing);
+}
+
+#[test]
+fn a_target_whose_candidates_all_overflow_still_answers() {
+    let mut target = box_target(0.0, 0.0);
+    target.transform = Transform::translate(Point::new(f64::NAN, 0.0));
+    target.points = vec![(0, Point::new(1.0, 0.5), None)];
+    let begin = EndSpec::Glued(&target, GlueEnd::Shape);
+    let end = EndSpec::Free(Point::new(0.0, f64::INFINITY));
+    let (begin, end, _) = resolve_ends(&begin, &end);
+    assert!(
+        begin.point.x.is_nan(),
+        "the only candidate is unusable: {:?}",
+        begin.point
+    );
+    assert_eq!(
+        end.point,
+        Point::new(0.0, f64::INFINITY),
+        "a free end keeps its point"
+    );
 }
 
 #[test]
@@ -353,6 +420,35 @@ fn a_zero_gap_facing_pair_gets_zero_length_stubs() {
     )
     .expect("route");
     assert_eq!(points, vec![Point::new(2.0, 0.5), Point::new(2.0, 2.5)]);
+}
+
+#[test]
+fn a_zero_length_or_non_finite_exit_is_no_preference() {
+    let start = Point::new(2.0, 0.5);
+    let end = Point::new(5.0, 2.0);
+    let none = route(start, end, &right_angle(None, None)).expect("route");
+    for exits in [
+        (Some(Point::new(0.0, 0.0)), None),
+        (
+            Some(Point::new(f64::NAN, 0.0)),
+            Some(Point::new(0.0, f64::INFINITY)),
+        ),
+    ] {
+        let treated = route(start, end, &right_angle(exits.0, exits.1)).expect("route");
+        assert_eq!(treated, none, "{exits:?} routes like no preference");
+    }
+}
+
+#[test]
+fn a_degenerate_route_with_exits_keeps_the_two_points() {
+    let p = Point::new(-1.5, 4.0);
+    let points = route(
+        p,
+        p,
+        &right_angle(Some(Point::new(1.0, 0.0)), Some(Point::new(0.0, -1.0))),
+    )
+    .expect("route");
+    assert_eq!(points, vec![p, p]);
 }
 
 #[test]

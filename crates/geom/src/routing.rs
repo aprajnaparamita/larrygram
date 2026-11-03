@@ -88,17 +88,34 @@ pub fn route(start: Point, end: Point, options: &RouteOptions) -> Result<Vec<Poi
     match options.style {
         RouteStyle::Straight => Ok(vec![start, end]),
         RouteStyle::RightAngle => {
+            if same(start, end) {
+                return Ok(vec![start, end]);
+            }
             let begin_exit = unit_exit(options.begin_exit);
             let end_exit = unit_exit(options.end_exit);
-            if begin_exit.is_none() && end_exit.is_none() {
-                Ok(elbow(start, end))
-            } else {
-                let mut points = right_angle_with_exits(start, end, begin_exit, end_exit);
-                collapse_collinear(&mut points);
-                Ok(points)
-            }
+            let mut points = right_angle_with_exits(start, end, begin_exit, end_exit);
+            collapse_collinear(&mut points);
+            drop_repeats(&mut points);
+            Ok(points)
         }
     }
+}
+
+/// Drops any interior point the route already visited (a degenerate
+/// turn can land on an earlier point): no point is repeated. The first
+/// and the last point always stay.
+fn drop_repeats(points: &mut Vec<Point>) {
+    if points.len() < 3 {
+        return;
+    }
+    let mut kept: Vec<Point> = Vec::with_capacity(points.len());
+    for (index, point) in points.iter().enumerate() {
+        let edge = index == 0 || index + 1 == points.len();
+        if edge || !kept.contains(point) {
+            kept.push(*point);
+        }
+    }
+    *points = kept;
 }
 
 /// Drops interior points that only continue the previous direction, so
@@ -132,25 +149,6 @@ fn collapse_collinear(points: &mut Vec<Point>) {
     }
 }
 
-/// The right-angle path without exit directions (ADR 0045): one elbow,
-/// horizontal first when `|dx| >= |dy|`.
-fn elbow(start: Point, end: Point) -> Vec<Point> {
-    let dx = (end.x - start.x).abs();
-    let dy = (end.y - start.y).abs();
-    let corner = if dx >= dy {
-        Point::new(end.x, start.y)
-    } else {
-        Point::new(start.x, end.y)
-    };
-    let mut points = vec![start];
-    push_unique(&mut points, corner);
-    push_unique(&mut points, end);
-    if points.len() < 2 {
-        points = vec![start, end];
-    }
-    points
-}
-
 /// The right-angle path with exit directions (ADR 0084 rule 4): a stub
 /// out of each glued end along its exit, and the join between them.
 fn right_angle_with_exits(
@@ -169,9 +167,9 @@ fn right_angle_with_exits(
     }
     push_unique(&mut points, back);
     push_unique(&mut points, end);
-    if points.len() < 2 {
-        points = vec![start, end];
-    }
+    // `start` and `end` differ here (`route` answers the degenerate
+    // case itself) and both always stay, so the path has at least two
+    // points.
     points
 }
 
@@ -328,15 +326,13 @@ fn other(axis: Axis) -> Axis {
     }
 }
 
-/// The exit's signed component on `axis` (`-1`, `0` or `1`).
+/// The exit's signed component on `axis` (`-1` or `1`; a unit exit
+/// always runs along its dominant axis).
 fn axis_sign(exit: Point, axis: Axis) -> f64 {
-    let value = axis_value(exit, axis);
-    if value > 0.0 {
+    if axis_value(exit, axis) > 0.0 {
         1.0
-    } else if value < 0.0 {
-        -1.0
     } else {
-        0.0
+        -1.0
     }
 }
 
