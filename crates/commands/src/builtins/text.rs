@@ -35,6 +35,12 @@ pub(crate) const TABLE: CommandTable = &[
     ("shape.set.text", "Shape Text", can_edit_text, run_set_text),
 ];
 
+/// The editor's own commands (task P7-41 item 4): they open, commit
+/// and cancel the in-place editor, so running one never commits the
+/// open edit first ([`super::ends_text_editing`] reads this list).
+/// A test pins it to the [`TABLE`] ids.
+pub(crate) const EDITOR_OWN: &[&str] = &["text.begin", "text.commit", "text.cancel"];
+
 /// The selection's anchor shape, or the last selected shape when there
 /// is no anchor (the same subject rule as the Size & Position pane).
 fn target_shape(ctx: &AppCtx) -> Option<ShapeId> {
@@ -392,6 +398,18 @@ mod tests {
             !shape_has_text(&doc, shape),
             "the empty own text wins and is not text"
         );
+    }
+
+    /// Task P7-41 item 4: [`EDITOR_OWN`] names exactly the `text.*`
+    /// commands of [`TABLE`] — a new one must be classified on
+    /// purpose.
+    #[test]
+    fn editor_own_is_the_text_table_without_the_writer() {
+        for (id, ..) in TABLE {
+            let editor_own = EDITOR_OWN.contains(id);
+            assert_eq!(editor_own, id.starts_with("text."), "{id}");
+        }
+        assert!(!EDITOR_OWN.contains(&"shape.set.text"));
     }
 
     #[test]
