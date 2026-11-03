@@ -335,3 +335,58 @@ fn a_dropped_process_draws_its_label_centred_in_panel_modern() {
 fn a_dropped_process_draws_its_label_centred_in_panel_classic() {
     a_dropped_process_draws_its_label_centred(LayoutKind::PanelClassic);
 }
+
+#[test]
+fn a_drawn_rectangle_draws_its_label_centred() {
+    // Task P7-45 goal 3, through the shell: the Rectangle tool's shape
+    // draws its typed label centred in its box (the P7-44 ink helper).
+    let mut rig = rig(LayoutKind::PanelClassic);
+    // The Rectangle tool sits on the hidden floating Drawing toolbar
+    // (View > Toolbars > Drawing; the text fixtures' pick).
+    rig.click_named("View");
+    rig.click_named("Toolbars");
+    rig.click_named("Drawing");
+    rig.click(Role::Button, "Rectangle Tool");
+    // Draw a box with a real drag (snapping on: the cells are read
+    // back from the shape).
+    let from = screen(&rig, 4.0, 5.0);
+    let to = screen(&rig, 6.0, 6.0);
+    drag(&mut rig, from, to, egui::Modifiers::NONE);
+    let shape = last_shape(&rig);
+    let (pin_x, pin_y) = (number(&rig, shape, "PinX"), number(&rig, shape, "PinY"));
+    let (loc_x, loc_y) = (
+        number(&rig, shape, "LocPinX"),
+        number(&rig, shape, "LocPinY"),
+    );
+    let (width, height) = (number(&rig, shape, "Width"), number(&rig, shape, "Height"));
+    let min = (pin_x - loc_x, pin_y - loc_y);
+
+    // Select it with a real canvas click and type the label.
+    let centre = screen(&rig, pin_x, pin_y);
+    click_at(&mut rig, centre);
+    press_key(&mut rig, egui::Key::F2, egui::Modifiers::NONE);
+    type_text(&mut rig, "Hi");
+    press_key(&mut rig, egui::Key::Escape, egui::Modifiers::NONE);
+    assert_eq!(
+        shape_text(&rig, shape).as_deref(),
+        Some("Hi"),
+        "the label commits"
+    );
+
+    // The picture: the ink sits in the middle of the shape's box,
+    // both ways (a top-left label would sit in its corner).
+    let image = rig.render();
+    let rect = egui::Rect::from_two_pos(
+        screen(&rig, min.0, min.1 + height),
+        screen(&rig, min.0 + width, min.1),
+    );
+    let ink = ink_bbox(&image, rect).expect("the label draws ink");
+    let (dx, dy) = (
+        ink.center().x - rect.center().x,
+        ink.center().y - rect.center().y,
+    );
+    assert!(
+        dx.abs() < rect.width() * 0.12 && dy.abs() < rect.height() * 0.2,
+        "the label is centred (ink {ink:?} in {rect:?}, offset {dx:.1},{dy:.1})"
+    );
+}
