@@ -7,7 +7,8 @@
 //! byte for byte through it all and a save. A corpus connector Visio
 //! routed keeps its rows through an unrelated edit and a save. A
 //! connector inside a group keeps its endpoint cells in the parent's
-//! coordinates.
+//! coordinates, and a group and an ungroup re-base those cells in the
+//! model (undo and redo included).
 
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
@@ -734,6 +735,92 @@ fn a_connector_inside_a_group_keeps_its_cells_in_the_parents_coordinates() {
         "the path's last row {last:?} agrees with the cells {end:?}"
     );
     let _ = group;
+}
+
+/// No edit may leave the endpoint cells disagreeing with the drawn
+/// path (ADR 0084 rule 1, amended; task P7-50 goal 1): the cells and
+/// the path's first and last row land on the same parent-space points.
+fn assert_cells_match_path(document: &Document, connector: ShapeId) {
+    let path = rows(document, connector);
+    let (begin, end) = ends(document, connector);
+    let first = row_point(path.first().expect("a first row"));
+    let last = row_point(path.last().expect("a last row"));
+    assert!(
+        close(local_to_parent(document, connector, first), begin),
+        "the begin cells {begin:?} vs the drawn first row {first:?}"
+    );
+    assert!(
+        close(local_to_parent(document, connector, last), end),
+        "the end cells {end:?} vs the drawn last row {last:?}"
+    );
+}
+
+/// One free-ended `connector.draw` from `(1.0, 8.0)` to `(5.0, 8.0)`.
+fn draw_free(ctx: &mut AppCtx, registry: &Registry) -> ShapeId {
+    dispatch(
+        ctx,
+        registry,
+        "connector.draw",
+        Args::new()
+            .with("stencil", ArgValue::Text("Basic Flowchart".to_owned()))
+            .with("master", ArgValue::Text("Connector".to_owned()))
+            .with("x", ArgValue::Number(3.0))
+            .with("y", ArgValue::Number(8.0))
+            .with("begin_x", ArgValue::Number(1.0))
+            .with("begin_y", ArgValue::Number(8.0))
+            .with("end_x", ArgValue::Number(5.0))
+            .with("end_y", ArgValue::Number(8.0)),
+    )
+    .expect("draw free");
+    ctx.selection.anchor.expect("the new connector is the anchor")
+}
+
+/// Task P7-50 goal 1: a group and an ungroup re-base the endpoint
+/// cells in the model, so the cells keep agreeing with the drawn path
+/// through the group, the ungroup and their undo and redo — for a
+/// glued connector and a free-ended one, with no re-route rewriting
+/// their stored rows at any step.
+#[test]
+fn group_and_ungroup_rebase_the_endpoint_cells_on_undo_and_redo() {
+    let (mut ctx, registry, page) = fixture();
+    let glued = draw(&mut ctx, &registry, 1, 2);
+    let free = draw_free(&mut ctx, &registry);
+    let glued_rows = rows(&document(&ctx), glued);
+    let free_rows = rows(&document(&ctx), free);
+    let glued_id = document(&ctx).shape(glued).expect("glued").visio_id;
+    let free_id = document(&ctx).shape(free).expect("free").visio_id;
+
+    let assert_both = |ctx: &AppCtx, step: &str| {
+        let doc = document(ctx);
+        assert_cells_match_path(&doc, glued);
+        assert_cells_match_path(&doc, free);
+        assert_eq!(rows(&doc, glued), glued_rows, "the glued rows at {step}");
+        assert_eq!(rows(&doc, free), free_rows, "the free rows at {step}");
+    };
+
+    // Group both connectors with their shapes: nothing moves on the
+    // page, so no re-route may rewrite the stored rows.
+    select(&mut ctx, page, &[1, 2, 5, glued_id, free_id]);
+    dispatch(&mut ctx, &registry, "arrange.group", Args::new()).expect("group");
+    let group = ctx.selection.anchor.expect("the group is the anchor");
+    assert_both(&ctx, "the group");
+
+    // Ungroup: the cells map back through the group's frame.
+    let group_id = document(&ctx).shape(group).expect("group").visio_id;
+    select(&mut ctx, page, &[group_id]);
+    dispatch(&mut ctx, &registry, "arrange.ungroup", Args::new()).expect("ungroup");
+    assert_both(&ctx, "the ungroup");
+
+    // Undo and redo of both steps agree with the model's re-base.
+    dispatch(&mut ctx, &registry, "edit.undo", Args::new()).expect("undo");
+    assert_both(&ctx, "the ungroup undone");
+    dispatch(&mut ctx, &registry, "edit.redo", Args::new()).expect("redo");
+    assert_both(&ctx, "the ungroup redone");
+    dispatch(&mut ctx, &registry, "edit.undo", Args::new()).expect("undo");
+    dispatch(&mut ctx, &registry, "edit.undo", Args::new()).expect("undo");
+    assert_both(&ctx, "the group undone");
+    dispatch(&mut ctx, &registry, "edit.redo", Args::new()).expect("redo");
+    assert_both(&ctx, "the group redone");
 }
 
 /// The typed point of one geometry row.
