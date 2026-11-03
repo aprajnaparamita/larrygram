@@ -1119,6 +1119,22 @@ mod tests {
         text_node
     }
 
+    /// Never-crash contract (AGENTS.md section 6): a page list that
+    /// names a shape the table does not have is skipped, in the
+    /// visio-id lookup as everywhere else (task P7-48).
+    #[test]
+    fn shape_by_visio_id_skips_a_stale_shape_reference() {
+        use larrygram_model::{Document, PageId};
+        let mut doc = Document::new();
+        doc.add_page("Page-1").expect("page");
+        doc.pages
+            .first_mut()
+            .expect("page")
+            .shapes
+            .push(ShapeId { index: 99 });
+        assert_eq!(doc.shape_by_visio_id(PageId { index: 0 }, 7), None);
+    }
+
     /// Task P7-41 item 9, task P7-48 item 1: the drawn font data is
     /// the first glyph's size and the first baseline (the box is the
     /// text block, not the glyphs).

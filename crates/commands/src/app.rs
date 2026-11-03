@@ -310,9 +310,8 @@ impl DocumentSession {
     ///
     /// One exception (task P7-48 item 6): while a new, empty text box
     /// is being typed the drawing reads as it did when the box opened
-    /// (the open group's [`Self::undo`]
-    /// [`group_unsaved`](larrygram_commands::UndoStack::group_unsaved)
-    /// snapshot). The box's insert is provisional — the commit without
+    /// (the open group's `unsaved` snapshot,
+    /// [`UndoStack::group_unsaved`]). The box's insert is provisional — the commit without
     /// text cancels it — so it marks nothing; the moment the box
     /// carries typed text it is a change again.
     pub fn is_dirty(&self) -> bool {
