@@ -115,3 +115,134 @@ fn the_line_and_the_text_box_keep_the_documented_defaults() {
         assert_ne!(h_src, ValueSource::Local, "{id}: no own row");
     }
 }
+
+/// One Process drop at (4, 3).
+fn process_args() -> Args {
+    Args::new()
+        .with("stencil", ArgValue::Text("Basic Flowchart".to_owned()))
+        .with("master", ArgValue::Text("Process".to_owned()))
+        .with("x", ArgValue::Number(4.0))
+        .with("y", ArgValue::Number(3.0))
+}
+
+#[test]
+fn local_alignment_wins_over_the_master_paragraph_row() {
+    // Task P7-45 goal 5: drop Process, run `format.text.align_left`,
+    // and the instance's own Paragraph row answers 0 — not the
+    // master's 1.
+    let (mut ctx, registry, page) = fixture();
+    dispatch(&mut ctx, &registry, "insert.shape", process_args()).expect("the drop drops");
+    let shape = last_shape(&ctx, page);
+    let (_, horz, _, h_src) = alignment(&ctx, shape);
+    assert_eq!(horz, num(1.0), "the master's row before the edit");
+    assert!(
+        matches!(h_src, ValueSource::Master(_)),
+        "from the master rung"
+    );
+    // The formatting commands need text on the shape (the `ADD_TEXT`
+    // predicate), so the shape gets its label first.
+    let session = ctx.active_document().expect("session").id;
+    {
+        let session = ctx
+            .documents
+            .iter_mut()
+            .find(|candidate| candidate.id == session)
+            .expect("session");
+        let entity = session.document.shape_mut(shape).expect("shape");
+        entity.text = Some(larrygram_model::TextContent {
+            parts: vec![larrygram_model::TextPart::Text("Label".to_owned())],
+        });
+    }
+    ctx.selection.shapes = vec![shape];
+    ctx.selection.anchor = Some(shape);
+    ctx.selection.page = Some(page);
+    dispatch(&mut ctx, &registry, "format.text.align_left", Args::new())
+        .expect("the alignment writes");
+    let (vertical, horz, v_src, h_src) = alignment(&ctx, shape);
+    assert_eq!(horz, num(0.0), "the instance's own row wins");
+    assert_eq!(h_src, ValueSource::Local, "from the instance's row");
+    assert_eq!(
+        vertical,
+        num(1.0),
+        "the master's VerticalAlign is untouched"
+    );
+    assert!(
+        matches!(v_src, ValueSource::Master(_)),
+        "still the master rung"
+    );
+}
+
+#[test]
+fn the_masters_alignment_survives_save_and_reopen() {
+    // Task P7-45 goal 5: the master's cells are in the reopened file,
+    // and an instance still resolves to 1/1 through the master rung.
+    let (mut ctx, registry, page) = fixture();
+    dispatch(&mut ctx, &registry, "insert.shape", process_args()).expect("the drop drops");
+    let (vertical, horz, _, _) = alignment(&ctx, last_shape(&ctx, page));
+    assert_eq!(
+        (vertical, horz),
+        (num(1.0), num(1.0)),
+        "before the round trip"
+    );
+    let document = {
+        let session = ctx.active_document().expect("session");
+        session.document.clone()
+    };
+    let bytes =
+        larrygram_vsdx::write_document(&document, &larrygram_vsdx::Package::new()).expect("write");
+    let reopened = larrygram_vsdx::read_document(&bytes, &larrygram_vsdx::Limits::DEFAULT)
+        .expect("the file reopens");
+
+    // The master's own sheet carries the cells.
+    let master = reopened
+        .masters
+        .iter()
+        .find(|master| master.name_u == "Process")
+        .expect("the Process master is in the file");
+    let sheet = &reopened
+        .shape(master.shapes.first().copied().expect("one shape"))
+        .expect("the master shape")
+        .sheet;
+    let vertical = sheet
+        .cells
+        .iter()
+        .find(|cell| cell.name.as_str() == "VerticalAlign")
+        .expect("VerticalAlign is in the file");
+    assert_eq!(
+        vertical.value,
+        Some(larrygram_model::CellValue::Number(1.0))
+    );
+    let paragraph = sheet
+        .sections
+        .iter()
+        .find(|section| section.name.as_str() == "Paragraph")
+        .expect("the Paragraph section is in the file");
+    let horz = paragraph.rows[0]
+        .cells
+        .iter()
+        .find(|cell| cell.name.as_str() == "HorzAlign")
+        .expect("HorzAlign is in the file");
+    assert_eq!(horz.value, Some(larrygram_model::CellValue::Number(1.0)));
+
+    // The instance in the reopened file still resolves 1/1.
+    let page = reopened.pages.first().expect("a page");
+    let shape = page.shapes.first().copied().expect("an instance");
+    let mut reader = larrygram_model::CellReader::new(&reopened);
+    assert_eq!(
+        reader
+            .number(SheetRef::Shape(shape), &CellName::new("VerticalAlign"))
+            .expect("VerticalAlign"),
+        1.0
+    );
+    assert_eq!(
+        reader
+            .row_number(
+                SheetRef::Shape(shape),
+                "Paragraph",
+                larrygram_model::RowTarget::at(0),
+                &CellName::new("HorzAlign"),
+            )
+            .expect("HorzAlign"),
+        1.0
+    );
+}
