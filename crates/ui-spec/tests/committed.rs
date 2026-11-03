@@ -96,8 +96,9 @@ const PIN_365: LayoutCounts = LayoutCounts {
 const COMMANDS: usize = 1130;
 // 90 rows from the source page; P7-20 adds the four `OWN_SHORTCUTS`
 // bindings (Ctrl+N, Ctrl+O, Ctrl+S, Ctrl+Alt+P); P7-23 adds `Ctrl+,`
-// (the Options dialog, Cmd+, on macOS).
-const SHORTCUTS: usize = 95;
+// (the Options dialog, Cmd+, on macOS); P7-42 adds `Ctrl+Q` (the quit
+// chord, Cmd+Q on macOS).
+const SHORTCUTS: usize = 96;
 
 #[test]
 fn committed_data_loads_and_counts_are_pinned() {
