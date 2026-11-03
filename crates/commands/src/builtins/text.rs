@@ -141,16 +141,16 @@ fn run_set_text(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandEr
     Ok(edit_outcome("Wrote shape text", Vec::new(), Box::new(edit)))
 }
 
-/// Whether the shape has text (task P7-29): at least one non-empty
-/// literal part. Run and paragraph markers alone are not text; a
-/// field's cached display text follows as a literal, so a field counts.
+/// Whether the shape has text (task P7-29, task P7-40): at least one
+/// non-empty literal part of its effective text (its own `Text`
+/// element, else its master's). Run and paragraph markers alone are
+/// not text; a field's cached display text follows as a literal, so a
+/// field counts.
 pub(crate) fn shape_has_text(doc: &Document, shape: ShapeId) -> bool {
-    doc.shape(shape).is_some_and(|entry| {
-        entry.text.as_ref().is_some_and(|text| {
-            text.parts.iter().any(|part| match part {
-                TextPart::Text(literal) => !literal.is_empty(),
-                _ => false,
-            })
+    doc.effective_text(shape).is_some_and(|text| {
+        text.parts.iter().any(|part| match part {
+            TextPart::Text(literal) => !literal.is_empty(),
+            _ => false,
         })
     })
 }
@@ -366,6 +366,32 @@ mod tests {
         }
         assert!(shape_has_text(&doc, shape), "a literal counts");
         assert!(!shape_has_text(&doc, ShapeId { index: 99 }), "stale id");
+    }
+
+    #[test]
+    fn shape_has_text_follows_the_master_text() {
+        // Task P7-40 item 3: the text controls enable on an instance
+        // whose text lives on its master.
+        use larrygram_model::{Master, MasterId};
+        let (mut doc, _page, shape) = document();
+        let mut master = Master::new(MasterId { index: 0 }, 1);
+        let content = doc.add_shape(Shape::new(ShapeId { index: 0 }, 2));
+        doc.shape_mut(content).expect("shape").text = Some(TextContent {
+            parts: vec![TextPart::Text("master".to_owned())],
+        });
+        master.shapes = vec![content];
+        doc.masters.push(master);
+        doc.shape_mut(shape).expect("shape").master = Some(MasterId { index: 0 });
+        assert!(
+            shape_has_text(&doc, shape),
+            "the master's text counts on the instance"
+        );
+        // The instance's own empty `Text` element overrides the master.
+        doc.shape_mut(shape).expect("shape").text = Some(TextContent::new());
+        assert!(
+            !shape_has_text(&doc, shape),
+            "the empty own text wins and is not text"
+        );
     }
 
     #[test]

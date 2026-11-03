@@ -1771,7 +1771,9 @@ struct ParaDraft {
 /// The text block of one shape (ADR 0020, ADR 0024), or `None` for no
 /// text.
 fn build_text(ctx: &mut Ctx<'_>, id: ShapeId, width: f64, height: f64) -> Option<TextNode> {
-    let content = ctx.doc.shape(id)?.text.as_ref()?;
+    // The text source is the effective one (task P7-40): an instance
+    // with no `Text` element of its own draws its master's text.
+    let content = ctx.doc.effective_text(id)?;
     if content.is_empty() {
         return None;
     }
@@ -3338,6 +3340,144 @@ mod tests {
             "{:?}",
             scene.warnings
         );
+    }
+
+    /// A document whose instance has no `Text` element of its own: the
+    /// master's shape holds one `Character` row (18 pt, underlined) and
+    /// the text `Master` when `with_text` (task P7-40; without it the
+    /// master's shape has no `Text` element either, the pixel test's
+    /// twin).
+    fn inherited_text_document(with_text: bool) -> (Document, ShapeId) {
+        let (mut doc, page, shape) = document_with_shape();
+        if let Some(entity) = doc.pages.get_mut(page.index as usize) {
+            entity.sheet.cells = vec![
+                number_cell("PageWidth", 8.5),
+                number_cell("PageHeight", 11.0),
+            ];
+        }
+        let mid = doc.masters.len();
+        let mut master = Master::new(MasterId { index: mid as u32 }, 1);
+        let content = doc.add_shape(ModelShape::new(ShapeId { index: 0 }, 2));
+        {
+            let entity = doc.shape_mut(content).expect("content");
+            let mut section = Section::new(SectionName::new("Character"));
+            let mut row = Row::new();
+            row.ix = Some(0);
+            row.cells = vec![
+                string_cell("Font", "Calibri"),
+                number_cell("Size", 0.25),
+                number_cell("Style", 4.0),
+            ];
+            section.rows.push(row);
+            entity.sheet.sections.push(section);
+            if with_text {
+                entity.text = Some(larrygram_model::TextContent {
+                    parts: vec![TextPart::Text("Master".to_owned())],
+                });
+            }
+        }
+        master.shapes = vec![content];
+        doc.masters.push(master);
+        {
+            let entity = doc.shape_mut(shape).expect("shape");
+            entity.master = Some(MasterId { index: mid as u32 });
+            entity.sheet.cells = vec![
+                number_cell("Width", 2.0),
+                number_cell("Height", 1.0),
+                number_cell("PinX", 4.0),
+                number_cell("PinY", 5.5),
+                number_cell("LocPinX", 1.0),
+                number_cell("LocPinY", 0.5),
+                number_cell("FillPattern", 0.0),
+                number_cell("LinePattern", 0.0),
+            ];
+        }
+        with_geometry(
+            &mut doc,
+            shape,
+            vec![
+                grow("MoveTo", &[("X", 0.0), ("Y", 0.0)]),
+                grow("LineTo", &[("X", 2.0), ("Y", 0.0)]),
+                grow("LineTo", &[("X", 2.0), ("Y", 1.0)]),
+                grow("LineTo", &[("X", 0.0), ("Y", 1.0)]),
+                grow("LineTo", &[("X", 0.0), ("Y", 0.0)]),
+            ],
+        );
+        (doc, shape)
+    }
+
+    #[test]
+    fn an_instance_without_text_draws_its_masters_text() {
+        // Task P7-40 item 2: the text source is the effective text and
+        // the master's run formatting applies to the inherited text.
+        let (doc, _shape) = inherited_text_document(true);
+        let scene = build(&doc);
+        match scene.nodes.first() {
+            Some(Node::Shape(shape)) => {
+                let text = shape.text.as_ref().expect("the master's text draws");
+                assert!(!text.layout.lines.is_empty());
+                for glyph in text.layout.lines.iter().flat_map(|line| &line.glyphs) {
+                    assert!((glyph.size - 18.0).abs() < 1e-9, "{glyph:?}");
+                }
+                // `Style` bit 4 on the master's `Character` row is
+                // underline (the run formatting through the chain).
+                assert_eq!(text.runs.len(), 1);
+                assert!(text.runs[0].underline, "{:?}", text.runs[0]);
+            }
+            other => panic!("expected a shape, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_empty_own_text_element_draws_no_text_block() {
+        // The instance's own `Text` element wins over the master's
+        // text (task P7-40), and an empty one draws no text block.
+        let (mut doc, shape) = inherited_text_document(true);
+        doc.shape_mut(shape).expect("shape").text = Some(larrygram_model::TextContent::new());
+        let scene = build(&doc);
+        match scene.nodes.first() {
+            Some(Node::Shape(shape)) => assert!(shape.text.is_none()),
+            other => panic!("expected a shape, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_masters_text_rasters_ink_into_the_text_box() {
+        // Task P7-40 item 2, scene and pixels: the raster of the
+        // master's text differs from the raster of the same page
+        // without it, and every differing pixel lands inside the
+        // shape's text box.
+        fn raster(doc: &Document) -> tiny_skia::Pixmap {
+            let scene = build(doc);
+            let png = crate::render_png(&scene, &crate::PngOptions::new()).expect("renders");
+            tiny_skia::Pixmap::decode_png(&png).expect("decodes")
+        }
+        let (with_text, _shape) = inherited_text_document(true);
+        let (without_text, _) = inherited_text_document(false);
+        let drawn = raster(&with_text);
+        let blank = raster(&without_text);
+        assert_eq!(
+            (drawn.width(), drawn.height()),
+            (blank.width(), blank.height())
+        );
+        let mut differing = 0usize;
+        for (index, (a, b)) in drawn.pixels().iter().zip(blank.pixels()).enumerate() {
+            let same = a.red() == b.red()
+                && a.green() == b.green()
+                && a.blue() == b.blue()
+                && a.alpha() == b.alpha();
+            if !same {
+                differing += 1;
+                let (x, y) = (index as u32 % drawn.width(), index as u32 / drawn.width());
+                // The text box: x 3..5 in, y 5..6 in at 96 ppi, `y`
+                // measured up from the page bottom.
+                assert!(
+                    (288..480).contains(&x) && (480..576).contains(&y),
+                    "ink outside the text box at ({x}, {y})"
+                );
+            }
+        }
+        assert!(differing > 0, "the master's text rasters no ink");
     }
 
     #[test]
