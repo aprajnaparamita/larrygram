@@ -728,6 +728,32 @@ impl Shell {
                 input.key_pressed(egui::Key::F5),
             )
         });
+        // An open popup owns Escape (task P7-48 item 3): the shortcut
+        // pass would consume it (its `Esc` binding is
+        // `view.full_screen_mode`), so the shell sets the key aside for
+        // the pass and puts it back for the popup to close on.
+        let escape_aside = if crate::text_edit::other_layer_open(ui.ctx(), self.editor.shape) {
+            ui.ctx().input_mut(|input| {
+                let mut saved = Vec::new();
+                input.events.retain(|event| {
+                    let is_escape = matches!(
+                        event,
+                        egui::Event::Key {
+                            key: egui::Key::Escape,
+                            pressed: true,
+                            ..
+                        }
+                    );
+                    if is_escape {
+                        saved.push(event.clone());
+                    }
+                    !is_escape
+                });
+                saved
+            })
+        } else {
+            Vec::new()
+        };
         match shortcuts::dispatch(ui.ctx(), &mut self.shortcuts, &self.app, self.focus) {
             Ok(mut produced) => {
                 if escape && !f5 && !self.app.full_screen {
@@ -736,6 +762,11 @@ impl Shell {
                 intents.extend(produced);
             }
             Err(error) => self.note_error(error.to_string()),
+        }
+        if !escape_aside.is_empty() {
+            ui.ctx().input_mut(|input| {
+                input.events.splice(0..0, escape_aside).count();
+            });
         }
         self.sync_full_screen(ui.ctx());
         if self.app.full_screen {
@@ -1818,7 +1849,18 @@ impl Shell {
     /// full-screen mode; those owners must see it first.
     fn capture_escape(&mut self, egui_ctx: &Context) {
         let escape = egui_ctx.input(|input| input.key_pressed(egui::Key::Escape));
+        // An open popup or menu owns Escape (task P7-48 item 3): it
+        // closes and the open edit stays, so the shell leaves the key
+        // alone while one is up.
+        let popup = crate::text_edit::other_layer_open(egui_ctx, self.editor.shape);
+        if escape && popup && self.editor.is_active() {
+            // The popup takes the Escape and egui hands the keyboard
+            // nowhere (it unfocuses on Escape); the editor takes it
+            // back the same frame (task P7-48 item 3).
+            self.editor.refocus();
+        }
         self.escape_pressed = escape
+            && !popup
             && (self.editor.is_active()
                 || stencil::is_dragging(&self.tools)
                 || self.app.format_painter.is_some());

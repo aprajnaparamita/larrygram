@@ -284,7 +284,12 @@ impl TextEditor {
                         .set_char_range(Some(CCursorRange::one(CCursor::new(buffer_chars))));
                     output.state.store(ui.ctx(), output.response.id);
                 }
-                if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+                // Escape commits (ADR 0044) — except when a popup
+                // or menu is open (task P7-48 item 3): Escape closes
+                // it and the edit stays.
+                if ui.input(|input| input.key_pressed(egui::Key::Escape))
+                    && !other_layer_open(ui.ctx(), self.shape)
+                {
                     commit = true;
                 }
                 field = Some((output.response.rect, output.response.id));
@@ -413,6 +418,20 @@ pub fn keep_editing_rect(
         });
         data.insert_temp(keep_rects_id(), kept);
     });
+}
+
+/// Whether a popup, menu or palette layer other than the editor's own
+/// is open (task P7-48 item 3): Escape belongs to that layer — it
+/// closes and the open edit stays.
+pub fn other_layer_open(ctx: &egui::Context, shape: Option<ShapeId>) -> bool {
+    let own = editor_id(shape);
+    ctx.memory(|memory| {
+        memory
+            .areas()
+            .visible_layer_ids()
+            .iter()
+            .any(|layer| layer.order == egui::Order::Foreground && layer.id != own)
+    })
 }
 
 /// What a press at `pos` does to the open editor (task P7-41 item 1).

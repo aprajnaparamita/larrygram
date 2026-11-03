@@ -1762,3 +1762,44 @@ fn the_canvas_leaves_out_the_text_being_edited() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Item 3 (task P7-48, the review's M3): Escape belongs to an open
+// popup — it closes and the open edit stays.
+// ---------------------------------------------------------------------------
+
+/// Escape in the font size list closes the list and keeps the edit
+/// with its text (task P7-48 item 3); Escape again ends the edit.
+#[test]
+fn escape_in_a_format_popup_closes_the_popup_not_the_edit() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        choose_text_tool(&mut rig, kind);
+        let pos = screen(&rig, EMPTY.0, EMPTY.1);
+        click_at(&mut rig, pos);
+        assert!(editing(&mut rig), "{kind:?}: the box opens");
+        type_into_editor(&mut rig, "Hi");
+        open_size_list(&mut rig, kind);
+        assert!(
+            has(&mut rig, Role::Button, "36 pt"),
+            "{kind:?}: the size list opens"
+        );
+        press_key(&mut rig, egui::Key::Escape);
+        assert!(
+            !has(&mut rig, Role::Button, "36 pt"),
+            "{kind:?}: the Escape closes the list"
+        );
+        assert!(
+            editing(&mut rig),
+            "{kind:?}: and keeps the edit with its text"
+        );
+        type_into_editor(&mut rig, "!");
+        press_key(&mut rig, egui::Key::Escape);
+        let box_ = last_shape(&rig.shell.borrow().app);
+        assert_eq!(
+            shape_text(&rig, box_).as_deref(),
+            Some("Hi!"),
+            "{kind:?}: the typed text is kept"
+        );
+    }
+}
