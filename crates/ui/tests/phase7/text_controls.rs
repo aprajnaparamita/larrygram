@@ -1662,3 +1662,103 @@ fn the_field_wraps_at_the_block_width() {
         press_key(&mut rig, egui::Key::Escape);
     }
 }
+
+// ---------------------------------------------------------------------------
+// Item 2 (task P7-48, the review's M2): one text at a time. The canvas
+// leaves out the text of the shape being edited; only the editor
+// shows it. Its geometry, fill and line still draw.
+// ---------------------------------------------------------------------------
+
+/// The count of non-background pixels of the canvas raster (the
+/// canvas layer, under the editor overlay) in a page rectangle.
+fn raster_ink(rig: &ShellRig, x0: f64, y0: f64, x1: f64, y1: f64) -> usize {
+    let shell = rig.shell.borrow();
+    let cache = shell.canvas_cache();
+    let raster = cache.raster().expect("the canvas raster");
+    let (page_w, page_h) = cache.page_size();
+    let scale = f64::from(raster.width) / page_w;
+    let px = |x: f64| ((x.clamp(0.0, page_w) * scale) as u32).min(raster.width.saturating_sub(1));
+    let py = |y: f64| {
+        (((page_h - y.clamp(0.0, page_h)) * scale) as u32).min(raster.height.saturating_sub(1))
+    };
+    let (xmin, xmax) = (px(x0), px(x1));
+    let (ymin, ymax) = (py(y1), py(y0));
+    let mut counts: std::collections::HashMap<(u8, u8, u8), usize> =
+        std::collections::HashMap::new();
+    for x in xmin..xmax {
+        for y in ymin..ymax {
+            let i = ((y * raster.width + x) * 4) as usize;
+            let px = &raster.rgba[i..i + 4];
+            *counts.entry((px[0], px[1], px[2])).or_default() += 1;
+        }
+    }
+    let background = counts
+        .iter()
+        .max_by_key(|(_, count)| *count)
+        .map(|(colour, _)| *colour)
+        .unwrap_or((0, 0, 0));
+    let mut inked = 0;
+    for x in xmin..xmax {
+        for y in ymin..ymax {
+            let i = ((y * raster.width + x) * 4) as usize;
+            let px = &raster.rgba[i..i + 4];
+            let far = i32::from(px[0]) - i32::from(background.0);
+            let far = far
+                .abs()
+                .max((i32::from(px[1]) - i32::from(background.1)).abs());
+            let far = far.max((i32::from(px[2]) - i32::from(background.2)).abs());
+            if far > 40 {
+                inked += 1;
+            }
+        }
+    }
+    inked
+}
+
+/// The canvas does not draw the text of the shape being edited (task
+/// P7-48 item 2): with the editor open the shape's text pixels are
+/// absent from the canvas layer; after the edit they are back with the
+/// new text.
+#[test]
+fn the_canvas_leaves_out_the_text_being_edited() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        select_shape(&mut rig);
+        lighten_fill(&mut rig, kind);
+        let pos = screen(&rig, SHAPE.0, SHAPE.1);
+        double_click_at(&mut rig, pos);
+        type_into_editor(&mut rig, "MMMM");
+        press_key(&mut rig, egui::Key::Escape);
+        rig.run();
+        rig.run();
+        let with_text = raster_ink(&rig, 2.05, 3.2, 3.95, 3.47);
+        assert!(
+            with_text > 0,
+            "{kind:?}: the committed text draws ({with_text})"
+        );
+
+        // While the editor is open the canvas layer holds no text.
+        double_click_at(&mut rig, pos);
+        rig.run();
+        rig.run();
+        let hidden = raster_ink(&rig, 2.05, 3.2, 3.95, 3.47);
+        assert_eq!(
+            hidden, 0,
+            "{kind:?}: the edited text is absent from the canvas"
+        );
+
+        // When the edit ends the text comes back, with the new text.
+        type_into_editor(&mut rig, "!");
+        press_key(&mut rig, egui::Key::Escape);
+        rig.run();
+        rig.run();
+        let back = raster_ink(&rig, 2.05, 3.2, 3.95, 3.47);
+        assert!(back > 0, "{kind:?}: the text is back ({back})");
+        let shape = rectangle(&rig.shell.borrow().app);
+        assert_eq!(
+            shape_text(&rig, shape).as_deref(),
+            Some("MMMM!"),
+            "{kind:?}: with the edited text"
+        );
+    }
+}

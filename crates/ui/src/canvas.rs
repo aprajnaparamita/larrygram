@@ -198,6 +198,11 @@ pub struct CanvasCache {
     generation: u64,
     last_warning: Option<String>,
     failed: Option<FailedKey>,
+    /// The shape whose text the raster leaves out (task P7-48 item 2):
+    /// the in-place editor shows that text, so the canvas does not
+    /// draw it a second time. Part of the raster key: changing it
+    /// drops the cached raster.
+    hidden_text: Option<larrygram_model::ShapeId>,
     /// Whether the primary button went down on the canvas (the tool
     /// event stream's own state, not part of the raster key).
     pointer_down: bool,
@@ -244,8 +249,20 @@ impl CanvasCache {
             generation: 0,
             last_warning: None,
             failed: None,
+            hidden_text: None,
             pointer_down: false,
             drag_cursor: None,
+        }
+    }
+
+    /// Leaves one shape's text out of the raster (task P7-48 item 2).
+    /// A change drops the cached raster: the page re-rasterizes with
+    /// the text in or out.
+    pub fn set_hidden_text(&mut self, shape: Option<larrygram_model::ShapeId>) {
+        if self.hidden_text != shape {
+            self.hidden_text = shape;
+            self.raster = None;
+            self.texture = None;
         }
     }
 
@@ -261,6 +278,7 @@ impl CanvasCache {
         self.generation = 0;
         self.last_warning = None;
         self.failed = None;
+        self.hidden_text = None;
         self.pointer_down = false;
         self.drag_cursor = None;
     }
@@ -334,6 +352,7 @@ impl PartialEq for CanvasCache {
             && self.generation == other.generation
             && self.last_warning == other.last_warning
             && self.failed == other.failed
+            && self.hidden_text == other.hidden_text
             && self.pointer_down == other.pointer_down
             && self.drag_cursor == other.drag_cursor
     }
@@ -1322,7 +1341,12 @@ fn rasterize_at(
         cache.clear();
         return Ok(());
     };
-    let scene = build_scene(&session.document, page, &BuildOptions::new()).map_err(render_error)?;
+    let mut scene =
+        build_scene(&session.document, page, &BuildOptions::new()).map_err(render_error)?;
+    // One text at a time (task P7-48 item 2): the shape being edited
+    // keeps its geometry, fill and line, but its text is the editor's
+    // to draw.
+    without_text_of(&mut scene.nodes, cache.hidden_text, 0);
     let wanted = POINTS_PER_INCH * safe_zoom(session.view.zoom);
     let scale = clamp_scale(ctx, scene.width, scene.height, wanted);
     let raster = render_raster(
@@ -1355,6 +1379,38 @@ fn rasterize_at(
     cache.raster_zoom = safe_zoom(session.view.zoom);
     cache.generation = cache.generation.saturating_add(1);
     Ok(())
+}
+
+/// Leaves one shape's text out of the scene (task P7-48 item 2): the
+/// in-place editor draws it instead. The node's geometry, fill and
+/// line stay. `depth` bounds the recursion (AGENTS.md section 6).
+fn without_text_of(
+    nodes: &mut [larrygram_render::scene::Node],
+    shape: Option<larrygram_model::ShapeId>,
+    depth: usize,
+) {
+    /// The deepest group nesting the filter walks (AGENTS.md section
+    /// 6: bounded recursion).
+    const MAX_DEPTH: usize = 128;
+    let Some(shape) = shape else {
+        return;
+    };
+    if depth >= MAX_DEPTH {
+        return;
+    }
+    for node in nodes {
+        match node {
+            larrygram_render::scene::Node::Group(group) => {
+                without_text_of(&mut group.children, Some(shape), depth + 1)
+            }
+            larrygram_render::scene::Node::Shape(candidate)
+                if candidate.shape_id == Some(shape) =>
+            {
+                candidate.text = None;
+            }
+            _ => {}
+        }
+    }
 }
 
 /// The raster scale under the ADR 0025 caps and the backend texture
@@ -1992,5 +2048,61 @@ mod tests {
             CanvasColors::active(&ctx).background,
             CanvasColors::from_theme(&modern).background
         );
+    }
+
+    /// Task P7-48 item 2: the filter leaves one shape's text out and
+    /// keeps everything else (its geometry, the other shapes).
+    #[test]
+    fn without_text_of_leaves_one_shapes_text_out() {
+        use larrygram_render::scene::{Group, Node, Shape as SceneShape, TextNode};
+        let text = TextNode {
+            fonts: Vec::new(),
+            runs: Vec::new(),
+            layout: Default::default(),
+            color: larrygram_render::Rgba::opaque(0, 0, 0),
+            block: larrygram_geom::Size::new(1.0, 1.0),
+            origin: larrygram_geom::Point::new(0.0, 0.0),
+        };
+        let shape_node = |id: Option<u32>| {
+            Node::Shape(Box::new(SceneShape {
+                shape_id: id.map(|index| ShapeId { index }),
+                transform: larrygram_geom::Transform::identity(),
+                path: Default::default(),
+                fill: None,
+                stroke: None,
+                shadow: None,
+                clip: None,
+                text: Some(text.clone()),
+            }))
+        };
+        let mut nodes = vec![
+            shape_node(Some(1)),
+            Node::Group(Group {
+                transform: larrygram_geom::Transform::identity(),
+                clip: None,
+                children: vec![shape_node(Some(2))],
+            }),
+        ];
+
+        // The named shape loses its text, in groups too; the rest keeps it.
+        without_text_of(&mut nodes, Some(ShapeId { index: 2 }), 0);
+        match &nodes[0] {
+            Node::Shape(shape) => assert!(shape.text.is_some(), "the other shape keeps its text"),
+            other => panic!("not a shape: {other:?}"),
+        }
+        match &nodes[1] {
+            Node::Group(group) => match &group.children[0] {
+                Node::Shape(shape) => assert!(shape.text.is_none(), "the shape's text is out"),
+                other => panic!("not a shape: {other:?}"),
+            },
+            other => panic!("not a group: {other:?}"),
+        }
+
+        // `None` clears nothing.
+        without_text_of(&mut nodes, None, 0);
+        match &nodes[0] {
+            Node::Shape(shape) => assert!(shape.text.is_some(), "None is a no-op"),
+            other => panic!("not a shape: {other:?}"),
+        }
     }
 }

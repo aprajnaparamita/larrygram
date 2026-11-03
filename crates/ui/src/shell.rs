@@ -524,6 +524,13 @@ impl Shell {
         self.canvas_viewport
     }
 
+    /// The canvas cache of this shell (task P7-48 item 2): the tests
+    /// read the canvas layer's raster, the picture under the editor
+    /// overlay.
+    pub fn canvas_cache(&self) -> &crate::canvas::CanvasCache {
+        &self.cache
+    }
+
     /// The Shapes window's rect of the last frame.
     pub fn shapes_window_rect(&self) -> Option<egui::Rect> {
         self.shapes_rect
@@ -1592,6 +1599,10 @@ impl Shell {
         {
             let session = self.app.active_document_mut();
             if let Some(session) = session {
+                // One text at a time (task P7-48 item 2): the canvas
+                // leaves out the text of the shape being edited — the
+                // editor shows it.
+                self.cache.set_hidden_text(self.editor.shape);
                 ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
                     match canvas::show_with_overlay(ui, session, &mut self.cache, &overlay) {
                         Ok(output) => {
