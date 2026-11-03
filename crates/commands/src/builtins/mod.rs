@@ -473,7 +473,7 @@ pub(crate) fn edit_outcome(
 /// Whether `command` is a text-format command (task P7-41 item 1): its
 /// control formats the text of the shape being edited, so a click on
 /// the control keeps the in-place editor open (focus and caret
-/// included). The set is [`format::TEXT_TABLE`], the same table the
+/// included). The set is `format::TEXT_TABLE`, the same table the
 /// registry registers: one source of truth.
 pub fn is_text_format(command: &str) -> bool {
     format::TEXT_TABLE.iter().any(|(id, ..)| *id == command)
@@ -482,7 +482,7 @@ pub fn is_text_format(command: &str) -> bool {
 /// Whether running `command` ends an in-place text edit (task P7-41
 /// item 4): every command does, except the text-format commands
 /// ([`is_text_format`]) and the editor's own commands
-/// ([`text::EDITOR_OWN`]). The shell commits the open edit before any
+/// (`text::EDITOR_OWN`). The shell commits the open edit before any
 /// other command runs, so a save never writes an empty box and a
 /// layout switch keeps the typed text.
 pub fn ends_text_editing(command: &str) -> bool {
