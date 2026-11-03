@@ -3162,6 +3162,105 @@ mod tests {
     }
 
     #[test]
+    fn a_route_edit_labels_and_restores_itself() {
+        let (mut ctx, session, page, connector, _left, _right) = fixture();
+        {
+            let doc = ctx.active_document_mut().expect("session");
+            let mut connect = Connect::new();
+            connect.from_sheet = doc.document.shape(connector).expect("c").visio_id;
+            connect.from_cell = "BeginX".to_owned();
+            connect.from_part = mutate::VIS_BEGIN;
+            connect.to_sheet = 1;
+            connect.to_cell = "PinX".to_owned();
+            connect.to_part = mutate::VIS_WHOLE_SHAPE;
+            doc.document.add_connect(page, connect).expect("connect");
+        }
+        let _ = session;
+        // A forced pass re-routes the connector and hands back its
+        // snapshot: the edit labels itself and its apply and revert
+        // write the same sheets.
+        let mut edit = reroute_connectors(&mut ctx, page, &[connector])
+            .expect("pass")
+            .expect("it rewrote rows");
+        assert_eq!(edit.label(), "Route connector");
+        let sheet = |ctx: &AppCtx| {
+            ctx.active_document()
+                .expect("session")
+                .document
+                .shape(connector)
+                .expect("c")
+                .sheet
+                .clone()
+        };
+        let before = sheet(&ctx);
+        edit.revert(&mut ctx).expect("revert");
+        edit.apply(&mut ctx).expect("apply");
+        assert_eq!(sheet(&ctx), before, "apply writes the same sheets");
+    }
+
+    #[test]
+    fn a_dangling_record_falls_back_to_the_stored_point() {
+        let (mut ctx, _session, page, connector, _left, _right) = fixture();
+        {
+            let doc = ctx.active_document_mut().expect("session");
+            let mut connect = Connect::new();
+            connect.from_sheet = doc.document.shape(connector).expect("c").visio_id;
+            connect.from_cell = "EndX".to_owned();
+            connect.from_part = mutate::VIS_END;
+            connect.to_sheet = 99;
+            connect.to_cell = "PinX".to_owned();
+            connect.to_part = mutate::VIS_WHOLE_SHAPE;
+            doc.document.add_connect(page, connect).expect("connect");
+        }
+        let session = ctx.active_document().expect("session");
+        let doc = &session.document;
+        let ends = doc.connects_of(page, connector).expect("ends");
+        let mut warnings = Vec::new();
+        let (_begin, _end, boxes) = resolved_ends(
+            doc,
+            page,
+            connector,
+            [
+                ends.first().and_then(Option::as_ref),
+                ends.get(1).and_then(Option::as_ref),
+            ],
+            [None, None],
+            &mut warnings,
+        )
+        .expect("resolve");
+        assert!(
+            boxes.iter().all(Option::is_none),
+            "no target box: {boxes:?}"
+        );
+    }
+
+    #[test]
+    fn a_forced_pass_re_routes_a_connector_with_free_ends() {
+        // The Forced scope re-routes its connectors even when no
+        // record names them (rule 5's "its own ends" category).
+        let (mut ctx, _session, page, _connector, _left, _right) = fixture();
+        let line = {
+            let session = ctx.active_document_mut().expect("session");
+            session
+                .document
+                .insert_shape(page, one_d(8, (1.0, 6.0), (5.0, 6.5), false), None)
+                .expect("line")
+        };
+        let edit = reroute_connectors(&mut ctx, page, &[line])
+            .expect("pass")
+            .expect("it rewrote rows");
+        assert_eq!(edit.label(), "Route connector");
+    }
+
+    #[test]
+    fn a_singular_parent_names_the_failure() {
+        // The guard's contract (the transform construction itself is
+        // never singular: the scale is always plus or minus one, so no
+        // flow reaches it).
+        assert_eq!(singular().to_string(), "singular parent transform");
+    }
+
+    #[test]
     fn connectors_are_never_glue_targets() {
         let (mut ctx, _session, page, _connector, _left, _right) = fixture();
         let line = {

@@ -571,6 +571,45 @@ mod tests {
     }
 
     #[test]
+    fn page_box_is_the_transformed_local_box() {
+        let target = box_target();
+        let box_ = target.page_box();
+        assert_eq!(box_.min, Point::new(3.0, 3.0));
+        assert_eq!(box_.max, Point::new(5.0, 4.0));
+        let mut rotated = box_target();
+        rotated.transform = Transform::rotate(Angle::from_radians(std::f64::consts::FRAC_PI_2));
+        let box_ = rotated.page_box();
+        assert!(
+            (box_.min.x + 1.0).abs() < 1e-9 && box_.min.y.abs() < 1e-9,
+            "{:?}",
+            box_
+        );
+        assert!(
+            box_.max.x.abs() < 1e-9 && (box_.max.y - 2.0).abs() < 1e-9,
+            "{:?}",
+            box_
+        );
+    }
+
+    #[test]
+    fn a_one_candidate_target_answers_it_for_both_ends() {
+        let mut target = box_target();
+        target.points = vec![(0, Point::new(1.0, 0.5), None)];
+        // Both dynamic: the distinct-pair fallback keeps the one
+        // candidate twice.
+        let begin = EndSpec::Glued(&target, GlueEnd::Shape);
+        let end = EndSpec::Glued(&target, GlueEnd::Shape);
+        let (begin, end, _) = resolve_ends(&begin, &end);
+        assert_eq!(begin.point, end.point);
+        // A fixed end and a dynamic one: the excluded row leaves the
+        // pool empty, so the dynamic end takes the same candidate.
+        let fixed = EndSpec::Glued(&target, GlueEnd::Point(0));
+        let dynamic = EndSpec::Glued(&target, GlueEnd::Shape);
+        let (fixed, dynamic, _) = resolve_ends(&fixed, &dynamic);
+        assert_eq!(fixed.point, dynamic.point);
+    }
+
+    #[test]
     fn a_non_finite_distance_counts_as_infinite() {
         assert_eq!(distance_or_infinite(Point::new(3.0, 4.0)), 5.0);
         assert_eq!(

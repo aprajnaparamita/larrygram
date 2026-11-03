@@ -569,6 +569,33 @@ mod tests {
     }
 
     #[test]
+    fn crosses_detects_the_interior_and_the_diagonal() {
+        let rect = Rect::new(Point::new(0.0, 0.0), Point::new(2.0, 2.0));
+        assert!(crosses(Point::new(-1.0, 1.0), Point::new(3.0, 1.0), rect));
+        assert!(!crosses(Point::new(-1.0, 3.0), Point::new(3.0, 3.0), rect));
+        assert!(
+            !crosses(Point::new(0.0, 1.0), Point::new(0.0, 3.0), rect),
+            "the boundary touches but does not cross"
+        );
+        assert!(crosses(Point::new(-1.0, -1.0), Point::new(3.0, 3.0), rect));
+    }
+
+    #[test]
+    fn a_route_from_inside_a_box_still_answers() {
+        // Every candidate enters the box the start sits in: the first
+        // elbow is the deterministic fallback, never an error.
+        let box_ = Rect::new(Point::new(0.0, 0.0), Point::new(2.0, 2.0));
+        let points = route(
+            Point::new(0.5, 0.5),
+            Point::new(5.0, 0.5),
+            &RouteOptions::new(RouteStyle::RightAngle).with_boxes(Some(box_), None),
+        )
+        .expect("route");
+        assert_eq!(points.first(), Some(&Point::new(0.5, 0.5)));
+        assert_eq!(points.last(), Some(&Point::new(5.0, 0.5)));
+    }
+
+    #[test]
     fn a_non_finite_endpoint_is_invalid() {
         let fine = Point::new(0.0, 0.0);
         for bad in [
