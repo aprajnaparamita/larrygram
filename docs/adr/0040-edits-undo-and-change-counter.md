@@ -149,7 +149,8 @@ one step.
   not reverted as one step labelled as the group (task P7-41): the
   stack stays consistent, the error is reported, and the unsaved state
   is not restored (a partial revert must never mark the drawing
-  saved).
+  saved). The pushed step re-reverts the edit that failed: its revert
+  runs again as part of that step's own undo.
 - `undo` and `redo` end an open group first. `can_undo` is true while
   a non-empty group is open (task P7-41): the Undo control commits the
   interaction first and then undoes the folded step whole.

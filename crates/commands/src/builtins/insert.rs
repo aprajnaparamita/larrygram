@@ -158,7 +158,11 @@ pub(super) fn run_insert_shape(
     }
     select_new(ctx, session, page, shape)?;
     ctx.touch_session(session);
-    Ok(edit_outcome(label, Vec::new(), Box::new(edit)))
+    let mut outcome = edit_outcome(label, Vec::new(), Box::new(edit));
+    // The new shape's id (task P7-48 item 9): like the other creation
+    // commands.
+    outcome.shape = Some(shape);
+    Ok(outcome)
 }
 
 /// The undo step of a finished drop (task P6-18 F14): the insertion
@@ -1207,6 +1211,31 @@ mod tests {
             1,
             "only the fixture shape is on the page"
         );
+    }
+
+    /// Task P7-48 item 9: `insert.shape` answers with its new shape's
+    /// id like the other creation commands.
+    #[test]
+    fn insert_shape_outcome_carries_the_new_shape_id() {
+        let (mut ctx, _session, page, _shape) = fixture();
+        let catalog = stencils::catalog();
+        let entry = catalog.first().expect("a catalog stencil");
+        let master = entry.masters.first().expect("a master");
+        let args = Args::new()
+            .with("stencil", ArgValue::Text(entry.name.to_owned()))
+            .with("master", ArgValue::Text(master.name.to_owned()))
+            .with("x", ArgValue::Number(4.0))
+            .with("y", ArgValue::Number(4.0));
+        let outcome =
+            run_insert_shape(&mut ctx, &Invocation::new(args, Source::Ui)).expect("the drop lands");
+        let doc = &ctx.active_document().expect("session").document;
+        let id = *doc
+            .page(page)
+            .expect("page")
+            .shapes
+            .last()
+            .expect("the new shape");
+        assert_eq!(outcome.shape, Some(id), "the outcome names the new shape");
     }
 
     /// Task P7-41 item 7: the outcome carries the new shape's id, so

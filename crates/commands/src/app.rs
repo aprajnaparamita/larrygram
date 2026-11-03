@@ -1310,6 +1310,49 @@ mod tests {
         assert!(slot.is_dirty(), "an earlier change still marks it");
     }
 
+    /// An edit whose `revert` fails (task P7-48 item 9's partial
+    /// revert).
+    struct RevertFailsEdit;
+
+    impl crate::undo::Edit for RevertFailsEdit {
+        fn label(&self) -> &str {
+            "revert fails"
+        }
+
+        fn apply(&mut self, _ctx: &mut AppCtx) -> Result<(), CommandError> {
+            Ok(())
+        }
+
+        fn revert(&mut self, _ctx: &mut AppCtx) -> Result<(), CommandError> {
+            Err(CommandError::failed("revert failed"))
+        }
+    }
+
+    /// Task P7-48 item 9: a partial revert never marks the drawing
+    /// saved (the review's minor 5).
+    #[test]
+    fn a_partial_cancel_revert_keeps_the_drawing_changed() {
+        let mut ctx = AppCtx::new(Settings::default());
+        let index = ctx.open_document(DocumentSession::new(larrygram_model::Document::new(), None));
+        let session = ctx.documents.get(index).expect("session").id;
+        ctx.begin_group(session, "Insert Text Box").expect("begin");
+        ctx.push_edit(session, Box::new(LabelEdit("insert")))
+            .expect("push");
+        ctx.touch_session(session);
+        ctx.push_edit(session, Box::new(RevertFailsEdit))
+            .expect("push");
+        let slot = ctx.documents.iter_mut().find(|s| s.id == session).unwrap();
+        assert!(slot.is_dirty(), "the inserts moved the counter");
+
+        let error = ctx.cancel_group(session).expect_err("the revert fails");
+        assert_eq!(error.to_string(), "revert failed");
+        let slot = ctx.documents.iter_mut().find(|s| s.id == session).unwrap();
+        assert!(
+            slot.is_dirty(),
+            "a partial revert never marks the drawing saved"
+        );
+    }
+
     #[test]
     fn cancel_group_restores_the_unsaved_changes_state() {
         // The group saw a changed document: the cancel leaves it

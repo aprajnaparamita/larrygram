@@ -919,12 +919,28 @@ fn formatting_while_typing_keeps_every_keystroke_and_the_caret() {
             editing(&mut rig),
             "{kind:?}: still editing after the Bold click"
         );
+        assert!(
+            !disabled(&mut rig, Role::Button, "Bold"),
+            "{kind:?}: the controls stay enabled after the click"
+        );
+        assert!(
+            undo_labels(&rig).is_empty(),
+            "{kind:?}: the steps collect in the open group"
+        );
         type_into_editor(&mut rig, "cd");
         open_size_list(&mut rig, kind);
         click(&mut rig, Role::Button, "36 pt");
         assert!(
             editing(&mut rig),
             "{kind:?}: still editing after the size choice"
+        );
+        assert!(
+            !disabled(&mut rig, Role::Button, "Bold"),
+            "{kind:?}: the controls stay enabled after the size"
+        );
+        assert!(
+            undo_labels(&rig).is_empty(),
+            "{kind:?}: the size step is in the open group too"
         );
         click(&mut rig, Role::Button, centre_name(kind));
         assert!(
@@ -939,6 +955,10 @@ fn formatting_while_typing_keeps_every_keystroke_and_the_caret() {
         assert!(
             editing(&mut rig),
             "{kind:?}: still editing after the Italic click"
+        );
+        assert!(
+            !disabled(&mut rig, Role::Button, "Italic"),
+            "{kind:?}: the controls stay enabled after the click"
         );
         type_into_editor(&mut rig, "X");
         press_key(&mut rig, egui::Key::Escape);
@@ -957,6 +977,9 @@ fn formatting_while_typing_keeps_every_keystroke_and_the_caret() {
             vec!["Insert Text Box".to_owned()],
             "{kind:?}: one step labelled as the insert"
         );
+        // The picture paints the text at that format (review minor 6).
+        let after = ink(&mut rig, 2.1, 5.3, 3.9, 5.75);
+        assert!(after > 0, "{kind:?}: the text paints ({after})");
     }
 }
 
@@ -969,6 +992,10 @@ fn format_clicks_on_an_existing_shape_are_one_step_each() {
     for kind in LAYOUTS {
         let mut rig = shell_rig(kind);
         select_shape(&mut rig);
+        // A light fill first (the `text_controls` rule): the black
+        // text hides on the fixture's dark fill, and the flow checks
+        // the picture (review minor 6).
+        lighten_fill(&mut rig, kind);
         let shape = rectangle(&rig.shell.borrow().app);
         let pos = screen(&rig, SHAPE.0, SHAPE.1);
         double_click_at(&mut rig, pos);
@@ -981,7 +1008,7 @@ fn format_clicks_on_an_existing_shape_are_one_step_each() {
         );
         assert_eq!(
             undo_labels(&rig),
-            vec!["Bold".to_owned()],
+            vec!["Set fill color #F5F5F5".to_owned(), "Bold".to_owned()],
             "{kind:?}: one step per format click (as Visio)"
         );
         open_size_list(&mut rig, kind);
@@ -992,8 +1019,28 @@ fn format_clicks_on_an_existing_shape_are_one_step_each() {
         );
         assert_eq!(
             undo_labels(&rig),
-            vec!["Bold".to_owned(), "Set font size".to_owned()],
+            vec![
+                "Set fill color #F5F5F5".to_owned(),
+                "Bold".to_owned(),
+                "Set font size".to_owned()
+            ],
             "{kind:?}: the size is its own step"
+        );
+        // The Bold and 36 pt clicks record their cells (review minor
+        // 6), and the controls stay enabled after the clicks.
+        assert_eq!(
+            row_number(&rig, shape, "Character", "Style"),
+            Some(1.0),
+            "{kind:?}: the Bold click records the Style bit"
+        );
+        assert_eq!(
+            row_number(&rig, shape, "Character", "Size"),
+            Some(0.5),
+            "{kind:?}: the 36 pt choice records the Size cell"
+        );
+        assert!(
+            !disabled(&mut rig, Role::Button, "Bold"),
+            "{kind:?}: the controls stay enabled after the clicks"
         );
         type_into_editor(&mut rig, "!");
         press_key(&mut rig, egui::Key::Escape);
@@ -1005,12 +1052,16 @@ fn format_clicks_on_an_existing_shape_are_one_step_each() {
         assert_eq!(
             undo_labels(&rig),
             vec![
+                "Set fill color #F5F5F5".to_owned(),
                 "Bold".to_owned(),
                 "Set font size".to_owned(),
                 "Write shape text".to_owned()
             ],
             "{kind:?}: the text write is one more step"
         );
+        // The picture paints the edited text (review minor 6).
+        let after = ink(&mut rig, 2.1, 3.2, 3.9, 3.5);
+        assert!(after > 0, "{kind:?}: the text paints ({after})");
     }
 }
 
@@ -1049,6 +1100,9 @@ fn cmd_b_while_typing_folds_into_the_group() {
             vec!["Insert Text Box".to_owned()],
             "{kind:?}: one step labelled as the insert"
         );
+        // The picture paints the bold text (review minor 6).
+        let after = ink(&mut rig, 2.1, 5.3, 3.9, 5.75);
+        assert!(after > 0, "{kind:?}: the text paints ({after})");
     }
 }
 
