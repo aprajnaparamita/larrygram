@@ -280,7 +280,7 @@ fn choose(target: &GlueTarget, reference: Option<Point>, exclude: Option<usize>)
 /// it twice.
 fn pair_distinct(target: &GlueTarget) -> (Candidate, Candidate) {
     let candidates = target.candidates();
-    let mut best: Option<(f64, (usize, usize))> = None;
+    let mut best: Option<(f64, (Candidate, Candidate))> = None;
     for (i, a) in candidates.iter().enumerate() {
         for (j, b) in candidates.iter().enumerate() {
             if i == j {
@@ -289,19 +289,14 @@ fn pair_distinct(target: &GlueTarget) -> (Candidate, Candidate) {
             let delta = a.point.sub(b.point);
             let distance = distance_or_infinite(delta);
             if best.as_ref().is_none_or(|(best, _)| distance < *best) {
-                best = Some((distance, (i, j)));
+                best = Some((distance, (*a, *b)));
             }
         }
     }
-    match best
-        .and_then(|(_, (i, j))| Some((candidates.get(i).copied()?, candidates.get(j).copied()?)))
-    {
-        Some(picked) => picked,
-        None => {
-            let only = first(&candidates, target);
-            (only, only)
-        }
-    }
+    best.map(|(_, pair)| pair).unwrap_or_else(|| {
+        let only = first(&candidates, target);
+        (only, only)
+    })
 }
 
 /// Both ends dynamic: the nearest candidate pair, ties to the lower
@@ -607,6 +602,23 @@ mod tests {
         let dynamic = EndSpec::Glued(&target, GlueEnd::Shape);
         let (fixed, dynamic, _) = resolve_ends(&fixed, &dynamic);
         assert_eq!(fixed.point, dynamic.point);
+    }
+
+    #[test]
+    fn the_interface_types_keep_their_derives() {
+        // The interface's derives are exercised (Debug, Clone, Copy,
+        // PartialEq, Eq).
+        let target = box_target();
+        let cloned = target.clone();
+        assert!(target == cloned);
+        let candidate = Candidate {
+            point: Point::new(1.0, 2.0),
+            exit: None,
+        };
+        assert!(format!("{candidate:?}").contains("1.0"));
+        assert!(format!("{:?}", GlueEnd::Point(3)).contains("Point(3)"));
+        assert_eq!(GlueEnd::Shape, GlueEnd::Shape);
+        assert!(format!("{:?}", EndSpec::Free(Point::new(0.0, 0.0))).contains("Free"));
     }
 
     #[test]

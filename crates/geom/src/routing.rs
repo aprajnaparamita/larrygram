@@ -459,9 +459,9 @@ fn collapse_collinear(points: &mut Vec<Point>) {
             kept.push(*point);
         }
     }
-    if kept.len() >= 2 {
-        *points = kept;
-    }
+    // The first and the last points always turn, so `kept` has at
+    // least two.
+    *points = kept;
 }
 
 /// Drops any interior point the route already visited (a degenerate
@@ -566,6 +566,41 @@ mod tests {
             route(p, p, &RouteOptions::default()).expect("route"),
             vec![p, p]
         );
+    }
+
+    #[test]
+    fn drop_repeats_keeps_the_first_visit() {
+        let mut points = vec![
+            Point::new(0.0, 0.0),
+            Point::new(1.0, 0.0),
+            Point::new(1.0, 1.0),
+            Point::new(0.0, 0.0),
+            Point::new(2.0, 0.0),
+        ];
+        drop_repeats(&mut points);
+        assert_eq!(
+            points,
+            vec![
+                Point::new(0.0, 0.0),
+                Point::new(1.0, 0.0),
+                Point::new(1.0, 1.0),
+                Point::new(2.0, 0.0),
+            ]
+        );
+    }
+
+    #[test]
+    fn the_routing_types_keep_their_derives() {
+        // The options' derives are exercised (Debug, Clone, Copy,
+        // PartialEq, Eq, Hash).
+        let options = RouteOptions::new(RouteStyle::RightAngle);
+        assert_eq!(options, options.clone());
+        assert!(format!("{options:?}").contains("RightAngle"));
+        assert_eq!(Beyond::Low, Beyond::Low);
+        assert!(format!("{:?}", Beyond::High).contains("High"));
+        let mut set = std::collections::HashSet::new();
+        set.insert(RouteStyle::Straight);
+        assert!(set.contains(&RouteStyle::Straight));
     }
 
     #[test]
