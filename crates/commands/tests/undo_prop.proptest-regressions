@@ -11,3 +11,5 @@ cc e8c01f1ad1532da7860240939164975b4185774d53474d728706b7ca16f4c169 # shrinks to
 cc 38877a4a24eb2dc9fb4c16cc08d00bdc0422ee027c7839bd6cfab67acae4f6a7 # shrinks to steps = [(36, 5), (14, 0), (8, 0)]
 cc b199c173a2a5e2ef9a53c9022ded7a42554b654634aae7bb7621b85969b1dbc6 # shrinks to steps = [(14, 0), (12, 0), (21, 0)]
 cc db9415bcacde216759fb61eb0ab1bdb3348e7a8e6557748a7fc27611704797a2 # shrinks to steps = [(45, 0)]
+cc 3bbd4523e26d8c76d7f32bbda3fc94c96510834292b5aff2506fc69dfdd2a611 # shrinks to steps = [(68, 0), (0, 0)]
+cc 3b6d1bc5e29451fbb5ad059b3bbd62aa6e765d5e29de7b9c49e85ef06c245589 # shrinks to steps = [(96, 6), (40, 0)]
