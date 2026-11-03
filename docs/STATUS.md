@@ -106,7 +106,8 @@ Phase 8: binary `.vsd`, `.vss` and `.vst` import, read-only, in `crates/vsd-bina
 | [R8](tasks/R8.md) | implementer | R7 | boundary | merged (path arguments and the macOS open-documents event; ADR 0074) | 90e301b |
 | [R9](tasks/R9.md) | implementer | — | boundary | merged with R10 (`cargo xtask dist mac`, `windows` and `linux` into `<target dir>/dist/`; `release.yml` pre-releases on `v*` tags after R6; untested on GitHub while the account billing lock lasts) | `c2c835d` |
 | [R10](tasks/R10.md) | implementer | R9 | boundary | merged with R9 (target dir from cargo metadata, tester steps, tag/version check, Linux install steps, tar times, no release cache) | `c2c835d` |
-| [R11](tasks/R11.md) | implementer | R9, R10 | boundary | ready (build id in About and `--version`, Windows console attach and `.ico`, `ci.yml` pins, the bug issue template) | — |
+| [R11](tasks/R11.md) | implementer | R9, R10 | boundary | handed off at `4edc25f`; master review: the build id runs `git` at runtime on every About frame, fixes in R12 on the same branch | — |
+| [R12](tasks/R12.md) | implementer | R11 | boundary | ready, on `agent/R11` (the build id fixed at build time and set by `cargo xtask dist`; Windows build tools only on Windows) | — |
 
 ## Phase 9 task board
 
