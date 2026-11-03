@@ -273,11 +273,10 @@ fn nearest(candidates: &[Candidate], reference: Point) -> Candidate {
             best = Some((distance, *candidate));
         }
     }
-    best.map(|(_, candidate)| candidate)
-        .unwrap_or(Candidate {
-            point: reference,
-            exit: None,
-        })
+    best.map(|(_, candidate)| candidate).unwrap_or(Candidate {
+        point: reference,
+        exit: None,
+    })
 }
 
 /// The nearest candidate pair, one from each slice; ties to the lower
@@ -371,26 +370,56 @@ mod tests {
         let candidates = target.candidates();
         assert_eq!(candidates.len(), 3);
         assert_eq!(candidates[0].point, Point::new(5.0, 3.5));
-        assert_eq!(candidates[0].exit, Some(Point::new(1.0, 0.0)), "row direction");
-        assert_eq!(candidates[1].exit, Some(Point::new(0.0, -1.0)), "nearest side");
+        assert_eq!(
+            candidates[0].exit,
+            Some(Point::new(1.0, 0.0)),
+            "row direction"
+        );
+        assert_eq!(
+            candidates[1].exit,
+            Some(Point::new(0.0, -1.0)),
+            "nearest side"
+        );
         assert_eq!(candidates[2].point, Point::new(4.0, 4.0));
-        assert_eq!(candidates[2].exit, Some(Point::new(0.0, 1.0)), "zero direction");
+        assert_eq!(
+            candidates[2].exit,
+            Some(Point::new(0.0, 1.0)),
+            "zero direction"
+        );
     }
 
     #[test]
     fn resolve_pair_takes_the_nearest_pair_and_lower_index_on_a_tie() {
         let a = vec![
-            Candidate { point: Point::new(0.0, 0.0), exit: None },
-            Candidate { point: Point::new(4.0, 0.0), exit: None },
+            Candidate {
+                point: Point::new(0.0, 0.0),
+                exit: None,
+            },
+            Candidate {
+                point: Point::new(4.0, 0.0),
+                exit: None,
+            },
         ];
         let b = vec![
-            Candidate { point: Point::new(2.0, 0.0), exit: None },
-            Candidate { point: Point::new(4.0, 0.0), exit: None },
+            Candidate {
+                point: Point::new(2.0, 0.0),
+                exit: None,
+            },
+            Candidate {
+                point: Point::new(4.0, 0.0),
+                exit: None,
+            },
         ];
         assert_eq!(resolve_pair(&a, &b), Some((1, 1)));
         let tied = vec![
-            Candidate { point: Point::new(2.0, 0.0), exit: None },
-            Candidate { point: Point::new(2.0, 0.0), exit: None },
+            Candidate {
+                point: Point::new(2.0, 0.0),
+                exit: None,
+            },
+            Candidate {
+                point: Point::new(2.0, 0.0),
+                exit: None,
+            },
         ];
         assert_eq!(resolve_pair(&tied, &tied), Some((0, 0)));
         assert_eq!(resolve_pair(&[], &b), None);
@@ -418,7 +447,11 @@ mod tests {
         let end = EndSpec::Free(Point::new(3.0, 3.0));
         let (begin, _end, missing) = resolve_ends(&begin, &end);
         assert!(missing);
-        assert_eq!(begin.point, Point::new(3.0, 3.5), "the left midpoint is nearest");
+        assert_eq!(
+            begin.point,
+            Point::new(3.0, 3.5),
+            "the left midpoint is nearest"
+        );
     }
 
     #[test]
@@ -440,7 +473,11 @@ mod tests {
         let end = EndSpec::Glued(&right, GlueEnd::Shape);
         let (begin, end, missing) = resolve_ends(&begin, &end);
         assert!(!missing);
-        assert_eq!(begin.point, Point::new(5.0, 3.5), "the facing right midpoint");
+        assert_eq!(
+            begin.point,
+            Point::new(5.0, 3.5),
+            "the facing right midpoint"
+        );
         assert_eq!(end.point, Point::new(7.0, 3.5), "the facing left midpoint");
     }
 
@@ -465,11 +502,19 @@ mod tests {
         let (begin, end, missing) = resolve_ends(&begin, &end);
         assert!(missing);
         assert_eq!(begin.point, Point::new(4.0, 4.0), "the first candidate");
-        assert_eq!(end.point, Point::new(0.0, f64::INFINITY), "a free end keeps its point");
+        assert_eq!(
+            end.point,
+            Point::new(0.0, f64::INFINITY),
+            "a free end keeps its point"
+        );
 
         let dynamic = EndSpec::Glued(&target, GlueEnd::Shape);
         let free = EndSpec::Free(Point::new(0.0, f64::INFINITY));
         let (begin, _end, _) = resolve_ends(&dynamic, &free);
-        assert_eq!(begin.point, Point::new(4.0, 4.0), "a non-finite reference picks the first");
+        assert_eq!(
+            begin.point,
+            Point::new(4.0, 4.0),
+            "a non-finite reference picks the first"
+        );
     }
 }

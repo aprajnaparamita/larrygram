@@ -110,7 +110,10 @@ fn collapse_collinear(points: &mut Vec<Point>) {
     }
     let mut kept: Vec<Point> = Vec::with_capacity(points.len());
     for (index, point) in points.iter().enumerate() {
-        let turn = match (index.checked_sub(1).and_then(|i| points.get(i)), points.get(index + 1)) {
+        let turn = match (
+            index.checked_sub(1).and_then(|i| points.get(i)),
+            points.get(index + 1),
+        ) {
             (Some(previous), Some(next)) => {
                 let in_leg = point.sub(*previous);
                 let out_leg = next.sub(*point);
@@ -289,11 +292,7 @@ fn shorter_side(out: Point, back: Point, axis: Axis) -> f64 {
     let high = axis_value(out, axis).max(axis_value(back, axis)) + PUSH;
     let travel_low = (axis_value(out, axis) - low).abs() + (axis_value(back, axis) - low).abs();
     let travel_high = (axis_value(out, axis) - high).abs() + (axis_value(back, axis) - high).abs();
-    if travel_high < travel_low {
-        high
-    } else {
-        low
-    }
+    if travel_high < travel_low { high } else { low }
 }
 
 /// The one turn between `out` and `back` whose first leg runs along

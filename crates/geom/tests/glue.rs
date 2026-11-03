@@ -34,10 +34,22 @@ fn a_target_without_points_offers_its_four_side_midpoints_through_its_transform(
     assert_eq!(
         candidates,
         vec![
-            Candidate { point: Point::new(4.0, 4.0), exit: Some(Point::new(0.0, 1.0)) },
-            Candidate { point: Point::new(5.0, 3.5), exit: Some(Point::new(1.0, 0.0)) },
-            Candidate { point: Point::new(4.0, 3.0), exit: Some(Point::new(0.0, -1.0)) },
-            Candidate { point: Point::new(3.0, 3.5), exit: Some(Point::new(-1.0, 0.0)) },
+            Candidate {
+                point: Point::new(4.0, 4.0),
+                exit: Some(Point::new(0.0, 1.0))
+            },
+            Candidate {
+                point: Point::new(5.0, 3.5),
+                exit: Some(Point::new(1.0, 0.0))
+            },
+            Candidate {
+                point: Point::new(4.0, 3.0),
+                exit: Some(Point::new(0.0, -1.0))
+            },
+            Candidate {
+                point: Point::new(3.0, 3.5),
+                exit: Some(Point::new(-1.0, 0.0))
+            },
         ],
         "top, right, bottom, left"
     );
@@ -53,9 +65,17 @@ fn a_target_with_points_offers_them_with_their_directions() {
     let candidates = target.candidates();
     assert_eq!(candidates.len(), 2);
     assert_eq!(candidates[0].point, Point::new(5.0, 3.5));
-    assert_eq!(candidates[0].exit, Some(Point::new(1.0, 0.0)), "row direction");
+    assert_eq!(
+        candidates[0].exit,
+        Some(Point::new(1.0, 0.0)),
+        "row direction"
+    );
     assert_eq!(candidates[1].point, Point::new(4.0, 3.0));
-    assert_eq!(candidates[1].exit, Some(Point::new(0.0, -1.0)), "the nearest side");
+    assert_eq!(
+        candidates[1].exit,
+        Some(Point::new(0.0, -1.0)),
+        "the nearest side"
+    );
 }
 
 #[test]
@@ -78,19 +98,41 @@ fn a_rotated_shape_turns_its_points_and_its_exits() {
 #[test]
 fn resolve_pair_takes_the_nearest_pair_and_the_lower_index_on_a_tie() {
     let a = vec![
-        Candidate { point: Point::new(0.0, 0.0), exit: None },
-        Candidate { point: Point::new(4.0, 0.0), exit: None },
+        Candidate {
+            point: Point::new(0.0, 0.0),
+            exit: None,
+        },
+        Candidate {
+            point: Point::new(4.0, 0.0),
+            exit: None,
+        },
     ];
     let b = vec![
-        Candidate { point: Point::new(2.0, 0.0), exit: None },
-        Candidate { point: Point::new(4.0, 0.0), exit: None },
+        Candidate {
+            point: Point::new(2.0, 0.0),
+            exit: None,
+        },
+        Candidate {
+            point: Point::new(4.0, 0.0),
+            exit: None,
+        },
     ];
     assert_eq!(resolve_pair(&a, &b), Some((1, 1)));
     let tied = vec![
-        Candidate { point: Point::new(2.0, 0.0), exit: None },
-        Candidate { point: Point::new(2.0, 0.0), exit: None },
+        Candidate {
+            point: Point::new(2.0, 0.0),
+            exit: None,
+        },
+        Candidate {
+            point: Point::new(2.0, 0.0),
+            exit: None,
+        },
     ];
-    assert_eq!(resolve_pair(&tied, &tied), Some((0, 0)), "ties to the lower index");
+    assert_eq!(
+        resolve_pair(&tied, &tied),
+        Some((0, 0)),
+        "ties to the lower index"
+    );
     assert_eq!(resolve_pair(&[], &b), None);
     assert_eq!(resolve_pair(&a, &[]), None);
 }
@@ -119,7 +161,11 @@ fn a_missing_point_row_falls_back_to_dynamic_glue_and_is_reported() {
     let end = EndSpec::Free(Point::new(3.0, 3.5));
     let (begin, _end, missing) = resolve_ends(&begin, &end);
     assert!(missing);
-    assert_eq!(begin.point, Point::new(3.0, 3.5), "the left midpoint is nearest");
+    assert_eq!(
+        begin.point,
+        Point::new(3.0, 3.5),
+        "the left midpoint is nearest"
+    );
 }
 
 #[test]
@@ -141,7 +187,11 @@ fn non_finite_input_falls_back_to_the_first_candidate() {
     let (begin, end, missing) = resolve_ends(&begin, &end);
     assert!(missing);
     assert_eq!(begin.point, Point::new(4.0, 4.0), "the first candidate");
-    assert_eq!(end.point, Point::new(0.0, f64::INFINITY), "a free end keeps its point");
+    assert_eq!(
+        end.point,
+        Point::new(0.0, f64::INFINITY),
+        "a free end keeps its point"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -223,7 +273,10 @@ fn the_perpendicular_case_turns_once() {
             Point::new(5.0, 2.0),
         ]
     );
-    assert!(!overlaps_side(&points, (Point::new(2.0, 0.0), Point::new(2.0, 1.0))));
+    assert!(!overlaps_side(
+        &points,
+        (Point::new(2.0, 0.0), Point::new(2.0, 1.0))
+    ));
     assert!(
         !overlaps_side(&points, (Point::new(4.0, 2.0), Point::new(6.0, 2.0))),
         "the run into C's bottom midpoint is perpendicular to the side"
@@ -250,8 +303,14 @@ fn the_same_side_case_goes_around_and_never_along_the_edge() {
         ],
         "the U runs back beyond both stubs"
     );
-    assert!(!overlaps_side(&points, (Point::new(2.0, 0.0), Point::new(2.0, 1.0))));
-    assert!(!overlaps_side(&points, (Point::new(2.0, 2.0), Point::new(2.0, 3.0))));
+    assert!(!overlaps_side(
+        &points,
+        (Point::new(2.0, 0.0), Point::new(2.0, 1.0))
+    ));
+    assert!(!overlaps_side(
+        &points,
+        (Point::new(2.0, 2.0), Point::new(2.0, 3.0))
+    ));
 }
 
 #[test]
@@ -279,7 +338,10 @@ fn two_exits_pointing_away_wrap_around() {
     for pair in points.windows(2) {
         assert_ne!(pair[0], pair[1], "no repeated point: {points:?}");
     }
-    assert!(!overlaps_side(&points, (Point::new(0.0, -1.0), Point::new(2.0, -1.0))));
+    assert!(!overlaps_side(
+        &points,
+        (Point::new(0.0, -1.0), Point::new(2.0, -1.0))
+    ));
 }
 
 #[test]

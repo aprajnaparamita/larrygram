@@ -101,7 +101,9 @@ fn draw(ctx: &mut AppCtx, registry: &Registry, begin: i32, end: i32) -> ShapeId 
             .with("end_target", ArgValue::Integer(i64::from(end))),
     )
     .expect("draw");
-    ctx.selection.anchor.expect("the new connector is the anchor")
+    ctx.selection
+        .anchor
+        .expect("the new connector is the anchor")
 }
 
 fn document(ctx: &AppCtx) -> Document {
@@ -112,20 +114,17 @@ fn document(ctx: &AppCtx) -> Document {
 /// connector; the parent's coordinates inside a group).
 fn ends(doc: &Document, connector: ShapeId) -> (larrygram_geom::Point, larrygram_geom::Point) {
     (
-        doc.connector_end(connector, ConnectorEnd::Begin).expect("begin"),
-        doc.connector_end(connector, ConnectorEnd::End).expect("end"),
+        doc.connector_end(connector, ConnectorEnd::Begin)
+            .expect("begin"),
+        doc.connector_end(connector, ConnectorEnd::End)
+            .expect("end"),
     )
 }
 
 /// The connector's geometry rows (the literal path, byte for byte).
 fn rows(doc: &Document, connector: ShapeId) -> Vec<GeometryRow> {
     let geometry = doc.shape_geometry(connector).expect("geometry");
-    geometry
-        .paths
-        .first()
-        .expect("a path")
-        .rows
-        .clone()
+    geometry.paths.first().expect("a path").rows.clone()
 }
 
 fn move_shape(
@@ -174,8 +173,18 @@ fn the_audit_reproduction_lands_on_the_rules_points_at_every_step() {
     // The unrelated edit touches nothing the connector knows.
     move_shape(&mut ctx, &registry, page, 5, 0.5, 0.5);
     let doc = document(&ctx);
-    assert_eq!(ends(&doc, drawn), (larrygram_geom::Point::new(4.0, 3.0), larrygram_geom::Point::new(6.0, 3.0)));
-    assert_eq!(rows(&doc, drawn), before, "the unrelated edit keeps the route");
+    assert_eq!(
+        ends(&doc, drawn),
+        (
+            larrygram_geom::Point::new(4.0, 3.0),
+            larrygram_geom::Point::new(6.0, 3.0)
+        )
+    );
+    assert_eq!(
+        rows(&doc, drawn),
+        before,
+        "the unrelated edit keeps the route"
+    );
 
     // One target moves below the other: the ends walk to the facing
     // top and bottom midpoints (the nearest pair).
@@ -216,7 +225,11 @@ fn an_unrelated_edit_keeps_a_third_connectors_rows_byte_for_byte() {
     let before = rows(&document(&ctx), third);
 
     move_shape(&mut ctx, &registry, page, 5, 0.5, 0.5);
-    assert_eq!(rows(&document(&ctx), third), before, "through the unrelated edit");
+    assert_eq!(
+        rows(&document(&ctx), third),
+        before,
+        "through the unrelated edit"
+    );
     move_shape(&mut ctx, &registry, page, 2, -4.0, 3.0);
     assert_eq!(rows(&document(&ctx), third), before, "through the move");
     dispatch(&mut ctx, &registry, "edit.undo", Args::new()).expect("undo");
@@ -236,7 +249,8 @@ fn an_unrelated_edit_keeps_a_third_connectors_rows_byte_for_byte() {
 fn glued_connector(doc: &Document, page: PageId) -> Option<(ShapeId, Vec<i32>)> {
     let entity = doc.page(page)?;
     for connect in &entity.connects {
-        let from_begin = connect.from_cell.starts_with("Begin") || connect.from_cell.starts_with("End");
+        let from_begin =
+            connect.from_cell.starts_with("Begin") || connect.from_cell.starts_with("End");
         if !from_begin {
             continue;
         }
@@ -263,7 +277,10 @@ fn a_corpus_connector_visio_routed_keeps_its_rows_through_an_unrelated_edit_and_
     }
     let path = files
         .iter()
-        .find(|path| path.file_name().is_some_and(|name| name == "testfile3.vsdx"))
+        .find(|path| {
+            path.file_name()
+                .is_some_and(|name| name == "testfile3.vsdx")
+        })
         .cloned()
         .expect("corpus/vsdx/testfile3.vsdx (corpus/PROVENANCE.md)");
     let document = read_corpus_file(&path);
@@ -409,7 +426,11 @@ fn row_point(row: &GeometryRow) -> larrygram_geom::Point {
 
 /// One row's point in the connector's parent's space (the inverse of
 /// `write_connector_path`'s own box mapping).
-fn local_to_parent(doc: &Document, connector: ShapeId, local: larrygram_geom::Point) -> larrygram_geom::Point {
+fn local_to_parent(
+    doc: &Document,
+    connector: ShapeId,
+    local: larrygram_geom::Point,
+) -> larrygram_geom::Point {
     let number = |name: &str| -> f64 {
         doc.shape(connector)
             .and_then(|entity| {

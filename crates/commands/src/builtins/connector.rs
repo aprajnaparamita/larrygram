@@ -667,8 +667,14 @@ fn glue(ctx: &mut AppCtx, inv: &Invocation, end: End) -> Result<Outcome, Command
         ];
         slots[end.slot()] = Some(&record);
         let mut resolve_warnings = Vec::new();
-        let (begin, finish) =
-            resolved_ends(doc, page, connector, slots, [None, None], &mut resolve_warnings)?;
+        let (begin, finish) = resolved_ends(
+            doc,
+            page,
+            connector,
+            slots,
+            [None, None],
+            &mut resolve_warnings,
+        )?;
         let at = match end {
             End::Begin => begin.point,
             End::End => finish.point,
@@ -1063,8 +1069,9 @@ fn run_draw(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError>
             let doc = &ctx.active_document().ok_or_else(no_document)?.document;
             let options = RouteOptions::new(route_style_for(doc, connector))
                 .with_exits(begin.exit, finish.exit);
-            let points = route(begin.point, finish.point, &options)
-                .map_err(|error| CommandError::failed(format!("cannot route connector: {error}")))?;
+            let points = route(begin.point, finish.point, &options).map_err(|error| {
+                CommandError::failed(format!("cannot route connector: {error}"))
+            })?;
             PathEdit::new(doc, session, connector, points)?
         };
         path_edit.apply(ctx)?;
@@ -1168,7 +1175,10 @@ fn resolved_ends(
         }
     }
     let spec = |slot: usize| -> EndSpec<'_> {
-        match (targets.get(slot).and_then(Option::as_ref), kinds.get(slot).copied().flatten()) {
+        match (
+            targets.get(slot).and_then(Option::as_ref),
+            kinds.get(slot).copied().flatten(),
+        ) {
             (Some(target), Some(kind)) => EndSpec::Glued(target, kind),
             _ => EndSpec::Free(
                 free.get(slot)
@@ -1192,9 +1202,7 @@ fn resolved_ends(
                 .iter()
                 .position(|(row, _, _)| *row == ix)
                 .and_then(|position| target.candidates().into_iter().nth(position))
-                .filter(|candidate| {
-                    candidate.point.x.is_finite() && candidate.point.y.is_finite()
-                });
+                .filter(|candidate| candidate.point.x.is_finite() && candidate.point.y.is_finite());
             if landed.is_none() {
                 warnings.push(format!(
                     "connector {connector_visio} has no connection point {ix}; glued to the shape instead"
@@ -1835,7 +1843,10 @@ fn route_one(
         doc,
         page,
         connector,
-        [ends.first().and_then(Option::as_ref), ends.get(1).and_then(Option::as_ref)],
+        [
+            ends.first().and_then(Option::as_ref),
+            ends.get(1).and_then(Option::as_ref),
+        ],
         [None, None],
         warnings,
     )?;
@@ -2057,10 +2068,7 @@ fn row_direction(sections: &[Section], ix: i32, scale_x: f64, scale_y: f64) -> O
             .or_else(|| row_number(row, "B"))
             .unwrap_or(0.0);
         let point = Point::new(x * scale_x, y * scale_y);
-        if point.x.is_finite()
-            && point.y.is_finite()
-            && (point.x != 0.0 || point.y != 0.0)
-        {
+        if point.x.is_finite() && point.y.is_finite() && (point.x != 0.0 || point.y != 0.0) {
             return Some(point);
         }
         return None;
@@ -2881,10 +2889,16 @@ mod tests {
     #[test]
     fn a_re_route_without_a_page_or_connectors_is_a_no_op() {
         let mut ctx = AppCtx::new(Settings::default());
-        assert_eq!(reroute_after_edit(&mut ctx, PageId { index: 0 }, &[]), Ok(0));
+        assert_eq!(
+            reroute_after_edit(&mut ctx, PageId { index: 0 }, &[]),
+            Ok(0)
+        );
         let (mut ctx, _session, page, _connector, _left, _right) = fixture();
         assert_eq!(reroute_after_edit(&mut ctx, page, &[]), Ok(0));
-        assert_eq!(reroute_after_edit(&mut ctx, PageId { index: 9 }, &[]), Ok(0));
+        assert_eq!(
+            reroute_after_edit(&mut ctx, PageId { index: 9 }, &[]),
+            Ok(0)
+        );
     }
 
     #[test]

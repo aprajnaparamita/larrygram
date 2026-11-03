@@ -16,7 +16,10 @@ use egui::accesskit::Role;
 use egui_kittest::kittest::Queryable;
 use larrygram_commands::app::{AppCtx, DocumentSession};
 use larrygram_geom::Point;
-use larrygram_model::{Cell, CellName, CellValue, Document, Page, PageId, Preserved, Row, Section, SectionName, Shape, ShapeId};
+use larrygram_model::{
+    Cell, CellName, CellValue, Document, Page, PageId, Preserved, Row, Section, SectionName, Shape,
+    ShapeId,
+};
 use larrygram_ui_spec::LayoutKind;
 
 use crate::{ShellRig, fixture_shape, settings_for};
@@ -355,7 +358,11 @@ fn the_ends_walk_when_one_shape_moves_below_the_other(kind: LayoutKind) {
     // the two endpoints and nothing else.
     let geometry = document.shape_geometry(connector).expect("geometry");
     let rows = &geometry.paths.first().expect("a path").rows;
-    assert_eq!(rows.len(), 2, "a straight run with no edge-hugging turn: {rows:?}");
+    assert_eq!(
+        rows.len(),
+        2,
+        "a straight run with no edge-hugging turn: {rows:?}"
+    );
 }
 
 /// One layout's flow: a drag that ends on a connection point glues to
@@ -426,7 +433,9 @@ fn a_drag_that_ends_over_a_connector_does_not_glue_to_the_connector(kind: Layout
         .filter(|record| record.from_sheet == second_visio)
         .collect();
     assert!(
-        of_second.iter().all(|record| record.to_sheet != first_visio),
+        of_second
+            .iter()
+            .all(|record| record.to_sheet != first_visio),
         "the end does not glue to the connector: {of_second:?}"
     );
     assert_eq!(of_second.len(), 1, "only the begin is glued: {of_second:?}");

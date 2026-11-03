@@ -240,11 +240,13 @@ fn an_edit_that_cannot_re_route_still_succeeds_with_one_warning() {
     assert_eq!(pin, Some(6.0));
 
     let warnings_before = ctx.warnings.len();
-    let outcome = dispatch(&mut ctx, &registry, "edit.delete", Args::new())
-        .expect("delete still succeeds");
+    let outcome =
+        dispatch(&mut ctx, &registry, "edit.delete", Args::new()).expect("delete still succeeds");
     assert!(
-        outcome.warnings.iter().any(|warning| warning
-            .starts_with("connector 3 lost its glue to detached shape 1")),
+        outcome
+            .warnings
+            .iter()
+            .any(|warning| warning.starts_with("connector 3 lost its glue to detached shape 1")),
         "{:?}",
         outcome.warnings
     );
