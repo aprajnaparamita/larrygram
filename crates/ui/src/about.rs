@@ -14,8 +14,7 @@ use crate::UiError;
 /// The version line of the About window (task R11 goal 1):
 /// `<version> (<build id>)`, for example `1.0.0-alpha.1 (abc1234)`.
 ///
-/// The build id comes from
-/// [`larrygram_commands::build`](larrygram_commands::build); both this
+/// The build id comes from [`larrygram_commands::build`]; both this
 /// line and `larrygram-cli --version` print it.
 pub fn version_line() -> String {
     larrygram_commands::build::version_line()
