@@ -303,7 +303,8 @@ struct GlueEdit {
     /// The connector's sheet before the glue (restored on `revert`, so
     /// one undo restores the cells and the routed path exactly).
     old_sheet: Sheet,
-    /// The point the end lands on (page inches, the cached `V`).
+    /// The point the end lands on (the parent's coordinates, the
+    /// cached `V`).
     at: Point,
     /// The glue kind the endpoint formula spells (ADR 0084 rule 2).
     glue: EndGlue,

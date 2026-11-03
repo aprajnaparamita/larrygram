@@ -1,7 +1,7 @@
 # 0084: Connector behaviour parity: the alpha scope
 
 - Status: accepted (drafted by P7-30; revised by the master after the
-  Opus review, 2026-11-02)
+  Opus review, 2026-11-02; amended 2026-11-04 by P7-49)
 - Date: 2026-11-02
 - Task: P7-30
 - Amends: ADR 0045 rules 1, 3 and 4
@@ -116,7 +116,9 @@ and the `Connects` record together, in one undoable edit:
 | Unglued | literal value, no formula | literal | `_XFTRIGGER(EventXFMod)` | none |
 
 - The cached `V` of every endpoint cell is the resolved point (rule 3)
-  in page inches.
+  in **the parent's coordinates** (amended 2026-11-04, P7-49: a
+  connector inside a group keeps its endpoint cells in the parent's
+  coordinates, the same as its geometry rows).
 - A glue, re-glue or unglue **replaces** the end's formulas and
   trigger, including formulas that Visio wrote. No stale
   `Sheet.<old>` reference survives.
@@ -178,9 +180,15 @@ directions. Obstacle avoidance stays out (ADR 0045).
 After an edit, the re-route pass recomputes only:
 
 - connectors with an end glued to a shape that the edit moved,
-  resized, rotated, flipped, deleted, or whose connection points it
-  changed;
+  resized, rotated, flipped, or whose connection points it changed;
 - connectors whose own ends, glue or style the edit changed.
+
+A **deleted** target keeps the stored route (amended 2026-11-04,
+P7-49): the delete clears the glue and the ends keep their points
+(rule 2), so nothing moved and no fresh route replaces the stored
+one. A connector the edit itself translated keeps its translated path
+(rule 1); one inside a moved group re-routes, because its ends moved
+in the page even though its rows stand still.
 
 Every other connector keeps its stored geometry, including routes
 Visio drew and segments the user moved (rule 7). The stored geometry
