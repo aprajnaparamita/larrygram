@@ -1803,3 +1803,177 @@ fn escape_in_a_format_popup_closes_the_popup_not_the_edit() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Item 4 (task P7-48, the review's M4): the quit and close paths
+// commit the open edit first (real input).
+// ---------------------------------------------------------------------------
+
+/// The viewport commands of the last frame (the `unsaved` module's
+/// helper).
+fn sent(rig: &mut ShellRig, match_: fn(&egui::ViewportCommand) -> bool) -> bool {
+    rig.harness()
+        .output()
+        .viewport_output
+        .values()
+        .any(|output| output.commands.iter().any(match_))
+}
+
+/// The window close request (the window's close button; the `unsaved`
+/// module's helper).
+fn request_window_close(rig: &mut ShellRig) {
+    {
+        let harness = rig.harness();
+        let viewports = harness
+            .input_mut()
+            .viewports
+            .entry(egui::ViewportId::ROOT)
+            .or_default();
+        viewports.events.push(egui::ViewportEvent::Close);
+    }
+    rig.harness().step();
+}
+
+/// Whether the quit completed within ten frames (the `unsaved`
+/// module's helper).
+fn quit_completed(rig: &mut ShellRig) -> bool {
+    for _ in 0..10 {
+        rig.harness().step();
+        if rig.shell.borrow().quit_requested() {
+            return true;
+        }
+        if sent(rig, |command| {
+            matches!(command, egui::ViewportCommand::Close)
+        }) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Whether the three-way dialog is up and names `name` (the `unsaved`
+/// module's helper).
+fn unsaved_dialog_names(rig: &mut ShellRig, name: &str) -> bool {
+    rig.run();
+    rig.names()
+        .contains_key(&format!("Unsaved changes in {name}."))
+}
+
+/// Presses the unsaved-changes dialog's button named `name` (scoped
+/// to its window) with no frame after it: the caller watches the
+/// frames that answer it (the `unsaved` module's `dialog_press`).
+fn unsaved_dialog_press(rig: &mut ShellRig, name: &str) {
+    let rect = rig
+        .harness()
+        .ctx
+        .memory(|memory| {
+            memory.area_rect(egui::Id::unique(larrygram_ui::window_size::UNSAVED_WINDOW))
+        })
+        .expect("the dialog window");
+    let root = rig.harness().root();
+    let node = root
+        .query_all_by_role_and_label(Role::Button, name)
+        .find(|node| rect.contains_rect(node.rect()))
+        .unwrap_or_else(|| panic!("no dialog button named {name:?}"));
+    node.click();
+}
+
+/// Clicks the unsaved-changes dialog's button named `name` and runs
+/// the frames of the click (`unsaved` module's `dialog_click`).
+fn unsaved_dialog_click(rig: &mut ShellRig, name: &str) {
+    unsaved_dialog_press(rig, name);
+    rig.run();
+}
+
+/// Whether the window close finished: the Close command of the last
+/// frame, or within the next ten (the walk may answer over frames).
+fn close_finished(rig: &mut ShellRig) -> bool {
+    sent(rig, |command| {
+        matches!(command, egui::ViewportCommand::Close)
+    }) || quit_completed(rig)
+}
+
+/// Opens a new text box with `text` typed in it (nothing committed).
+fn type_a_new_box(rig: &mut ShellRig, kind: LayoutKind, text: &str) {
+    choose_text_tool(rig, kind);
+    let pos = screen(rig, EMPTY.0, EMPTY.1);
+    click_at(rig, pos);
+    assert!(editing(rig), "the box opens");
+    type_into_editor(rig, text);
+}
+
+/// The window close request with an empty new box on a clean drawing:
+/// no dialog (the commit rule cancels the box) and the window closes
+/// (task P7-48 item 4, the P7-42 review minor 6 case).
+#[test]
+fn a_close_request_with_an_empty_new_box_closes_quietly() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        type_a_new_box(&mut rig, kind, "");
+        request_window_close(&mut rig);
+        // The close finishes in the request's frame: read it before
+        // the dialog check runs frames of its own.
+        let closed = close_finished(&mut rig);
+        assert!(
+            !unsaved_dialog_names(&mut rig, "Untitled"),
+            "{kind:?}: an empty box is no change to ask about"
+        );
+        assert!(closed, "{kind:?}: the window closes");
+    }
+}
+
+/// The window close request with typed text: the dialog appears (the
+/// commit rule wrote the text first) and Don't Save closes the
+/// drawing without saving it (task P7-48 item 4).
+#[test]
+fn a_close_request_with_typed_text_asks_and_dont_save_closes() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        type_a_new_box(&mut rig, kind, "Hi");
+        request_window_close(&mut rig);
+        assert!(
+            unsaved_dialog_names(&mut rig, "Untitled"),
+            "{kind:?}: the typed text is a change to ask about"
+        );
+        // The answer is watched frame by frame (`run` settles over
+        // frames and the close would be gone from the output).
+        unsaved_dialog_press(&mut rig, "Don't Save");
+        assert!(close_finished(&mut rig), "{kind:?}: Don't Save closes");
+        assert!(
+            rig.shell.borrow().app.documents.is_empty(),
+            "{kind:?}: the drawing closed with its unsaved text"
+        );
+    }
+}
+
+/// Cmd+Q (Ctrl+Q off macOS) with typed text: the dialog appears (task
+/// P7-48 item 4).
+#[test]
+fn cmd_q_with_typed_text_asks() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        type_a_new_box(&mut rig, kind, "Hi");
+        chord(&mut rig, egui::Key::Q);
+        assert!(
+            unsaved_dialog_names(&mut rig, "Untitled"),
+            "{kind:?}: the dialog asks about the typed text"
+        );
+        unsaved_dialog_click(&mut rig, "Cancel");
+    }
+}
+
+/// `file.exit` from the File menu with typed text: the dialog appears
+/// (task P7-48 item 4). Panel Modern's File view has no Exit row
+/// (P7-42): its quit path is Cmd+Q above.
+#[test]
+fn file_exit_from_the_menu_with_typed_text_asks() {
+    let mut rig = shell_rig(LayoutKind::PanelClassic);
+    type_a_new_box(&mut rig, LayoutKind::PanelClassic, "Hi");
+    click(&mut rig, Role::Button, "File");
+    click(&mut rig, Role::MenuItem, "Exit");
+    assert!(
+        unsaved_dialog_names(&mut rig, "Untitled"),
+        "the dialog asks about the typed text"
+    );
+    unsaved_dialog_click(&mut rig, "Cancel");
+}
