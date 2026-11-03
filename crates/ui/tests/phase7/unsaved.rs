@@ -14,6 +14,9 @@
 //!   cancelled and shows the dialog;
 //! - goal 4: the title shows the marker after an edit and loses it
 //!   after a save.
+//! - task P7-47: the save of a never-saved drawing keeps the picked
+//!   path, so the title names the saved file and a second save writes
+//!   there without asking.
 
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
@@ -338,6 +341,15 @@ fn temp_target(name: &str) -> PathBuf {
     ))
 }
 
+/// The file name of `path` (task P7-47: the title names the saved
+/// file after the save keeps the picked path).
+fn file_name(path: &std::path::Path) -> String {
+    path.file_name()
+        .expect("a file name")
+        .to_string_lossy()
+        .into_owned()
+}
+
 /// The viewport commands of the last frame (egui_kittest keeps the
 /// frame's [`egui::ViewportOutput`], commands included).
 fn sent(rig: &mut ShellRig, match_: fn(&egui::ViewportCommand) -> bool) -> bool {
@@ -592,7 +604,8 @@ fn the_window_close_request_is_cancelled_and_shows_the_dialog() {
 
 /// The title shows the marker after an edit and loses it after a
 /// save (task P7-42 goal 4), in both layouts' title bars and the OS
-/// window title.
+/// window title. The save keeps the picked path (task P7-47), so
+/// after it the name is the saved file's, not "Untitled".
 #[test]
 fn the_title_shows_the_marker_and_loses_it_after_a_save() {
     for kind in LAYOUTS {
@@ -622,15 +635,72 @@ fn the_title_shows_the_marker_and_loses_it_after_a_save() {
         );
 
         save_drawing(&mut rig, kind);
+        // The save adopted the picked path (task P7-47): the name is
+        // the saved file's, with no changed marker.
+        let name = file_name(&target);
         assert!(
-            !rig.names().contains_key("• Untitled"),
+            !rig.names().contains_key(&format!("• {name}")),
             "{kind:?}: the save loses the mark"
         );
-        assert!(rig.names().contains_key("Untitled"), "{kind:?}: the name");
+        assert!(
+            rig.names().contains_key(&name),
+            "{kind:?}: the name is the saved file's"
+        );
         assert_eq!(
             rig.shell.borrow().window_title(),
-            "Untitled - Larrygram",
-            "{kind:?}: the window title loses the mark"
+            format!("{name} - Larrygram"),
+            "{kind:?}: the window title loses the mark and names the file"
+        );
+        let _ = std::fs::remove_file(&target);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Task P7-47: the save of a never-saved drawing keeps the picked path.
+// ---------------------------------------------------------------------------
+
+/// A new drawing, Save (Cmd+S), a picked path: the title shows the
+/// file name with no changed marker, and a second Save writes the
+/// kept path again without asking (task P7-47 goal 3), in both layouts. The
+/// drawing edits first, so the changed marker is meaningful before and
+/// after the save.
+#[test]
+fn saving_an_unnamed_drawing_keeps_the_picked_path() {
+    for kind in LAYOUTS {
+        let target = temp_target("kept");
+        let picker = TempPicker::new(target.clone());
+        let saves = picker.saves.clone();
+        let mut rig = shell_rig(kind);
+        rig.shell.borrow_mut().set_picker(Box::new(picker));
+        edit_shape(&mut rig);
+        chord(&mut rig, egui::Key::S);
+        let name = file_name(&target);
+        assert_eq!(*saves.borrow(), 1, "{kind:?}: one pick for the target");
+        assert!(
+            rig.names().contains_key(&name),
+            "{kind:?}: the title names the saved file"
+        );
+        assert!(
+            !rig.names().contains_key(&format!("• {name}")),
+            "{kind:?}: no changed marker after the save"
+        );
+        assert_eq!(
+            rig.shell.borrow().window_title(),
+            format!("{name} - Larrygram"),
+            "{kind:?}: the window title names the saved file"
+        );
+        // The second save writes the kept path again and asks for
+        // nothing: the first file is gone and comes back.
+        std::fs::remove_file(&target).expect("remove the first save");
+        chord(&mut rig, egui::Key::S);
+        assert_eq!(
+            *saves.borrow(),
+            1,
+            "{kind:?}: the second save asks for nothing"
+        );
+        assert!(
+            target.is_file(),
+            "{kind:?}: the second save wrote the kept path"
         );
         let _ = std::fs::remove_file(&target);
     }
