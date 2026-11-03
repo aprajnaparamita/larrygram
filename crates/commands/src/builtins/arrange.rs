@@ -249,6 +249,7 @@ fn align(ctx: &mut AppCtx, align: Align) -> Result<Outcome, CommandError> {
     let (session, targets, warnings) = targets(ctx)?;
     let bounds = union(&targets);
     let mut edit = CompositeEdit::new(align.label(targets.len()));
+    let mut moved: Vec<ShapeId> = Vec::new();
     {
         let doc = document_mut(ctx, session)?;
         for target in &targets {
@@ -261,12 +262,15 @@ fn align(ctx: &mut AppCtx, align: Align) -> Result<Outcome, CommandError> {
                 Align::Bottom => (0.0, bounds.min.y - target.rect.min.y),
             };
             if let Some(step) = move_cell_edit(doc, session, "Align shape", target, dx, dy)? {
+                moved.push(target.id);
                 edit.push(step);
             }
         }
     }
     edit.apply(ctx)?;
-    reroute_quietly(ctx, &changed_ids(&targets));
+    // The scoped re-route takes the shapes the edit changed (ADR 0084
+    // rule 5): a shape that did not move is not one of them.
+    reroute_quietly(ctx, &moved);
     Ok(edit_outcome(
         align.label(targets.len()),
         warnings,
@@ -297,6 +301,7 @@ enum Axis {
 /// Spaces the selected shapes equally along `axis` (ADR 0047).
 fn distribute(ctx: &mut AppCtx, axis: Axis) -> Result<Outcome, CommandError> {
     let (session, mut targets, warnings) = targets(ctx)?;
+    let mut moved: Vec<ShapeId> = Vec::new();
     let label = match axis {
         Axis::Horizontal => "Distribute horizontally",
         Axis::Vertical => "Distribute vertically",
@@ -356,6 +361,7 @@ fn distribute(ctx: &mut AppCtx, axis: Axis) -> Result<Outcome, CommandError> {
                 if let Some(step) =
                     move_cell_edit(doc, session, "Distribute shape", target, dx, dy)?
                 {
+                    moved.push(target.id);
                     edit.push(step);
                 }
                 cursor = wanted + size + gap;
@@ -363,14 +369,10 @@ fn distribute(ctx: &mut AppCtx, axis: Axis) -> Result<Outcome, CommandError> {
         }
     }
     edit.apply(ctx)?;
-    reroute_quietly(ctx, &changed_ids(&targets));
+    // The scoped re-route takes the shapes the edit changed (ADR 0084
+    // rule 5): a shape that did not move is not one of them.
+    reroute_quietly(ctx, &moved);
     Ok(edit_outcome(label, warnings, Box::new(edit)))
-}
-
-/// The arena ids of the frames an align or distribute run moved (the
-/// scoped re-route's "shapes the edit changed", ADR 0084 rule 5).
-fn changed_ids(targets: &[Target]) -> Vec<ShapeId> {
-    targets.iter().map(|target| target.id).collect()
 }
 
 /// The selected shapes with their frames and pins, and the page they are
@@ -1358,6 +1360,7 @@ fn run_distribute_middle(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome,
 /// Middle"; the gap variant is [`distribute`]).
 fn distribute_centres(ctx: &mut AppCtx, axis: Axis) -> Result<Outcome, CommandError> {
     let (session, mut targets, warnings) = targets(ctx)?;
+    let mut moved: Vec<ShapeId> = Vec::new();
     let label = match axis {
         Axis::Horizontal => "Distribute center",
         Axis::Vertical => "Distribute middle",
@@ -1395,13 +1398,16 @@ fn distribute_centres(ctx: &mut AppCtx, axis: Axis) -> Result<Outcome, CommandEr
                 if let Some(step) =
                     move_cell_edit(doc, session, "Distribute shape", target, dx, dy)?
                 {
+                    moved.push(target.id);
                     edit.push(step);
                 }
             }
         }
     }
     edit.apply(ctx)?;
-    reroute_quietly(ctx, &changed_ids(&targets));
+    // The scoped re-route takes the shapes the edit changed (ADR 0084
+    // rule 5): a shape that did not move is not one of them.
+    reroute_quietly(ctx, &moved);
     Ok(edit_outcome(label, warnings, Box::new(edit)))
 }
 

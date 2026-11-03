@@ -1771,7 +1771,11 @@ fn reroute_document(
         if ends.first().is_none_or(Option::is_none) && ends.get(1).is_none_or(Option::is_none) {
             continue;
         }
-        if !picks(scope, &changed_visio, &ends, connector) {
+        let visio_id = doc
+            .shape(connector)
+            .map(|entity| entity.visio_id)
+            .unwrap_or_default();
+        if !picks(scope, &changed_visio, &ends, visio_id) {
             continue;
         }
         routed = routed.saturating_add(route_one(doc, page, connector, &ends, warnings)?);
@@ -1796,21 +1800,23 @@ fn reroute_document(
 }
 
 /// Whether the scope picks one connector (ADR 0084 rule 5): it has an
-/// end glued to a changed shape (a group's members count with it), or
-/// the edit changed the connector itself (its own ends, glue or style).
+/// end glued to a changed shape, or the edit changed the connector
+/// itself (its own ends, glue or style). Both sides count a group's
+/// members with it, so the pass after a step and the pass after its
+/// undo or redo see the same scope.
 fn picks(
     scope: Scope<'_>,
     changed_visio: &[i32],
     ends: &[Option<Connect>; 2],
-    connector: ShapeId,
+    connector_visio: i32,
 ) -> bool {
     match scope {
         Scope::All => true,
-        Scope::Changed(changed) => {
+        Scope::Changed(_) => {
             ends.iter()
                 .flatten()
                 .any(|connect| changed_visio.contains(&connect.to_sheet))
-                || changed.contains(&connector)
+                || changed_visio.contains(&connector_visio)
         }
     }
 }
