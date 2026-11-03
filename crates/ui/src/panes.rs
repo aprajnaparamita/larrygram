@@ -112,9 +112,9 @@ const FIELD_MIN_WIDTH: f32 = 40.0;
 const FIELD_TEXT_INSET: f32 = 4.0;
 
 /// The gap between a pane's label and value columns, in points (task
-/// P7-44: wide enough to read, tight enough that an ordinary value
-/// fits at the default pane width).
-const FIELD_GAP: f32 = 4.0;
+/// P7-45 goal 2: back to the ordinary 8 points, which the wider pane
+/// leaves room for).
+const FIELD_GAP: f32 = 8.0;
 
 /// The safety margin kept between a typed field and the pane edge, in
 /// points (task P7-44).

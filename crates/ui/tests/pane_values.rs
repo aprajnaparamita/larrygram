@@ -29,8 +29,8 @@ use larrygram_model::{
 use larrygram_ui::panes::show_shape_data;
 
 /// The default width of the side panes, in points (`PANES_WIDTH` in
-/// `crates/ui/src/shell.rs`).
-const PANE_WIDTH: f32 = 220.0;
+/// `crates/ui/src/shell.rs`, task P7-45).
+const PANE_WIDTH: f32 = 240.0;
 
 /// One shape with `(label, value)` Shape Data rows, drawn in the Shape
 /// Data pane at [`PANE_WIDTH`] every frame (the P4-04 rig pattern).

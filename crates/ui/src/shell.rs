@@ -77,8 +77,10 @@ const VIEW_MENU: &[&str] = &[
 /// the wizard and the About window (ADR 0066, task P7-09).
 const HELP_MENU: &[&str] = &["help.welcome", "help.about"];
 
-/// The width of the Shape Data and Size & Position panes, in points.
-const PANES_WIDTH: f32 = 220.0;
+/// The width of the Shape Data and Size & Position panes, in points
+/// (task P7-45: wide enough that a 30-character value fits beside the
+/// widest label of a real Process shape at the default width).
+const PANES_WIDTH: f32 = 240.0;
 
 /// The largest share of the window width one side panel takes by
 /// default.

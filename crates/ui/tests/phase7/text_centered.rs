@@ -227,6 +227,30 @@ fn field_values(rig: &mut ShellRig) -> Vec<String> {
         .collect()
 }
 
+/// Replaces the content of the field showing `shown` with `text` and
+/// commits it with Enter (a real pane edit).
+fn type_into_field(rig: &mut ShellRig, shown: &str, text: &str) {
+    rig.run();
+    rig.harness()
+        .root()
+        .query_all_by_role(Role::TextInput)
+        .find(|node| node.value().as_deref() == Some(shown))
+        .unwrap_or_else(|| panic!("no field showing {shown:?}"))
+        .focus();
+    rig.run();
+    rig.harness()
+        .key_combination_modifiers(egui::Modifiers::COMMAND, &[egui::Key::A]);
+    rig.run();
+    rig.harness()
+        .root()
+        .query_all_by_role(Role::TextInput)
+        .find(|node| node.value().as_deref() == Some(shown))
+        .expect("the field is still there")
+        .type_text(text);
+    rig.run();
+    press_key(rig, egui::Key::Enter, egui::Modifiers::NONE);
+}
+
 /// One layout's flow: drop the Process master on a new drawing, type
 /// a label, commit it, and check the picture draws the label centred
 /// and the Shape Data pane shows the whole value.
@@ -287,6 +311,18 @@ fn a_dropped_process_draws_its_label_centred(kind: LayoutKind) {
     assert!(
         values.iter().all(|value| !value.ends_with('\u{2026}')),
         "{kind:?}: no value is cut, got {values:?}"
+    );
+
+    // A 30-character value fits at the default pane width (task P7-45
+    // goal 1): typed into the "Cost" row of a real Process shape, the
+    // field shows it whole.
+    let thirty = "This is a thirty character str";
+    assert_eq!(thirty.chars().count(), 30);
+    type_into_field(&mut rig, "0", thirty);
+    let values = field_values(&mut rig);
+    assert!(
+        values.iter().any(|value| value == thirty),
+        "{kind:?}: the 30-character value shows whole, got {values:?}"
     );
 }
 
