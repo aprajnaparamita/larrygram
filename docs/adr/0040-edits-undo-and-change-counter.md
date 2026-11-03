@@ -133,16 +133,26 @@ The first user is a new text box that is formatted while it is typed
 (P7-37): the insert, the format commands and the final text write are
 one step.
 
-- `UndoStack::begin_group(label)` opens a group. While it is open,
-  `push` appends to the group instead of the stack. Groups do not nest:
-  a second `begin_group` is an error.
+- `UndoStack::begin_group(label, unsaved)` opens a group: `unsaved` is
+  the caller's snapshot of the derived unsaved-changes state. The
+  shell-level seam is `AppCtx::begin_group(session, label)`, which
+  takes that snapshot itself. While the group is open, `push` appends
+  to the group instead of the stack. Groups do not nest: a second
+  `begin_group` is an error.
 - `end_group()` pushes the collected edits as one `CompositeEdit`
   under the label. An empty group pushes nothing.
 - `cancel_group(ctx)` reverts the collected edits in reverse order,
   with recording suspended (rule 2), and discards them. The document
   is as it was when the group opened, and its unsaved-changes state is
   restored too. The change counter still only moves forward (rule 3).
-- `undo` and `redo` end an open group first.
+  A failing `revert` stops the rollback and pushes the edits that were
+  not reverted as one step labelled as the group (task P7-41): the
+  stack stays consistent, the error is reported, and the unsaved state
+  is not restored (a partial revert must never mark the drawing
+  saved).
+- `undo` and `redo` end an open group first. `can_undo` is true while
+  a non-empty group is open (task P7-41): the Undo control commits the
+  interaction first and then undoes the folded step whole.
 - Only the shell opens a group, and it always closes it, with
   `end_group` or `cancel_group`, when the interaction ends by any path:
   commit, Escape, a click elsewhere (P7-25), a layout switch, closing
