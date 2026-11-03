@@ -246,7 +246,7 @@ pub struct DocumentSession {
     /// Where it was loaded from or last saved to; `None` when never saved.
     pub path: Option<PathBuf>,
     /// The change counter recorded at the last open or save (task
-    /// P7-42, ADR 0040 amendment 2026-10-25). A session is changed
+    /// P7-42, ADR 0040 amendment 2026-11-03). A session is changed
     /// when this differs from [`Self::changes`], which every edit,
     /// undo and redo moves; [`Self::is_dirty`] derives the answer and
     /// [`Self::mark_saved`] records a save. No flag to remember.
@@ -293,7 +293,7 @@ impl DocumentSession {
     }
 
     /// Whether the document changed since it was last opened or saved
-    /// (task P7-42, ADR 0040 amendment 2026-10-25).
+    /// (task P7-42, ADR 0040 amendment 2026-11-03).
     ///
     /// The rule is one comparison: [`Self::changes`] differs from
     /// [`Self::saved_changes`]. Every edit, undo and redo moves the
