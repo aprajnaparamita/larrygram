@@ -113,6 +113,11 @@ const TEXT_BOX_TRIGGERS: &[&str] = &[
     "file.new.blank.drawing.metric",
     "file.new.blank.drawing.us",
     "file.open",
+    // The save paths (task P7-42): a save writes what the user has
+    // typed, so the group closes before it runs and the save's
+    // recorded marker is exact (ADR 0040, amendment 2026-11-03).
+    "file.save",
+    "file.save_as",
     "view.ui_layout.panel_2016",
     "view.ui_layout.panel_365",
     "view.ui_layout.panel_classic",

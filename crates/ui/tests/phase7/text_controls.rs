@@ -959,7 +959,7 @@ fn a_new_box_committed_empty_leaves_no_shape_and_no_undo_entry() {
         let session = shell.app.active_document().expect("session");
         assert!(session.undo.is_empty(), "{kind:?}: no undo entry");
         assert!(
-            !session.dirty,
+            !session.is_dirty(),
             "{kind:?}: the document is not marked as changed"
         );
     }
@@ -1070,12 +1070,11 @@ fn closing_the_document_closes_the_new_box_first() {
         let mut rig = shell_rig(kind);
         // The close pauses on its confirmation, so the session stays
         // open for inspection (an earlier edit marked it changed).
-        rig.shell
-            .borrow_mut()
-            .app
-            .active_document_mut()
-            .expect("session")
-            .dirty = true;
+        {
+            let mut shell = rig.shell.borrow_mut();
+            let session = shell.app.active_document_mut().expect("session");
+            session.changes = session.changes.wrapping_add(1);
+        }
         let before = shape_count(&rig);
         choose_text_tool(&mut rig, kind);
         let pos = screen(&rig, EMPTY.0, EMPTY.1);
@@ -1103,12 +1102,11 @@ fn closing_the_document_closes_the_new_box_first() {
 
         // With no text: the box cancels and the document is unchanged.
         let mut rig = shell_rig(kind);
-        rig.shell
-            .borrow_mut()
-            .app
-            .active_document_mut()
-            .expect("session")
-            .dirty = true;
+        {
+            let mut shell = rig.shell.borrow_mut();
+            let session = shell.app.active_document_mut().expect("session");
+            session.changes = session.changes.wrapping_add(1);
+        }
         let before = shape_count(&rig);
         choose_text_tool(&mut rig, kind);
         let pos = screen(&rig, EMPTY.0, EMPTY.1);

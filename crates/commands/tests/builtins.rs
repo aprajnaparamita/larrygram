@@ -390,7 +390,7 @@ fn file_open_reads_the_package_and_keeps_it_for_writing() {
     assert_eq!(session.document.pages.len(), 2);
     assert_eq!(session.path.as_deref(), Some(file.as_path()));
     assert!(session.preserve.is_some());
-    assert!(!session.dirty);
+    assert!(!session.is_dirty());
 
     // A missing file and an unparsable one are `cannot read input: ...`.
     let error = run(
@@ -428,7 +428,10 @@ fn save_as_writes_the_package_and_save_follows_the_session_path() {
         Args::new().with("path", ArgValue::Path(file)),
     )
     .expect("file.open");
-    ctx.active_document_mut().expect("session").dirty = true;
+    {
+        let session = ctx.active_document_mut().expect("session");
+        session.changes = session.changes.wrapping_add(1);
+    }
 
     let saved = out_dir.join("copy.vsdx");
     let outcome = run(
@@ -438,7 +441,7 @@ fn save_as_writes_the_package_and_save_follows_the_session_path() {
     )
     .expect("file.save_as");
     assert!(outcome.message.unwrap().contains("copy.vsdx"));
-    assert!(!ctx.active_document().expect("session").dirty);
+    assert!(!ctx.active_document().expect("session").is_dirty());
 
     // The written bytes are a package holding the same document.
     let bytes = std::fs::read(&saved).expect("saved bytes");
@@ -447,9 +450,12 @@ fn save_as_writes_the_package_and_save_follows_the_session_path() {
     assert_eq!(document.pages.len(), 2);
 
     // file.save now writes to the session path again.
-    ctx.active_document_mut().expect("session").dirty = true;
+    {
+        let session = ctx.active_document_mut().expect("session");
+        session.changes = session.changes.wrapping_add(1);
+    }
     run(&mut ctx, "file.save", Args::new()).expect("file.save");
-    assert!(!ctx.active_document().expect("session").dirty);
+    assert!(!ctx.active_document().expect("session").is_dirty());
     assert!(saved.exists());
 
     // An unwritable target is `cannot write output: ...`.
@@ -469,7 +475,10 @@ fn save_as_writes_the_package_and_save_follows_the_session_path() {
 fn file_close_asks_on_interactive_sources_only() {
     let mut ctx = AppCtx::new(Settings::default());
     run(&mut ctx, "file.new", Args::new()).expect("file.new");
-    ctx.active_document_mut().expect("session").dirty = true;
+    {
+        let session = ctx.active_document_mut().expect("session");
+        session.changes = session.changes.wrapping_add(1);
+    }
 
     // Interactive + unsaved: a ConfirmClose request, nothing closed.
     let outcome = run_from(&mut ctx, "file.close", Args::new(), Source::Ui).expect("close");
@@ -491,7 +500,10 @@ fn file_close_asks_on_interactive_sources_only() {
 
     // A programmatic source closes without asking.
     run(&mut ctx, "file.new", Args::new()).expect("file.new");
-    ctx.active_document_mut().expect("session").dirty = true;
+    {
+        let session = ctx.active_document_mut().expect("session");
+        session.changes = session.changes.wrapping_add(1);
+    }
     let outcome = run(&mut ctx, "file.close", Args::new()).expect("close");
     assert!(outcome.ui_request.is_none());
     assert!(ctx.active_document().is_none());
