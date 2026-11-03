@@ -2117,10 +2117,13 @@ impl Shell {
             ))),
         };
         let shape = match opened {
-            Ok(results) if results.first().is_some_and(|result| result.is_ok()) => {
-                self.app.selection.anchor
-            }
-            Ok(_) => None,
+            // The outcome carries the new shape's id (task P7-41 item
+            // 7); no racing the selection for the anchor.
+            Ok(results) => results
+                .into_iter()
+                .next()
+                .and_then(|result| result.ok())
+                .and_then(|outcome| outcome.shape),
             Err(error) => {
                 self.note_error(error.to_string());
                 None

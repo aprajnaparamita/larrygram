@@ -479,6 +479,10 @@ pub struct Outcome {
     /// A file to hand to the caller instead of writing it to disk
     /// (ADR 0036).
     pub payload: Option<Payload>,
+    /// The shape a creation command made (task P7-41 item 7): the
+    /// caller finds its shape without racing the selection (the shell's
+    /// `open_text_box` opens the editor on this id).
+    pub shape: Option<larrygram_model::ShapeId>,
     /// Warning lines the run produced (ADR 0021), one line each,
     /// without the `warning: ` prefix.
     pub warnings: Vec<String>,
@@ -496,6 +500,7 @@ impl std::fmt::Debug for Outcome {
                     Payload::Bytes { name, data } => format!("{name} ({} bytes)", data.len()),
                 }),
             )
+            .field("shape", &self.shape)
             .field("warnings", &self.warnings)
             .finish()
     }
@@ -506,10 +511,7 @@ impl Outcome {
     pub fn message(message: impl Into<String>) -> Self {
         Self {
             message: Some(message.into()),
-            edit: None,
-            ui_request: None,
-            payload: None,
-            warnings: Vec::new(),
+            ..Self::default()
         }
     }
 }
