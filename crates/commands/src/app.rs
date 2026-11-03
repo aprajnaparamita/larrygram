@@ -708,7 +708,9 @@ impl AppCtx {
     /// and the document's unsaved-changes state is restored to what it
     /// was when the group opened (task P7-42: a cancelled empty text
     /// box leaves the drawing unchanged). Without an open group this
-    /// does nothing.
+    /// does nothing. A partial revert (task P7-41 item 6) is returned
+    /// as an error and restores nothing: a partial revert must never
+    /// mark the drawing saved.
     pub fn cancel_group(&mut self, session: SessionId) -> Result<(), CommandError> {
         let unsaved = self.with_stack(session, |stack, ctx| stack.cancel_group(ctx))??;
         if let Some(unsaved) = unsaved

@@ -246,21 +246,45 @@ impl UndoStack {
     ///
     /// Returns the unsaved-changes state the group saw when it opened
     /// (`Ok(None)` without an open group), so the caller can restore it;
-    /// the change counter still only moves forward (rule 3). A failing
-    /// `revert` is returned as [`CommandError`] and the group is
-    /// discarded.
+    /// the change counter still only moves forward (rule 3).
+    ///
+    /// A failing `revert` (task P7-41 item 6) stops the rollback: the
+    /// edits that were not reverted — the failing one and the ones its
+    /// failure spared — are pushed as one step labelled as the group,
+    /// so the stack stays consistent and their undo finishes the
+    /// rollback later. The failure is returned as [`CommandError`], and
+    /// the caller keeps the current unsaved state (a partial revert
+    /// must never mark the drawing saved).
     pub fn cancel_group(&mut self, ctx: &mut AppCtx) -> Result<Option<bool>, CommandError> {
         let Some(mut group) = self.group.take() else {
             return Ok(None);
         };
-        let result = run_suspended(ctx, |ctx| {
-            for edit in group.edits.iter_mut().rev() {
-                edit.revert(ctx)?;
+        let failure = run_suspended(ctx, |ctx| {
+            let mut failure = None;
+            while let Some(edit) = group.edits.last_mut() {
+                match edit.revert(ctx) {
+                    Ok(()) => {
+                        group.edits.pop();
+                    }
+                    Err(error) => {
+                        failure = Some(error);
+                        break;
+                    }
+                }
             }
-            Ok(())
+            failure
         });
-        result?;
-        Ok(Some(group.unsaved))
+        let Some(error) = failure else {
+            return Ok(Some(group.unsaved));
+        };
+        if !group.edits.is_empty() {
+            let mut composite = CompositeEdit::new(group.label.clone());
+            for edit in group.edits {
+                composite.push(edit);
+            }
+            self.push(Box::new(composite));
+        }
+        Err(error)
     }
 
     /// Reverses the newest undoable edit and returns its label.
@@ -731,6 +755,117 @@ mod tests {
         let (mut ctx, _session) = app_with_session();
         let mut stack = UndoStack::new(UndoStack::DEFAULT_CAPACITY);
         assert_eq!(stack.cancel_group(&mut ctx).expect("cancel"), None);
+    }
+
+    /// An edit whose first `revert` fails and whose later ones behave
+    /// like [`MarkEdit`] (task P7-41 item 6's rollback completion).
+    struct FailsOnceEdit {
+        mark: char,
+        log: std::sync::Arc<std::sync::Mutex<String>>,
+        failed: std::sync::Arc<std::sync::Mutex<bool>>,
+    }
+
+    impl Edit for FailsOnceEdit {
+        fn label(&self) -> &str {
+            "fails once"
+        }
+
+        fn apply(&mut self, _ctx: &mut AppCtx) -> Result<(), CommandError> {
+            if let Ok(mut log) = self.log.lock() {
+                log.push(self.mark);
+            }
+            Ok(())
+        }
+
+        fn revert(&mut self, _ctx: &mut AppCtx) -> Result<(), CommandError> {
+            if let Ok(mut failed) = self.failed.lock()
+                && !*failed
+            {
+                *failed = true;
+                return Err(CommandError::failed("revert failed"));
+            }
+            if let Ok(mut log) = self.log.lock() {
+                assert_eq!(log.pop(), Some(self.mark), "reverts run in reverse");
+            }
+            Ok(())
+        }
+    }
+
+    /// A failing `revert` pushes the edits that were not reverted as
+    /// one step labelled as the group and returns the error (task
+    /// P7-41 item 6): the stack stays consistent and one undo finishes
+    /// the rollback.
+    #[test]
+    fn a_failed_cancel_keeps_the_unreverted_edits_as_one_step() {
+        let log = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let (mut ctx, _session) = app_with_session();
+        let mut stack = UndoStack::new(UndoStack::DEFAULT_CAPACITY);
+        stack.begin_group("Insert Text Box", false).expect("begin");
+        let edits: Vec<Box<dyn Edit>> = vec![
+            Box::new(MarkEdit {
+                mark: 'a',
+                log: log.clone(),
+            }),
+            Box::new(FailsOnceEdit {
+                mark: 'b',
+                log: log.clone(),
+                failed: std::sync::Arc::new(std::sync::Mutex::new(false)),
+            }),
+            Box::new(MarkEdit {
+                mark: 'c',
+                log: log.clone(),
+            }),
+        ];
+        for mut edit in edits {
+            edit.apply(&mut ctx).expect("apply");
+            stack.push(edit);
+        }
+        assert_eq!(&*log.lock().expect("log"), "abc");
+
+        let error = stack.cancel_group(&mut ctx).expect_err("the revert fails");
+        assert_eq!(error.to_string(), "revert failed", "the error is reported");
+        assert!(!stack.has_group(), "the group closed either way");
+        assert_eq!(
+            &*log.lock().expect("log"),
+            "ab",
+            "the reverts before the failure landed"
+        );
+        assert_eq!(
+            stack.undo_labels(),
+            vec!["Insert Text Box"],
+            "the unreverted edits are one step labelled as the group"
+        );
+
+        // One undo finishes the rollback: 'b' and then 'a' revert.
+        assert_eq!(
+            stack.undo(&mut ctx).expect("undo").as_deref(),
+            Some("Insert Text Box")
+        );
+        assert_eq!(&*log.lock().expect("log"), "", "every edit is reverted");
+        assert!(!stack.can_undo(), "the stack is consistent");
+    }
+
+    /// A failure at the very first revert keeps every collected edit
+    /// as the one group step (task P7-41 item 6).
+    #[test]
+    fn a_failed_cancel_at_the_first_revert_keeps_every_edit() {
+        let log = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let (mut ctx, _session) = app_with_session();
+        let mut stack = UndoStack::new(UndoStack::DEFAULT_CAPACITY);
+        stack.begin_group("group", true).expect("begin");
+        let mut first = MarkEdit {
+            mark: 'a',
+            log: log.clone(),
+        };
+        first.apply(&mut ctx).expect("apply");
+        stack.push(Box::new(first));
+        // `BadEdit` only fails its steps; the push is the "already
+        // applied" seam (ADR 0028).
+        stack.push(Box::new(BadEdit));
+        let error = stack.cancel_group(&mut ctx).expect_err("the revert fails");
+        assert_eq!(error.to_string(), "revert failed");
+        assert_eq!(stack.undo_labels(), vec!["group"]);
+        assert_eq!(&*log.lock().expect("log"), "a", "nothing reverted");
     }
 
     /// Undo and redo end an open group first: the collected edits are
