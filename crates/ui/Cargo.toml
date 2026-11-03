@@ -68,6 +68,10 @@ egui_kittest = { version = "0.37", features = ["wgpu"] }
 insta = "1"
 # Property tests (ADR 0037; the settings-slot round trip, P4-16).
 proptest = "1"
+# Parses the saved .vsdx of the save-while-typing tests (task P7-41
+# item 3): the test asserts what the file holds, not what the document
+# holds after the fact.
+larrygram-vsdx = { path = "../vsdx" }
 # Parses the committed YAML in the tests only (the runtime loader is
 # `larrygram-ui-spec`'s; MIT, the same YAML parser `xtask` uses, ADR
 # 0007): the `contexts.yaml` and layout cross-check (P7-08) and the

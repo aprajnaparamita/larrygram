@@ -1328,3 +1328,230 @@ fn the_undo_button_removes_the_whole_new_box() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Item 3 (task P7-41): a save while the editor has focus commits the
+// box first, so a save never writes an empty box. Cmd+S and Cmd+P are
+// global bindings and dispatch while the editor holds the keyboard;
+// Save As and export reach their `file.*` commands from the File menu
+// or the File view, where the press rule ends the edit first.
+// ---------------------------------------------------------------------------
+
+/// A picker that answers every save with one temp path and counts the
+/// saves (the `unsaved` module's TempPicker pattern).
+#[derive(Clone)]
+struct SavePicker {
+    /// The path every save picks.
+    path: std::path::PathBuf,
+    /// How many saves were asked for.
+    saves: std::rc::Rc<std::cell::RefCell<usize>>,
+}
+
+impl SavePicker {
+    fn new(path: std::path::PathBuf) -> Self {
+        Self {
+            path,
+            saves: std::rc::Rc::new(std::cell::RefCell::new(0)),
+        }
+    }
+}
+
+impl larrygram_ui::dialogs::FilePicker for SavePicker {
+    fn open(
+        &self,
+        _request: &larrygram_ui::dialogs::OpenRequest,
+    ) -> Result<Option<larrygram_ui::dialogs::FileChoice>, larrygram_ui::UiError> {
+        Ok(None)
+    }
+
+    fn save(
+        &self,
+        _request: &larrygram_ui::dialogs::SaveRequest,
+        _data: &[u8],
+    ) -> Result<Option<larrygram_ui::dialogs::FileChoice>, larrygram_ui::UiError> {
+        *self.saves.borrow_mut() += 1;
+        Ok(Some(larrygram_ui::dialogs::FileChoice::Path(
+            self.path.clone(),
+        )))
+    }
+
+    fn poll(&self) -> larrygram_ui::dialogs::PickState {
+        larrygram_ui::dialogs::PickState::Idle
+    }
+}
+
+/// A private temp file path for one test's save.
+fn temp_target(name: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!(
+        "larrygram-text-controls-{}-{name}.vsdx",
+        std::process::id()
+    ))
+}
+
+/// The shape count of the saved file's active page (what the save
+/// wrote, not what the document holds after the fact).
+fn saved_shapes(target: &std::path::Path) -> usize {
+    let bytes = std::fs::read(target).expect("the save wrote the file");
+    let doc = larrygram_vsdx::read_document(&bytes, &larrygram_vsdx::Limits::default())
+        .expect("the saved file parses");
+    let page = doc.pages.first().expect("a page");
+    page.shapes.len()
+}
+
+/// The Save As command through the layout's own navigation: Panel
+/// Classic's File menu row, Panel Modern's File view page and its
+/// Browse button.
+fn save_as_command(rig: &mut ShellRig, kind: LayoutKind) {
+    match kind {
+        LayoutKind::PanelClassic => {
+            click(rig, Role::Button, "File");
+            click(rig, Role::MenuItem, "Save As...");
+        }
+        _ => {
+            rig.click_named("File");
+            click(rig, Role::Button, "Save As");
+            click(rig, Role::Button, "Browse\u{2026}");
+        }
+    }
+}
+
+/// Cmd+S dispatches while the editor has focus: the global binding
+/// runs `file.save`, and the commit rule writes the typed text and
+/// closes the group first, so the file carries the box with its text.
+#[test]
+fn a_save_while_typing_commits_the_box_and_writes_it() {
+    for kind in LAYOUTS {
+        let target = temp_target("typed");
+        let picker = SavePicker::new(target.clone());
+        let saves = picker.saves.clone();
+        let mut rig = shell_rig(kind);
+        rig.shell.borrow_mut().set_picker(Box::new(picker));
+        let before = shape_count(&rig);
+        choose_text_tool(&mut rig, kind);
+        let pos = screen(&rig, EMPTY.0, EMPTY.1);
+        click_at(&mut rig, pos);
+        type_into_editor(&mut rig, "Hi");
+        chord(&mut rig, egui::Key::S);
+        assert!(!editing(&mut rig), "{kind:?}: the save ends the edit");
+        assert_eq!(
+            *saves.borrow(),
+            1,
+            "{kind:?}: Cmd+S dispatched while the editor had focus"
+        );
+        let box_ = last_shape(&rig.shell.borrow().app);
+        assert_eq!(
+            shape_text(&rig, box_).as_deref(),
+            Some("Hi"),
+            "{kind:?}: the typed text committed before the write"
+        );
+        assert_eq!(shape_count(&rig), before + 1, "{kind:?}: the box is there");
+        assert_eq!(
+            undo_labels(&rig),
+            vec!["Insert Text Box".to_owned()],
+            "{kind:?}: one step labelled as the insert"
+        );
+        assert_eq!(
+            saved_shapes(&target),
+            before + 1,
+            "{kind:?}: the file carries the box"
+        );
+        {
+            let shell = rig.shell.borrow();
+            let session = shell.app.active_document().expect("session");
+            assert!(!session.is_dirty(), "{kind:?}: the save marked it saved");
+        }
+        let _ = std::fs::remove_file(&target);
+    }
+}
+
+/// A save with an empty new box open writes no empty box (item 3):
+/// the commit rule cancels the box before `file.save` runs, and the
+/// file holds only the fixture shapes.
+#[test]
+fn a_save_of_an_empty_new_box_writes_no_box() {
+    for kind in LAYOUTS {
+        let target = temp_target("empty");
+        let picker = SavePicker::new(target.clone());
+        let saves = picker.saves.clone();
+        let mut rig = shell_rig(kind);
+        rig.shell.borrow_mut().set_picker(Box::new(picker));
+        let before = shape_count(&rig);
+        choose_text_tool(&mut rig, kind);
+        let pos = screen(&rig, EMPTY.0, EMPTY.1);
+        click_at(&mut rig, pos);
+        assert!(editing(&mut rig), "{kind:?}: the box opens");
+        chord(&mut rig, egui::Key::S);
+        assert!(!editing(&mut rig), "{kind:?}: the save ends the edit");
+        assert_eq!(*saves.borrow(), 1, "{kind:?}: the save ran");
+        assert_eq!(shape_count(&rig), before, "{kind:?}: the empty box cancels");
+        assert!(undo_labels(&rig).is_empty(), "{kind:?}: no undo entry");
+        assert_eq!(
+            saved_shapes(&target),
+            before,
+            "{kind:?}: the file holds no empty box"
+        );
+        {
+            let shell = rig.shell.borrow();
+            let session = shell.app.active_document().expect("session");
+            assert!(
+                !session.is_dirty(),
+                "{kind:?}: the cancelled box left it unchanged"
+            );
+        }
+        let _ = std::fs::remove_file(&target);
+    }
+}
+
+/// The other file commands over an open edit commit it first too (item
+/// 3's check, item 4's pin): Cmd+P is `file.print`'s global binding —
+/// a stub today — and it still commits (or cancels) the box before it
+/// runs; Save As sees the committed box as well.
+#[test]
+fn a_file_command_over_an_open_edit_commits_it_first() {
+    for kind in LAYOUTS {
+        // Cmd+P over an empty box: the box cancels before the stub
+        // runs.
+        let mut rig = shell_rig(kind);
+        let before = shape_count(&rig);
+        choose_text_tool(&mut rig, kind);
+        let pos = screen(&rig, EMPTY.0, EMPTY.1);
+        click_at(&mut rig, pos);
+        assert!(editing(&mut rig), "{kind:?}: the box opens");
+        chord(&mut rig, egui::Key::P);
+        assert!(
+            !editing(&mut rig),
+            "{kind:?}: the print command ends the edit"
+        );
+        assert_eq!(
+            shape_count(&rig),
+            before,
+            "{kind:?}: the empty box cancels before the file command"
+        );
+        drop(rig);
+
+        // Save As over typed text: the edit ends first and the file
+        // command saves the committed box.
+        let target = temp_target("save_as");
+        let picker = SavePicker::new(target.clone());
+        let saves = picker.saves.clone();
+        let mut rig = shell_rig(kind);
+        rig.shell.borrow_mut().set_picker(Box::new(picker));
+        choose_text_tool(&mut rig, kind);
+        let pos = screen(&rig, EMPTY.0, EMPTY.1);
+        click_at(&mut rig, pos);
+        type_into_editor(&mut rig, "Hi");
+        save_as_command(&mut rig, kind);
+        assert!(!editing(&mut rig), "{kind:?}: the edit ended");
+        assert_eq!(
+            *saves.borrow(),
+            1,
+            "{kind:?}: Save As saved the committed box"
+        );
+        assert_eq!(
+            saved_shapes(&target),
+            before + 1,
+            "{kind:?}: the file carries the committed box"
+        );
+        let _ = std::fs::remove_file(&target);
+    }
+}
