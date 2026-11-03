@@ -150,6 +150,13 @@ impl UndoStack {
         self.cursor < self.entries.len() && self.pending_label().is_none()
     }
 
+    /// The unsaved-changes verdict the open group saw when it opened
+    /// (task P7-48 item 6): what the drawing read as before the
+    /// pending interaction. `None` without an open group.
+    pub fn group_unsaved(&self) -> Option<bool> {
+        self.group.as_ref().map(|group| group.unsaved)
+    }
+
     /// The label of the open group's pending step (task P7-48 item
     /// 5): the step its `end_group` becomes. `None` without an open
     /// group or with an empty one.

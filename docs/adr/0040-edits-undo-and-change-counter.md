@@ -176,6 +176,13 @@ one comparison over counters the amendment above already moves:
   "clean" answer after a dropped step.
 - A fresh `file.new` drawing with no edits is not changed; neither is
   a just-opened file.
+- One exception (task P7-48): while a new, **empty** text box is being
+  typed (`DocumentSession::pending_text_empty == Some(true)`), the
+  session reads as it did when the box opened — the open group's
+  `unsaved` snapshot. The box's insert is provisional (the commit
+  without text cancels it), so it marks nothing; the moment the box
+  carries typed text it is a change again. That is the reading the
+  macOS hook's `NSTerminateNow` sees.
 - The undo group's `unsaved` snapshot takes the same derived read when
   the group opens, and `cancel_group` restores that verdict after the
   reverts: a group that saw an unchanged drawing marks the reverted

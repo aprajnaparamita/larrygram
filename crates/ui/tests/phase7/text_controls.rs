@@ -2081,3 +2081,61 @@ fn undo_on_an_untyped_box_cancels_it_and_undoes_nothing_else() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Item 6 (task P7-48, the review's minor 7): an empty new box is not
+// a change. (The macOS hook reads the same rule: NSTerminateNow.)
+// ---------------------------------------------------------------------------
+
+/// The title carries no changed marker while the pending box is
+/// empty, and one once it carries typed text (task P7-48 item 6); a
+/// drawing changed before the box stays marked.
+#[test]
+fn an_empty_new_box_marks_nothing_in_the_title() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        assert_eq!(
+            rig.shell.borrow().window_title(),
+            "Untitled - Larrygram",
+            "{kind:?}: the fixture starts clean"
+        );
+        type_a_new_box(&mut rig, kind, "");
+        assert_eq!(
+            rig.shell.borrow().window_title(),
+            "Untitled - Larrygram",
+            "{kind:?}: an empty box marks nothing"
+        );
+        type_into_editor(&mut rig, "x");
+        assert_eq!(
+            rig.shell.borrow().window_title(),
+            "\u{2022} Untitled - Larrygram",
+            "{kind:?}: typed text is a change"
+        );
+        press_key(&mut rig, egui::Key::Backspace);
+        assert_eq!(
+            rig.shell.borrow().window_title(),
+            "Untitled - Larrygram",
+            "{kind:?}: the emptied box marks nothing again"
+        );
+        press_key(&mut rig, egui::Key::Escape);
+        drop(rig);
+
+        // A drawing changed before the box stays marked while the box
+        // is typed.
+        let mut rig = shell_rig(kind);
+        type_a_new_box(&mut rig, kind, "First");
+        press_key(&mut rig, egui::Key::Escape);
+        assert_eq!(
+            rig.shell.borrow().window_title(),
+            "\u{2022} Untitled - Larrygram",
+            "{kind:?}: the committed box marks the drawing"
+        );
+        type_a_new_box(&mut rig, kind, "");
+        assert_eq!(
+            rig.shell.borrow().window_title(),
+            "\u{2022} Untitled - Larrygram",
+            "{kind:?}: the empty box keeps the earlier change marked"
+        );
+        press_key(&mut rig, egui::Key::Escape);
+    }
+}

@@ -2184,6 +2184,22 @@ impl Shell {
     /// shape or undo group went away underneath it (task P7-37 item 5:
     /// every way the editor can end closes the group).
     fn sync_text_box(&mut self) {
+        // The pending box's emptiness (task P7-48 item 6): an empty
+        // new text box is not a change, and the moment it carries
+        // typed text it is one again.
+        let pending_empty = self.text_box.map(|_| self.editor.buffer.is_empty());
+        for session in &mut self.app.documents {
+            session.pending_text_empty = None;
+        }
+        if let (Some(tracked), Some(empty)) = (self.text_box, pending_empty)
+            && let Some(session) = self
+                .app
+                .documents
+                .iter_mut()
+                .find(|slot| slot.id == tracked.session)
+        {
+            session.pending_text_empty = Some(empty);
+        }
         let Some(tracked) = self.text_box else {
             return;
         };

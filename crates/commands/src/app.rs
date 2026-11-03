@@ -257,6 +257,11 @@ pub struct DocumentSession {
     pub view: ViewState,
     /// The per-document undo stack (ADR 0028).
     pub undo: UndoStack,
+    /// The pending new text box of an open typing interaction (task
+    /// P7-48 item 6): `Some(empty)` while a tracked text box carries
+    /// no typed text, `None` with no tracked box. The shell keeps it;
+    /// [`DocumentSession::is_dirty`] reads it.
+    pub pending_text_empty: Option<bool>,
     /// The document change counter (ADR 0040): every edit bumps it, and
     /// the canvas cache keys on it instead of comparing a document
     /// snapshot every frame (the P4-05 deferred item). It only moves
@@ -286,6 +291,7 @@ impl DocumentSession {
             active_page,
             view: ViewState::new(),
             undo: UndoStack::new(UndoStack::DEFAULT_CAPACITY),
+            pending_text_empty: None,
             changes: 0,
             graph: None,
             preserve: None,
@@ -301,7 +307,21 @@ impl DocumentSession {
     /// back to the saved state still reads as changed: simple and safe
     /// (the counter only moves forward, ADR 0040 rule 3). A fresh
     /// `file.new` drawing with no edits is not changed.
+    ///
+    /// One exception (task P7-48 item 6): while a new, empty text box
+    /// is being typed the drawing reads as it did when the box opened
+    /// (the open group's [`Self::undo`]
+    /// [`group_unsaved`](larrygram_commands::UndoStack::group_unsaved)
+    /// snapshot). The box's insert is provisional — the commit without
+    /// text cancels it — so it marks nothing; the moment the box
+    /// carries typed text it is a change again.
     pub fn is_dirty(&self) -> bool {
+        if self.pending_text_empty == Some(true) {
+            return self
+                .undo
+                .group_unsaved()
+                .unwrap_or(self.changes != self.saved_changes);
+        }
         self.changes != self.saved_changes
     }
 
@@ -1251,6 +1271,45 @@ mod tests {
     /// `cancel_group` restores the document's unsaved-changes state to
     /// what it was when the group opened (ADR 0040, amendment
     /// 2026-11-03; task P7-42: the snapshot is the derived rule).
+    /// Task P7-48 item 6: an empty pending text box is not a change —
+    /// the drawing reads as it did when its group opened.
+    #[test]
+    fn an_empty_pending_text_box_is_not_a_change() {
+        let mut ctx = AppCtx::new(Settings::default());
+        let index = ctx.open_document(DocumentSession::new(larrygram_model::Document::new(), None));
+        let session = ctx.documents.get(index).expect("session").id;
+
+        // A clean drawing: the box's insert moves the counter but
+        // marks nothing while the box is empty.
+        ctx.begin_group(session, "Insert Text Box").expect("begin");
+        ctx.push_edit(session, Box::new(LabelEdit("insert")))
+            .expect("push");
+        ctx.touch_session(session);
+        {
+            let slot = ctx.documents.iter_mut().find(|s| s.id == session).unwrap();
+            assert!(slot.is_dirty(), "the insert moved the counter");
+            slot.pending_text_empty = Some(true);
+            assert!(!slot.is_dirty(), "an empty box marks nothing");
+            slot.pending_text_empty = Some(false);
+            assert!(slot.is_dirty(), "typed text is a change");
+            slot.pending_text_empty = None;
+            assert!(slot.is_dirty(), "without the box the counter rules");
+        }
+        ctx.cancel_group(session).expect("cancel");
+
+        // A drawing that was changed before the box stays marked.
+        ctx.push_edit(session, Box::new(LabelEdit("earlier")))
+            .expect("push");
+        ctx.touch_session(session);
+        ctx.begin_group(session, "Insert Text Box").expect("begin");
+        ctx.push_edit(session, Box::new(LabelEdit("insert")))
+            .expect("push");
+        ctx.touch_session(session);
+        let slot = ctx.documents.iter_mut().find(|s| s.id == session).unwrap();
+        slot.pending_text_empty = Some(true);
+        assert!(slot.is_dirty(), "an earlier change still marks it");
+    }
+
     #[test]
     fn cancel_group_restores_the_unsaved_changes_state() {
         // The group saw a changed document: the cancel leaves it
