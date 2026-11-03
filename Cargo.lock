@@ -2325,6 +2325,7 @@ version = "1.0.0-alpha.1"
 dependencies = [
  "calamine",
  "flate2",
+ "image",
  "jsonschema",
  "larrygram-commands",
  "larrygram-ui-spec",
