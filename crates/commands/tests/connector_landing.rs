@@ -371,14 +371,6 @@ enum GroupKind {
     Flip,
 }
 
-/// The parent-space point of a page point for one test group.
-fn to_parent(kind: GroupKind, page: larrygram_geom::Point) -> larrygram_geom::Point {
-    match kind {
-        GroupKind::Rotate => larrygram_geom::Point::new(page.y, 10.0 - page.x),
-        GroupKind::Flip => larrygram_geom::Point::new(10.0 - page.x, page.y),
-    }
-}
-
 /// The page point of a parent-space point for one test group.
 fn to_page(kind: GroupKind, parent: larrygram_geom::Point) -> larrygram_geom::Point {
     match kind {
