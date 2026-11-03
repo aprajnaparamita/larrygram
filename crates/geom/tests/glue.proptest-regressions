@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc bd346890f6771e3fbf0549682c307094a45e240d3f7407877da1b87fae96719c # shrinks to x = 0.0, y = 0.0, width = 0.5, height = 1.656129173410053, side_a = 0, side_b = 0, along_a = 0.1, along_b = 0.1, dx = -1.4978759504039583, dy = -2.3562871857573855, jitter_a = (0.0, 0.0), jitter_b = (0.0, 0.0)
+cc 01a06dee448d00d08f7a02fd68427a09a187b8ce95380fb03f59c7bda078d1db # shrinks to x = 0.0, y = 0.0, width = 0.5, height = 1.688941329322929, side_a = 1, side_b = 3, along_a = 0.7672487409528422, along_b = 0.43530023152174807, dx = 5.730915054843138, dy = 0.7723185722633058, jitter_a = (-0.2631294508786441, 0.0), jitter_b = (-0.2765571342382237, 0.0)
+cc fc5435fa27e56f24573f837ca1a8a924256b2823bd446a246531685af5ce7498 # shrinks to x = 0.0, y = 0.0, width = 0.5, height = 1.7527029256061812, side_a = 3, side_b = 1, along_a = 0.1, along_b = 0.152031718133097, dx = -0.11250325966939438, dy = 10.69506813180366, jitter_a = (0.0, 0.9664386376563858), jitter_b = (0.0, 1.0081570339096104)

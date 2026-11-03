@@ -667,7 +667,7 @@ fn glue(ctx: &mut AppCtx, inv: &Invocation, end: End) -> Result<Outcome, Command
         ];
         slots[end.slot()] = Some(&record);
         let mut resolve_warnings = Vec::new();
-        let (begin, finish) = resolved_ends(
+        let (begin, finish, _boxes) = resolved_ends(
             doc,
             page,
             connector,
@@ -1011,10 +1011,10 @@ fn run_draw(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError>
             };
             records[end.slot()] = Some(record);
         }
-        let (begin, finish) = {
+        let (begin, finish, boxes) = {
             let doc = &ctx.active_document().ok_or_else(no_document)?.document;
             let mut resolve_warnings = Vec::new();
-            let (begin, finish) = resolved_ends(
+            let resolved = resolved_ends(
                 doc,
                 page,
                 connector,
@@ -1026,7 +1026,7 @@ fn run_draw(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError>
                 &mut resolve_warnings,
             )?;
             warnings.extend(resolve_warnings);
-            (begin, finish)
+            resolved
         };
         let [begin_record, end_record] = records;
         for (end, record) in [(End::Begin, begin_record), (End::End, end_record)] {
@@ -1068,7 +1068,11 @@ fn run_draw(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError>
         let mut path_edit = {
             let doc = &ctx.active_document().ok_or_else(no_document)?.document;
             let options = RouteOptions::new(route_style_for(doc, connector))
-                .with_exits(begin.exit, finish.exit);
+                .with_exits(begin.exit, finish.exit)
+                .with_boxes(
+                    boxes.first().copied().flatten(),
+                    boxes.get(1).copied().flatten(),
+                );
             let points = route(begin.point, finish.point, &options).map_err(|error| {
                 CommandError::failed(format!("cannot route connector: {error}"))
             })?;
@@ -1115,7 +1119,7 @@ fn resolved_ends(
     records: [Option<&Connect>; 2],
     free_at: [Option<Point>; 2],
     warnings: &mut Vec<String>,
-) -> Result<(Candidate, Candidate), CommandError> {
+) -> Result<(Candidate, Candidate, [Option<Rect>; 2]), CommandError> {
     let mut targets: [Option<GlueTarget>; 2] = [None, None];
     let mut kinds: [Option<GlueKind>; 2] = [None, None];
     let mut free: [Option<Point>; 2] = [None, None];
@@ -1210,7 +1214,17 @@ fn resolved_ends(
             }
         }
     }
-    Ok((begin, end))
+    let boxes = [
+        targets
+            .first()
+            .and_then(Option::as_ref)
+            .map(GlueTarget::page_box),
+        targets
+            .get(1)
+            .and_then(Option::as_ref)
+            .map(GlueTarget::page_box),
+    ];
+    Ok((begin, end, boxes))
 }
 
 /// The end's current point in page inches: its endpoint cells (which a
@@ -1971,7 +1985,7 @@ fn route_one(
         warnings.push(format!("connector {visio_id} has no usable transform"));
         return Ok(0);
     }
-    let (begin, end) = resolved_ends(
+    let (begin, end, boxes) = resolved_ends(
         doc,
         page,
         connector,
@@ -1995,7 +2009,12 @@ fn route_one(
         }
     }
     let style = route_style_for(doc, connector);
-    let options = RouteOptions::new(style).with_exits(begin.exit, end.exit);
+    let options = RouteOptions::new(style)
+        .with_exits(begin.exit, end.exit)
+        .with_boxes(
+            boxes.first().copied().flatten(),
+            boxes.get(1).copied().flatten(),
+        );
     let points = route(begin.point, end.point, &options).map_err(|error| {
         CommandError::failed(format!("cannot route connector {visio_id}: {error}"))
     })?;

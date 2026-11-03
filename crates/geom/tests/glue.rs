@@ -307,11 +307,11 @@ fn the_facing_case_zigs_once_between_the_two_stubs() {
         points,
         vec![
             Point::new(2.0, 0.5),
-            Point::new(2.25, 0.5),
-            Point::new(2.25, 2.5),
+            Point::new(3.75, 0.5),
+            Point::new(3.75, 2.5),
             Point::new(4.0, 2.5),
         ],
-        "the turn comes right after the begin stub"
+        "one zig between the two stubs"
     );
     assert!(
         !overlaps_side(&points, (Point::new(2.0, 0.0), Point::new(2.0, 1.0))),
@@ -364,11 +364,11 @@ fn the_same_side_case_goes_around_and_never_along_the_edge() {
         points,
         vec![
             Point::new(2.0, 0.5),
-            Point::new(2.5, 0.5),
-            Point::new(2.5, 2.5),
+            Point::new(2.25, 0.5),
+            Point::new(2.25, 2.5),
             Point::new(2.0, 2.5),
         ],
-        "the U runs back beyond both stubs"
+        "out, across and back, clear of the shapes"
     );
     assert!(!overlaps_side(
         &points,
@@ -396,8 +396,8 @@ fn two_exits_pointing_away_wrap_around() {
             Point::new(0.0, 0.0),
             Point::new(-0.25, 0.0),
             Point::new(-0.25, -0.25),
-            Point::new(4.5, -0.25),
-            Point::new(4.5, 3.0),
+            Point::new(4.25, -0.25),
+            Point::new(4.25, 3.0),
             Point::new(4.0, 3.0),
         ],
         "out of the begin side, around, and back into the end side"
@@ -420,6 +420,106 @@ fn a_zero_gap_facing_pair_gets_zero_length_stubs() {
     )
     .expect("route");
     assert_eq!(points, vec![Point::new(2.0, 0.5), Point::new(2.0, 2.5)]);
+}
+
+/// No segment of `points` crosses the interior of `box_`.
+fn clears(points: &[Point], box_: larrygram_geom::Rect) -> bool {
+    for pair in points.windows(2) {
+        let (p, q) = (pair[0], pair[1]);
+        let (min, max) = (box_.min, box_.max);
+        if (p.y - q.y).abs() == 0.0
+            && p.y > min.y
+            && p.y < max.y
+            && p.x.min(q.x) < max.x
+            && p.x.max(q.x) > min.x
+        {
+            return false;
+        }
+        if (p.x - q.x).abs() == 0.0
+            && p.x > min.x
+            && p.x < max.x
+            && p.y.min(q.y) < max.y
+            && p.y.max(q.y) > min.y
+        {
+            return false;
+        }
+    }
+    true
+}
+
+/// No turn of `points` reverses the previous leg (no 180 degrees).
+fn no_reversal(points: &[Point]) -> bool {
+    for triple in points.windows(3) {
+        let first = triple[1].sub(triple[0]);
+        let second = triple[2].sub(triple[1]);
+        if first.x * second.x + first.y * second.y < 0.0 {
+            return false;
+        }
+    }
+    true
+}
+
+/// One probe of the review: the begin point and exit, the end point
+/// and exit, and the end target's box.
+type Probe = (
+    Point,
+    Option<Point>,
+    Point,
+    Option<Point>,
+    larrygram_geom::Rect,
+);
+
+/// The review's three probes (task P7-49 goal 3): the L must not run
+/// back through the begin shape or through the target, so each route
+/// clears both boxes and turns no 180 degrees.
+#[test]
+fn the_review_probes_clear_their_shapes_without_a_reversal() {
+    let a = larrygram_geom::Rect::new(Point::new(3.0, 3.0), Point::new(5.0, 4.0));
+    let probes: [Probe; 3] = [
+        // Leaving A's right side towards a shape below and left of A.
+        (
+            Point::new(5.0, 3.5),
+            Some(Point::new(1.0, 0.0)),
+            Point::new(4.0, 1.0),
+            Some(Point::new(0.0, 1.0)),
+            larrygram_geom::Rect::new(Point::new(3.0, 0.0), Point::new(5.0, 1.0)),
+        ),
+        // Leaving A's top side towards a shape above and left of A.
+        (
+            Point::new(4.0, 4.0),
+            Some(Point::new(0.0, 1.0)),
+            Point::new(2.0, 6.0),
+            Some(Point::new(-1.0, 0.0)),
+            larrygram_geom::Rect::new(Point::new(2.0, 5.0), Point::new(4.0, 7.0)),
+        ),
+        // Leaving a box's right side towards a shape below and left.
+        (
+            Point::new(0.0, 0.0),
+            Some(Point::new(1.0, 0.0)),
+            Point::new(-3.0, -3.0),
+            Some(Point::new(0.0, -1.0)),
+            larrygram_geom::Rect::new(Point::new(-4.0, -3.0), Point::new(-2.0, -1.0)),
+        ),
+    ];
+    for (begin, begin_exit, end, end_exit, end_box) in probes {
+        let begin_box = if begin == Point::new(5.0, 3.5) || begin == Point::new(4.0, 4.0) {
+            a
+        } else {
+            larrygram_geom::Rect::new(Point::new(-2.0, -0.5), Point::new(0.0, 0.5))
+        };
+        let points = route(
+            begin,
+            end,
+            &right_angle(begin_exit, end_exit).with_boxes(Some(begin_box), Some(end_box)),
+        )
+        .expect("route");
+        assert!(
+            clears(&points, begin_box),
+            "enters the begin box: {points:?}"
+        );
+        assert!(clears(&points, end_box), "enters the end box: {points:?}");
+        assert!(no_reversal(&points), "a 180 turn: {points:?}");
+    }
 }
 
 #[test]
@@ -464,6 +564,42 @@ fn exits_never_break_the_route_contract() {
     }
 }
 
+/// One glue target of the proptest: a box and one of its side points
+/// with that side's outward normal, jittered (task P7-49 goal 4: the
+/// router snaps it back to the dominant axis).
+fn target(
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    side: u8,
+    along: f64,
+    jitter: (f64, f64),
+) -> (Point, Option<Point>, larrygram_geom::Rect) {
+    let box_ = larrygram_geom::Rect::new(Point::new(x, y), Point::new(x + width, y + height));
+    let (point, normal) = match side % 4 {
+        0 => (Point::new(x + width * along, y), Point::new(0.0, -1.0)),
+        1 => (
+            Point::new(x + width, y + height * along),
+            Point::new(1.0, 0.0),
+        ),
+        2 => (
+            Point::new(x + width * along, y + height),
+            Point::new(0.0, 1.0),
+        ),
+        _ => (Point::new(x, y + height * along), Point::new(-1.0, 0.0)),
+    };
+    // The wobble keeps the outward sign on the normal's axis and adds
+    // a parallel component: the snapped exit may run along the side
+    // but never into the box.
+    let parallel = Point::new(normal.y, -normal.x);
+    let exit = Point::new(
+        normal.x * (0.5 + jitter.0.abs()) + parallel.x * jitter.1,
+        normal.y * (0.5 + jitter.0.abs()) + parallel.y * jitter.1,
+    );
+    (point, Some(exit), box_)
+}
+
 proptest! {
     /// Every right-angle route with axis-aligned exits begins and ends
     /// on its inputs, repeats no point and is axis-aligned.
@@ -498,5 +634,55 @@ proptest! {
             prop_assert!(pair[0].x == pair[1].x || pair[0].y == pair[1].y, "not axis-aligned: {points:?}");
             prop_assert!(pair[0] != pair[1], "repeated point: {points:?}");
         }
+    }
+
+    /// Every route between two glue targets clears both boxes and
+    /// turns no 180 degrees, even with jittered (non-axis-aligned)
+    /// exits: every segment is horizontal or vertical (task P7-49
+    /// goals 3 and 4).
+    #[test]
+    fn every_route_clears_its_shapes_and_turns_no_180(
+        x in -20.0f64..20.0,
+        y in -20.0f64..20.0,
+        width in 0.5f64..3.0,
+        height in 0.5f64..2.0,
+        side_a in 0u8..4,
+        side_b in 0u8..4,
+        along_a in 0.1f64..0.9,
+        along_b in 0.1f64..0.9,
+        dx in -12.0f64..12.0,
+        dy in -12.0f64..12.0,
+        jitter_a in (-0.4f64..0.4, -1.2f64..1.2),
+        jitter_b in (-0.4f64..0.4, -1.2f64..1.2),
+    ) {
+        let (begin, begin_exit, begin_box) =
+            target(x, y, width, height, side_a, along_a, jitter_a);
+        // The end target sits clear of the begin one on one axis (two
+        // glue targets never overlap).
+        let (bx, by) = if dx.abs() > dy.abs() {
+            (x + width + 1.0 + dx.abs(), y + dy)
+        } else {
+            (x + dx, y + height + 1.0 + dy.abs())
+        };
+        let (end, end_exit, end_box) = target(bx, by, width, height, side_b, along_b, jitter_b);
+        let points = route(
+            begin,
+            end,
+            &right_angle(begin_exit, end_exit).with_boxes(Some(begin_box), Some(end_box)),
+        )
+        .expect("route");
+        prop_assert_eq!(points.first(), Some(&begin));
+        prop_assert_eq!(points.last(), Some(&end));
+        for pair in points.windows(2) {
+            prop_assert!(pair[0].x == pair[1].x || pair[0].y == pair[1].y, "not axis-aligned: {points:?}");
+            prop_assert!(pair[0] != pair[1], "repeated point: {points:?}");
+        }
+        for triple in points.windows(3) {
+            let first = triple[1].sub(triple[0]);
+            let second = triple[2].sub(triple[1]);
+            prop_assert!(first.x * second.x + first.y * second.y >= 0.0, "a 180 turn: {points:?}");
+        }
+        prop_assert!(clears(&points, begin_box), "enters the begin box: {points:?}");
+        prop_assert!(clears(&points, end_box), "enters the end box: {points:?}");
     }
 }

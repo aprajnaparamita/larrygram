@@ -96,6 +96,20 @@ impl GlueTarget {
             .collect()
     }
 
+    /// The target's local box mapped through the transform: the
+    /// page-space box the route's detours clear (task P7-49 goal 3).
+    pub fn page_box(&self) -> Rect {
+        let Rect { min, max } = self.local_box;
+        let mut low = Point::new(f64::INFINITY, f64::INFINITY);
+        let mut high = Point::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
+        for corner in [min, Point::new(max.x, min.y), max, Point::new(min.x, max.y)] {
+            let point = self.transform.apply(corner);
+            low = Point::new(low.x.min(point.x), low.y.min(point.y));
+            high = Point::new(high.x.max(point.x), high.y.max(point.y));
+        }
+        Rect::new(low, high)
+    }
+
     /// A local direction through the transform's linear part, as a unit
     /// vector, or `None` when it maps to a zero-length or non-finite
     /// vector.
