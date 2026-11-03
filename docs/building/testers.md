@@ -133,7 +133,9 @@ asks for one problem per report:
   build; the release notes under it also give the full commit it was
   built from;
 - **Build id**: the part in brackets in **Help > About** (for example
-  `abc1234`), which names the commit your binary was built from;
+  `abc1234`), which names the commit your binary was built from. A
+  build you downloaded always shows a commit id; `dev` means a local
+  build compiled from a source checkout, not a tester build;
 - **Operating system**: macOS version, Windows version or Linux
   distribution;
 - **Drawing**: optional. A small `.vsdx` or `.vsd` that shows the
