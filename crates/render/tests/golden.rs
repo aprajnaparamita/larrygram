@@ -9,7 +9,8 @@
 //!
 //! The goldens under `tests/golden/` are our own rendering of the
 //! hand-authored fixtures in `corpus/fixtures/` (plus one corpus file,
-//! `blue-box.vsdx`, skipped when the corpus is absent). Regenerate with
+//! `blue-box.vsdx`, skipped when the corpus is absent, and one drawing
+//! built from our own stencil masters: task P7-44). Regenerate with
 //!
 //! ```sh
 //! LARRYGRAM_UPDATE_GOLDEN=1 cargo test -p larrygram-render --test golden
@@ -53,6 +54,49 @@ const FIXTURE_GOLDENS: &[&str] = &[
 
 /// The goldens rendered from corpus input (fetched, never committed).
 const CORPUS_GOLDENS: &[&str] = &["blue-box"];
+
+/// The goldens rendered from a drawing built in code from our own
+/// stencil masters (task P7-44): a dropped Process and a dropped
+/// Decision shape with typed labels.
+const STENCIL_GOLDENS: &[&str] = &["stencil-text-centered"];
+
+/// A blank drawing with a dropped Process and a dropped Decision shape,
+/// each with its typed label, near the top of the page (task P7-44).
+#[allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)] // test helper
+fn flowchart_labels() -> larrygram_model::Document {
+    use larrygram_model::stencils;
+    let mut document = larrygram_model::Document::new();
+    for (name_u, label, pin_x) in [("Process", "Process", 1.5), ("Decision", "Decision", 4.2)] {
+        let def = stencils::basic_flowchart()
+            .masters
+            .into_iter()
+            .find(|master| master.name_u == name_u)
+            .unwrap_or_else(|| panic!("no master {name_u}"));
+        let shape = stencils::instantiate(&mut document, &def);
+        let entity = document.shape_mut(shape).expect("shape");
+        for (cell, value) in [("PinX", pin_x), ("PinY", 8.0)] {
+            let entry = entity
+                .sheet
+                .cells
+                .iter_mut()
+                .find(|entry| entry.name.as_str() == cell)
+                .unwrap_or_else(|| panic!("{name_u}: {cell}"));
+            entry.value = Some(larrygram_model::CellValue::Number(value));
+        }
+        entity.text = Some(larrygram_model::TextContent {
+            parts: vec![larrygram_model::TextPart::Text(label.to_owned())],
+        });
+    }
+    document
+}
+
+/// The document of one code-built stencil golden (task P7-44).
+fn stencil_case(name: &str) -> Option<larrygram_model::Document> {
+    match name {
+        "stencil-text-centered" => Some(flowchart_labels()),
+        _ => None,
+    }
+}
 
 /// The golden directory of this test: `crates/render/tests/golden/`.
 fn golden_dir() -> PathBuf {
@@ -125,7 +169,9 @@ fn channel_delta(a: &PremultipliedColorU8, b: &PremultipliedColorU8) -> u8 {
 /// The rendered PNG of one case's first page.
 #[allow(clippy::expect_used)]
 fn render_case(name: &str) -> Option<Vec<u8>> {
-    let document = if name.starts_with("render-") {
+    let document = if let Some(document) = stencil_case(name) {
+        document
+    } else if name.starts_with("render-") {
         common::fixture_document(&format!("{name}.vsdx"))
     } else {
         common::corpus_document(&format!("{name}.vsdx"))?
@@ -145,6 +191,7 @@ fn golden_images_match_the_adr_0027_metric() {
         .iter()
         .map(|name| (*name).to_owned())
         .collect();
+    cases.extend(STENCIL_GOLDENS.iter().map(|name| (*name).to_owned()));
     for name in CORPUS_GOLDENS {
         if common::corpus_document(&format!("{name}.vsdx")).is_some() {
             cases.push((*name).to_owned());
@@ -176,6 +223,50 @@ fn golden_images_match_the_adr_0027_metric() {
         if let Err(diff) = compare_images(&saved, &rendered) {
             panic!("golden {name}.png: {diff}");
         }
+    }
+}
+
+// --- the scene check (task P7-44) ------------------------------------
+
+/// Task P7-44: the label of a dropped master lays out centred in the
+/// shape's text block, both ways (scene check; the pixels are checked
+/// by the `stencil-text-centered` golden above).
+#[test]
+fn stencil_text_lays_out_centred() {
+    let document = flowchart_labels();
+    let scenes = common::page_scenes(&document, true);
+    let scene = scenes.first().expect("the drawing has a page");
+    let texts: Vec<_> = scene
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            larrygram_render::scene::Node::Shape(shape) => shape.text.as_ref(),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(texts.len(), 2, "Process and Decision draw their text");
+    for (text, (width, height)) in texts.iter().zip([(1.5, 0.75), (1.2, 0.9)]) {
+        let mut min_x = f64::INFINITY;
+        let mut max_x = f64::NEG_INFINITY;
+        for line in &text.layout.lines {
+            if let Some(first) = line.glyphs.first() {
+                min_x = min_x.min(first.x);
+                max_x = max_x.max(first.x + line.width);
+            }
+        }
+        assert!(min_x.is_finite(), "the label has glyphs");
+        let center_x = (min_x + max_x) * 0.5;
+        assert!(
+            (center_x - width * 0.5).abs() < 0.05,
+            "centred horizontally: text centre {center_x} vs box {}",
+            width * 0.5
+        );
+        let baseline = text.layout.lines.first().expect("a line").baseline;
+        let box_mid = height * 0.5;
+        assert!(
+            (baseline - box_mid).abs() < 0.12,
+            "centred vertically: baseline {baseline} vs box middle {box_mid}"
+        );
     }
 }
 
