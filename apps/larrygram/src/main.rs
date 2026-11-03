@@ -321,7 +321,9 @@ struct LarrygramApp {
     /// The settings last written to the store (the dirty check).
     saved_settings: Settings,
     /// Whether the should-terminate hook check ran once (task P7-46
-    /// goal 3; it runs on the first frame, while the app is idle).
+    /// goal 3; it runs on the first frame, while the app is idle). Off
+    /// macOS there is no hook to check.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     quit_hook_checked: bool,
 }
 
