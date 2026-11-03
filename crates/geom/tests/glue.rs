@@ -238,12 +238,7 @@ fn both_ends_on_one_shape_resolve_to_distinct_candidates() {
 
     // The route between them has at least two distinct points and no
     // repeated point.
-    let points = route(
-        begin.point,
-        end.point,
-        &right_angle(begin.exit, end.exit),
-    )
-    .expect("route");
+    let points = route(begin.point, end.point, &right_angle(begin.exit, end.exit)).expect("route");
     let mut distinct: Vec<Point> = Vec::new();
     for point in &points {
         if !distinct.contains(point) {

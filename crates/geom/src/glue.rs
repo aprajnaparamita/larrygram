@@ -199,11 +199,19 @@ pub fn resolve_ends(begin: &EndSpec<'_>, end: &EndSpec<'_>) -> (Candidate, Candi
     let (begin, end) = match (begin_slot, end_slot) {
         (Slot::Fixed(b, _), Slot::Fixed(e, _)) => (b, e),
         (Slot::Fixed(b, b_index), Slot::Dynamic(target)) => {
-            let e = choose(target, Some(b.point), same_target.then_some(b_index).flatten());
+            let e = choose(
+                target,
+                Some(b.point),
+                same_target.then_some(b_index).flatten(),
+            );
             (b, e)
         }
         (Slot::Dynamic(target), Slot::Fixed(e, e_index)) => {
-            let b = choose(target, Some(e.point), same_target.then_some(e_index).flatten());
+            let b = choose(
+                target,
+                Some(e.point),
+                same_target.then_some(e_index).flatten(),
+            );
             (b, e)
         }
         (Slot::Dynamic(bt), Slot::Dynamic(et)) => {
@@ -222,15 +230,13 @@ pub fn resolve_ends(begin: &EndSpec<'_>, end: &EndSpec<'_>) -> (Candidate, Candi
 /// point falls back to dynamic glue and sets `missing_row`.
 fn slot<'a>(spec: &EndSpec<'a>, missing_row: &mut bool) -> Slot<'a> {
     match spec {
-        EndSpec::Free(point) => {
-            Slot::Fixed(
-                Candidate {
-                    point: *point,
-                    exit: None,
-                },
-                None,
-            )
-        }
+        EndSpec::Free(point) => Slot::Fixed(
+            Candidate {
+                point: *point,
+                exit: None,
+            },
+            None,
+        ),
         EndSpec::Glued(target, GlueEnd::Shape) => Slot::Dynamic(target),
         EndSpec::Glued(target, GlueEnd::Point(ix)) => {
             let position = target.points.iter().position(|(row, _, _)| row == ix);
@@ -287,9 +293,9 @@ fn pair_distinct(target: &GlueTarget) -> (Candidate, Candidate) {
             }
         }
     }
-    match best.and_then(|(_, (i, j))| {
-        Some((candidates.get(i).copied()?, candidates.get(j).copied()?))
-    }) {
+    match best
+        .and_then(|(_, (i, j))| Some((candidates.get(i).copied()?, candidates.get(j).copied()?)))
+    {
         Some(picked) => picked,
         None => {
             let only = first(&candidates, target);

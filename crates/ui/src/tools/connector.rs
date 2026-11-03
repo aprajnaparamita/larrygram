@@ -226,11 +226,62 @@ fn preview(state: &ToolMachine, style: RouteStyle) -> ToolEffect {
     }
 }
 
+/// The shape's own box in page inches: the outline test of the glue
+/// rule (task P7-49 goal 8). A text block larger than the shape does
+/// not extend it.
+fn own_bounds(
+    doc: &larrygram_model::Document,
+    entry: &crate::handles::NodeEntry,
+) -> Option<larrygram_geom::Rect> {
+    let mut reader = larrygram_model::CellReader::new(doc);
+    let sheet = larrygram_model::SheetRef::Shape(entry.shape);
+    let width = reader
+        .number(sheet, &larrygram_model::CellName::new("Width"))
+        .ok()?;
+    let height = reader
+        .number(sheet, &larrygram_model::CellName::new("Height"))
+        .ok()?;
+    let mut low = Point::new(f64::INFINITY, f64::INFINITY);
+    let mut high = Point::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
+    for corner in [
+        Point::new(0.0, 0.0),
+        Point::new(width, 0.0),
+        Point::new(width, height),
+        Point::new(0.0, height),
+    ] {
+        let point = entry.transform.apply(corner);
+        low = Point::new(low.x.min(point.x), low.y.min(point.y));
+        high = Point::new(high.x.max(point.x), high.y.max(point.y));
+    }
+    Some(larrygram_geom::Rect::new(low, high))
+}
+
+/// The top-level ancestor of `shape` (the shape itself when it sits on
+/// the page): a hit on a group member glues to its top-level ancestor,
+/// as the render doc says (task P7-49 goal 8).
+fn top_level(
+    doc: &larrygram_model::Document,
+    shape: larrygram_model::ShapeId,
+) -> larrygram_model::ShapeId {
+    let mut top = shape;
+    for _ in 0..128 {
+        let Some(parent) = doc.shape(top).and_then(|entity| entity.parent) else {
+            break;
+        };
+        top = parent;
+    }
+    top
+}
+
 /// The glue rule of one endpoint (ADR 0084 rule 6): point glue within
 /// the snap distance of a connection point, otherwise dynamic glue to
 /// the topmost non-connector shape whose outline contains the pointer,
-/// otherwise free. Connectors are never glue targets. Alt suppresses
-/// glue entirely.
+/// otherwise free. A tie between connection points goes to the
+/// topmost shape; a hit on a group member maps to its top-level
+/// ancestor; a shape with no fill glues inside its bounds (the old
+/// bounds test); a text block larger than its shape does not glue
+/// outside the outline. Connectors are never glue targets. Alt
+/// suppresses glue entirely.
 fn locate(
     ctx: &AppCtx,
     pos: Point,
@@ -250,13 +301,16 @@ fn locate(
     let entries = node_entries(&scene);
     let max_distance = SNAP_DISTANCE_PX / (zoom * crate::canvas::POINTS_PER_INCH);
     let mut nearest: Option<(f64, Point, Glue)> = None;
-    for entry in &entries {
-        let Some(shape) = doc.shape(entry.shape) else {
-            continue;
-        };
-        if doc.is_connector(entry.shape) {
+    // Paint order reversed: a tie between connection points goes to
+    // the topmost shape (task P7-49 goal 8).
+    for entry in entries.iter().rev() {
+        let target = top_level(doc, entry.shape);
+        if doc.is_connector(target) {
             continue;
         }
+        let Some(shape) = doc.shape(target) else {
+            continue;
+        };
         for (ix, local) in doc.connection_points_indexed(entry.shape) {
             let point = entry.transform.apply(local);
             if !point.x.is_finite() || !point.y.is_finite() {
@@ -285,17 +339,43 @@ fn locate(
         let result = snapper.snap_point(ctx, None, pos, zoom, false)?;
         result.point
     };
-    let hits = hit_test(&scene, pos, &HitOptions::new(max_distance)).map_err(render_error)?;
-    let glue = hits.iter().find_map(|hit| {
-        let shape = hit.shape_id?;
-        if doc.is_connector(shape) {
+    // Dynamic glue: the topmost shape whose own bounds contain the
+    // pointer. The bounds test is what a shape with no fill needs (its
+    // outline alone does not hit inside), and it keeps a text block
+    // larger than its shape from gluing outside the outline.
+    // One hit's glue: the top-level ancestor's own bounds must contain
+    // the pointer (goal 8's three rules: the ancestor mapping, the
+    // bounds test a shape with no fill needs, and a text block larger
+    // than its shape never gluing outside the outline).
+    let hit_glue = |shape: larrygram_model::ShapeId| {
+        let target = top_level(doc, shape);
+        if doc.is_connector(target) {
             return None;
         }
-        doc.shape(shape).map(|found| Glue {
-            visio_id: found.visio_id,
-            point: None,
-        })
-    });
+        // The hit shape's own box: the pointer is inside the top-level
+        // shape's outline when it is inside a member's, and a text
+        // block larger than its shape does not extend the box (goal
+        // 8's three rules).
+        let bounds = entries
+            .iter()
+            .find(|entry| entry.shape == shape)
+            .and_then(|entry| own_bounds(doc, entry));
+        if bounds.is_some_and(|bounds| bounds.contains(pos)) {
+            doc.shape(target).map(|found| Glue {
+                visio_id: found.visio_id,
+                point: None,
+            })
+        } else {
+            None
+        }
+    };
+    let hits = hit_test(&scene, pos, &HitOptions::new(max_distance)).map_err(render_error)?;
+    let mut glue = hits.iter().find_map(|entry| hit_glue(entry.shape_id?));
+    if glue.is_none() {
+        // The bounds fallback: a press inside the outline of a shape
+        // with no fill takes dynamic glue (the old bounds test).
+        glue = entries.iter().rev().find_map(|entry| hit_glue(entry.shape));
+    }
     Ok((snapped, glue))
 }
 
@@ -540,6 +620,126 @@ mod tests {
             machine.handle(event, &ctx).expect("no error");
         }
         assert_eq!(anchor(&machine), None);
+    }
+
+    /// Drags from `from` to `to` with the Connector tool and returns
+    /// the draw intent's arguments.
+    fn drag_for_glue(app: &AppCtx, from: Point, to: Point) -> Args {
+        let mut machine = ToolMachine::new();
+        machine.tool = super::super::Tool::Connector;
+        machine
+            .handle(down(from, Modifiers::none()), app)
+            .expect("down");
+        machine
+            .handle(moved(to, Modifiers::none()), app)
+            .expect("move");
+        let effect = machine.handle(up(to, Modifiers::none()), app).expect("up");
+        draw_intent(&effect)
+            .expect("connector.draw")
+            .invocation
+            .args
+            .clone()
+    }
+
+    #[test]
+    fn a_press_inside_an_unfilled_shape_takes_dynamic_glue() {
+        let mut shape = rectangle(ShapeId { index: 0 }, 1, (2.0, 3.0), &[]);
+        for cell in &mut shape.sheet.cells {
+            if cell.name.as_str() == "FillPattern" {
+                cell.value = Some(CellValue::Number(0.0));
+            }
+        }
+        let mut doc = Document::new();
+        let mut page = Page::new(PageId { index: 0 }, 1);
+        let id = doc.add_shape(shape);
+        page.shapes.push(id);
+        doc.pages.push(page);
+        let mut ctx = AppCtx::new(Settings::default());
+        ctx.open_document(DocumentSession::new(doc, None));
+
+        // The centre of the unfilled box: the bounds fallback glues.
+        let args = drag_for_glue(&ctx, Point::new(2.0, 3.0), Point::new(4.0, 4.0));
+        assert_eq!(args.integer("begin_target"), Some(1));
+    }
+
+    #[test]
+    fn a_hit_on_a_group_member_maps_to_its_top_level_ancestor() {
+        let member = rectangle(ShapeId { index: 0 }, 2, (4.0, 3.0), &[]);
+        let mut group = rectangle(ShapeId { index: 0 }, 1, (0.0, 0.0), &[]);
+        group.children = Vec::new();
+        let mut doc = Document::new();
+        let mut page = Page::new(PageId { index: 0 }, 1);
+        let member = doc.add_shape(member);
+        let group = doc.add_shape(group);
+        page.shapes.push(group);
+        if let Some(entity) = doc.shape_mut(group) {
+            entity.children.push(member);
+        }
+        if let Some(entity) = doc.shape_mut(member) {
+            entity.parent = Some(group);
+        }
+        doc.pages.push(page);
+        let mut ctx = AppCtx::new(Settings::default());
+        ctx.open_document(DocumentSession::new(doc, None));
+
+        // The press is on the member; the glue names the group.
+        let args = drag_for_glue(&ctx, Point::new(4.0, 3.0), Point::new(6.0, 4.0));
+        assert_eq!(
+            args.integer("begin_target"),
+            Some(1),
+            "the top-level ancestor"
+        );
+    }
+
+    #[test]
+    fn a_text_block_larger_than_the_shape_does_not_glue_outside() {
+        let mut shape = rectangle(ShapeId { index: 0 }, 1, (2.0, 3.0), &[]);
+        shape.text = Some(larrygram_model::TextContent {
+            parts: vec![larrygram_model::TextPart::Text("a long text".to_owned())],
+        });
+        shape.sheet.cells.push(cell("TxtWidth", 10.0));
+        shape.sheet.cells.push(cell("TxtHeight", 6.0));
+        let mut doc = Document::new();
+        let mut page = Page::new(PageId { index: 0 }, 1);
+        let id = doc.add_shape(shape);
+        page.shapes.push(id);
+        doc.pages.push(page);
+        let mut ctx = AppCtx::new(Settings::default());
+        ctx.open_document(DocumentSession::new(doc, None));
+
+        // The press is beyond the shape's own box (over its large text
+        // block): no glue.
+        let args = drag_for_glue(&ctx, Point::new(6.0, 3.0), Point::new(7.0, 4.0));
+        assert_eq!(args.integer("begin_target"), None, "no glue outside");
+    }
+
+    #[test]
+    fn a_tie_between_connection_points_goes_to_the_topmost_shape() {
+        let mut doc = Document::new();
+        let mut page = Page::new(PageId { index: 0 }, 1);
+        // Both boxes put connection point 0 at the same page point.
+        let bottom = doc.add_shape(rectangle(
+            ShapeId { index: 0 },
+            1,
+            (2.0, 3.0),
+            &[(2.0, 0.5)],
+        ));
+        let top = doc.add_shape(rectangle(
+            ShapeId { index: 0 },
+            2,
+            (2.0, 3.0),
+            &[(2.0, 0.5)],
+        ));
+        page.shapes.push(bottom);
+        page.shapes.push(top);
+        doc.pages.push(page);
+        let mut ctx = AppCtx::new(Settings::default());
+        ctx.open_document(DocumentSession::new(doc, None));
+
+        // The shared point is at (3, 3); the topmost shape wins.
+        let args = drag_for_glue(&ctx, Point::new(3.0, 3.0), Point::new(6.0, 4.0));
+        assert_eq!(args.integer("begin_point"), Some(0));
+        assert_eq!(args.integer("begin_target"), Some(2), "the topmost shape");
     }
 
     #[test]
