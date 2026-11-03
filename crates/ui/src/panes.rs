@@ -266,14 +266,11 @@ impl Entry {
 /// The buffer of one typed field between frames.
 #[derive(Debug, Clone)]
 struct FieldState {
-    /// The text shown in the field.
+    /// The text shown in the field: always the whole value (task
+    /// P7-45 goal 4; only the drawing is ever cut).
     text: String,
     /// Whether the user is editing it (the buffer wins over the row).
     editing: bool,
-    /// Whether the field had the keyboard focus last frame (task
-    /// P7-44): an unfocused field shows a cut value, a focused one its
-    /// whole text.
-    focused: bool,
 }
 
 /// Builds the Shape Data rows (ADR 0035, ADR 0058).
@@ -1049,33 +1046,36 @@ fn field_width(ui: &Ui, entry: &Entry, pane_width: f32, widest_label: f32) -> f3
     (pane_width - widest_label - marker - chrome).clamp(FIELD_MIN_WIDTH, FIELD_WIDTH)
 }
 
-/// Cuts `text` to `max` points with an ellipsis (task P7-44): the
-/// longest prefix whose width with the appended ellipsis fits `max`.
-/// `measure` answers a candidate's width in points. A text that fits is
-/// returned unchanged; when not even the ellipsis fits, the ellipsis is
-/// the answer. The full text belongs in the tooltip.
-fn ellipsize(text: &str, max: f32, measure: &dyn Fn(&str) -> f32) -> String {
-    if measure(text) <= max {
-        return text.to_owned();
+/// The ellipsis a cut value draws (task P7-45 goal 4).
+const ELLIPSIS: char = '\u{2026}';
+
+/// The layout job of one field's drawn text (task P7-45 goal 4): the
+/// text is always the whole value, and `cut` only changes the drawing
+/// — one row that elides at `wrap_width` with [`ELLIPSIS`]
+/// (`TextWrapping::max_rows` 1). The `line_height` mirrors egui's own
+/// text-edit layouter, so an uncut field draws exactly as egui would.
+fn field_layout_job(
+    text: &str,
+    font_id: egui::FontId,
+    color: egui::Color32,
+    line_height: f32,
+    wrap_width: f32,
+    cut: bool,
+) -> egui::text::LayoutJob {
+    let mut job = egui::text::LayoutJob::simple_singleline(text.to_owned(), font_id, color);
+    job.keep_trailing_whitespace = true;
+    for section in &mut job.sections {
+        section.format.line_height = Some(line_height);
     }
-    const ELLIPSIS: &str = "\u{2026}";
-    if measure(ELLIPSIS) > max {
-        return ELLIPSIS.to_owned();
+    if cut {
+        job.wrap = egui::text::TextWrapping {
+            max_width: wrap_width,
+            max_rows: 1,
+            break_anywhere: true,
+            overflow_character: Some(ELLIPSIS),
+        };
     }
-    let mut fitting = 0usize;
-    let mut too_long = text.chars().count();
-    while fitting < too_long {
-        let mid = (fitting + too_long).div_ceil(2);
-        let prefix: String = text.chars().take(mid).collect();
-        if measure(&format!("{prefix}{ELLIPSIS}")) <= max {
-            fitting = mid;
-        } else {
-            too_long = mid - 1;
-        }
-    }
-    let mut cut: String = text.chars().take(fitting).collect();
-    cut.push_str(ELLIPSIS);
-    cut
+    job
 }
 
 /// Draws one pane: its title and the rows as a two-column grid. With
@@ -1171,10 +1171,12 @@ fn show_value(ui: &mut Ui, entry: &Entry) -> Vec<Intent> {
 ///
 /// A formula cell refuses the edit with one status line and a bad entry
 /// is refused the same way; both change nothing (no intent, no model
-/// write). The field is `width` points wide (task P7-44): a value that
-/// does not fit is cut with an ellipsis and its full text goes in the
-/// tooltip, until the field takes the keyboard focus and shows the
-/// whole text again.
+/// write). The field is `width` points wide (task P7-44): its buffer
+/// always holds the whole value, and while the field is not focused
+/// only the drawing is cut, one row with an ellipsis (task P7-45 goal
+/// 4); the full text goes in the tooltip. The focus is read from
+/// egui's memory at layout time under the field's own id, so the first
+/// focused frame draws the whole text.
 fn edit_field(
     ui: &mut Ui,
     app: &mut AppCtx,
@@ -1188,36 +1190,46 @@ fn edit_field(
             .unwrap_or_else(|| FieldState {
                 text: entry.row.value.clone(),
                 editing: false,
-                focused: false,
             })
     });
     if !state.editing {
         state.text = entry.row.value.clone();
     }
-    let full = state.text.clone();
+    let mut text = state.text.clone();
     // The text area: the field's two text insets (the cursor shows
     // only while the field has the focus, when nothing is cut).
     let inner = (width - 2.0 * FIELD_TEXT_INSET).max(1.0);
-    let shown = if state.focused || state.editing {
-        full.clone()
-    } else {
-        ellipsize(&full, inner, &|piece| text_width(ui, piece))
-    };
-    let mut text = shown.clone();
     // The field's `control.border` edge and field fill (task P7-19,
     // the P7-18 design pass's `raise_controls`).
     let response = ui
         .scope(|ui| {
             crate::theme::raise_controls(ui);
+            let font_id = egui::TextStyle::Body.resolve(ui.style());
+            let color = ui.visuals().text_color();
+            let line_height = ui.fonts_mut(|fonts| fonts.row_height(&font_id))
+                + ui.spacing().extra_text_line_spacing;
             ui.add(
                 egui::TextEdit::singleline(&mut text)
                     // The grid's sizing pass offers a cell almost no
                     // width, and `desired_width` alone would shrink to
                     // it (the old 40-point field, task P7-44);
                     // `min_size` overrides the available width.
+                    .id(id)
                     .desired_width(width)
                     .min_size(egui::vec2(width, 0.0))
-                    .hint_text(entry.row.label.as_str()),
+                    .hint_text(entry.row.label.as_str())
+                    .layouter(&mut |ui, buffer, wrap_width| {
+                        let cut = !ui.memory(|memory| memory.has_focus(id));
+                        let job = field_layout_job(
+                            buffer.as_str(),
+                            font_id.clone(),
+                            color,
+                            line_height,
+                            wrap_width,
+                            cut,
+                        );
+                        ui.fonts_mut(|fonts| fonts.layout_job(job))
+                    }),
             )
         })
         .inner;
@@ -1225,10 +1237,9 @@ fn edit_field(
         state.editing = true;
         state.text = text;
     }
-    state.focused = response.has_focus();
-    // A cut value keeps its whole text in the tooltip (task P7-44).
-    let response = if shown != full {
-        response.on_hover_text(full.as_str())
+    // A drawn cut keeps the whole text in the tooltip (task P7-44).
+    let response = if text_width(ui, &state.text) > inner {
+        response.on_hover_text(state.text.as_str())
     } else {
         response
     };
@@ -1461,28 +1472,43 @@ mod tests {
     use larrygram_geom::Unit as GeomUnit;
     use larrygram_model::{Cell, Color, Document, Page, PageId, Property, Row, Section, Shape};
 
-    /// A measuring stub for [`ellipsize`]: every character is 10
-    /// points wide.
-    fn per_char(text: &str) -> f32 {
-        text.chars().count() as f32 * 10.0
+    #[test]
+    fn a_cut_value_draws_an_ellipsis_and_keeps_its_whole_text() {
+        // Task P7-45 goal 4: the buffer is the whole value; the galley
+        // (what the field draws) is one elided row ending in the
+        // ellipsis.
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(Default::default(), |ctx| {
+            let font_id = egui::FontId::new(12.0, egui::FontFamily::Proportional);
+            let full = "This is a much longer value string";
+            let job = field_layout_job(full, font_id, egui::Color32::WHITE, 14.0, 80.0, true);
+            assert_eq!(job.text, full, "the buffer is whole");
+            let galley = ctx.fonts_mut(|fonts| fonts.layout_job(job));
+            assert!(galley.elided, "the drawing is cut");
+            let drawn = galley.rows.last().expect("a row").text();
+            assert!(
+                drawn.ends_with(ELLIPSIS),
+                "the drawn text ends in the ellipsis: {drawn:?}"
+            );
+            assert!(drawn.chars().count() < full.chars().count());
+        });
+        output.textures_delta.clear();
     }
 
     #[test]
-    fn ellipsize_keeps_a_value_that_fits() {
-        assert_eq!(ellipsize("Process", 100.0, &per_char), "Process");
-    }
-
-    #[test]
-    fn ellipsize_cuts_a_longer_value_with_an_ellipsis() {
-        // 6 characters plus the ellipsis fit in 70 points.
-        let cut = ellipsize("Process value", 70.0, &per_char);
-        assert_eq!(cut, "Proces\u{2026}");
-        assert!(per_char(&cut) <= 70.0, "{cut:?} fits");
-    }
-
-    #[test]
-    fn ellipsize_answers_the_ellipsis_when_nothing_fits() {
-        assert_eq!(ellipsize("Process", 5.0, &per_char), "\u{2026}");
+    fn an_uncut_value_draws_whole() {
+        // The same job with `cut` false (the field has the focus):
+        // nothing is elided and the whole value draws.
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(Default::default(), |ctx| {
+            let font_id = egui::FontId::new(12.0, egui::FontFamily::Proportional);
+            let full = "This is a much longer value string";
+            let job = field_layout_job(full, font_id, egui::Color32::WHITE, 14.0, 80.0, false);
+            let galley = ctx.fonts_mut(|fonts| fonts.layout_job(job));
+            assert!(!galley.elided, "the focused field draws whole");
+            assert_eq!(galley.rows.last().expect("a row").text(), full);
+        });
+        output.textures_delta.clear();
     }
 
     /// A page with the given name and an 8.5 x 11 in sheet.
