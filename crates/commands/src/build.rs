@@ -1,50 +1,53 @@
-//! The build id and the version line (task R11 goal 1).
+//! The build id and the version line (task R11 goal 1, task R12
+//! goal 1).
 //!
 //! Every shipped build knows one short id that names its commit: the
 //! About window shows `1.0.0-alpha.1 (abc1234)` and `larrygram-cli
-//! --version` prints the same line. The id is resolved in this order:
+//! --version` prints the same line. The id is a **build-time
+//! constant** (task R12 goal 1): the `LARRYGRAM_BUILD_SHA` variable
+//! as it was set when this crate compiled (`release.yml` sets it from
+//! `GITHUB_SHA`; `cargo xtask dist <platform>` sets it from
+//! `git rev-parse --short HEAD` in the workspace root), shortened and
+//! checked as below, else `dev`. No process is started and no
+//! environment is read at run time: an installed app never runs git,
+//! and a stray variable in the user's environment changes nothing.
 //!
-//! 1. the `LARRYGRAM_BUILD_SHA` environment variable of the running
-//!    process (a caller that pins the id);
-//! 2. `LARRYGRAM_BUILD_SHA` as it was set **at build time**
-//!    (`release.yml` sets it from `GITHUB_SHA`, and the value is baked
-//!    in when `larrygram-commands` compiles);
-//! 3. `git rev-parse --short HEAD`, when git answers (a development
-//!    build run from a checkout);
-//! 4. `dev`.
+//! A plain `cargo build` sets no variable, so development builds read
+//! `dev` (task R12 goal 3). The id and the version line are computed
+//! once, not per frame (task R12 goal 1).
 //!
-//! Resolution never fails and never panics (AGENTS.md section 6): any
-//! missing or unusable source falls through to the next one. The
-//! module lives in this crate (not in a build script) because the
+//! The module lives in this crate (not in a build script) because the
 //! About window (`crates/ui`) and the CLI are different packages and
 //! cannot see one package's `cargo:rustc-env` (task R11 goal 1).
+
+use std::sync::OnceLock;
 
 /// The version shown in the version line: the workspace version of
 /// this crate (AGENTS.md: `[workspace.package] version`).
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// The build id of a build that knows nothing better (task R11 goal 1).
+/// The build id of a build that knows nothing better (task R11 goal
+/// 1): a plain development build.
 pub const FALLBACK_ID: &str = "dev";
 
 /// The longest build id shown: a short commit SHA (task R11 goal 1).
 const MAX_ID_LEN: usize = 7;
 
-/// The build id of this build (task R11 goal 1).
+/// The build id of this build (task R12 goal 1).
 ///
-/// See the module documentation for the resolution order. Never
-/// fails: an unknown id is [`FALLBACK_ID`].
-pub fn build_id() -> String {
-    resolve(
-        runtime_build_sha(),
-        option_env!("LARRYGRAM_BUILD_SHA"),
-        git_short_sha(),
-    )
+/// See the module documentation. Never fails: an unknown id is
+/// [`FALLBACK_ID`]. A compile-time constant.
+pub fn build_id() -> &'static str {
+    resolve(option_env!("LARRYGRAM_BUILD_SHA"))
 }
 
 /// The version line of this build: `<version> (<build id>)`, for
-/// example `1.0.0-alpha.1 (abc1234)` (task R11 goal 1).
-pub fn version_line() -> String {
-    version_line_with(&build_id())
+/// example `1.0.0-alpha.1 (abc1234)` (task R11 goal 1). Computed
+/// once, not per frame (task R12 goal 1).
+pub fn version_line() -> &'static str {
+    static LINE: OnceLock<String> = OnceLock::new();
+    LINE.get_or_init(|| format!("{} ({})", VERSION, build_id()))
+        .as_str()
 }
 
 /// The version line with a given build id (task R11 goal 1: the fixed
@@ -53,16 +56,10 @@ pub fn version_line_with(build_id: &str) -> String {
     format!("{VERSION} ({build_id})")
 }
 
-/// The first usable candidate wins: runtime variable, then the value
-/// baked in at build time, then git, else [`FALLBACK_ID`] (task R11
-/// goal 1). Each candidate goes through [`shorten`].
-fn resolve(runtime: Option<String>, compiled: Option<&str>, git: Option<String>) -> String {
-    for candidate in [runtime, compiled.map(str::to_owned), git] {
-        if let Some(id) = candidate.as_deref().and_then(shorten) {
-            return id.to_owned();
-        }
-    }
-    FALLBACK_ID.to_owned()
+/// The build id from the compile-time variable: shortened and
+/// checked, else [`FALLBACK_ID`] (task R12 goal 1).
+fn resolve(compiled: Option<&'static str>) -> &'static str {
+    compiled.and_then(shorten).unwrap_or(FALLBACK_ID)
 }
 
 /// Trims one candidate to a short, alphanumeric build id, or [`None`]
@@ -73,47 +70,6 @@ fn shorten(candidate: &str) -> Option<&str> {
         return None;
     }
     Some(trimmed.get(..MAX_ID_LEN).unwrap_or(trimmed))
-}
-
-/// The `LARRYGRAM_BUILD_SHA` variable of the running process (task
-/// R11 goal 1). Process environments do not exist on wasm.
-#[cfg(not(target_arch = "wasm32"))]
-fn runtime_build_sha() -> Option<String> {
-    std::env::var("LARRYGRAM_BUILD_SHA").ok()
-}
-
-/// No process environment on wasm (task R11 goal 1).
-#[cfg(target_arch = "wasm32")]
-fn runtime_build_sha() -> Option<String> {
-    None
-}
-
-/// `git rev-parse --short HEAD`, when git answers in the working
-/// directory (task R11 goal 1). A missing git, a non-repository or a
-/// broken pipe is `None`, never a panic (AGENTS.md section 6).
-#[cfg(not(target_arch = "wasm32"))]
-fn git_short_sha() -> Option<String> {
-    let output = std::process::Command::new("git")
-        .args(["rev-parse", "--short", "HEAD"])
-        .output()
-        .ok()?;
-    sha_from(output.status.success(), &output.stdout)
-}
-
-/// No process on wasm (task R11 goal 1).
-#[cfg(target_arch = "wasm32")]
-fn git_short_sha() -> Option<String> {
-    None
-}
-
-/// The trimmed stdout of a successful `git rev-parse`, else [`None`]
-/// (task R11 goal 1).
-#[cfg(not(target_arch = "wasm32"))]
-fn sha_from(success: bool, stdout: &[u8]) -> Option<String> {
-    if !success {
-        return None;
-    }
-    Some(String::from_utf8_lossy(stdout).trim().to_owned())
 }
 
 #[cfg(test)]
@@ -138,41 +94,31 @@ mod tests {
     }
 
     #[test]
-    fn the_first_usable_candidate_wins() {
-        assert_eq!(
-            resolve(
-                Some("runtime".to_owned()),
-                Some("compile"),
-                Some("gitsha1".to_owned())
-            ),
-            "runtime"
-        );
-        assert_eq!(
-            resolve(None, Some("compile"), Some("gitsha1".to_owned())),
-            "compile"
-        );
-        assert_eq!(resolve(None, None, Some("gitsha1".to_owned())), "gitsha1");
+    fn resolve_shortens_the_variable_and_falls_back_to_dev() {
+        assert_eq!(resolve(Some("abc1234")), "abc1234");
+        assert_eq!(resolve(Some("abcdef1234567890")), "abcdef1");
+        assert_eq!(resolve(Some("bad value")), FALLBACK_ID);
+        assert_eq!(resolve(Some("")), FALLBACK_ID);
+        assert_eq!(resolve(None), FALLBACK_ID);
     }
 
     #[test]
-    fn unusable_candidates_fall_through_and_the_last_resort_is_dev() {
-        assert_eq!(
-            resolve(
-                Some("bad value".to_owned()),
-                Some("compile"),
-                Some("gitsha1".to_owned())
-            ),
-            "compile"
-        );
-        assert_eq!(resolve(Some(String::new()), None, None), FALLBACK_ID);
-        assert_eq!(resolve(None, None, None), FALLBACK_ID);
+    fn a_plain_development_build_reads_dev() {
+        // Task R12 goal 3: `cargo build` sets no variable.
+        if option_env!("LARRYGRAM_BUILD_SHA").is_none() {
+            assert_eq!(build_id(), FALLBACK_ID);
+        }
     }
 
     #[test]
-    fn sha_from_takes_the_stdout_of_a_successful_git() {
-        assert_eq!(sha_from(true, b"abc1234\n"), Some("abc1234".to_owned()));
-        assert_eq!(sha_from(false, b"abc1234\n"), None);
-        assert_eq!(sha_from(true, b""), Some(String::new()));
+    fn the_build_id_is_the_variable_as_baked_in() {
+        assert_eq!(
+            build_id(),
+            resolve(option_env!("LARRYGRAM_BUILD_SHA")),
+            "the id never differs from the compile-time variable"
+        );
+        assert!(!build_id().is_empty());
+        assert!(build_id().chars().all(|c| c.is_ascii_alphanumeric()));
     }
 
     #[test]
@@ -180,20 +126,9 @@ mod tests {
         let line = version_line_with("abc1234");
         assert_eq!(line, format!("{VERSION} (abc1234)"));
 
-        let line = version_line();
-        let id = line
-            .strip_prefix(&format!("{VERSION} ("))
-            .and_then(|rest| rest.strip_suffix(')'))
-            .unwrap_or_else(|| panic!("the version line is <version> (<id>): {line}"));
-        assert!(!id.is_empty(), "the build id is never empty: {line}");
-        assert!(id.chars().all(|c| c.is_ascii_alphanumeric()), "{line}");
-    }
-
-    #[test]
-    fn the_build_id_is_short_and_alphanumeric() {
-        let id = build_id();
-        assert!(!id.is_empty());
-        assert!(id.len() <= MAX_ID_LEN.max(FALLBACK_ID.len()));
-        assert!(id.chars().all(|c| c.is_ascii_alphanumeric()));
+        let shown = version_line();
+        assert_eq!(shown, format!("{} ({})", VERSION, build_id()));
+        assert!(shown.starts_with(VERSION), "{shown}");
+        assert!(shown.ends_with(')'), "{shown}");
     }
 }

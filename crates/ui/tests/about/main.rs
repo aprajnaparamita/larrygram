@@ -122,7 +122,7 @@ fn the_version_line_renders() {
     let root = rig.harness.root();
     let line = about::version_line();
     assert!(
-        root.query_all_by_label(&line).next().is_some(),
+        root.query_all_by_label(line).next().is_some(),
         "the version line renders: {line}"
     );
     assert!(

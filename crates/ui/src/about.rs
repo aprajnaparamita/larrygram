@@ -15,8 +15,9 @@ use crate::UiError;
 /// `<version> (<build id>)`, for example `1.0.0-alpha.1 (abc1234)`.
 ///
 /// The build id comes from [`larrygram_commands::build`]; both this
-/// line and `larrygram-cli --version` print it.
-pub fn version_line() -> String {
+/// line and `larrygram-cli --version` print it. A build-time
+/// constant, computed once (task R12 goal 1).
+pub fn version_line() -> &'static str {
     larrygram_commands::build::version_line()
 }
 
@@ -71,7 +72,7 @@ pub enum Outcome {
 /// grows with it (task P7-17). Close wins when both buttons report a
 /// click in the same frame.
 pub fn show(ui: &mut Ui) -> Result<Outcome, UiError> {
-    show_with_version(ui, &version_line())
+    show_with_version(ui, version_line())
 }
 
 /// Draws one frame with a given version line (task R11 goal 1: the
