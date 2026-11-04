@@ -3282,34 +3282,33 @@ mod tests {
         assert_eq!(geometry.paths.len(), 1);
         let rows = &geometry.paths[0].rows;
         assert_eq!(rows.len(), 2);
-        match &rows[1] {
-            GeometryRow::NurbsTo {
-                x,
-                y,
-                second_last_knot,
-                last_weight,
-                first_knot,
-                first_weight,
-                data,
-            } => {
-                assert_eq!((*x, *y), (4.0, 0.0));
-                // Five points: U[i] = (i - 3) / 2, so the last point's
-                // knot is 0.5 and the vector is 0, 0, 0, 0, 0.5, 1.
-                assert_eq!(*second_last_knot, 0.5);
-                assert_eq!(*last_weight, 1.0);
-                assert_eq!(*first_knot, 0.0);
-                assert_eq!(*first_weight, 1.0);
-                let data = data.as_ref().expect("E decodes");
-                assert_eq!(data.degree, 3);
-                assert_eq!(data.knot_last, 1.0);
-                assert_eq!(data.x_type, 1);
-                assert_eq!(data.y_type, 1);
-                assert_eq!(data.points.len(), 3, "the interior control points");
-                assert_eq!(data.points[0].x, 1.0);
-                assert_eq!(data.points[2].x, 3.0);
-                assert_eq!(data.points[1].knot, 0.0);
-            }
-            other => panic!("expected a NURBSTo row, got {other:?}"),
+        assert!(matches!(&rows[1], GeometryRow::NurbsTo { .. }));
+        if let GeometryRow::NurbsTo {
+            x,
+            y,
+            second_last_knot,
+            last_weight,
+            first_knot,
+            first_weight,
+            data,
+        } = &rows[1]
+        {
+            assert_eq!((*x, *y), (4.0, 0.0));
+            // Five points: U[i] = (i - 3) / 2, so the last point's
+            // knot is 0.5 and the vector is 0, 0, 0, 0, 0.5, 1.
+            assert_eq!(*second_last_knot, 0.5);
+            assert_eq!(*last_weight, 1.0);
+            assert_eq!(*first_knot, 0.0);
+            assert_eq!(*first_weight, 1.0);
+            let data = data.as_ref().expect("E decodes");
+            assert_eq!(data.degree, 3);
+            assert_eq!(data.knot_last, 1.0);
+            assert_eq!(data.x_type, 1);
+            assert_eq!(data.y_type, 1);
+            assert_eq!(data.points.len(), 3, "the interior control points");
+            assert_eq!(data.points[0].x, 1.0);
+            assert_eq!(data.points[2].x, 3.0);
+            assert_eq!(data.points[1].knot, 0.0);
         }
     }
 

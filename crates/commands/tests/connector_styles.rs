@@ -883,3 +883,128 @@ fn an_overflowing_connection_point_index_is_named() {
     .expect_err("overflow");
     assert!(error.to_string().contains("too large"), "{error}");
 }
+
+// ---------------------------------------------------------------------------
+// The move paths of a 1-D shape (task P7-36 item 2's neighbours)
+// ---------------------------------------------------------------------------
+
+/// A connector whose geometry rows carry formulas moves by its box:
+/// the rows belong to recalc and only the ends and box move.
+#[test]
+fn a_formula_driven_connector_moves_by_its_box() {
+    use larrygram_model::RowTarget;
+    use larrygram_model::mutate::CellWrite as Write;
+    let (mut ctx, registry, page) = fixture();
+    draw_glued(&mut ctx, &registry, page);
+    let connector = shape(&ctx, page, 3);
+    {
+        let doc = &mut ctx.active_document_mut().expect("session").document;
+        doc.write_row_cell(
+            SheetRef::Shape(connector),
+            &larrygram_model::SectionName::from_static("Geometry"),
+            RowTarget {
+                position: Some(1),
+                ix: Some(1),
+            },
+            &CellName::new("X"),
+            &Write::new("Width*0.5", CellValue::Number(1.0)),
+        )
+        .expect("formula row");
+    }
+    let rows_before = row_types(doc(&ctx), connector);
+    ctx.selection.shapes = vec![connector];
+    ctx.selection.anchor = Some(connector);
+    ctx.selection.page = Some(page);
+    dispatch(
+        &mut ctx,
+        &registry,
+        "shape.move",
+        Args::new()
+            .with("dx", ArgValue::Number(1.0))
+            .with("dy", ArgValue::Number(0.0)),
+    )
+    .expect("move");
+    assert_eq!(
+        row_types(doc(&ctx), connector),
+        rows_before,
+        "the formula-driven rows belong to recalc"
+    );
+}
+
+/// A 1-D shape whose end cells are not numeric cannot move: the
+/// command names the problem and writes nothing.
+#[test]
+fn a_move_without_numeric_ends_is_named() {
+    let (mut ctx, registry, page) = fixture();
+    draw_glued(&mut ctx, &registry, page);
+    let connector = shape(&ctx, page, 3);
+    {
+        let doc = &mut ctx.active_document_mut().expect("session").document;
+        if let Some(entity) = doc.shape_mut(connector) {
+            for cell in &mut entity.sheet.cells {
+                if cell.name.as_str() == "BeginX" {
+                    cell.value = Some(CellValue::Str("x".to_owned()));
+                    cell.formula = None;
+                }
+            }
+        }
+    }
+    ctx.selection.shapes = vec![connector];
+    ctx.selection.anchor = Some(connector);
+    ctx.selection.page = Some(page);
+    let error = dispatch(
+        &mut ctx,
+        &registry,
+        "shape.move",
+        Args::new()
+            .with("dx", ArgValue::Number(1.0))
+            .with("dy", ArgValue::Number(0.0)),
+    )
+    .expect_err("no numeric ends");
+    assert!(error.to_string().contains("no numeric point"), "{error}");
+}
+
+/// `connector.unglue` asks which end; `connector.draw` names its bad
+/// numbers and its unknown master (the input arms).
+#[test]
+fn the_draw_and_unglue_input_arms_are_named() {
+    use larrygram_commands::CommandError;
+    let (mut ctx, registry, page) = fixture();
+    draw_glued(&mut ctx, &registry, page);
+    let missing = dispatch(
+        &mut ctx,
+        &registry,
+        "connector.unglue",
+        Args::new().with("connector", ArgValue::Integer(3)),
+    )
+    .expect_err("missing end");
+    assert!(matches!(
+        missing,
+        CommandError::NeedsInput(larrygram_commands::NeededInput::Text { .. })
+    ));
+    let bad = dispatch(
+        &mut ctx,
+        &registry,
+        "connector.draw",
+        Args::new()
+            .with("stencil", ArgValue::Text("Basic Flowchart".to_owned()))
+            .with("master", ArgValue::Text("Connector".to_owned()))
+            .with("x", ArgValue::Number(f64::NAN))
+            .with("y", ArgValue::Number(4.5)),
+    )
+    .expect_err("non-finite x");
+    assert!(bad.to_string().contains("x"), "{bad}");
+    let unknown = dispatch(
+        &mut ctx,
+        &registry,
+        "connector.draw",
+        Args::new()
+            .with("stencil", ArgValue::Text("No Such Stencil".to_owned()))
+            .with("master", ArgValue::Text("Connector".to_owned()))
+            .with("x", ArgValue::Number(3.0))
+            .with("y", ArgValue::Number(4.5)),
+    )
+    .expect_err("unknown stencil");
+    assert!(!unknown.to_string().is_empty(), "{unknown}");
+    let _ = page;
+}
