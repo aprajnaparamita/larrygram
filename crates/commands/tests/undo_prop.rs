@@ -900,7 +900,6 @@ fn run_style(ctx: &mut AppCtx, registry: &Registry, id: &'static str, pick: u32)
     try_dispatch(ctx, registry, id, args);
 }
 
-<<<<<<< HEAD
 /// `connector.move_end` (task P7-33 item 4): the first connector's
 /// `begin` or `end` moves, with point glue on some picks, dynamic glue
 /// on others and a free end on the rest.
@@ -950,7 +949,8 @@ fn is_connector_shape(ctx: &AppCtx, shape: ShapeId) -> bool {
     ctx.active_document()
         .map(|session| session.document.is_connector(shape))
         .unwrap_or(false)
-=======
+}
+
 /// The style controls (task P7-36 item 3): they dispatch
 /// `connector.style` with their own style over the same selection as
 /// [`run_style`].
@@ -958,7 +958,6 @@ fn run_style_control(ctx: &mut AppCtx, registry: &Registry, id: &'static str, _p
     let ids: Vec<i32> = top_level(ctx).iter().map(|s| visio_of(ctx, *s)).collect();
     select_visio(ctx, &ids);
     try_dispatch(ctx, registry, id, numbers(&[]));
->>>>>>> 3276096 (test(commands): classify the style controls and line jump ids (ADR 0040 rule 4))
 }
 
 /// `connector.draw`: one connector master instance with one free end.
