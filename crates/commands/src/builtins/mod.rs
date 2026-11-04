@@ -15,6 +15,7 @@ mod arrange;
 mod clipboard;
 mod connector;
 mod connector_ends;
+mod connector_segments;
 mod connector_styles;
 mod data;
 mod edit;
@@ -28,6 +29,7 @@ mod tools;
 mod view;
 
 pub use connector::{connector_style, route_style_value, style_from_value};
+pub use connector_segments::connector_reroute_code;
 pub use format::{ARROW_SIZES, LINE_ARROWS, LINE_CAPS, LINE_PATTERNS};
 pub use view::{ZOOM_MAX, ZOOM_MIN};
 
@@ -63,6 +65,7 @@ pub(crate) const STUB_TABLES: &[CommandTable] = &[
     clipboard::TABLE,
     connector::TABLE,
     connector_ends::TABLE,
+    connector_segments::TABLE,
     connector_styles::TABLE,
     data::TABLE,
     edit::TABLE,

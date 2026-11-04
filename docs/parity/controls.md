@@ -770,6 +770,7 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | connector.curved | Curved Connector | implemented |
 | connector.curved.lines | Curved Lines | implemented |
 | connector.draw | Draw Connector | implemented |
+| connector.dyn.conn.reroute | Reroute | implemented |
 | connector.glue_begin | Glue Begin | implemented |
 | connector.glue_end | Glue End | implemented |
 | connector.line_jump_style | Line Jump Style | implemented |
@@ -784,6 +785,7 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | connector.line_jump_style.sides_7 | 7 Sides | implemented |
 | connector.line_jump_style.square | Square | implemented |
 | connector.move_end | Move Connector End | implemented |
+| connector.move_segment | Move Connector Segment | implemented |
 | connector.reroute_all | Reroute All | implemented |
 | connector.right_angle | Right-Angle Connector | implemented |
 | connector.show.line.jumps | Show Line Jumps | implemented |
@@ -830,6 +832,9 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | format.line_pattern.no_line | No Line | implemented |
 | format.set.dyn.conn.appearance.curved | Curved | implemented |
 | format.set.dyn.conn.appearance.straight | Straight | implemented |
+| format.set.dyn.conn.reroute.freely | Freely | implemented |
+| format.set.dyn.conn.reroute.never | Never | implemented |
+| format.set.dyn.conn.reroute.on.crossover | Crossover | implemented |
 | format.set.dyn.conn.routing.style | Style | implemented |
 | format.set.fill.color | Fill Color | implemented |
 | format.set.line.color | Line Color | implemented |
@@ -1022,7 +1027,6 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | arrange.trim | Shapes Object Trim | stub |
 | connector.auto_connect | AutoConnect | stub |
 | connector.conn.points | Points | stub |
-| connector.dyn.conn.reroute | Reroute | stub |
 | connector.dynamic.grid | Dynamic Grid | stub |
 | data.auto.connect | Connect | stub |
 | data.auto.link | Link | stub |
@@ -1267,9 +1271,6 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | format.set.container.properties | Properties | stub |
 | format.set.dyn.conn.appearance.default | Default | stub |
 | format.set.dyn.conn.reroute.as.needed | Needed | stub |
-| format.set.dyn.conn.reroute.freely | Freely | stub |
-| format.set.dyn.conn.reroute.never | Never | stub |
-| format.set.dyn.conn.reroute.on.crossover | Crossover | stub |
 | format.set.fill.pattern | Pattern | stub |
 | format.set.fill.shadow | Shadow | stub |
 | format.set.header.footer | Footer | stub |
