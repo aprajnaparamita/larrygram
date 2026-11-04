@@ -17,8 +17,8 @@
 
 use larrygram_geom::{Angle, Point, Transform};
 use larrygram_model::{
-    CellName, CellReader, CellValue, CellWrite, Connect, Document, GeometryRow, PageId, Row,
-    RowTarget, ShapeId, Sheet, SheetRef, mutate,
+    CellName, CellReader, CellValue, CellWrite, Connect, Document, GeometryRow, PageId, RowTarget,
+    ShapeId, Sheet, SheetRef, mutate,
 };
 use larrygram_shapesheet::CellAddress;
 
@@ -258,7 +258,7 @@ fn conn_fixed_code(doc: &Document, connector: ShapeId) -> f64 {
 
 /// The kept route of a Never Reroute connector (task P7-35 item 5, ADR
 /// 0084 rule 7): the stored path with its ends replaced by the resolved
-/// glue points — the interior rows stay byte for byte and the end
+/// glue points — the interior points keep their positions and the end
 /// segments stretch to reach their glue. `None` when there is no
 /// stored straight-segment path to keep (a curved or formula-driven
 /// geometry is left to a fresh route or its formulas).
@@ -272,8 +272,11 @@ pub(crate) fn kept_route(
     if crate::recalc::geometry_is_formula_driven(doc, connector) {
         return None;
     }
-    let points = stored_path(doc, connector)?;
-    if points.len() < 2 {
+    // The stored interior points, in the parent's coordinates (the
+    // write's space): a 1-D path write re-frames the connector's box,
+    // so the points that stay are the ones the parent holds.
+    let mut path = parent_path(doc, connector)?;
+    if path.len() < 2 {
         return None;
     }
     // Both ends resolve together (ADR 0084 rule 3); a glued end that
@@ -300,14 +303,6 @@ pub(crate) fn kept_route(
             return None;
         }
     }
-    // The interior rows to put back after the path write (the write
-    // recomputes every row; only the ends change here).
-    let rows = interior_rows(doc, connector, points.len());
-    // The write's space is the parent's (ADR 0084 rule 2).
-    let mut path = Vec::with_capacity(points.len());
-    for point in points {
-        path.push(end_cells_point(doc, connector, point).ok()?);
-    }
     let begin = end_cells_point(doc, connector, begin.point).ok()?;
     let finish = end_cells_point(doc, connector, end.point).ok()?;
     if let Some(first) = path.first_mut() {
@@ -316,69 +311,28 @@ pub(crate) fn kept_route(
     if let Some(last) = path.last_mut() {
         *last = finish;
     }
-    Some(KeptRoute { path, rows })
+    Some(KeptRoute { path })
 }
 
 /// The staged keep of a Never Reroute connector's stored route (task
-/// P7-35 item 5): the path whose ends follow the glue, and the
-/// original interior rows to put back byte for byte.
+/// P7-35 item 5): the path whose interior points keep their positions
+/// and whose ends follow the glue.
 pub(crate) struct KeptRoute {
     /// The path in the parent's coordinates (the write's space).
     path: Vec<Point>,
-    /// The geometry rows of the interior points, in order from
-    /// position 1.
-    rows: Vec<Row>,
 }
 
 impl KeptRoute {
-    /// Writes the route: the path write refreshes the ends, pins and
-    /// rows, then the interior rows go back exactly as they were.
+    /// Writes the kept route: the path write refreshes the ends, the
+    /// pins and the rows, and lands the interior points back where the
+    /// parent holds them.
     pub(crate) fn apply(
         &self,
         doc: &mut Document,
         connector: ShapeId,
     ) -> Result<(), larrygram_model::Error> {
-        doc.write_connector_path(connector, &self.path)?;
-        let Some(entity) = doc.shape_mut(connector) else {
-            return Ok(());
-        };
-        for (offset, row) in self.rows.iter().enumerate() {
-            let position = offset + 1;
-            if let Some(section) = entity
-                .sheet
-                .sections
-                .iter_mut()
-                .find(|section| section.name.as_str() == "Geometry")
-                && let Some(slot) = section.rows.get_mut(position)
-            {
-                *slot = row.clone();
-            }
-        }
-        Ok(())
+        doc.write_connector_path(connector, &self.path)
     }
-}
-
-/// The raw geometry rows of the path's interior points (positions 1 to
-/// `len - 2`), in order.
-fn interior_rows(doc: &Document, connector: ShapeId, len: usize) -> Vec<Row> {
-    let Some(entity) = doc.shape(connector) else {
-        return Vec::new();
-    };
-    entity
-        .sheet
-        .sections
-        .iter()
-        .find(|section| section.name.as_str() == "Geometry")
-        .map(|section| {
-            section
-                .rows
-                .iter()
-                .skip(1)
-                .take(len.saturating_sub(2))
-                .cloned()
-                .collect()
-        })
-        .unwrap_or_default()
 }
 
 /// The connector's stored geometry as its path in page inches: the
@@ -386,6 +340,20 @@ fn interior_rows(doc: &Document, connector: ShapeId, len: usize) -> Vec<Row> {
 /// geometry with any other row (a curve) answers `None`.
 fn stored_path(doc: &Document, connector: ShapeId) -> Option<Vec<Point>> {
     let transform = page_transform(doc, connector).ok()?;
+    polyline(doc, connector, transform)
+}
+
+/// The connector's stored geometry in its parent's coordinates (the
+/// write's space of `Document::write_connector_path`).
+fn parent_path(doc: &Document, connector: ShapeId) -> Option<Vec<Point>> {
+    let mut reader = CellReader::new(doc);
+    let frame = local_transform(&mut reader, connector).ok()?;
+    polyline(doc, connector, frame)
+}
+
+/// The connector's `MoveTo`/`LineTo` rows through `transform`. A
+/// geometry with any other row (a curve) answers `None`.
+fn polyline(doc: &Document, connector: ShapeId, transform: Transform) -> Option<Vec<Point>> {
     let geometry = doc.shape_geometry(connector).ok()?;
     let path = geometry.paths.first()?;
     let mut points = Vec::with_capacity(path.rows.len());

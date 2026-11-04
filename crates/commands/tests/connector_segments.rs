@@ -462,12 +462,16 @@ fn never_reroute_keeps_the_interior_when_a_glued_shape_moves() {
 
     let after = rows(doc(&ctx), connector_shape);
     assert_eq!(after.len(), before.len(), "the row count is kept");
-    assert_eq!(
-        &after[1..after.len() - 1],
-        &before[1..before.len() - 1],
-        "the interior rows are kept byte for byte"
-    );
     let moved = drawn(doc(&ctx), connector_shape);
+    for (kept, was) in path[1..path.len() - 1]
+        .iter()
+        .zip(moved[1..moved.len() - 1].iter())
+    {
+        assert!(
+            close(*was, *kept),
+            "the interior point {was:?} moved from {kept:?}"
+        );
+    }
     assert!(
         close(
             *moved.first().unwrap(),
@@ -496,18 +500,23 @@ fn reset_connector_routes_even_a_never_connector_fresh() {
         Args::new(),
     )
     .expect("never");
-    let before = rows(doc(&ctx), connector_shape);
+    let before_path = drawn(doc(&ctx), connector_shape);
 
     // A glued shape moves: the interior is kept (rule 7).
     let picked = shape(&ctx, page, 1);
     select(&mut ctx, &[picked]);
     move_by(&mut ctx, &registry, 0.25, 0.5);
+    let kept = drawn(doc(&ctx), connector_shape);
+    for (kept, was) in before_path[1..before_path.len() - 1]
+        .iter()
+        .zip(kept[1..kept.len() - 1].iter())
+    {
+        assert!(
+            close(*was, *kept),
+            "the interior point {was:?} moved from {kept:?}"
+        );
+    }
     let kept = rows(doc(&ctx), connector_shape);
-    assert_eq!(
-        &kept[1..kept.len() - 1],
-        &before[1..before.len() - 1],
-        "the interior is kept"
-    );
 
     // Reset Connector re-routes it fresh (task P7-35 item 4), and the
     // fresh route is what the full pass computes.
