@@ -31,7 +31,7 @@ fn fixture() -> (AppCtx, Registry, PageId) {
 /// A 2 x 1 in box at `(x, y)` with one connection point per side
 /// midpoint.
 fn box_shape(visio_id: i32, x: f64, y: f64) -> larrygram_model::Shape {
-    use larrygram_model::{Cell, Preserved, Row, Section, SectionName, Shape};
+    use larrygram_model::{Cell, Preserved, Row, Section, SectionName};
     let cell = |name: &str, value: f64| Cell {
         name: CellName::new(name),
         formula: Some(format!("{value}")),
@@ -844,7 +844,7 @@ fn point_glue_to_an_instances_master_points_resolves_them() {
 /// may carry a row at `i32::MAX` (task P7-36 item 3's neighbours).
 #[test]
 fn an_overflowing_connection_point_index_is_named() {
-    use larrygram_model::{Cell, Preserved, Row, Section, SectionName, Shape};
+    use larrygram_model::{Cell, Preserved, Row, Section, SectionName};
     let (mut ctx, registry, page) = fixture();
     let cell = |name: &str, value: f64| Cell {
         name: CellName::new(name),
