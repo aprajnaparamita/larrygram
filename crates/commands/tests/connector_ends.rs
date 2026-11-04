@@ -674,7 +674,7 @@ fn a_bad_point_is_an_argument_error_with_no_dialog_request() {
     let (mut ctx, registry, _page) = fixture();
     let connector = draw_free(&mut ctx, &registry);
     for point in [-1, 9] {
-        let mut args = Args::new()
+        let args = Args::new()
             .with("connector", ArgValue::Integer(i64::from(connector)))
             .with("end", ArgValue::Text("end".to_owned()))
             .with("x", ArgValue::Number(5.0))
