@@ -300,6 +300,32 @@ fn row_number(rig: &ShellRig, shape: ShapeId, section: &str, name: &str) -> Opti
         })
 }
 
+/// The count of pixels that differ between two rendered frames in a
+/// page rectangle (task P7-51 item 5: the Bold and 36 pt picture
+/// checks compare against the plain picture, not only ink > 0).
+fn picture_differ(
+    rig: &ShellRig,
+    before: &image::RgbaImage,
+    after: &image::RgbaImage,
+    bounds: (f64, f64, f64, f64),
+) -> usize {
+    let a = screen(rig, bounds.0, bounds.3);
+    let b = screen(rig, bounds.2, bounds.1);
+    let (xmin, xmax) = (a.x.min(b.x).max(0.0) as u32, a.x.max(b.x) as u32);
+    let (ymin, ymax) = (a.y.min(b.y).max(0.0) as u32, a.y.max(b.y) as u32);
+    let mut differ = 0;
+    for y in ymin..ymax.min(before.height()).min(after.height()) {
+        for x in xmin..xmax.min(before.width()).min(after.width()) {
+            let p = before.get_pixel(x, y);
+            let q = after.get_pixel(x, y);
+            if p.0.iter().zip(q.0.iter()).any(|(p, q)| p.abs_diff(*q) > 20) {
+                differ += 1;
+            }
+        }
+    }
+    differ
+}
+
 /// The count of non-background pixels in a page-rectangle region of
 /// the rendered frame (the picture check: the background is the
 /// region's most common colour).
@@ -893,9 +919,19 @@ fn a_new_text_box_can_be_formatted_while_it_is_typed() {
             vec!["Insert Text Box".to_owned()],
             "{kind:?}: the commit is one step labelled as the insert"
         );
-        // The picture paints the text at that format.
+        // The picture paints the text at that format — and the
+        // format visibly changes it (task P7-51 item 5: compared
+        // against the plain picture, not only ink > 0).
+        let formatted = rig.render();
         let after = ink(&mut rig, 3.1, 5.55, 4.9, 5.95);
         assert!(after > 0, "{kind:?}: the text paints ({after})");
+        click(&mut rig, Role::Button, "Bold");
+        rig.run();
+        let plain = rig.render();
+        assert!(
+            picture_differ(&rig, &formatted, &plain, (3.1, 5.55, 4.9, 5.95)) > 0,
+            "{kind:?}: the bold picture differs from the plain one"
+        );
     }
 }
 
@@ -977,9 +1013,21 @@ fn formatting_while_typing_keeps_every_keystroke_and_the_caret() {
             vec!["Insert Text Box".to_owned()],
             "{kind:?}: one step labelled as the insert"
         );
-        // The picture paints the text at that format (review minor 6).
+        // The picture paints the text at that format (review minor 6)
+        // — and the formats visibly change it (task P7-51 item 5:
+        // compared against the plain picture, not only ink > 0).
+        let formatted = rig.render();
         let after = ink(&mut rig, 2.1, 5.3, 3.9, 5.75);
         assert!(after > 0, "{kind:?}: the text paints ({after})");
+        click(&mut rig, Role::Button, "Bold");
+        open_size_list(&mut rig, kind);
+        click(&mut rig, Role::Button, "12 pt");
+        rig.run();
+        let plain = rig.render();
+        assert!(
+            picture_differ(&rig, &formatted, &plain, (2.1, 5.3, 3.9, 5.75)) > 0,
+            "{kind:?}: the formatted picture differs from the plain one"
+        );
     }
 }
 
@@ -1059,9 +1107,22 @@ fn format_clicks_on_an_existing_shape_are_one_step_each() {
             ],
             "{kind:?}: the text write is one more step"
         );
-        // The picture paints the edited text (review minor 6).
+        // The picture paints the edited text (review minor 6) — and
+        // the Bold and 36 pt formats visibly change it (task P7-51
+        // item 5: compared against the plain picture, not only
+        // ink > 0).
+        let formatted = rig.render();
         let after = ink(&mut rig, 2.1, 3.2, 3.9, 3.5);
         assert!(after > 0, "{kind:?}: the text paints ({after})");
+        click(&mut rig, Role::Button, "Bold");
+        open_size_list(&mut rig, kind);
+        click(&mut rig, Role::Button, "12 pt");
+        rig.run();
+        let plain = rig.render();
+        assert!(
+            picture_differ(&rig, &formatted, &plain, (2.1, 3.2, 3.9, 3.5)) > 0,
+            "{kind:?}: the Bold and 36 pt picture differs from the plain one"
+        );
     }
 }
 
@@ -1100,9 +1161,19 @@ fn cmd_b_while_typing_folds_into_the_group() {
             vec!["Insert Text Box".to_owned()],
             "{kind:?}: one step labelled as the insert"
         );
-        // The picture paints the bold text (review minor 6).
+        // The picture paints the bold text (review minor 6) — and
+        // the bold visibly changes it (task P7-51 item 5: compared
+        // against the plain picture, not only ink > 0).
+        let formatted = rig.render();
         let after = ink(&mut rig, 2.1, 5.3, 3.9, 5.75);
         assert!(after > 0, "{kind:?}: the text paints ({after})");
+        click(&mut rig, Role::Button, "Bold");
+        rig.run();
+        let plain = rig.render();
+        assert!(
+            picture_differ(&rig, &formatted, &plain, (2.1, 5.3, 3.9, 5.75)) > 0,
+            "{kind:?}: the bold picture differs from the plain one"
+        );
     }
 }
 
@@ -1814,6 +1885,23 @@ fn the_canvas_leaves_out_the_text_being_edited() {
             Some("MMMM!"),
             "{kind:?}: with the edited text"
         );
+
+        // A cancel brings the old text back too (task P7-51 item 5).
+        double_click_at(&mut rig, pos);
+        type_into_editor(&mut rig, "?");
+        rig.dispatch("text.cancel");
+        rig.run();
+        rig.run();
+        let back = raster_ink(&rig, 2.05, 3.2, 3.95, 3.47);
+        assert!(
+            back > 0,
+            "{kind:?}: the text is back after a cancel ({back})"
+        );
+        assert_eq!(
+            shape_text(&rig, shape).as_deref(),
+            Some("MMMM!"),
+            "{kind:?}: with the old text after the cancel"
+        );
     }
 }
 
@@ -2047,6 +2135,16 @@ fn undo_names_the_open_group_and_redo_comes_back_after() {
         // The dynamic label seam is Panel Modern's (task P7-48 item 5).
         let kind = LayoutKind::PanelModern;
         let mut rig = shell_rig(kind);
+        // A redo tail first (task P7-51 item 5): the "Can't Redo"
+        // check only proves the open group disables Redo when a redo
+        // tail exists to disable.
+        type_a_new_box(&mut rig, kind, "First");
+        press_key(&mut rig, egui::Key::Escape);
+        chord(&mut rig, egui::Key::Z);
+        assert!(
+            has(&mut rig, Role::Button, "Repeat Insert Text Box"),
+            "{kind:?}: the undo left a redo tail"
+        );
         type_a_new_box(&mut rig, kind, "Hi");
         // The group's step is what Undo names, and it is enabled.
         assert!(
@@ -2057,7 +2155,8 @@ fn undo_names_the_open_group_and_redo_comes_back_after() {
             !disabled(&mut rig, Role::Button, "Undo Insert Text Box"),
             "{kind:?}: Undo is enabled with the group open"
         );
-        // Redo is disabled while the group is open.
+        // Redo is disabled while the group is open, though the redo
+        // tail is there (task P7-51 item 5).
         assert!(
             has(&mut rig, Role::Button, "Can't Redo"),
             "{kind:?}: Redo reads as disabled"
@@ -2091,6 +2190,40 @@ fn undo_names_the_open_group_and_redo_comes_back_after() {
             shape_text(&rig, box_).as_deref(),
             Some("Hi"),
             "{kind:?}: with its text"
+        );
+    }
+}
+
+/// The Undo history list lists the pending step first while a
+/// non-empty group is open (task P7-51 item 5), matching the Undo
+/// button's label.
+#[test]
+fn the_undo_history_list_names_the_pending_step_first() {
+    let kind = LayoutKind::PanelModern;
+    let mut rig = shell_rig(kind);
+    // One older step first, so "first" has something to beat.
+    select_shape(&mut rig);
+    lighten_fill(&mut rig, kind);
+    type_a_new_box(&mut rig, kind, "Hi");
+    assert!(
+        has(&mut rig, Role::Button, "Undo Insert Text Box"),
+        "{kind:?}: the button names the group's pending step"
+    );
+    click(&mut rig, Role::Button, "More items");
+    {
+        rig.run();
+        let root = rig.harness().root();
+        let pending = root
+            .query_all_by_role_and_label(Role::Button, "Insert Text Box")
+            .next()
+            .expect("the pending step's row");
+        let older = root
+            .query_all_by_role_and_label(Role::Button, "Set fill color #F5F5F5")
+            .next()
+            .expect("the older step's row");
+        assert!(
+            pending.rect().min.y < older.rect().min.y,
+            "{kind:?}: the pending step lists first"
         );
     }
 }
@@ -2333,5 +2466,54 @@ fn a_popup_field_keeps_its_typing_while_editing() {
             Some("Hi"),
             "{kind:?}: not in the shape text"
         );
+    }
+}
+
+/// The Size field's buffer is a per-popup draft (task P7-51 item 5):
+/// closing the list without a choice clears it.
+#[test]
+fn the_size_field_draft_clears_when_the_list_closes_without_a_choice() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        type_a_new_box(&mut rig, kind, "Hi");
+        open_size_list(&mut rig, kind);
+        {
+            rig.run();
+            let root = rig.harness().root();
+            let node = root
+                .query_all_by_role_and_label(Role::TextInput, "Size")
+                .next()
+                .expect("the Size picker's field");
+            node.click();
+            node.type_text("36");
+        }
+        rig.run();
+        {
+            let root = rig.harness().root();
+            let value = root
+                .query_all_by_role_and_label(Role::TextInput, "Size")
+                .next()
+                .and_then(|node| node.value());
+            assert_eq!(
+                value.as_deref(),
+                Some("36"),
+                "{kind:?}: the draft while the list is open"
+            );
+        }
+        // Escape closes the list without a choice.
+        press_key(&mut rig, egui::Key::Escape);
+        open_size_list(&mut rig, kind);
+        {
+            rig.run();
+            let root = rig.harness().root();
+            let value = root
+                .query_all_by_role_and_label(Role::TextInput, "Size")
+                .next()
+                .and_then(|node| node.value());
+            assert!(
+                value.as_deref().is_none_or(|text| text.is_empty()),
+                "{kind:?}: the draft is cleared: {value:?}"
+            );
+        }
     }
 }

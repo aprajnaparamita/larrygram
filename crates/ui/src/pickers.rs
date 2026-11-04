@@ -363,11 +363,18 @@ fn font_list(ui: &mut Ui, nav: &mut Nav, source: Source, out: &mut Vec<Intent>) 
 /// size ladder.
 fn font_size(ui: &mut Ui, nav: &mut Nav, source: Source, out: &mut Vec<Intent>) -> bool {
     let mut chosen = false;
-    // The typed buffer persists while the picker draws (task P7-48
-    // item 8: the field keeps its typing — a buffer local to the call
-    // would empty the field on every later frame).
-    let key = egui::Id::unique("larrygram-picker-size-field");
-    let mut buffer: String = ui.data_mut(|data| data.get_temp(key)).unwrap_or_default();
+    // The typed buffer is a per-picker, per-popup draft (task P7-51
+    // item 5): every size picker keeps its own (the key is scoped to
+    // the host) and the draft clears when the popup closes without a
+    // choice (a new popup session starts after a pass without the
+    // picker drawing).
+    let key = ui.make_persistent_id("larrygram-picker-size-field");
+    let pass = ui.ctx().cumulative_pass_nr();
+    let mut buffer: String = ui
+        .data_mut(|data| data.get_temp::<(u64, String)>(key))
+        .filter(|(seen, _)| *seen + 1 >= pass)
+        .map(|(_, buffer)| buffer)
+        .unwrap_or_default();
     let mut typed = None;
     ui.horizontal(|ui| {
         ui.label("Size:");
@@ -387,7 +394,7 @@ fn font_size(ui: &mut Ui, nav: &mut Nav, source: Source, out: &mut Vec<Intent>) 
         buffer.clear();
         chosen = true;
     }
-    ui.data_mut(|data| data.insert_temp(key, buffer));
+    ui.data_mut(|data| data.insert_temp(key, (pass, buffer)));
     ui.separator();
     for size in SIZE_LADDER {
         let highlighted = nav.highlighted();
@@ -899,6 +906,136 @@ mod tests {
         assert_eq!(intents.len(), 1);
         assert_eq!(intents[0].command.as_str(), "text.font.size");
         assert_eq!(intents[0].invocation.args.number("size"), Some(12.0));
+    }
+
+    /// Task P7-51 item 5: the Size field's buffer is a per-picker
+    /// draft — typing in one size picker's field never shows in
+    /// another's.
+    #[test]
+    fn the_size_field_buffer_is_not_shared_between_size_pickers() {
+        let out: Rc<RefCell<Vec<Intent>>> = Rc::new(RefCell::new(Vec::new()));
+        let mut harness = Harness::builder()
+            .with_size(egui::vec2(480.0, 400.0))
+            .build_ui({
+                let out = Rc::clone(&out);
+                move |ui| {
+                    ui.horizontal(|ui| {
+                        ui.push_id("first", |ui| {
+                            show(
+                                ui,
+                                PickerKind::FontSize,
+                                Source::Test,
+                                egui::Color32::GRAY,
+                                &mut out.borrow_mut(),
+                            );
+                        });
+                        ui.push_id("second", |ui| {
+                            show(
+                                ui,
+                                PickerKind::FontSize,
+                                Source::Test,
+                                egui::Color32::GRAY,
+                                &mut out.borrow_mut(),
+                            );
+                        });
+                    });
+                }
+            });
+        harness.run();
+        {
+            let root = harness.root();
+            let first = root
+                .query_all_by_role_and_label(Role::TextInput, "Size")
+                .next()
+                .expect("the first Size field");
+            first.click();
+            first.type_text("36");
+        }
+        harness.run();
+        {
+            let root = harness.root();
+            let mut fields = root.query_all_by_role_and_label(Role::TextInput, "Size");
+            let first = fields.next().expect("the first Size field");
+            let second = fields.next().expect("the second Size field");
+            assert_eq!(first.value().as_deref(), Some("36"), "the typed draft");
+            assert!(
+                second
+                    .value()
+                    .as_deref()
+                    .is_none_or(|value| value.is_empty()),
+                "the other picker keeps its own buffer: {:?}",
+                second.value()
+            );
+        }
+    }
+
+    /// Task P7-51 item 5: the Size field's buffer clears when the
+    /// popup closes without a choice (a new popup session starts
+    /// empty).
+    #[test]
+    fn the_size_field_buffer_clears_when_the_popup_closes() {
+        let out: Rc<RefCell<Vec<Intent>>> = Rc::new(RefCell::new(Vec::new()));
+        let open = Rc::new(std::cell::Cell::new(true));
+        let mut harness = Harness::builder()
+            .with_size(egui::vec2(240.0, 600.0))
+            .build_ui({
+                let out = Rc::clone(&out);
+                let open = Rc::clone(&open);
+                move |ui| {
+                    if open.get() {
+                        show(
+                            ui,
+                            PickerKind::FontSize,
+                            Source::Test,
+                            egui::Color32::GRAY,
+                            &mut out.borrow_mut(),
+                        );
+                    }
+                }
+            });
+        harness.run();
+        {
+            let root = harness.root();
+            let field = root
+                .query_all_by_role_and_label(Role::TextInput, "Size")
+                .next()
+                .expect("the Size field");
+            field.click();
+            field.type_text("36");
+        }
+        harness.run();
+        {
+            let root = harness.root();
+            let field = root
+                .query_all_by_role_and_label(Role::TextInput, "Size")
+                .next()
+                .expect("the Size field");
+            assert_eq!(
+                field.value().as_deref(),
+                Some("36"),
+                "the draft while the popup is open"
+            );
+        }
+        // The popup closes without a choice, then opens again.
+        open.set(false);
+        harness.run();
+        open.set(true);
+        harness.run();
+        {
+            let root = harness.root();
+            let field = root
+                .query_all_by_role_and_label(Role::TextInput, "Size")
+                .next()
+                .expect("the Size field");
+            assert!(
+                field
+                    .value()
+                    .as_deref()
+                    .is_none_or(|value| value.is_empty()),
+                "the draft is cleared: {:?}",
+                field.value()
+            );
+        }
     }
 
     #[test]

@@ -1090,16 +1090,18 @@ fn visible_tabs(layout: &LayoutV2, context: crate::contexts::SelectionContext) -
         .collect()
 }
 
-/// The labels of the undoable edits (the QAT history list).
+/// The labels of the undoable edits (the QAT history list). The
+/// pending step of a non-empty open group lists first (task P7-51
+/// item 5): the same step the Undo button names.
 fn undo_labels(app: &AppCtx) -> Vec<String> {
     app.active_document()
         .map(|session| {
-            session
-                .undo
-                .undo_labels()
-                .into_iter()
-                .map(str::to_owned)
-                .collect()
+            let mut labels: Vec<String> = Vec::new();
+            if let Some(pending) = session.undo.pending_label() {
+                labels.push(pending.to_owned());
+            }
+            labels.extend(session.undo.undo_labels().into_iter().map(str::to_owned));
+            labels
         })
         .unwrap_or_default()
 }
