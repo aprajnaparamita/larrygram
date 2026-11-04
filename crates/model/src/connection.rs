@@ -241,6 +241,26 @@ impl Document {
         Ok(())
     }
 
+    /// The `Type` of row `ix` (0 inward, 1 outward, 2 both; task
+    /// P7-34 item 3): the documented default, 0, when the row has no
+    /// `Type` cell. A stale shape id or row index answers `None` (the
+    /// checked state of the point's type menu).
+    pub fn connection_point_type(&self, shape: ShapeId, ix: u32) -> Option<u8> {
+        let (position, section_at) = self.connection_row_slot(shape, ix).ok()?;
+        let row = self
+            .shape(shape)?
+            .sheet
+            .sections
+            .get(section_at)?
+            .rows
+            .get(position)?;
+        match row_number(row, "Type") {
+            Some(1.0) => Some(1),
+            Some(2.0) => Some(2),
+            _ => Some(0),
+        }
+    }
+
     /// Copies the inherited `Connection` rows of `shape` into its own
     /// section (task P7-34 item 5), the indices unchanged and the
     /// `X`/`Y` values scaled to the instance's box, so the effective

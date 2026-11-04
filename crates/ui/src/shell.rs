@@ -22,7 +22,7 @@
 use egui::{Context, PointerButton, Ui};
 use larrygram_commands::DocumentSession;
 use larrygram_commands::{
-    ActiveTool, AppCtx, ArgValue, CommandError, CommandId, Invocation, NeededInput, Outcome,
+    ActiveTool, AppCtx, ArgValue, Args, CommandError, CommandId, Invocation, NeededInput, Outcome,
     PathPurpose, Payload, Registry, SessionId, Source, UiRequest,
 };
 use larrygram_model::{PageId, ShapeId, TextContent, TextPart};
@@ -157,6 +157,7 @@ fn tool_for(active: ActiveTool) -> Tool {
         ActiveTool::Ellipse => Tool::Ellipse,
         ActiveTool::Line => Tool::Line,
         ActiveTool::Connector => Tool::Connector,
+        ActiveTool::ConnectionPoint => Tool::ConnectionPoint,
         ActiveTool::Text => Tool::Text,
         ActiveTool::TextBlock => Tool::TextBlock,
         _ => Tool::Pointer,
@@ -772,6 +773,13 @@ impl Shell {
             Ok(mut produced) => {
                 if escape && !f5 && !self.app.full_screen {
                     produced.retain(|intent| intent.command.as_str() != FULL_SCREEN);
+                    // Esc with the Connection Point tool armed returns
+                    // to the Pointer Tool (task P7-34 item 2).
+                    if self.tools.tool == crate::tools::Tool::ConnectionPoint
+                        && let Ok(command) = CommandId::parse("tools.pointer")
+                    {
+                        produced.push(Intent::new(command, Invocation::empty(Source::Ui)));
+                    }
                 }
                 intents.extend(produced);
             }
@@ -980,10 +988,11 @@ impl Shell {
                 let set = self.layouts.get(kind);
                 let mode = self.classic_window_mode();
                 let live = LiveLists;
+                let checks = self.shell_checks();
                 let input = PanelInput::new(&set.v2, &self.registry, &self.app)
                     .with_mode(mode)
                     .with_lists(&live)
-                    .with_checked(&ShellChecks);
+                    .with_checked(&checks);
                 match self.panel_classic.show(ui, &input) {
                     Ok(mut more) => produced.append(&mut more),
                     Err(error) => errors.push(error.to_string()),
@@ -1615,10 +1624,11 @@ impl Shell {
         let set = self.layouts.get(kind);
         let mode = self.classic_window_mode();
         let live = LiveLists;
+        let checks = self.shell_checks();
         let input = PanelInput::new(&set.v2, &self.registry, &self.app)
             .with_mode(mode)
             .with_lists(&live)
-            .with_checked(&ShellChecks);
+            .with_checked(&checks);
         match self.panel_classic.context_menu(ui, &input, &menu_id, None) {
             Ok(mut more) => intents.append(&mut more),
             Err(error) => self.note_error(error.to_string()),
@@ -1649,11 +1659,19 @@ impl Shell {
         // One outline while the text editor is open (task P7-25 item
         // 9): the tool overlay is suppressed and the editor draws its
         // own outline around the text block.
-        let overlay = if self.editor.is_active() {
+        let mut overlay = if self.editor.is_active() {
             Overlay::new()
         } else {
             self.overlay.clone()
         };
+        // The connection-points view check (task P7-34 item 1): every
+        // shape's points as markers, whatever the tool.
+        if self.app.show_connection_points
+            && !self.editor.is_active()
+            && let Some(mark) = crate::tools::connection_point::all_points_mark(&self.app)
+        {
+            overlay.marks.push(mark);
+        }
         {
             let session = self.app.active_document_mut();
             if let Some(session) = session {
@@ -1827,6 +1845,22 @@ impl Shell {
             }
             if self.editor.is_active() {
                 self.open_context_menu(HitTarget::TextEditing, Some(pos));
+                return;
+            }
+            // A right-click on a connection point with the Connection
+            // Point tool armed selects it and opens the
+            // connection-point menu (task P7-34 item 3).
+            let point_hit = if self.tools.tool == crate::tools::Tool::ConnectionPoint {
+                self.app.active_document().and_then(|session| {
+                    let page = canvas::page_position(rect, session, pos, canvas::ruler_width(ui))?;
+                    crate::tools::connection_point::point_under(&self.app, page, session.view.zoom)
+                })
+            } else {
+                None
+            };
+            if let Some((shape, ix, _)) = point_hit {
+                crate::tools::connection_point::select(&mut self.tools, shape, ix);
+                self.open_context_menu(HitTarget::ConnectionPoint, Some(pos));
                 return;
             }
             match self.shape_under(ui, pos, rect) {
@@ -2920,9 +2954,72 @@ impl Shell {
     ) -> Result<Vec<Result<Outcome, CommandError>>, UiError> {
         let mut results = Vec::with_capacity(intents.len());
         for intent in intents {
-            results.push(self.dispatch_intent(intent)?);
+            let routed = self.route_point_intent(intent);
+            results.push(self.dispatch_intent(&routed)?);
         }
         Ok(results)
+    }
+
+    /// The connection-point routing (task P7-34 items 2 and 3): with
+    /// the Connection Point tool armed and a point selected, `Delete`
+    /// removes that point, and the connection-point menu's type rows
+    /// carry its `shape` and `point` arguments. An intent that already
+    /// names a point is left alone (the programmatic contract).
+    fn route_point_intent(&self, intent: &Intent) -> Intent {
+        if self.tools.tool != crate::tools::Tool::ConnectionPoint {
+            return intent.clone();
+        }
+        let Some((shape, ix)) = crate::tools::connection_point::selected(&self.tools) else {
+            return intent.clone();
+        };
+        let visio_id = self
+            .app
+            .active_document()
+            .and_then(|session| session.document.shape(shape))
+            .map(|entity| entity.visio_id);
+        let args_with_point = |args: &Args| -> Option<Args> {
+            let visio_id = visio_id?;
+            let mut args = args.clone();
+            args.set("shape", ArgValue::Integer(i64::from(visio_id)));
+            args.set("point", ArgValue::Integer(i64::from(ix)));
+            Some(args)
+        };
+        let command = intent.command.as_str();
+        if command == "edit.delete" {
+            if let (Some(args), Ok(id)) = (
+                args_with_point(&Args::new()),
+                CommandId::parse("connector.point_delete"),
+            ) {
+                return Intent::new(id, Invocation::new(args, intent.invocation.source));
+            }
+            return intent.clone();
+        }
+        if command.starts_with("edit.connection_point.")
+            && intent.invocation.args.get("point").is_none()
+            && let Some(args) = args_with_point(&intent.invocation.args)
+        {
+            return Intent::new(
+                intent.command,
+                Invocation::new(args, intent.invocation.source),
+            );
+        }
+        intent.clone()
+    }
+
+    /// The checked state the panels read ([`ShellChecks`]): the
+    /// selected connection point's `Type` for the point menu (task
+    /// P7-34 item 3).
+    fn shell_checks(&self) -> ShellChecks {
+        let point_type = (self.tools.tool == crate::tools::Tool::ConnectionPoint)
+            .then(|| crate::tools::connection_point::selected(&self.tools))
+            .flatten()
+            .and_then(|(shape, ix)| {
+                self.app
+                    .active_document()?
+                    .document
+                    .connection_point_type(shape, ix)
+            });
+        ShellChecks { point_type }
     }
 
     /// Whether the page holds the keyboard this frame: no text edit,
@@ -3378,9 +3475,28 @@ fn layout_radio_checked(app: &AppCtx, id: &str) -> Option<bool> {
 /// The checked state the Panel Classic widgets read (task P7-23): the
 /// layout rows are radios over [`Settings::ui_layout`] (ADR 0032),
 /// every other command defers to [`ToolLatch`] (the tool latch,
-/// task P5-17).
+/// task P5-17), the text toggles (task P7-24 item 10) and the
+/// connection-point state (task P7-34 items 1 and 3).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-struct ShellChecks;
+struct ShellChecks {
+    /// The selected connection point's row `Type` (task P7-34 item 3):
+    /// the connection-point menu's Inward / Outward / Inward & Outward
+    /// rows read it. `None` with no point selected.
+    point_type: Option<u8>,
+}
+
+impl ShellChecks {
+    /// The checked state of the connection-point type rows.
+    fn point_type_checked(&self, command: &str) -> Option<bool> {
+        let kind = match command {
+            "edit.connection_point.inward" => 0,
+            "edit.connection_point.outward" => 1,
+            "edit.connection_point.inward_and_outward" => 2,
+            _ => return None,
+        };
+        self.point_type.map(|point| point == kind)
+    }
+}
 
 impl panel_classic::CheckedState for ShellChecks {
     fn is_checked(&self, command: &str, app: &AppCtx) -> Option<bool> {
@@ -3392,6 +3508,12 @@ impl panel_classic::CheckedState for ShellChecks {
             // The connector style rows show the current style (task
             // P7-36 item 3).
             .or_else(|| crate::checked::connector_style_checked(app, command))
+            // The connection-points checks read the one per-window
+            // state (task P7-34 item 1).
+            .or_else(|| crate::checked::connection_points_checked(app, command))
+            // The connection-point menu's type rows (task P7-34 item
+            // 3).
+            .or_else(|| self.point_type_checked(command))
     }
 }
 
@@ -5586,7 +5708,7 @@ mod tests {
         use panel_classic::CheckedState;
         let mut shell = full_shell();
         shell.set_layout_kind(LayoutKind::PanelClassic);
-        let checks = ShellChecks;
+        let checks = ShellChecks::default();
         assert_eq!(
             checks.is_checked("view.ui_layout.panel_classic", &shell.app),
             Some(true)

@@ -977,17 +977,7 @@ fn draw_overlay(
                     }
                 }
                 for marker in &feedback.markers {
-                    let center = to_screen(*marker);
-                    let rect = Rect::from_center_size(
-                        center,
-                        egui::vec2(HANDLE_HALF * 1.5, HANDLE_HALF * 1.5),
-                    );
-                    painter.rect_stroke(
-                        rect,
-                        0.0,
-                        Stroke::new(1.0, colors.accent),
-                        egui::StrokeKind::Middle,
-                    );
+                    draw_point_marker(painter, to_screen(*marker), colors.accent, false);
                 }
                 if let Some(point) = feedback.point {
                     painter.circle(
@@ -998,9 +988,31 @@ fn draw_overlay(
                     );
                 }
             }
+            // The connection points of the view check and the tool
+            // (task P7-34 items 1 and 2): P7-33's hollow markers, and
+            // the selected point's own style (filled).
+            OverlayMark::ConnectionPoints { points, selected } => {
+                for marker in points {
+                    draw_point_marker(painter, to_screen(*marker), colors.accent, false);
+                }
+                if let Some(point) = selected {
+                    draw_point_marker(painter, to_screen(*point), colors.accent, true);
+                }
+            }
             _ => {}
         }
     }
+}
+
+/// One connection-point marker (task P7-33 item 3 and task P7-34): a
+/// small square at `center`, hollow for a plain point and filled for
+/// the selected one's own style.
+fn draw_point_marker(painter: &egui::Painter, center: Pos2, color: Color32, selected: bool) {
+    let rect = Rect::from_center_size(center, egui::vec2(HANDLE_HALF * 1.5, HANDLE_HALF * 1.5));
+    if selected {
+        painter.rect_filled(rect, 0.0, color);
+    }
+    painter.rect_stroke(rect, 0.0, Stroke::new(1.0, color), egui::StrokeKind::Middle);
 }
 
 /// Draws the ruler bands along the top and left edges of the canvas

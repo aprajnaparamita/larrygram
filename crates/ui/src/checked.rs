@@ -3,8 +3,9 @@
 //! share, so Panel Modern does not call into [`crate::panel_classic`].
 //!
 //! The seam answers `Some(on)` for the `format.text.*` toggles of a
-//! selected shape and for the connector style controls (task P7-36
-//! item 3), and `None` for every other command.
+//! selected shape, for the connector style controls (task P7-36 item
+//! 3) and for the connection-points checks of task P7-34 (both ids
+//! read the one per-window state), and `None` for every other command.
 
 use larrygram_commands::app::AppCtx;
 use larrygram_geom::RouteStyle;
@@ -38,6 +39,17 @@ pub fn connector_style_checked(app: &AppCtx, command: &str) -> Option<bool> {
     }
     let current = larrygram_commands::builtins::connector_style(app)?;
     Some(current == wanted)
+}
+
+/// The checked state of the connection-points view check (task P7-34
+/// item 1): `tools.connection.points` (Panel Modern) and
+/// `view.connections` (Panel Classic) both read the one per-window
+/// state; `None` for every other command.
+pub fn connection_points_checked(app: &AppCtx, command: &str) -> Option<bool> {
+    match command {
+        "tools.connection.points" | "view.connections" => Some(app.show_connection_points),
+        _ => None,
+    }
 }
 
 /// The checked state of the text toggles (task P7-24 item 10): Bold,
