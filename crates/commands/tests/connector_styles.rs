@@ -13,7 +13,9 @@ use larrygram_commands::app::{AppCtx, DocumentSession, Settings};
 use larrygram_commands::builtins::{connector_style, registry};
 use larrygram_commands::{ArgValue, Args, Registry};
 use larrygram_geom::RouteStyle;
-use larrygram_model::{CellName, CellValue, Document, GeometryRow, PageId, ShapeId, SheetRef};
+use larrygram_model::{
+    Cell, CellName, CellValue, Document, GeometryRow, PageId, Preserved, Shape, ShapeId, SheetRef,
+};
 
 /// Two boxes on one page (Visio ids 1 and 2), as in the move suite.
 fn fixture() -> (AppCtx, Registry, PageId) {
@@ -1065,4 +1067,69 @@ fn master_points_on_an_unsized_instance_resolve_unscaled() {
         "{:?}",
         outcome.message
     );
+}
+
+/// A point glue to a shape with no connection points anywhere names
+/// the empty list (the resolution's empty-rung return).
+#[test]
+fn point_glue_to_a_shape_without_points_is_named() {
+    let (mut ctx, registry, page) = fixture();
+    let mut plain = Shape::new(ShapeId { index: 0 }, 5);
+    plain.sheet.cells.push(Cell {
+        name: CellName::new("PinX"),
+        formula: Some("2".to_owned()),
+        value: Some(CellValue::Number(2.0)),
+        unit: larrygram_geom::Unit::Inches,
+        preserved: Preserved::new(),
+    });
+    let plain_visio = {
+        let doc = &mut ctx.active_document_mut().expect("session").document;
+        let plain = doc.insert_shape(page, plain, None).expect("plain");
+        doc.shape(plain).expect("plain").visio_id
+    };
+    let error = dispatch(
+        &mut ctx,
+        &registry,
+        "connector.glue_begin",
+        Args::new()
+            .with("connector", ArgValue::Integer(3))
+            .with("target", ArgValue::Integer(i64::from(plain_visio)))
+            .with("point", ArgValue::Integer(0)),
+    )
+    .expect_err("no points");
+    assert!(error.to_string().contains("does not exist"), "{error}");
+}
+
+/// The page style read walks the page's style chain and stops at a
+/// dangling link (the lookup chain's break arm).
+#[test]
+fn the_page_style_read_stops_at_a_dangling_style_link() {
+    let (mut ctx, registry, page) = fixture();
+    draw_glued(&mut ctx, &registry, page);
+    {
+        let doc = &mut ctx.active_document_mut().expect("session").document;
+        if let Some(entry) = doc.pages.get_mut(page.index as usize) {
+            entry.sheet.cells.push(Cell {
+                name: CellName::new("LineStyle"),
+                formula: None,
+                value: Some(CellValue::Number(999.0)),
+                unit: larrygram_geom::Unit::Unitsless,
+                preserved: Preserved::new(),
+            });
+        }
+    }
+    ctx.selection.shapes.clear();
+    ctx.selection.anchor = None;
+    dispatch(
+        &mut ctx,
+        &registry,
+        "connector.style",
+        Args::new().with("style", ArgValue::Text("straight".to_owned())),
+    )
+    .expect("page default");
+    assert_eq!(
+        page_cell(&ctx, page, "RouteStyle"),
+        Some(CellValue::Number(2.0))
+    );
+    let _ = &registry;
 }
