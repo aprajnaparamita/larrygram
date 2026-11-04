@@ -9,7 +9,10 @@
 //! copied target; a drop from the Shapes window places the ends from
 //! the drop point. Deleting a group clears the glue of every connector
 //! glued to one of its members. A glued 1-D shape that is not routable
-//! stays a straight line. Every edit's single undo restores the cells
+//! stays a straight line. A rigid group move keeps a stored custom
+//! route byte for byte; a connector outside a moved group glued to a
+//! member still re-routes (task P7-50 goal 2). Every edit's single
+//! undo restores the cells
 //! and the records exactly, and no edit leaves the endpoint cells
 //! disagreeing with the drawn path.
 
@@ -384,6 +387,173 @@ fn moving_one_target_with_the_connector_frees_only_the_other_end() {
     assert!(formula(&after, connector, "BeginX").is_some());
     assert_eq!(formula(&after, connector, "EndX"), None);
     assert_cells_match_path(&after, connector);
+}
+
+/// S1 (task P7-49 goal 2): moving only the connector translates its
+/// stored route, bends and stubs kept (rule 1), with no fresh route
+/// replacing it.
+#[test]
+fn moving_only_the_connector_translates_its_stored_route() {
+    let (mut ctx, registry, page) = fixture();
+    draw_glued(&mut ctx, &registry);
+    let connector = connectors(doc(&ctx), page)[0];
+    // A route with a bend: move one target off the line first.
+    let left = shape(&ctx, page, 1);
+    select(&mut ctx, &[left]);
+    move_by(&mut ctx, &registry, 0.0, -1.5);
+    let before = drawn(&snapshot(&ctx), connector);
+    assert!(before.len() >= 3, "a route with a bend: {before:?}");
+
+    select(&mut ctx, &[connector]);
+    move_by(&mut ctx, &registry, 1.0, 0.5);
+    let after = drawn(&snapshot(&ctx), connector);
+    assert_eq!(after.len(), before.len(), "the route keeps its shape");
+    for (b, a) in before.iter().zip(after.iter()) {
+        assert!(close(*a, b.add(Point::new(1.0, 0.5))), "{b:?} -> {a:?}");
+    }
+
+    dispatch(&mut ctx, &registry, "edit.undo", Args::new()).expect("undo");
+    assert_eq!(drawn(&snapshot(&ctx), connector), before, "undo is exact");
+    dispatch(&mut ctx, &registry, "edit.redo", Args::new()).expect("redo");
+    assert_eq!(drawn(&snapshot(&ctx), connector), after, "redo is exact");
+}
+
+/// S1b (task P7-49 goal 2): moving the connector and both targets
+/// together translates the stored route (rule 1); the scoped pass
+/// never replaces it.
+#[test]
+fn moving_the_connector_and_both_targets_translates_the_stored_route() {
+    let (mut ctx, registry, page) = fixture();
+    draw_glued(&mut ctx, &registry);
+    let connector = connectors(doc(&ctx), page)[0];
+    let (left, right) = (shape(&ctx, page, 1), shape(&ctx, page, 2));
+    select(&mut ctx, &[left]);
+    move_by(&mut ctx, &registry, 0.0, -1.5);
+    let before = drawn(&snapshot(&ctx), connector);
+    assert!(before.len() >= 3, "a route with a bend: {before:?}");
+
+    select(&mut ctx, &[left, right, connector]);
+    move_by(&mut ctx, &registry, 1.0, 0.5);
+    let after = drawn(&snapshot(&ctx), connector);
+    assert_eq!(after.len(), before.len(), "the route keeps its shape");
+    for (b, a) in before.iter().zip(after.iter()) {
+        assert!(close(*a, b.add(Point::new(1.0, 0.5))), "{b:?} -> {a:?}");
+    }
+
+    dispatch(&mut ctx, &registry, "edit.undo", Args::new()).expect("undo");
+    assert_eq!(drawn(&snapshot(&ctx), connector), before, "undo is exact");
+    dispatch(&mut ctx, &registry, "edit.redo", Args::new()).expect("redo");
+    assert_eq!(drawn(&snapshot(&ctx), connector), after, "redo is exact");
+}
+
+/// The connector's geometry rows, byte for byte.
+fn geometry_rows(document: &Document, connector: ShapeId) -> Vec<GeometryRow> {
+    document
+        .shape_geometry(connector)
+        .expect("geometry")
+        .paths
+        .first()
+        .expect("a path")
+        .rows
+        .clone()
+}
+
+/// Task P7-50 goal 2 (MA2): a rigid group move keeps a stored custom
+/// route byte for byte — the connector and both targets move together,
+/// so nothing on either side of the move changes — and undo and redo
+/// agree with it.
+#[test]
+fn a_rigid_group_move_keeps_a_stored_custom_route_byte_for_byte() {
+    let (mut ctx, registry, page) = fixture();
+    draw_glued(&mut ctx, &registry);
+    let connector = connectors(doc(&ctx), page)[0];
+    let (left, right) = (shape(&ctx, page, 1), shape(&ctx, page, 2));
+    // A custom 4-point route: two bends the router would not choose.
+    let custom = vec![
+        Point::new(2.0, 3.0),
+        Point::new(2.0, 4.5),
+        Point::new(6.0, 4.5),
+        Point::new(6.0, 2.0),
+    ];
+    {
+        let doc = &mut ctx.active_document_mut().expect("session").document;
+        doc.write_connector_path(connector, &custom).expect("path");
+    }
+    let stored = geometry_rows(doc(&ctx), connector);
+    assert_eq!(stored.len(), 4, "the custom route: {stored:?}");
+
+    // Group the connector with both targets and move the group: the
+    // whole route is rigid and must survive byte for byte.
+    select(&mut ctx, &[left, right, connector]);
+    dispatch(&mut ctx, &registry, "arrange.group", Args::new()).expect("group");
+    let group = ctx.selection.anchor.expect("the group is the anchor");
+    assert_eq!(
+        geometry_rows(doc(&ctx), connector),
+        stored,
+        "the group keeps it"
+    );
+    select(&mut ctx, &[group]);
+    move_by(&mut ctx, &registry, 0.5, -0.25);
+    assert_eq!(
+        geometry_rows(doc(&ctx), connector),
+        stored,
+        "the rigid move keeps it byte for byte"
+    );
+
+    dispatch(&mut ctx, &registry, "edit.undo", Args::new()).expect("undo");
+    assert_eq!(geometry_rows(doc(&ctx), connector), stored, "undo agrees");
+    dispatch(&mut ctx, &registry, "edit.redo", Args::new()).expect("redo");
+    assert_eq!(geometry_rows(doc(&ctx), connector), stored, "redo agrees");
+}
+
+/// Task P7-50 goal 2 (MA2): the other side of the rule. A connector
+/// **outside** a moved group, glued to one of its members, re-routes:
+/// its target moved and it did not.
+#[test]
+fn a_connector_outside_a_moved_group_to_a_member_still_re_routes() {
+    let (mut ctx, registry, page) = fixture();
+    // One end glued to box 1 (a future group member), the other free.
+    dispatch(
+        &mut ctx,
+        &registry,
+        "connector.draw",
+        Args::new()
+            .with("stencil", ArgValue::Text("Basic Flowchart".to_owned()))
+            .with("master", ArgValue::Text("Connector".to_owned()))
+            .with("x", ArgValue::Number(2.0))
+            .with("y", ArgValue::Number(2.5))
+            .with("begin_target", ArgValue::Integer(1))
+            .with("end_x", ArgValue::Number(8.0))
+            .with("end_y", ArgValue::Number(6.0)),
+    )
+    .expect("draw");
+    let connector = connectors(doc(&ctx), page)[0];
+    let (left, right) = (shape(&ctx, page, 1), shape(&ctx, page, 2));
+    select(&mut ctx, &[left, right]);
+    dispatch(&mut ctx, &registry, "arrange.group", Args::new()).expect("group");
+    let group = ctx.selection.anchor.expect("the group is the anchor");
+    let before = geometry_rows(doc(&ctx), connector);
+
+    select(&mut ctx, &[group]);
+    move_by(&mut ctx, &registry, 1.0, -0.5);
+    let after = geometry_rows(doc(&ctx), connector);
+    assert_ne!(after, before, "the outside connector re-routes");
+    // The glued end follows the member to one of its two connection
+    // points at the new place (box 1's local (1, 1) and (1, 0)).
+    let begin = end(doc(&ctx), connector, ConnectorEnd::Begin);
+    let moved_points = [Point::new(3.0, 2.0), Point::new(3.0, 1.0)];
+    assert!(
+        moved_points.iter().any(|point| close(*point, begin)),
+        "the end follows the member: {begin:?}"
+    );
+    assert_cells_match_path(doc(&ctx), connector);
+
+    dispatch(&mut ctx, &registry, "edit.undo", Args::new()).expect("undo");
+    assert_eq!(
+        geometry_rows(doc(&ctx), connector),
+        before,
+        "undo restores the rows byte for byte"
+    );
 }
 
 #[test]

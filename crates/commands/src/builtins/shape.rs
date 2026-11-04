@@ -101,11 +101,17 @@ fn active_page(ctx: &AppCtx) -> Option<larrygram_model::PageId> {
         .and_then(|session| session.active_page)
 }
 
-/// Re-routes the page's glued connectors after an editing command.
-fn reroute(ctx: &mut AppCtx, page: Option<larrygram_model::PageId>) {
-    if let Some(page) = page {
-        reroute_quietly_on(ctx, page);
-    }
+/// Re-routes the connectors the edit's `changed` shapes affect (ADR
+/// 0084 rule 5) and folds the rewritten rows into the step (task P7-49
+/// goal 1: one undo restores shapes and routes together).
+fn reroute(
+    ctx: &mut AppCtx,
+    page: Option<larrygram_model::PageId>,
+    changed: &[ShapeId],
+    step: Box<dyn Edit>,
+) -> Box<dyn Edit> {
+    let routes = page.and_then(|page| reroute_quietly_on(ctx, page, changed));
+    super::connector::with_routes(step, routes)
 }
 
 /// The staged 1-D moves of `one_d` by `delta` page inches, one edit per
@@ -261,11 +267,10 @@ pub(super) fn run_move(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, Co
         }
     }
     edit.apply(ctx)?;
-    reroute(ctx, active_page(ctx));
     Ok(edit_outcome(
         count_label("Moved", targets.len()),
         warnings,
-        Box::new(edit),
+        reroute(ctx, active_page(ctx), &targets, Box::new(edit)),
     ))
 }
 
@@ -384,11 +389,10 @@ pub(super) fn run_resize(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, 
             apply_step(ctx, &mut edit, write_pin_y)?;
         }
     }
-    reroute(ctx, active_page(ctx));
     Ok(edit_outcome(
         count_label("Resized", targets.len()),
         warnings,
-        Box::new(edit),
+        reroute(ctx, active_page(ctx), &targets, Box::new(edit)),
     ))
 }
 
@@ -543,11 +547,10 @@ pub(super) fn run_rotate(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, 
         }
     }
     edit.apply(ctx)?;
-    reroute(ctx, active_page(ctx));
     Ok(edit_outcome(
         count_label("Rotated", targets.len()),
         warnings,
-        Box::new(edit),
+        reroute(ctx, active_page(ctx), &targets, Box::new(edit)),
     ))
 }
 
@@ -601,14 +604,13 @@ fn set_size(ctx: &mut AppCtx, inv: &Invocation, axis: Axis) -> Result<Outcome, C
         edit.push(cell_edit(doc, session, "Set size", shape, cell, value)?);
     }
     edit.apply(ctx)?;
-    reroute(ctx, active_page(ctx));
     Ok(edit_outcome(
         match axis {
             Axis::Width => "Width set",
             Axis::Height => "Height set",
         },
         warnings,
-        Box::new(edit),
+        reroute(ctx, active_page(ctx), &[shape], Box::new(edit)),
     ))
 }
 
@@ -637,8 +639,11 @@ pub(super) fn run_set_pin(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome,
         }
     }
     edit.apply(ctx)?;
-    reroute(ctx, active_page(ctx));
-    Ok(edit_outcome("Pin set", warnings, Box::new(edit)))
+    Ok(edit_outcome(
+        "Pin set",
+        warnings,
+        reroute(ctx, active_page(ctx), &[shape], Box::new(edit)),
+    ))
 }
 
 /// `shape.set.angle`: sets the anchor shape's `Angle` to `angle`
@@ -653,8 +658,11 @@ pub(super) fn run_set_angle(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcom
         edit.push(cell_edit(doc, session, "Set Angle", shape, "Angle", angle)?);
     }
     edit.apply(ctx)?;
-    reroute(ctx, active_page(ctx));
-    Ok(edit_outcome("Angle set", warnings, Box::new(edit)))
+    Ok(edit_outcome(
+        "Angle set",
+        warnings,
+        reroute(ctx, active_page(ctx), &[shape], Box::new(edit)),
+    ))
 }
 
 /// `shape.set.text_block` (task P7-25 item 4): writes the anchor

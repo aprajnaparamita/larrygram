@@ -18,16 +18,18 @@
 //! - `connector.style` — arg `style` (`"straight"` / `"right_angle"`)
 //!   for the selected shapes/connectors.
 //!
-//! [`reroute_after_edit`] is the one hook the editing commands call after
-//! a move, resize, rotate or delete (and the undo/redo runner after a
-//! step): it drops glue whose target is detached and re-writes every
-//! affected connector path.
+//! [`reroute_after_edit`] is the one hook the editing commands call
+//! after a move, resize, rotate or delete: it drops glue whose target
+//! is detached and re-writes only the affected connector paths.
 
-use larrygram_geom::{Point, Rect, RouteOptions, RouteStyle, Transform, route};
+use larrygram_geom::{
+    Candidate, EndSpec, GlueEnd as GlueKind, GlueTarget, Obstacle, Point, Rect, RouteOptions,
+    RouteStyle, Transform, resolve_ends, route,
+};
 use larrygram_model::CellReader;
 use larrygram_model::{
-    CellLookup, CellName, CellValue, CellWrite, Connect, ConnectorEnd, Document, EndGlue, PageId,
-    Resolved, RowTarget, ShapeId, Sheet, SheetRef, mutate,
+    Cell, CellLookup, CellName, CellValue, CellWrite, Connect, ConnectorEnd, Document, EndGlue,
+    PageId, Resolved, Row, RowTarget, Section, Shape, ShapeId, Sheet, SheetRef, mutate,
 };
 use larrygram_shapesheet::CellAddress;
 
@@ -85,6 +87,14 @@ impl End {
         match self {
             End::Begin => mutate::VIS_BEGIN,
             End::End => mutate::VIS_END,
+        }
+    }
+
+    /// This end's slot in a two-end array (`connects_of` order).
+    fn slot(self) -> usize {
+        match self {
+            End::Begin => 0,
+            End::End => 1,
         }
     }
 
@@ -189,18 +199,36 @@ fn connector_shape(ctx: &AppCtx, page: PageId, args: &Args) -> Result<ShapeId, C
     }
 }
 
-/// The target shape of a glue run.
+/// The target shape of a glue run. A 1-D shape is refused: connectors
+/// are never glue targets (ADR 0084 rule 1, task P7-49 goal 6).
 fn target_shape(ctx: &AppCtx, page: PageId, args: &Args) -> Result<ShapeId, CommandError> {
     let session = ctx.active_document().ok_or_else(no_document)?;
     let visio_id = need_integer(args, "target", "target shape id")?;
-    session
+    let target = session
         .document
         .shape_by_visio_id(page, visio_id)
         .ok_or_else(|| {
             CommandError::invalid_args(format!(
                 "unknown target shape id {visio_id} on the active page"
             ))
-        })
+        })?;
+    refuse_connector_target(&session.document, target, visio_id)?;
+    Ok(target)
+}
+
+/// Refuses a 1-D shape as a glue target (task P7-49 goal 6): the
+/// connector itself included, for every source.
+fn refuse_connector_target(
+    doc: &Document,
+    target: ShapeId,
+    visio_id: i32,
+) -> Result<(), CommandError> {
+    if doc.is_connector(target) {
+        return Err(CommandError::invalid_args(format!(
+            "target shape {visio_id} is a 1-D shape: connectors are never glue targets"
+        )));
+    }
+    Ok(())
 }
 
 /// The `Connect` record for one endpoint glue.
@@ -274,7 +302,8 @@ struct GlueEdit {
     /// The connector's sheet before the glue (restored on `revert`, so
     /// one undo restores the cells and the routed path exactly).
     old_sheet: Sheet,
-    /// The point the end lands on (page inches, the cached `V`).
+    /// The point the end lands on (the parent's coordinates, the
+    /// cached `V`).
     at: Point,
     /// The glue kind the endpoint formula spells (ADR 0084 rule 2).
     glue: EndGlue,
@@ -543,10 +572,28 @@ pub(crate) fn subtree_visio_ids(doc: &Document, roots: &[ShapeId]) -> Vec<i32> {
     ids
 }
 
-/// One end's stored point: its endpoint cells or, without them, its
-/// geometry path's end (then the pin as the last resort).
+/// The endpoint cells' value for one resolved page point: the cells of
+/// a connector inside a group are in its parent's coordinates (task
+/// P7-39's open issue), so the resolved page point maps into the
+/// parent's space on its way to the cells.
+fn end_cells_point(doc: &Document, connector: ShapeId, at: Point) -> Result<Point, CommandError> {
+    let parent = parent_transform(doc, connector)?;
+    let inverse = parent.invert().map_err(|_| singular())?;
+    Ok(inverse.apply(at))
+}
+
+/// One end's stored point as the cells hold it: the endpoint cells of a
+/// connector inside a group are in its parent's coordinates, so this is
+/// the value a freed end's cells keep (ADR 0084 rule 2). A shape
+/// without the endpoint cells falls back to its geometry path's end in
+/// page space, then the pin.
 fn stored_end_point(doc: &Document, connector: ShapeId, end: End) -> Point {
-    current_end_point(doc, connector, end)
+    if doc.is_connector(connector)
+        && let Ok(point) = doc.connector_end(connector, end.connector_end())
+    {
+        return point;
+    }
+    end_point_page(doc, connector, end)
         .or_else(|| fallback_point(doc, connector))
         .unwrap_or(Point::new(0.0, 0.0))
 }
@@ -624,16 +671,42 @@ fn glue(ctx: &mut AppCtx, inv: &Invocation, end: End) -> Result<Outcome, Command
     let connector = connector_shape(ctx, page, &inv.args)?;
     let target = target_shape(ctx, page, &inv.args)?;
     let point = optional_point(&inv.args)?;
-    let (target_visio_id, record, at) = {
+    let (target_visio_id, record, at, warnings) = {
         let doc = &ctx.active_document().ok_or_else(no_document)?.document;
         let target_visio_id = doc
             .shape(target)
             .ok_or_else(|| CommandError::failed("the target shape no longer exists"))?
             .visio_id;
         let record = glue_record(connector, target, target_visio_id, point, end, doc)?;
-        let mut warnings = Vec::new();
-        let at = end_point_for(doc, page, connector, end, Some(&record), &mut warnings);
-        (target_visio_id, record, at)
+        let current = doc.connects_of(page, connector).map_err(model_error)?;
+        let mut slots: [Option<&Connect>; 2] = [
+            current.first().and_then(Option::as_ref),
+            current.get(1).and_then(Option::as_ref),
+        ];
+        slots[end.slot()] = Some(&record);
+        let mut resolve_warnings = Vec::new();
+        let (begin, finish, _boxes) = resolved_ends(
+            doc,
+            page,
+            connector,
+            slots,
+            [None, None],
+            &mut resolve_warnings,
+        )?;
+        let at = match end {
+            End::Begin => begin.point,
+            End::End => finish.point,
+        };
+        // A resolution that lands nowhere keeps the end's current
+        // point: the cached `V` must stay finite (the model refuses a
+        // non-finite endpoint).
+        let at = if at.x.is_finite() && at.y.is_finite() {
+            at
+        } else {
+            end_point_page(doc, connector, end).unwrap_or(Point::new(0.0, 0.0))
+        };
+        let at = end_cells_point(doc, connector, at)?;
+        (target_visio_id, record, at, resolve_warnings)
     };
     let label = match end {
         End::Begin => "Glue connector begin",
@@ -655,15 +728,14 @@ fn glue(ctx: &mut AppCtx, inv: &Invocation, end: End) -> Result<Outcome, Command
     };
     let mut edit = staged?;
     edit.apply(ctx)?;
-    let warnings = Vec::new();
-    let _ = reroute_after_edit(ctx, page);
+    let routes = reroute_connectors(ctx, page, &[connector])?;
     Ok(edit_outcome(
         match end {
             End::Begin => format!("Connector begin glued to shape {target_visio_id}"),
             End::End => format!("Connector end glued to shape {target_visio_id}"),
         },
         warnings,
-        Box::new(edit),
+        with_routes(Box::new(edit), routes),
     ))
 }
 
@@ -691,8 +763,7 @@ pub(super) fn run_unglue(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, 
             .shape(connector)
             .map(|entry| entry.visio_id)
             .unwrap_or_default();
-        let mut warnings = Vec::new();
-        let at = end_point_for(doc, page, connector, end, None, &mut warnings);
+        let at = stored_end_point(doc, connector, end);
         let staged = GlueEdit::new(
             doc,
             session,
@@ -708,14 +779,14 @@ pub(super) fn run_unglue(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, 
     };
     edit.apply(ctx)?;
     let warnings = Vec::new();
-    let _ = reroute_after_edit(ctx, page);
+    let routes = reroute_connectors(ctx, page, &[connector])?;
     Ok(edit_outcome(
         match end {
             End::Begin => "Connector begin unglued",
             End::End => "Connector end unglued",
         },
         warnings,
-        Box::new(edit),
+        with_routes(Box::new(edit), routes),
     ))
 }
 
@@ -726,7 +797,7 @@ pub(super) fn run_reroute_all(
     _inv: &Invocation,
 ) -> Result<Outcome, CommandError> {
     let (_, page) = active_page(ctx)?;
-    let count = reroute_after_edit(ctx, page)?;
+    let count = reroute_all_on(ctx, page)?;
     Ok(outcome(
         if count == 1 {
             "Re-routed 1 connector".to_owned()
@@ -801,7 +872,7 @@ pub(super) fn run_style(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, C
         }
     }
     edit.apply(ctx)?;
-    let _ = reroute_after_edit(ctx, page);
+    let routes = reroute_connectors(ctx, page, &targets)?;
     Ok(edit_outcome(
         if style == RouteStyle::Straight {
             "Connector style: straight"
@@ -809,7 +880,7 @@ pub(super) fn run_style(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, C
             "Connector style: right angle"
         },
         Vec::new(),
-        Box::new(edit),
+        with_routes(Box::new(edit), routes),
     ))
 }
 
@@ -918,7 +989,7 @@ fn run_draw(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError>
         .edit
         .ok_or_else(|| CommandError::failed("the connector insert produced no edit"))?;
     let mut edits: Vec<Box<dyn Edit>> = vec![insert_edit];
-    let warnings = insert.warnings;
+    let mut warnings = insert.warnings;
 
     let result = (|| -> Result<(), CommandError> {
         let (session, page) = active_page(ctx)?;
@@ -932,6 +1003,12 @@ fn run_draw(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError>
                 .ok_or_else(|| CommandError::failed("the inserted connector is missing"))?
                 .visio_id
         };
+
+        // Both ends resolve together (ADR 0084 rule 3): a glued end
+        // lands where glue and every re-route land it, a free end at the
+        // point where the user released it. No master default endpoint
+        // is involved (task P7-32 goal 2).
+        let mut records: [Option<Connect>; 2] = [None, None];
         for (end, target, point) in [
             (End::Begin, begin_target, begin_point),
             (End::End, end_target, end_point),
@@ -939,11 +1016,7 @@ fn run_draw(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError>
             let Some(target_visio_id) = target else {
                 continue;
             };
-            let label = match end {
-                End::Begin => "Glue connector begin",
-                End::End => "Glue connector end",
-            };
-            let mut edit = {
+            let record = {
                 let doc = &ctx.active_document().ok_or_else(no_document)?.document;
                 let target = doc
                     .shape_by_visio_id(page, target_visio_id)
@@ -952,17 +1025,50 @@ fn run_draw(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError>
                             "unknown glue target {target_visio_id} on the active page"
                         ))
                     })?;
-                let record = glue_record(connector, target, target_visio_id, point, end, doc)?;
-                let mut resolve_warnings = Vec::new();
-                let at = end_point_for(
-                    doc,
-                    page,
-                    connector,
-                    end,
-                    Some(&record),
-                    &mut resolve_warnings,
-                );
-                let staged = GlueEdit::new(
+                refuse_connector_target(doc, target, target_visio_id)?;
+                glue_record(connector, target, target_visio_id, point, end, doc)?
+            };
+            records[end.slot()] = Some(record);
+        }
+        let (begin, finish, boxes) = {
+            let doc = &ctx.active_document().ok_or_else(no_document)?.document;
+            let mut resolve_warnings = Vec::new();
+            let resolved = resolved_ends(
+                doc,
+                page,
+                connector,
+                [
+                    records.first().and_then(Option::as_ref),
+                    records.get(1).and_then(Option::as_ref),
+                ],
+                [begin_free, end_free],
+                &mut resolve_warnings,
+            )?;
+            warnings.extend(resolve_warnings);
+            resolved
+        };
+        let [begin_record, end_record] = records;
+        for (end, record) in [(End::Begin, begin_record), (End::End, end_record)] {
+            let Some(record) = record else {
+                continue;
+            };
+            let label = match end {
+                End::Begin => "Glue connector begin",
+                End::End => "Glue connector end",
+            };
+            let mut edit = {
+                let doc = &ctx.active_document().ok_or_else(no_document)?.document;
+                let at = match end {
+                    End::Begin => begin.point,
+                    End::End => finish.point,
+                };
+                let at = if at.x.is_finite() && at.y.is_finite() {
+                    at
+                } else {
+                    end_point_page(doc, connector, end).unwrap_or(Point::new(0.0, 0.0))
+                };
+                let at = end_cells_point(doc, connector, at)?;
+                GlueEdit::new(
                     doc,
                     session,
                     label,
@@ -972,8 +1078,7 @@ fn run_draw(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError>
                     end,
                     Some(record),
                     at,
-                );
-                staged?
+                )?
             };
             edit.apply(ctx)?;
             edits.push(Box::new(edit));
@@ -981,28 +1086,15 @@ fn run_draw(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError>
 
         let mut path_edit = {
             let doc = &ctx.active_document().ok_or_else(no_document)?.document;
-            let transform = page_transform(doc, connector)?;
-            let current = geometry_endpoints(doc, connector, transform);
-            let fallback = transform_point(transform, loc_pin(doc, connector));
-            let begin = resolved_end(
-                doc,
-                page,
-                connector,
-                End::Begin,
-                begin_free,
-                current,
-                fallback,
-            );
-            let start = begin?;
-            let resolved =
-                resolved_end(doc, page, connector, End::End, end_free, current, fallback);
-            let end = resolved?;
-            let points = route(
-                start,
-                end,
-                &RouteOptions::new(route_style_for(doc, connector)),
-            )
-            .map_err(|error| CommandError::failed(format!("cannot route connector: {error}")))?;
+            let options = RouteOptions::new(route_style_for(doc, connector))
+                .with_exits(begin.exit, finish.exit)
+                .with_boxes(
+                    boxes.first().copied().flatten(),
+                    boxes.get(1).copied().flatten(),
+                );
+            let points = route(begin.point, finish.point, &options).map_err(|error| {
+                CommandError::failed(format!("cannot route connector: {error}"))
+            })?;
             PathEdit::new(doc, session, connector, points)?
         };
         path_edit.apply(ctx)?;
@@ -1028,82 +1120,142 @@ fn run_draw(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError>
     ))
 }
 
-/// One connector endpoint: its glue target's resolved point when that
-/// end is glued, else the given free point (or the connector's current
-/// geometry point). Task P5-17 Goal 6 routes both kinds the same way.
-fn resolved_end(
+/// Both resolved endpoints of one connector, in page space, through
+/// the one resolution of ADR 0084 rule 3 (`larrygram_geom::glue`).
+///
+/// `records` is the glue state the resolution sees: the `Connect`
+/// record of each end, `None` for a free end. `free_at` names the page
+/// point a free end sits at when it is not the end's own stored point
+/// (a fresh draw lands a free end where the user released it). A record
+/// whose target is gone, or a free end without a readable point, falls
+/// back to the end's own stored point. The returned flag is true when a
+/// record named a connection row its target does not have (the end fell
+/// back to dynamic glue, with one warning per such end).
+fn resolved_ends(
     doc: &Document,
     page: PageId,
     connector: ShapeId,
-    end: End,
-    free: Option<Point>,
-    current: Option<(Point, Point)>,
-    fallback: Point,
-) -> Result<Point, CommandError> {
+    records: [Option<&Connect>; 2],
+    free_at: [Option<Point>; 2],
+    warnings: &mut Vec<String>,
+) -> Result<(Candidate, Candidate, [Option<Obstacle>; 2]), CommandError> {
+    let mut targets: [Option<GlueTarget>; 2] = [None, None];
+    let mut kinds: [Option<GlueKind>; 2] = [None, None];
+    let mut free: [Option<Point>; 2] = [None, None];
     let connector_visio = doc
         .shape(connector)
-        .ok_or_else(|| CommandError::failed("the connector shape is missing"))?
-        .visio_id;
-    let connects = doc.connects_of(page, connector).map_err(model_error)?;
-    let (index, reference, current_point) = match end {
-        End::Begin => (
-            0,
-            current.map(|(start, _)| start),
-            current.map(|(start, _)| start),
-        ),
-        End::End => (1, current.map(|(_, end)| end), current.map(|(_, end)| end)),
-    };
-    if let Some(connect) = connects.get(index).and_then(Option::as_ref) {
-        let mut lines = Vec::new();
-        return resolve_endpoint(
-            doc,
-            page,
-            connect,
-            reference.unwrap_or(fallback),
-            connector_visio,
-            &mut lines,
-        )
-        .ok_or_else(|| CommandError::failed("cannot resolve a glued connector end"));
-    }
-    free.or(current_point)
-        .ok_or_else(|| CommandError::invalid_args("a free connector end needs its x and y"))
-}
-
-/// The resolved point of one end (page inches) with the resolution the
-/// re-route uses (task P7-31 keeps the old landing; P7-32 replaces
-/// it): the glue target's row point for point glue, the nearest bounds
-/// point for dynamic glue, and the end's own current point when it is
-/// free. A point that cannot be resolved falls back to that current
-/// point (the re-route refreshes the cached `V` afterwards).
-fn end_point_for(
-    doc: &Document,
-    page: PageId,
-    connector: ShapeId,
-    end: End,
-    record: Option<&Connect>,
-    warnings: &mut Vec<String>,
-) -> Point {
-    let current = current_end_point(doc, connector, end);
-    let reference = current
-        .or_else(|| fallback_point(doc, connector))
-        .unwrap_or(Point::new(0.0, 0.0));
-    match record {
-        Some(connect) => {
-            let visio = doc
-                .shape(connector)
-                .map(|entity| entity.visio_id)
-                .unwrap_or_default();
-            resolve_endpoint(doc, page, connect, reference, visio, warnings).unwrap_or(reference)
+        .map(|entity| entity.visio_id)
+        .unwrap_or_default();
+    for (slot, end) in [End::Begin, End::End].into_iter().enumerate() {
+        match records.get(slot).copied().flatten() {
+            Some(connect) => {
+                let target = doc
+                    .shape_by_visio_id(page, connect.to_sheet)
+                    .map(|target| glue_target(doc, target))
+                    .transpose();
+                match target {
+                    Ok(Some(target)) => {
+                        targets[slot] = Some(target);
+                        kinds[slot] = Some(match connection_index(connect) {
+                            Some(ix) => GlueKind::Point(u32::try_from(ix).unwrap_or(u32::MAX)),
+                            None => GlueKind::Shape,
+                        });
+                    }
+                    Ok(None) => {
+                        free[slot] = free_at
+                            .get(slot)
+                            .copied()
+                            .flatten()
+                            .or_else(|| end_point_page(doc, connector, end))
+                            .or_else(|| fallback_point(doc, connector));
+                    }
+                    Err(error) => {
+                        // A target whose facts cannot be read (a cyclic
+                        // parent chain, a broken transform): the end
+                        // keeps its point and the run degrades to one
+                        // warning (never a failure, AGENTS.md section 6).
+                        warnings.push(format!(
+                            "connector {connector_visio} cannot resolve its glue to shape {}: {error}",
+                            connect.to_sheet
+                        ));
+                        free[slot] = free_at
+                            .get(slot)
+                            .copied()
+                            .flatten()
+                            .or_else(|| end_point_page(doc, connector, end))
+                            .or_else(|| fallback_point(doc, connector));
+                    }
+                }
+            }
+            None => {
+                free[slot] = free_at
+                    .get(slot)
+                    .copied()
+                    .flatten()
+                    .or_else(|| end_point_page(doc, connector, end))
+                    .or_else(|| fallback_point(doc, connector));
+            }
         }
-        None => reference,
     }
+    let spec = |slot: usize| -> EndSpec<'_> {
+        match (
+            targets.get(slot).and_then(Option::as_ref),
+            kinds.get(slot).copied().flatten(),
+        ) {
+            (Some(target), Some(kind)) => EndSpec::Glued(target, kind),
+            _ => EndSpec::Free(
+                free.get(slot)
+                    .copied()
+                    .flatten()
+                    .unwrap_or(Point::new(0.0, 0.0)),
+            ),
+        }
+    };
+    let (begin, end, missing) = resolve_ends(&spec(0), &spec(1));
+    if missing {
+        for slot in [0usize, 1usize] {
+            let (Some(target), Some(GlueKind::Point(ix))) = (
+                targets.get(slot).and_then(Option::as_ref),
+                kinds.get(slot).copied().flatten(),
+            ) else {
+                continue;
+            };
+            let landed = target
+                .points
+                .iter()
+                .position(|(row, _, _)| *row == ix)
+                .and_then(|position| target.candidates().into_iter().nth(position))
+                .filter(|candidate| candidate.point.x.is_finite() && candidate.point.y.is_finite());
+            if landed.is_none() {
+                warnings.push(format!(
+                    "connector {connector_visio} has no connection point {ix}; glued to the shape instead"
+                ));
+            }
+        }
+    }
+    let boxes = [
+        targets
+            .first()
+            .and_then(Option::as_ref)
+            .map(GlueTarget::obstacle),
+        targets
+            .get(1)
+            .and_then(Option::as_ref)
+            .map(GlueTarget::obstacle),
+    ];
+    Ok((begin, end, boxes))
 }
 
-/// The end's current point in page inches: its endpoint cells when it
-/// has them, else its geometry path's end.
-fn current_end_point(doc: &Document, connector: ShapeId, end: End) -> Option<Point> {
-    if let Ok(point) = doc.connector_end(connector, end.connector_end()) {
-        return Some(point);
+/// The end's current point in page inches: its endpoint cells (which a
+/// connector inside a group keeps in its parent's coordinates) through
+/// the parent transform, else its geometry path's end. A shape without
+/// the endpoint cells (a legacy record-only connector) reads its
+/// geometry: `connector_end` alone would answer the cell defaults.
+fn end_point_page(doc: &Document, connector: ShapeId, end: End) -> Option<Point> {
+    if doc.is_connector(connector)
+        && let Ok(point) = doc.connector_end(connector, end.connector_end())
+    {
+        return Some(parent_transform(doc, connector).ok()?.apply(point));
     }
     let transform = page_transform(doc, connector).ok()?;
     let (start, last) = geometry_endpoints(doc, connector, transform)?;
@@ -1538,66 +1690,287 @@ pub(crate) fn rebind_copied_glue(
 // Re-route
 // ---------------------------------------------------------------------------
 
-/// Recomputes every glued connector's path on `page` (ADR 0045).
+/// Which connectors a re-route pass picks (ADR 0084 rule 5).
+#[derive(Debug, Clone, Copy)]
+enum Scope<'a> {
+    /// Every glued connector on the page (`connector.reroute_all`).
+    All,
+    /// The shapes one edit changed: the pass re-routes connectors
+    /// whose glued end and the connector sit on **different sides** of
+    /// the move — the target is in the moved set (or its subtree) and
+    /// the connector is not, or the other way round (task P7-50 goal
+    /// 2). A rigid move carries a connector and both targets together,
+    /// so its stored route survives it byte for byte.
+    Changed(&'a [ShapeId]),
+    /// The connectors whose own ends, glue or style the edit changed:
+    /// exactly these re-route.
+    Forced(&'a [ShapeId]),
+}
+
+/// One undoable record of the rows a re-route rewrote (task P7-49
+/// goal 1): `revert` puts the old rows back byte for byte and `apply`
+/// (redo) the new ones, so one undo restores the shapes and the routes
+/// together and a stored custom or Visio route survives both. It keeps
+/// only what `write_path` touches — the `Geometry` sections and the
+/// endpoint, pin and size cells (task P7-50 minor 5) — not two whole
+/// sheets. `connector.reroute_all` is **not** an edit (ADR 0040 rule
+/// 3) and records nothing here.
+#[derive(Debug)]
+pub(crate) struct RouteEdit {
+    session: SessionId,
+    /// The connectors the pass rewrote, with their path rows around it.
+    entries: Vec<RouteRows>,
+}
+
+/// One connector's path rows before and after the pass rewrote it
+/// (task P7-50 minor 5: only what `write_path` touches).
+#[derive(Debug)]
+struct RouteRows {
+    shape: ShapeId,
+    before: PathRows,
+    after: PathRows,
+}
+
+/// The rows and cells one path write touches (task P7-50 minor 5):
+/// the `Geometry` sections and the 1-D endpoint, pin and size cells,
+/// each with the position it holds in the sheet.
+#[derive(Debug, Clone, Default)]
+struct PathRows {
+    geometry: Vec<(usize, Section)>,
+    cells: Vec<(usize, Cell)>,
+}
+
+/// The cells a path write writes or derives: the four endpoint cells,
+/// the pin and size cells of ADR 0084 rule 1 (`write_connector_ends`
+/// and `write_connector_pins`), and the `LocPin*` and `Txt*`
+/// derivations of `write_cell` from `Width` and `Height` (the model's
+/// documented-defaults table).
+const PATH_CELLS: [&str; 17] = [
+    "BeginX",
+    "BeginY",
+    "EndX",
+    "EndY",
+    "PinX",
+    "PinY",
+    "Width",
+    "Height",
+    "LocPinX",
+    "LocPinY",
+    "Angle",
+    "TxtPinX",
+    "TxtPinY",
+    "TxtLocPinX",
+    "TxtLocPinY",
+    "TxtWidth",
+    "TxtHeight",
+];
+
+impl PathRows {
+    /// The shape's `Geometry` sections and path cells, with their
+    /// positions (a path write touches nothing else in the sheet).
+    fn capture(doc: &Document, shape: ShapeId) -> Self {
+        let mut out = Self::default();
+        if let Some(entity) = doc.shape(shape) {
+            for (index, section) in entity.sheet.sections.iter().enumerate() {
+                if section.name.as_str() == "Geometry" {
+                    out.geometry.push((index, section.clone()));
+                }
+            }
+            for (index, cell) in entity.sheet.cells.iter().enumerate() {
+                if PATH_CELLS.contains(&cell.name.as_str()) {
+                    out.cells.push((index, cell.clone()));
+                }
+            }
+        }
+        out
+    }
+
+    /// Puts the captured rows and cells back: every `Geometry` section
+    /// and path cell the write changed (or added) goes, and the
+    /// captured ones return at their recorded positions (ascending, so
+    /// every index is still the right slot).
+    fn restore(&self, doc: &mut Document, shape: ShapeId) {
+        let Some(entity) = doc.shape_mut(shape) else {
+            return;
+        };
+        entity
+            .sheet
+            .sections
+            .retain(|section| section.name.as_str() != "Geometry");
+        for (index, section) in &self.geometry {
+            let at = (*index).min(entity.sheet.sections.len());
+            entity.sheet.sections.insert(at, section.clone());
+        }
+        entity
+            .sheet
+            .cells
+            .retain(|cell| !PATH_CELLS.contains(&cell.name.as_str()));
+        for (index, cell) in &self.cells {
+            let at = (*index).min(entity.sheet.cells.len());
+            entity.sheet.cells.insert(at, cell.clone());
+        }
+    }
+}
+
+impl Edit for RouteEdit {
+    fn label(&self) -> &str {
+        "Route connector"
+    }
+
+    fn apply(&mut self, ctx: &mut AppCtx) -> Result<(), CommandError> {
+        let session = self.session;
+        let doc = document_mut(ctx, session)?;
+        for entry in &self.entries {
+            entry.after.restore(doc, entry.shape);
+        }
+        ctx.touch_session(session);
+        Ok(())
+    }
+
+    fn revert(&mut self, ctx: &mut AppCtx) -> Result<(), CommandError> {
+        let session = self.session;
+        let doc = document_mut(ctx, session)?;
+        for entry in self.entries.iter().rev() {
+            entry.before.restore(doc, entry.shape);
+        }
+        ctx.touch_session(session);
+        Ok(())
+    }
+}
+
+/// Folds a re-route's snapshot into the step it belongs to (task P7-49
+/// goal 1): one undo restores the shapes and the routes together, and
+/// redo puts the recorded rows back with no recompute.
+pub(crate) fn with_routes(step: Box<dyn Edit>, routes: Option<Box<dyn Edit>>) -> Box<dyn Edit> {
+    match routes {
+        Some(routes) => {
+            let mut composite = CompositeEdit::new(step.label().to_owned());
+            composite.push(step);
+            composite.push(routes);
+            Box::new(composite)
+        }
+        None => step,
+    }
+}
+
+/// The scoped re-route after an editing command that moved, resized,
+/// rotated, flipped or deleted shapes (ADR 0084 rule 5, amended
+/// 2026-11-04 for task P7-50 goal 2): connectors whose glued end and
+/// own body sit on different sides of the move. Every other connector
+/// keeps its stored geometry rows byte for byte.
 ///
-/// The editing commands call this after a move/resize/rotate/delete, and
-/// the undo/redo runner after a step. It is idempotent, not undoable, and
-/// returns the number of connectors whose path it rewrote. It acts on
-/// the active document only. A glue whose
-/// target is detached is dropped with one warning line. A missing page or
-/// session is `Ok(0)`: a re-route pass never fails an edit that already
-/// succeeded.
-pub(crate) fn reroute_after_edit(ctx: &mut AppCtx, page: PageId) -> Result<usize, CommandError> {
+/// Returns the snapshot edit the caller folds into its step, `None`
+/// when the pass rewrote nothing. One warning line per dropped glue;
+/// a missing page or session is `Ok(None)`: a re-route pass never
+/// fails an edit that already succeeded.
+pub(crate) fn reroute_after_edit(
+    ctx: &mut AppCtx,
+    page: PageId,
+    changed: &[ShapeId],
+) -> Result<Option<Box<dyn Edit>>, CommandError> {
+    let (_, routes) = reroute_scoped(ctx, page, Scope::Changed(changed))?;
+    Ok(routes)
+}
+
+/// The forced re-route of the connectors whose own ends, glue or style
+/// the edit changed (glue, unglue, style): exactly these connectors
+/// re-route, whatever the scope says.
+pub(crate) fn reroute_connectors(
+    ctx: &mut AppCtx,
+    page: PageId,
+    connectors: &[ShapeId],
+) -> Result<Option<Box<dyn Edit>>, CommandError> {
+    let (_, routes) = reroute_scoped(ctx, page, Scope::Forced(connectors))?;
+    Ok(routes)
+}
+
+/// The full pass of `connector.reroute_all`: every glued connector on
+/// the page (ADR 0045), not scoped to one edit and not an edit itself.
+pub(crate) fn reroute_all_on(ctx: &mut AppCtx, page: PageId) -> Result<usize, CommandError> {
+    let (count, _) = reroute_scoped(ctx, page, Scope::All)?;
+    Ok(count)
+}
+
+/// The shared hook body: one pass on the active document, one warning
+/// line per dropped glue, never a failed edit (the
+/// [`reroute_after_edit`] contract).
+fn reroute_scoped(
+    ctx: &mut AppCtx,
+    page: PageId,
+    scope: Scope<'_>,
+) -> Result<(usize, Option<Box<dyn Edit>>), CommandError> {
     // `PageId` is a position, so only the active document can own it: the
     // editing commands and undo/redo all act on the active document.
     let Some(slot) = ctx.active_document_mut() else {
-        return Ok(0);
+        return Ok((0, None));
     };
     if slot.document.page(page).is_none() {
-        return Ok(0);
+        return Ok((0, None));
     }
     let session = slot.id;
     let mut warnings = Vec::new();
-    let count = reroute_document(&mut slot.document, page, &mut warnings)?;
+    let (count, entries) = reroute_document(&mut slot.document, page, scope, &mut warnings)?;
     for line in warnings {
         ctx.record_warning(line);
     }
     ctx.touch_session(session);
-    Ok(count)
-}
-
-/// Re-routes the active page's glued connectors after an editing
-/// command that moved, deleted or glued shapes (ADR 0045 rule 3).
-///
-/// One pass after the edit, and one warning line when the pass cannot
-/// run: the edit itself already succeeded and stays applied (the
-/// [`reroute_after_edit`] contract).
-pub(crate) fn reroute_quietly(ctx: &mut AppCtx) {
-    let page = ctx
-        .active_document()
-        .and_then(|session| session.active_page);
-    if let Some(page) = page {
-        reroute_quietly_on(ctx, page);
-    }
+    // The pass writes values only (the rows and the cached endpoint
+    // points), so the snapshot dirties nothing: recalc owns no cell it
+    // must recompute, and a recompute would replace cached values the
+    // file kept (task P7-49 goal 1).
+    let edit = (count > 0).then(|| Box::new(RouteEdit { session, entries }) as Box<dyn Edit>);
+    Ok((count, edit))
 }
 
 /// One re-route pass on `page`, with one warning line when the pass
 /// cannot run (task P5-19 coverage: the one helper and the one spelling
-/// of the "connectors were not re-routed" message).
-pub(crate) fn reroute_quietly_on(ctx: &mut AppCtx, page: PageId) {
-    if let Err(error) = reroute_after_edit(ctx, page) {
-        ctx.record_warning(format!("connectors were not re-routed: {error}"));
+/// of the "connectors were not re-routed" message). The returned edit
+/// is the caller's to fold into its step.
+pub(crate) fn reroute_quietly(ctx: &mut AppCtx, changed: &[ShapeId]) -> Option<Box<dyn Edit>> {
+    let page = ctx
+        .active_document()
+        .and_then(|session| session.active_page);
+    page.and_then(|page| reroute_quietly_on(ctx, page, changed))
+}
+
+/// One re-route pass on `page`, with one warning line when the pass
+/// cannot run (task P5-19 coverage: the one helper and the one spelling
+/// of the "connectors were not re-routed" message). The returned edit
+/// is the caller's to fold into its step.
+pub(crate) fn reroute_quietly_on(
+    ctx: &mut AppCtx,
+    page: PageId,
+    changed: &[ShapeId],
+) -> Option<Box<dyn Edit>> {
+    match reroute_after_edit(ctx, page, changed) {
+        Ok(routes) => routes,
+        Err(error) => {
+            ctx.record_warning(format!("connectors were not re-routed: {error}"));
+            None
+        }
     }
 }
 
-/// The re-route pass over one document.
+/// The re-route pass over one document (ADR 0084 rule 5).
+///
+/// The candidates are the connectors the page's records name. The pass
+/// recomputes only the ones the scope picks: on different sides of a
+/// move (rule 5), or (for [`Scope::Forced`]) named outright. It
+/// returns the sheets it rewrote, around the write, so the caller's
+/// undo step can put them back.
 fn reroute_document(
     doc: &mut Document,
     page: PageId,
+    scope: Scope<'_>,
     warnings: &mut Vec<String>,
-) -> Result<usize, CommandError> {
+) -> Result<(usize, Vec<RouteRows>), CommandError> {
     let connector_ids = connector_visio_ids(doc, page)?;
+    let changed_visio = match scope {
+        Scope::All | Scope::Forced(_) => Vec::new(),
+        Scope::Changed(changed) => subtree_visio_ids(doc, changed),
+    };
     let mut routed = 0usize;
+    let mut entries: Vec<RouteRows> = Vec::new();
     for visio_id in connector_ids {
         let Some(connector) = doc.shape_by_visio_id(page, visio_id) else {
             drop_all_for(doc, page, visio_id);
@@ -1611,70 +1984,146 @@ fn reroute_document(
         if ends.first().is_none_or(Option::is_none) && ends.get(1).is_none_or(Option::is_none) {
             continue;
         }
-        // ADR 0056: a connector whose geometry rows carry formulas is
-        // owned by recalc (a master-driven dynamic connector); the
-        // router never writes its rows.
-        if crate::recalc::geometry_is_formula_driven(doc, connector) {
+        let visio_id = doc
+            .shape(connector)
+            .map(|entity| entity.visio_id)
+            .unwrap_or_default();
+        if !picks(scope, &changed_visio, &ends, connector, visio_id) {
             continue;
         }
-        let transform = match page_transform(doc, connector) {
-            Ok(transform) => transform,
-            Err(error) => {
-                warnings.push(format!(
-                    "connector {visio_id} has no usable transform: {error}"
-                ));
-                continue;
-            }
-        };
-        let mut references = [None, None];
-        for (slot, end) in ends.iter().enumerate() {
-            let Some(connect) = end else {
-                continue;
-            };
-            let Some(target) = doc.shape_by_visio_id(page, connect.to_sheet) else {
-                continue;
-            };
-            let Some(rect) = page_bounds(doc, target) else {
-                continue;
-            };
-            let center = rect_center(rect);
-            if let Some(other) = references.get_mut(1 - slot) {
-                *other = Some(center);
-            }
-        }
-        let pin = transform_point(transform, loc_pin(doc, connector));
-        let current = geometry_endpoints(doc, connector, transform);
-        let begin_ref = references
-            .first()
-            .copied()
-            .flatten()
-            .or(current.map(|(start, _)| start))
-            .unwrap_or(pin);
-        let end_ref = references
-            .get(1)
-            .copied()
-            .flatten()
-            .or(current.map(|(_, end)| end))
-            .unwrap_or(pin);
-        let begin = match ends.first().and_then(Option::as_ref) {
-            Some(connect) => resolve_endpoint(doc, page, connect, begin_ref, visio_id, warnings),
-            None => current.map(|(start, _)| start).or(Some(pin)),
-        };
-        let end = match ends.get(1).and_then(Option::as_ref) {
-            Some(connect) => resolve_endpoint(doc, page, connect, end_ref, visio_id, warnings),
-            None => current.map(|(_, end)| end).or(Some(pin)),
-        };
-        let (Some(start), Some(end)) = (begin, end) else {
-            continue;
-        };
-        let style = route_style_for(doc, connector);
-        let points = route(start, end, &RouteOptions::new(style)).map_err(|error| {
-            CommandError::failed(format!("cannot route connector {visio_id}: {error}"))
-        })?;
-        write_path(doc, connector, &points)?;
-        routed = routed.saturating_add(1);
+        routed = routed.saturating_add(route_one(
+            doc,
+            page,
+            connector,
+            &ends,
+            warnings,
+            &mut entries,
+        )?);
     }
-    Ok(routed)
+    // A forced scope also re-routes its connectors when no record
+    // names them (free ends and a style change). A moved connector is
+    // never one of them: its edit translated its path (task P7-49
+    // goal 2, rule 1).
+    if let Scope::Forced(changed) = scope {
+        for &connector in changed {
+            if !doc.is_connector(connector) {
+                continue;
+            }
+            let ends = doc.connects_of(page, connector).map_err(model_error)?;
+            let glued = ends.first().is_some_and(Option::is_some)
+                || ends.get(1).is_some_and(Option::is_some);
+            if glued {
+                continue; // the record loop above already picked it
+            }
+            routed = routed.saturating_add(route_one(
+                doc,
+                page,
+                connector,
+                &ends,
+                warnings,
+                &mut entries,
+            )?);
+        }
+    }
+    Ok((routed, entries))
+}
+
+/// Whether the scope picks one connector (ADR 0084 rule 5, amended
+/// 2026-11-04 for task P7-50 goal 2): under [`Scope::Changed`] a
+/// connector re-routes only when a glued end's target and the
+/// connector are on different sides of the move — the target is in the
+/// moved set (or its subtree) and the connector is not, or the other
+/// way round. A rigid group move carries a connector and both its
+/// targets together, so a stored route survives it byte for byte; a
+/// connector whose own ends, glue or style changed is named outright
+/// by [`Scope::Forced`].
+fn picks(
+    scope: Scope<'_>,
+    changed_visio: &[i32],
+    ends: &[Option<Connect>; 2],
+    connector: ShapeId,
+    connector_visio: i32,
+) -> bool {
+    match scope {
+        Scope::All => true,
+        Scope::Forced(connectors) => connectors.contains(&connector),
+        Scope::Changed(_) => {
+            let moved = changed_visio.contains(&connector_visio);
+            ends.iter()
+                .flatten()
+                .any(|connect| changed_visio.contains(&connect.to_sheet) != moved)
+        }
+    }
+}
+
+/// The routes one connector fresh and writes its path, recording its
+/// sheet around the write; `1` when it rewrote the rows, `0` when it
+/// left them alone (a formula-driven geometry belongs to recalc, ADR
+/// 0056).
+fn route_one(
+    doc: &mut Document,
+    page: PageId,
+    connector: ShapeId,
+    ends: &[Option<Connect>; 2],
+    warnings: &mut Vec<String>,
+    entries: &mut Vec<RouteRows>,
+) -> Result<usize, CommandError> {
+    // ADR 0056: a connector whose geometry rows carry formulas is
+    // owned by recalc (a master-driven dynamic connector); the
+    // router never writes its rows.
+    if crate::recalc::geometry_is_formula_driven(doc, connector) {
+        return Ok(0);
+    }
+    let visio_id = doc
+        .shape(connector)
+        .map(|entity| entity.visio_id)
+        .unwrap_or_default();
+    if page_transform(doc, connector).is_err() {
+        warnings.push(format!("connector {visio_id} has no usable transform"));
+        return Ok(0);
+    }
+    let (begin, end, boxes) = resolved_ends(
+        doc,
+        page,
+        connector,
+        [
+            ends.first().and_then(Option::as_ref),
+            ends.get(1).and_then(Option::as_ref),
+        ],
+        [None, None],
+        warnings,
+    )?;
+    for (candidate, connect) in [
+        (begin, ends.first().and_then(Option::as_ref)),
+        (end, ends.get(1).and_then(Option::as_ref)),
+    ] {
+        let finite = candidate.point.x.is_finite() && candidate.point.y.is_finite();
+        if connect.is_some() && !finite {
+            warnings.push(format!(
+                "connector {visio_id} has no resolvable glue; its path is unchanged"
+            ));
+            return Ok(0);
+        }
+    }
+    let style = route_style_for(doc, connector);
+    let options = RouteOptions::new(style)
+        .with_exits(begin.exit, end.exit)
+        .with_boxes(
+            boxes.first().copied().flatten(),
+            boxes.get(1).copied().flatten(),
+        );
+    let points = route(begin.point, end.point, &options).map_err(|error| {
+        CommandError::failed(format!("cannot route connector {visio_id}: {error}"))
+    })?;
+    let before = PathRows::capture(doc, connector);
+    write_path(doc, connector, &points)?;
+    let after = PathRows::capture(doc, connector);
+    entries.push(RouteRows {
+        shape: connector,
+        before,
+        after,
+    });
+    Ok(1)
 }
 
 /// Whether one `Connect` record names a **connector end** (`VisFromParts`
@@ -1751,9 +2200,7 @@ fn drop_detached_targets(
         let end = End::of(connect);
         let at = doc
             .shape_by_visio_id(page, connector_visio_id)
-            .and_then(|shape| {
-                current_end_point(doc, shape, end).or_else(|| fallback_point(doc, shape))
-            })
+            .map(|shape| stored_end_point(doc, shape, end))
             .unwrap_or(Point::new(0.0, 0.0));
         lost_ends.push((end, at));
     }
@@ -1786,41 +2233,154 @@ fn drop_detached_targets(
     }
 }
 
-/// One connector endpoint in page inches: from its glue target, or the
-/// nearest point of the target's bounds.
-fn resolve_endpoint(
-    doc: &Document,
-    page: PageId,
-    connect: &Connect,
-    reference: Point,
-    connector_visio_id: i32,
-    warnings: &mut Vec<String>,
-) -> Option<Point> {
-    let target = doc.shape_by_visio_id(page, connect.to_sheet)?;
-    let transform = page_transform(doc, target).ok()?;
-    if connect.to_part >= mutate::VIS_CONNECTION_POINT
-        || connect.to_cell.starts_with("Connections.")
-    {
-        let ix = connection_index(connect);
-        if let Some(local) = ix.and_then(|ix| {
-            let ix = i32::try_from(ix).ok()?;
-            doc.connection_points_indexed(target)
-                .into_iter()
-                .find(|(row, _)| *row == ix)
-                .map(|(_, point)| point)
-        }) {
-            let point = transform_point(transform, local);
-            if point.x.is_finite() && point.y.is_finite() {
-                return Some(point);
-            }
-        }
-        warnings.push(format!(
-            "connector {connector_visio_id} has no connection point {}; using the outline",
-            ix.map_or(-1, |ix| ix as i32)
-        ));
+/// The facts one glue target offers the resolver (ADR 0084 rule 3):
+/// its connection rows in file order, its local box and its page
+/// transform.
+fn glue_target(doc: &Document, shape: ShapeId) -> Result<GlueTarget, CommandError> {
+    let mut reader = CellReader::new(doc);
+    let sheet = SheetRef::Shape(shape);
+    let number = |reader: &mut CellReader<'_>, name: &str| {
+        reader
+            .number(sheet, &CellName::new(name))
+            .map_err(model_error)
+    };
+    let width = box_size(number(&mut reader, "Width")?);
+    let height = box_size(number(&mut reader, "Height")?);
+    let points = doc
+        .connection_points_indexed(shape)
+        .into_iter()
+        .map(|(ix, local)| {
+            let direction = connection_direction(doc, shape, ix);
+            (u32::try_from(ix).unwrap_or(u32::MAX), local, direction)
+        })
+        .collect();
+    Ok(GlueTarget {
+        points,
+        local_box: Rect::new(Point::new(0.0, 0.0), Point::new(width, height)),
+        transform: page_transform(doc, shape)?,
+    })
+}
+
+/// A local box side length: a negative or non-finite size counts as
+/// zero (the degenerate box never panics the resolver).
+fn box_size(value: f64) -> f64 {
+    if value.is_finite() && value > 0.0 {
+        value
+    } else {
+        0.0
     }
-    let bounds = page_bounds(doc, target)?;
-    Some(nearest_on_rect(bounds, reference))
+}
+
+/// The connection row's local `DirX`/`DirY` direction (ADR 0084 rule
+/// 4), or `None` when the row has none (both cells zero, missing or
+/// non-finite).
+///
+/// The row is found where [`Document::connection_points_indexed`] finds
+/// its point: the shape's own `Connection` rows when it has any, else
+/// the nearest master with rows. A master's directions scale to the
+/// instance like its points do.
+fn connection_direction(doc: &Document, shape: ShapeId, ix: i32) -> Option<Point> {
+    let entity = doc.shape(shape)?;
+    if !connection_rows(&entity.sheet.sections).is_empty() {
+        return row_direction(&entity.sheet.sections, ix, 1.0, 1.0);
+    }
+    for master in doc.master_chain_shapes(shape, 128) {
+        let found = doc.shape(master)?;
+        if connection_rows(&found.sheet.sections).is_empty() {
+            continue;
+        }
+        let (scale_x, scale_y) = master_scales(entity, found);
+        return row_direction(&found.sheet.sections, ix, scale_x, scale_y);
+    }
+    None
+}
+
+/// The `Connection` rows of a sheet, across every section of that name
+/// (the model's [`Document::connection_points_indexed`] rule).
+fn connection_rows(sections: &[Section]) -> Vec<&Row> {
+    sections
+        .iter()
+        .filter(|section| section.name.as_str() == "Connection")
+        .flat_map(|section| section.rows.iter())
+        .collect()
+}
+
+/// The direction of the row whose `IX` is `ix`, scaled per axis like
+/// [`Document::connection_points_indexed`] scales its point. Only
+/// `DirX`/`DirY` are directions: an extended row's `A` and `B` are not
+/// (task P7-49 goal 9).
+fn row_direction(sections: &[Section], ix: i32, scale_x: f64, scale_y: f64) -> Option<Point> {
+    for (position, row) in connection_rows(sections).into_iter().enumerate() {
+        let row_ix = row
+            .ix
+            .filter(|ix| *ix >= 0)
+            .unwrap_or_else(|| i32::try_from(position).unwrap_or(i32::MAX));
+        if row_ix != ix {
+            continue;
+        }
+        let x = row_number(row, "DirX").unwrap_or(0.0);
+        let y = row_number(row, "DirY").unwrap_or(0.0);
+        let point = Point::new(x * scale_x, y * scale_y);
+        if point.x.is_finite() && point.y.is_finite() && (point.x != 0.0 || point.y != 0.0) {
+            return Some(point);
+        }
+        return None;
+    }
+    None
+}
+
+/// The cached number of one row cell, or `None`.
+fn row_number(row: &Row, name: &str) -> Option<f64> {
+    row.cells
+        .iter()
+        .find(|cell| cell.name.as_str() == name)
+        .and_then(|cell| match &cell.value {
+            Some(CellValue::Number(value)) => Some(*value),
+            _ => None,
+        })
+}
+
+/// The per-axis scale from a master shape's local box to the
+/// instance's box (the model's connection-point rule). A zero or
+/// non-finite size leaves that axis unscaled.
+fn master_scales(instance: &Shape, master: &Shape) -> (f64, f64) {
+    (
+        axis_scale(
+            direct_number(instance, "Width"),
+            direct_number(master, "Width"),
+        ),
+        axis_scale(
+            direct_number(instance, "Height"),
+            direct_number(master, "Height"),
+        ),
+    )
+}
+
+/// The direct cached number of one shape cell, or `None`.
+fn direct_number(shape: &Shape, name: &str) -> Option<f64> {
+    shape
+        .sheet
+        .cells
+        .iter()
+        .find(|cell| cell.name.as_str() == name)
+        .and_then(|cell| match &cell.value {
+            Some(CellValue::Number(value)) => Some(*value),
+            _ => None,
+        })
+}
+
+/// One axis' scale factor: the instance size over the master size, or
+/// `1.0` when either size is missing, non-finite or the master size is
+/// zero.
+fn axis_scale(instance: Option<f64>, master: Option<f64>) -> f64 {
+    match (instance, master) {
+        (Some(instance), Some(master))
+            if instance.is_finite() && master.is_finite() && master != 0.0 =>
+        {
+            instance / master
+        }
+        _ => 1.0,
+    }
 }
 
 /// The `Connection` row index of a record (`VisToParts` = 100 + IX, or
@@ -1855,9 +2415,12 @@ fn page_transform(doc: &Document, shape: ShapeId) -> Result<Transform, CommandEr
     }
     let mut reader = CellReader::new(doc);
     let mut transform = Transform::identity();
+    // Innermost first: each local transform runs before its parent's
+    // (task P7-49 goal 5: a translating parent hid the old reversed
+    // order).
     for id in chain.iter().rev() {
         let local = local_transform(&mut reader, *id)?;
-        transform = transform.then(local);
+        transform = local.then(transform);
     }
     Ok(transform)
 }
@@ -1901,72 +2464,9 @@ fn loc_pin(doc: &Document, shape: ShapeId) -> Point {
     Point::new(read(&mut reader, "LocPinX"), read(&mut reader, "LocPinY"))
 }
 
-/// The page-space bounds of a shape's local box.
-fn page_bounds(doc: &Document, shape: ShapeId) -> Option<Rect> {
-    let entity = doc.shape(shape)?;
-    let mut reader = CellReader::new(doc);
-    let sheet = SheetRef::Shape(shape);
-    let width = reader.number(sheet, &CellName::new("Width")).unwrap_or(0.0);
-    let height = reader
-        .number(sheet, &CellName::new("Height"))
-        .unwrap_or(0.0);
-    let transform = page_transform(doc, shape).ok()?;
-    let corners = [
-        Point::new(0.0, 0.0),
-        Point::new(width, 0.0),
-        Point::new(width, height),
-        Point::new(0.0, height),
-    ];
-    let mut min = Point::new(f64::INFINITY, f64::INFINITY);
-    let mut max = Point::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
-    for corner in corners {
-        let point = transform_point(transform, corner);
-        if !point.x.is_finite() || !point.y.is_finite() {
-            return None;
-        }
-        min = Point::new(min.x.min(point.x), min.y.min(point.y));
-        max = Point::new(max.x.max(point.x), max.y.max(point.y));
-    }
-    let _ = entity;
-    Some(Rect::new(min, max))
-}
-
 /// Maps a local point, keeping only finite results callers can use.
 fn transform_point(transform: Transform, point: Point) -> Point {
     transform.apply(point)
-}
-
-/// The centre of a rectangle.
-fn rect_center(rect: Rect) -> Point {
-    Point::new(
-        (rect.min.x + rect.max.x) / 2.0,
-        (rect.min.y + rect.max.y) / 2.0,
-    )
-}
-
-/// The nearest point on a rectangle's outline to `reference`.
-fn nearest_on_rect(rect: Rect, reference: Point) -> Point {
-    let inside = rect.contains(reference);
-    if !inside {
-        return Point::new(
-            reference.x.clamp(rect.min.x, rect.max.x),
-            reference.y.clamp(rect.min.y, rect.max.y),
-        );
-    }
-    let left = reference.x - rect.min.x;
-    let right = rect.max.x - reference.x;
-    let bottom = reference.y - rect.min.y;
-    let top = rect.max.y - reference.y;
-    let smallest = left.min(right).min(bottom).min(top);
-    if smallest == left {
-        Point::new(rect.min.x, reference.y)
-    } else if smallest == right {
-        Point::new(rect.max.x, reference.y)
-    } else if smallest == bottom {
-        Point::new(reference.x, rect.min.y)
-    } else {
-        Point::new(reference.x, rect.max.y)
-    }
 }
 
 /// The connector's current path endpoints in page inches, when it has a
@@ -2380,7 +2880,7 @@ mod tests {
         .expect("glue end");
         let before = path_points(&ctx, connector);
         assert_eq!(before.first(), Some(&Point::new(0.0, 1.5)));
-        assert_eq!(before.last(), Some(&Point::new(4.0, 2.0)));
+        assert_eq!(before.last(), Some(&Point::new(6.0, 2.5)));
 
         ctx.selection.shapes = vec![left];
         ctx.selection.anchor = Some(left);
@@ -2428,12 +2928,12 @@ mod tests {
         )
         .expect("style");
         let points = path_points(&ctx, connector);
-        assert_eq!(points.len(), 3, "{points:?}");
+        assert!(points.len() > 2, "{points:?}");
         assert_eq!(points.first(), Some(&Point::new(0.0, 1.5)));
-        assert_eq!(points.last(), Some(&Point::new(4.0, 2.0)));
+        assert_eq!(points.last(), Some(&Point::new(6.0, 2.5)));
         dispatch(&mut ctx, "edit.undo", Args::new()).expect("undo style");
         // The undo restores no local style; the default routes right
-        // angle too (ADR 0084 rule 8), so the same elbow comes back.
+        // angle too (ADR 0084 rule 8), so the same route comes back.
         assert_eq!(path_points(&ctx, connector), points);
     }
 
@@ -2489,7 +2989,7 @@ mod tests {
 
     #[test]
     fn reroute_acts_on_the_active_document_only() {
-        let (mut ctx, session, page, _connector, _left, _right) = fixture();
+        let (mut ctx, session, page, connector, _left, _right) = fixture();
         dispatch(
             &mut ctx,
             "connector.glue_end",
@@ -2509,11 +3009,21 @@ mod tests {
 
         // The second document also has a page 0, but it is the active one:
         // the pass must not touch the first document.
-        assert_eq!(reroute_after_edit(&mut ctx, page).expect("reroute"), 0);
+        assert!(
+            reroute_connectors(&mut ctx, page, &[connector])
+                .expect("reroute")
+                .is_none(),
+            "the pass rewrites nothing on the other document"
+        );
         assert_eq!(ctx.documents.get(first).expect("first").changes, before);
 
         ctx.active = Some(first);
-        assert_eq!(reroute_after_edit(&mut ctx, page).expect("reroute"), 1);
+        assert!(
+            reroute_connectors(&mut ctx, page, &[connector])
+                .expect("reroute")
+                .is_some(),
+            "the pass rewrites the connector on its own document"
+        );
     }
 
     #[test]
@@ -2598,36 +3108,6 @@ mod tests {
     }
 
     #[test]
-    fn nearest_point_handles_inside_and_outside_references() {
-        let rect = Rect::new(Point::new(0.0, 0.0), Point::new(4.0, 2.0));
-        assert_eq!(
-            nearest_on_rect(rect, Point::new(-1.0, 1.0)),
-            Point::new(0.0, 1.0)
-        );
-        assert_eq!(
-            nearest_on_rect(rect, Point::new(1.0, -3.0)),
-            Point::new(1.0, 0.0)
-        );
-        assert_eq!(
-            nearest_on_rect(rect, Point::new(0.5, 1.0)),
-            Point::new(0.0, 1.0)
-        );
-        assert_eq!(
-            nearest_on_rect(rect, Point::new(3.5, 1.0)),
-            Point::new(4.0, 1.0)
-        );
-        assert_eq!(
-            nearest_on_rect(rect, Point::new(2.0, 0.25)),
-            Point::new(2.0, 0.0)
-        );
-        assert_eq!(
-            nearest_on_rect(rect, Point::new(2.0, 1.75)),
-            Point::new(2.0, 2.0)
-        );
-        assert_eq!(rect_center(rect), Point::new(2.0, 1.0));
-    }
-
-    #[test]
     fn connection_indices_read_both_spellings() {
         let mut connect = Connect::new();
         connect.to_part = mutate::VIS_CONNECTION_POINT + 4;
@@ -2655,8 +3135,12 @@ mod tests {
             .document
             .detach_shape(connector)
             .expect("detach");
-        let count = reroute_after_edit(&mut ctx, page).expect("reroute");
-        assert_eq!(count, 0);
+        assert!(
+            reroute_after_edit(&mut ctx, page, &[])
+                .expect("reroute")
+                .is_none(),
+            "nothing was routed"
+        );
         let doc = &ctx.active_document().expect("session").document;
         assert!(doc.page(page).expect("page").connects.is_empty());
         assert_eq!(
@@ -2669,14 +3153,14 @@ mod tests {
     #[test]
     fn a_re_route_without_a_page_or_connectors_is_a_no_op() {
         let mut ctx = AppCtx::new(Settings::default());
-        assert_eq!(reroute_after_edit(&mut ctx, PageId { index: 0 }), Ok(0));
+        assert!(reroute_after_edit(&mut ctx, PageId { index: 0 }, &[]).is_ok());
         let (mut ctx, _session, page, _connector, _left, _right) = fixture();
-        assert_eq!(reroute_after_edit(&mut ctx, page), Ok(0));
-        assert_eq!(reroute_after_edit(&mut ctx, PageId { index: 9 }), Ok(0));
+        assert!(reroute_after_edit(&mut ctx, page, &[]).is_ok());
+        assert!(reroute_after_edit(&mut ctx, PageId { index: 9 }, &[]).is_ok());
     }
 
     #[test]
-    fn a_missing_connection_point_falls_back_to_the_outline() {
+    fn a_missing_connection_point_falls_back_to_dynamic_glue() {
         let (mut ctx, _session, page, connector, left, _right) = fixture();
         {
             let doc = ctx.active_document_mut().expect("session");
@@ -2689,7 +3173,7 @@ mod tests {
             connect.to_part = mutate::VIS_CONNECTION_POINT + 8;
             doc.document.add_connect(page, connect).expect("connect");
         }
-        reroute_after_edit(&mut ctx, page).expect("reroute");
+        reroute_connectors(&mut ctx, page, &[connector]).expect("reroute");
         assert!(
             ctx.warnings
                 .iter()
@@ -2697,10 +3181,274 @@ mod tests {
             "{:?}",
             ctx.warnings
         );
+        // The end falls back to dynamic glue: the left box has one
+        // candidate (its connection point 0 at the page point (0, 1.5)),
+        // so the end lands there.
         assert_eq!(
             path_points(&ctx, connector).first(),
-            Some(&Point::new(2.0, 2.0))
+            Some(&Point::new(0.0, 1.5))
         );
+    }
+
+    #[test]
+    fn an_extended_rows_a_and_b_are_not_a_direction() {
+        // A connection row with A/B (the extended spellings) but no
+        // DirX/DirY: the exit is the nearest side's normal, not A/B.
+        let mut doc = Document::new();
+        let page = doc.add_page("Page-1").expect("page");
+        let mut shape = shape_at(1, 2.0, 2.0, 2.0, 1.0);
+        let mut section = Section::new(SectionName::from_static("Connection"));
+        let mut row = Row::new();
+        row.row_type = Some("Connection".to_owned());
+        row.ix = Some(0);
+        row.cells = vec![
+            cell("X", 1.0),
+            cell("Y", 1.0),
+            cell("A", 3.0),
+            cell("B", 0.0),
+        ];
+        section.rows.push(row);
+        shape.sheet.sections.push(section);
+        let target = doc.insert_shape(page, shape, None).expect("target");
+        let mut ctx = AppCtx::new(Settings::default());
+        ctx.open_document(DocumentSession::new(doc, None));
+        let session = ctx.active_document().expect("session");
+        let built = glue_target(&session.document, target).expect("target");
+        let candidates = built.candidates();
+        assert_eq!(
+            candidates[0].exit,
+            Some(larrygram_geom::Point::new(0.0, 1.0)),
+            "the nearest side's normal (the row's top), not A/B"
+        );
+    }
+
+    #[test]
+    fn a_route_edit_labels_and_restores_itself() {
+        let (mut ctx, session, page, connector, _left, _right) = fixture();
+        {
+            let doc = ctx.active_document_mut().expect("session");
+            let mut connect = Connect::new();
+            connect.from_sheet = doc.document.shape(connector).expect("c").visio_id;
+            connect.from_cell = "BeginX".to_owned();
+            connect.from_part = mutate::VIS_BEGIN;
+            connect.to_sheet = 1;
+            connect.to_cell = "PinX".to_owned();
+            connect.to_part = mutate::VIS_WHOLE_SHAPE;
+            doc.document.add_connect(page, connect).expect("connect");
+        }
+        let _ = session;
+        // A forced pass re-routes the connector and hands back its
+        // snapshot: the edit labels itself and its apply and revert
+        // write the same sheets.
+        let mut edit = reroute_connectors(&mut ctx, page, &[connector])
+            .expect("pass")
+            .expect("it rewrote rows");
+        assert_eq!(edit.label(), "Route connector");
+        let sheet = |ctx: &AppCtx| {
+            ctx.active_document()
+                .expect("session")
+                .document
+                .shape(connector)
+                .expect("c")
+                .sheet
+                .clone()
+        };
+        let before = sheet(&ctx);
+        edit.revert(&mut ctx).expect("revert");
+        edit.apply(&mut ctx).expect("apply");
+        assert_eq!(sheet(&ctx), before, "apply writes the same sheets");
+    }
+
+    /// Task P7-50 minor 5: the re-route snapshot keeps only what
+    /// `write_path` touches (the `Geometry` sections and the endpoint,
+    /// pin and size cells) and restores the sheet exactly, the cells
+    /// the write added included, with the unrelated cell and section
+    /// never in the snapshot.
+    #[test]
+    fn the_route_snapshot_restores_only_what_the_path_write_touches() {
+        let mut doc = Document::new();
+        let page = doc.add_page("Page-1").expect("page");
+        // A 1-D shape with no local-pin or angle cells (the path write
+        // adds them), an unrelated cell and an unrelated section.
+        let mut shape = Shape::new(ShapeId { index: 0 }, 1);
+        shape.sheet.cells = vec![
+            cell("BeginX", 1.0),
+            cell("BeginY", 1.0),
+            cell("EndX", 3.0),
+            cell("EndY", 1.0),
+            cell("PinX", 2.0),
+            cell("PinY", 1.0),
+            cell("Width", 2.0),
+            cell("Height", 0.2),
+        ];
+        shape.sheet.cells.push(Cell {
+            name: CellName::new("Comment"),
+            formula: None,
+            value: Some(CellValue::Str("keep me".to_owned())),
+            unit: larrygram_geom::Unit::Unitsless,
+            preserved: Preserved::new(),
+        });
+        let mut geometry = Section::new(SectionName::from_static("Geometry"));
+        for (ix, (kind, x, y)) in [("MoveTo", 0.0, 0.1), ("LineTo", 2.0, 0.1)]
+            .into_iter()
+            .enumerate()
+        {
+            let mut row = Row::new();
+            row.row_type = Some(kind.to_owned());
+            row.ix = Some(i32::try_from(ix).unwrap_or(0));
+            row.cells = vec![cell("X", x), cell("Y", y)];
+            geometry.rows.push(row);
+        }
+        shape.sheet.sections.push(geometry);
+        shape
+            .sheet
+            .sections
+            .push(Section::new(SectionName::from_static("Character")));
+        let id = doc.insert_shape(page, shape, None).expect("shape");
+        let original = doc.shape(id).expect("shape").sheet.clone();
+        let before = PathRows::capture(&doc, id);
+        assert!(
+            !before
+                .cells
+                .iter()
+                .any(|(_, cell)| cell.name.as_str() == "Comment"),
+            "the snapshot holds no unrelated cell"
+        );
+        assert!(
+            before
+                .geometry
+                .iter()
+                .all(|(_, section)| section.name.as_str() == "Geometry"),
+            "the snapshot holds no unrelated section"
+        );
+        write_path(&mut doc, id, &[Point::new(2.0, 2.0), Point::new(5.0, 4.0)]).expect("write");
+        let written = doc.shape(id).expect("shape").sheet.clone();
+        let after = PathRows::capture(&doc, id);
+        assert!(
+            before.cells.len() < after.cells.len(),
+            "the write added the pin cells: {} < {}",
+            before.cells.len(),
+            after.cells.len()
+        );
+        before.restore(&mut doc, id);
+        assert_eq!(
+            doc.shape(id).expect("shape").sheet,
+            original,
+            "revert is exact"
+        );
+        after.restore(&mut doc, id);
+        assert_eq!(
+            doc.shape(id).expect("shape").sheet,
+            written,
+            "redo is exact"
+        );
+    }
+
+    #[test]
+    fn a_dangling_record_falls_back_to_the_stored_point() {
+        let (mut ctx, _session, page, connector, _left, _right) = fixture();
+        {
+            let doc = ctx.active_document_mut().expect("session");
+            let mut connect = Connect::new();
+            connect.from_sheet = doc.document.shape(connector).expect("c").visio_id;
+            connect.from_cell = "EndX".to_owned();
+            connect.from_part = mutate::VIS_END;
+            connect.to_sheet = 99;
+            connect.to_cell = "PinX".to_owned();
+            connect.to_part = mutate::VIS_WHOLE_SHAPE;
+            doc.document.add_connect(page, connect).expect("connect");
+        }
+        let session = ctx.active_document().expect("session");
+        let doc = &session.document;
+        let ends = doc.connects_of(page, connector).expect("ends");
+        let mut warnings = Vec::new();
+        let (_begin, _end, boxes) = resolved_ends(
+            doc,
+            page,
+            connector,
+            [
+                ends.first().and_then(Option::as_ref),
+                ends.get(1).and_then(Option::as_ref),
+            ],
+            [None, None],
+            &mut warnings,
+        )
+        .expect("resolve");
+        assert!(
+            boxes.iter().all(Option::is_none),
+            "no target box: {boxes:?}"
+        );
+    }
+
+    #[test]
+    fn a_forced_pass_re_routes_a_connector_with_free_ends() {
+        // The Forced scope re-routes its connectors even when no
+        // record names them (rule 5's "its own ends" category).
+        let (mut ctx, _session, page, _connector, _left, _right) = fixture();
+        let line = {
+            let session = ctx.active_document_mut().expect("session");
+            session
+                .document
+                .insert_shape(page, one_d(8, (1.0, 6.0), (5.0, 6.5), false), None)
+                .expect("line")
+        };
+        let edit = reroute_connectors(&mut ctx, page, &[line])
+            .expect("pass")
+            .expect("it rewrote rows");
+        assert_eq!(edit.label(), "Route connector");
+    }
+
+    #[test]
+    fn a_singular_parent_names_the_failure() {
+        // The guard's contract (the transform construction itself is
+        // never singular: the scale is always plus or minus one, so no
+        // flow reaches it).
+        assert_eq!(singular().to_string(), "singular parent transform");
+    }
+
+    #[test]
+    fn connectors_are_never_glue_targets() {
+        let (mut ctx, _session, page, _connector, _left, _right) = fixture();
+        let line = {
+            let session = ctx.active_document_mut().expect("session");
+            session
+                .document
+                .insert_shape(page, one_d(7, (1.0, 1.0), (5.0, 1.0), false), None)
+                .expect("line")
+        };
+        let visio = ctx
+            .active_document()
+            .expect("session")
+            .document
+            .shape(line)
+            .expect("line")
+            .visio_id;
+
+        // Gluing the line to itself: refused, for any source.
+        let error = dispatch(
+            &mut ctx,
+            "connector.glue_begin",
+            args(&[
+                ("connector", i64::from(visio)),
+                ("target", i64::from(visio)),
+            ]),
+        )
+        .expect_err("the connector itself");
+        assert!(error.to_string().contains("never glue targets"), "{error}");
+
+        // And through a draw.
+        let error = dispatch(
+            &mut ctx,
+            "connector.draw",
+            Args::new()
+                .with("stencil", ArgValue::Text("Basic Flowchart".to_owned()))
+                .with("master", ArgValue::Text("Connector".to_owned()))
+                .with("x", ArgValue::Number(1.0))
+                .with("y", ArgValue::Number(1.0))
+                .with("end_target", ArgValue::Integer(i64::from(visio))),
+        )
+        .expect_err("a 1-D target through the draw");
+        assert!(error.to_string().contains("never glue targets"), "{error}");
     }
 
     #[test]
@@ -2848,9 +3596,10 @@ mod tests {
     #[test]
     fn a_reroute_with_no_document_is_a_no_op() {
         let mut ctx = AppCtx::new(Settings::default());
-        assert_eq!(
-            reroute_after_edit(&mut ctx, PageId { index: 0 }).expect("no document"),
-            0
+        assert!(
+            reroute_after_edit(&mut ctx, PageId { index: 0 }, &[])
+                .expect("no document")
+                .is_none()
         );
     }
 
@@ -3143,7 +3892,7 @@ mod tests {
             entity.shapes.retain(|shape| *shape != target);
         }
         let mut warnings = Vec::new();
-        reroute_document(&mut doc, page, &mut warnings).expect("pass");
+        reroute_document(&mut doc, page, Scope::Changed(&[]), &mut warnings).expect("pass");
         assert!(doc.page(page).expect("page").connects.is_empty());
         let end_x = doc
             .shape(line)

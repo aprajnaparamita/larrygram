@@ -6,7 +6,7 @@
 //! master. Glue is stored the way Visio stores it (`docs/ui/connectors.md`
 //! section 8): the endpoint formula (`PAR(PNT(...))` for point glue,
 //! `_WALKGLUE(...)` for dynamic glue), the cached `V` (the resolved
-//! point in page inches), the end's trigger formula and the
+//! point in the parent's coordinates), the end's trigger formula and the
 //! `Connects` record, all in one edit. [`Document::write_connector_end`]
 //! writes the cells and the trigger and leaves the records to the
 //! caller (the commands crate writes them in the same undoable edit).
@@ -107,7 +107,9 @@ impl Document {
         })
     }
 
-    /// The page-space point of one end, from its endpoint cells.
+    /// The point of one end from its endpoint cells, in the parent's
+    /// coordinates (a connector inside a group keeps its endpoint cells
+    /// there, not in page inches).
     ///
     /// A shape without a numeric point on both cells is an
     /// [`Error::BadCell`].
@@ -127,7 +129,7 @@ impl Document {
     }
 
     /// Writes one end's endpoint cells (formula and cached value at
-    /// `at`, page inches) and its trigger for `glue`, replacing any
+    /// `at`, the parent's coordinates) and its trigger for `glue`, replacing any
     /// formula already there (ADR 0084 rule 2). It does not touch the
     /// `Connects` records; the caller writes them in the same edit.
     ///

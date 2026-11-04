@@ -214,10 +214,11 @@ fn a_draw_writes_the_formulas_and_the_records_together() {
     );
     // The cached values are the resolved points in page inches: the
     // point glue lands exactly on the row, the dynamic glue on the
-    // nearest bounds point (the old landing; P7-32 replaces it).
+    // candidate nearest the fixed end (ADR 0084 rule 3): box 2's top
+    // connection point at (6, 2.5).
     assert!((number(&doc, drawn, "BeginX") - 2.0).abs() < 1e-9);
     assert!((number(&doc, drawn, "BeginY") - 2.5).abs() < 1e-9);
-    assert!((number(&doc, drawn, "EndX") - 5.0).abs() < 1e-9);
+    assert!((number(&doc, drawn, "EndX") - 6.0).abs() < 1e-9);
     assert!((number(&doc, drawn, "EndY") - 2.5).abs() < 1e-9);
 }
 

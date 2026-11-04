@@ -32,7 +32,7 @@ use crate::recalc::subtree_addresses;
 use crate::undo::Edit;
 use crate::{Invocation, Outcome};
 
-use super::connector::reroute_quietly;
+use super::connector::{reroute_quietly, with_routes};
 use super::edit::{
     CellEdit, PageKey, count_label, document_mut, number_literal, page_key, resolve_page,
     selection_targets, without_one_d,
@@ -249,6 +249,7 @@ fn align(ctx: &mut AppCtx, align: Align) -> Result<Outcome, CommandError> {
     let (session, targets, warnings) = targets(ctx)?;
     let bounds = union(&targets);
     let mut edit = CompositeEdit::new(align.label(targets.len()));
+    let mut moved: Vec<ShapeId> = Vec::new();
     {
         let doc = document_mut(ctx, session)?;
         for target in &targets {
@@ -261,16 +262,19 @@ fn align(ctx: &mut AppCtx, align: Align) -> Result<Outcome, CommandError> {
                 Align::Bottom => (0.0, bounds.min.y - target.rect.min.y),
             };
             if let Some(step) = move_cell_edit(doc, session, "Align shape", target, dx, dy)? {
+                moved.push(target.id);
                 edit.push(step);
             }
         }
     }
     edit.apply(ctx)?;
-    reroute_quietly(ctx);
+    // The scoped re-route takes the shapes the edit changed (ADR 0084
+    // rule 5): a shape that did not move is not one of them.
+    let routes = reroute_quietly(ctx, &moved);
     Ok(edit_outcome(
         align.label(targets.len()),
         warnings,
-        Box::new(edit),
+        with_routes(Box::new(edit), routes),
     ))
 }
 
@@ -297,6 +301,7 @@ enum Axis {
 /// Spaces the selected shapes equally along `axis` (ADR 0047).
 fn distribute(ctx: &mut AppCtx, axis: Axis) -> Result<Outcome, CommandError> {
     let (session, mut targets, warnings) = targets(ctx)?;
+    let mut moved: Vec<ShapeId> = Vec::new();
     let label = match axis {
         Axis::Horizontal => "Distribute horizontally",
         Axis::Vertical => "Distribute vertically",
@@ -356,6 +361,7 @@ fn distribute(ctx: &mut AppCtx, axis: Axis) -> Result<Outcome, CommandError> {
                 if let Some(step) =
                     move_cell_edit(doc, session, "Distribute shape", target, dx, dy)?
                 {
+                    moved.push(target.id);
                     edit.push(step);
                 }
                 cursor = wanted + size + gap;
@@ -363,8 +369,14 @@ fn distribute(ctx: &mut AppCtx, axis: Axis) -> Result<Outcome, CommandError> {
         }
     }
     edit.apply(ctx)?;
-    reroute_quietly(ctx);
-    Ok(edit_outcome(label, warnings, Box::new(edit)))
+    // The scoped re-route takes the shapes the edit changed (ADR 0084
+    // rule 5): a shape that did not move is not one of them.
+    let routes = reroute_quietly(ctx, &moved);
+    Ok(edit_outcome(
+        label,
+        warnings,
+        with_routes(Box::new(edit), routes),
+    ))
 }
 
 /// The selected shapes with their frames and pins, and the page they are
@@ -516,7 +528,7 @@ fn run_group(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandErro
     let key = page_key(doc, page)?;
     let mut edit = GroupEdit::new(session, key, targets.clone());
     edit.apply(ctx)?;
-    reroute_quietly(ctx);
+    let routes = reroute_quietly(ctx, &targets);
     let group = edit.group;
     if let Some(group) = group {
         select(ctx, session, page, &[group]);
@@ -524,7 +536,7 @@ fn run_group(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandErro
     Ok(edit_outcome(
         count_label("Group", targets.len()),
         warnings,
-        Box::new(edit),
+        with_routes(Box::new(edit), routes),
     ))
 }
 
@@ -819,12 +831,12 @@ fn run_ungroup(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandEr
     if edit.is_empty() {
         return Err(CommandError::failed("no selected group to ungroup"));
     }
-    reroute_quietly(ctx);
+    let routes = reroute_quietly(ctx, &children);
     select(ctx, session, page, &children);
     Ok(edit_outcome(
         count_label("Ungroup", edit.len()),
         warnings,
-        Box::new(edit),
+        with_routes(Box::new(edit), routes),
     ))
 }
 
@@ -1217,10 +1229,14 @@ fn rotate(ctx: &mut AppCtx, delta: f64, label: &str) -> Result<Outcome, CommandE
     }
     edit.apply(ctx)?;
     // The glued connectors follow the rotated shape (the same quiet
-    // re-route the moves do, task P7-21): the post state is what a
-    // re-route on undo or redo recomputes (ADR 0045 rule 3).
-    reroute_quietly(ctx);
-    Ok(edit_outcome(label, warnings, Box::new(edit)))
+    // re-route the moves do, task P7-21), and the rewritten rows join
+    // the step (task P7-49 goal 1).
+    let routes = reroute_quietly(ctx, &targets);
+    Ok(edit_outcome(
+        label,
+        warnings,
+        with_routes(Box::new(edit), routes),
+    ))
 }
 
 /// `arrange.flip_horizontal`: toggles the `FlipX` cell.
@@ -1271,10 +1287,14 @@ fn flip(ctx: &mut AppCtx, cell: &'static str, label: &str) -> Result<Outcome, Co
     }
     edit.apply(ctx)?;
     // A glued connector derives its end through the shape's transform,
-    // flips included: re-route like the moves do (task P7-21), so the
-    // post state is what a re-route on undo or redo recomputes.
-    reroute_quietly(ctx);
-    Ok(edit_outcome(label, warnings, Box::new(edit)))
+    // flips included: re-route like the moves do (task P7-21), and the
+    // rewritten rows join the step (task P7-49 goal 1).
+    let routes = reroute_quietly(ctx, &targets);
+    Ok(edit_outcome(
+        label,
+        warnings,
+        with_routes(Box::new(edit), routes),
+    ))
 }
 
 /// `arrange.align.box`: the Align gallery's `value` argument names the
@@ -1352,6 +1372,7 @@ fn run_distribute_middle(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome,
 /// Middle"; the gap variant is [`distribute`]).
 fn distribute_centres(ctx: &mut AppCtx, axis: Axis) -> Result<Outcome, CommandError> {
     let (session, mut targets, warnings) = targets(ctx)?;
+    let mut moved: Vec<ShapeId> = Vec::new();
     let label = match axis {
         Axis::Horizontal => "Distribute center",
         Axis::Vertical => "Distribute middle",
@@ -1389,14 +1410,21 @@ fn distribute_centres(ctx: &mut AppCtx, axis: Axis) -> Result<Outcome, CommandEr
                 if let Some(step) =
                     move_cell_edit(doc, session, "Distribute shape", target, dx, dy)?
                 {
+                    moved.push(target.id);
                     edit.push(step);
                 }
             }
         }
     }
     edit.apply(ctx)?;
-    reroute_quietly(ctx);
-    Ok(edit_outcome(label, warnings, Box::new(edit)))
+    // The scoped re-route takes the shapes the edit changed (ADR 0084
+    // rule 5): a shape that did not move is not one of them.
+    let routes = reroute_quietly(ctx, &moved);
+    Ok(edit_outcome(
+        label,
+        warnings,
+        with_routes(Box::new(edit), routes),
+    ))
 }
 
 /// The `value` argument as text, or the programmatic contract's

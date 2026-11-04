@@ -29,6 +29,7 @@
 //! cell by one multiplication (`LocPinX = Width*0.5`).
 
 use crate::cell::{Cell, CellValue};
+use crate::connector::ConnectorEnd;
 use crate::defaults::documented_default;
 use crate::document::Document;
 use crate::error::Error;
@@ -1440,6 +1441,12 @@ impl Document {
             }
             rebase.push((*id, pin));
         }
+        // A 1-D member's endpoint cells take the same map as its pin
+        // (task P7-50 goal 1): they live in the parent's coordinates,
+        // so the new parent's frame re-bases them. An end with no
+        // readable point is left alone (nothing sensible to map).
+        let ids: Vec<ShapeId> = rebase.iter().map(|(id, _)| *id).collect();
+        let ends = self.mapped_ends(&ids, |point| Point::new(point.x - min.x, point.y - min.y));
 
         // The group's frame is the identity offset (its pin minus its
         // local pin is the box minimum), so a member's page position is
@@ -1488,6 +1495,7 @@ impl Document {
             ] {
                 self.write_cell(SheetRef::Shape(*id), &CellName::from_static(cell), &write)?;
             }
+            self.write_rebased_ends(*id, &ends)?;
         }
         Ok(group)
     }
@@ -1534,6 +1542,10 @@ impl Document {
                 linear.flip_y,
             ));
         }
+        // A 1-D child's endpoint cells take the same map as its pin
+        // (task P7-50 goal 1): the dissolved group's transform.
+        let ids: Vec<ShapeId> = rebase.iter().map(|(id, ..)| *id).collect();
+        let ends = self.mapped_ends(&ids, |point| group_frame.transform().apply(point));
         for (id, pin_x, pin_y, angle, flip_x, flip_y) in &rebase {
             let (pin_x, pin_y, angle) = (*pin_x, *pin_y, *angle);
             let (flip_x, flip_y) = (*flip_x, *flip_y);
@@ -1567,6 +1579,7 @@ impl Document {
             ] {
                 self.write_cell(SheetRef::Shape(*id), &CellName::from_static(cell), &write)?;
             }
+            self.write_rebased_ends(*id, &ends)?;
         }
         // The children leave the group first, so the detach only takes
         // the group itself (and only its own `Connects`) away.
@@ -1600,6 +1613,55 @@ impl Document {
             }
         }
         Ok(children)
+    }
+
+    /// The 1-D shapes' endpoint pairs mapped into their new parent's
+    /// coordinates (task P7-50 goal 1): each readable pair takes `map`,
+    /// the same affine map the pins take. A shape that is not 1-D, has
+    /// no readable ends, or maps to a non-finite point is left out (its
+    /// cells are never written).
+    fn mapped_ends(
+        &self,
+        shapes: &[ShapeId],
+        map: impl Fn(Point) -> Point,
+    ) -> Vec<(ShapeId, Point, Point)> {
+        let mut out = Vec::new();
+        for id in shapes {
+            if !self.is_connector(*id) {
+                continue;
+            }
+            let (Ok(begin), Ok(end)) = (
+                self.connector_end(*id, ConnectorEnd::Begin),
+                self.connector_end(*id, ConnectorEnd::End),
+            ) else {
+                continue;
+            };
+            let (begin, end) = (map(begin), map(end));
+            if [begin.x, begin.y, end.x, end.y]
+                .iter()
+                .all(|value| value.is_finite())
+            {
+                out.push((*id, begin, end));
+            }
+        }
+        out
+    }
+
+    /// Writes `shape`'s mapped endpoint pair from `ends` (task P7-50
+    /// goal 1): a glue formula is kept and only its cached `V` refreshes
+    /// ([`Document::write_connector_ends`]); a shape `ends` does not
+    /// list keeps its cells as they are.
+    fn write_rebased_ends(
+        &mut self,
+        shape: ShapeId,
+        ends: &[(ShapeId, Point, Point)],
+    ) -> Result<(), Error> {
+        for (id, begin, end) in ends {
+            if *id == shape {
+                return self.write_connector_ends(shape, *begin, *end);
+            }
+        }
+        Ok(())
     }
 
     /// Writes the connector's geometry rows as one path (the routed
@@ -2673,6 +2735,250 @@ mod tests {
         let error = doc.ungroup_shape(group).expect_err("overflow");
         assert!(matches!(error, Error::BadCell(_)), "got {error:?}");
         assert_eq!(doc, before, "a failed mutation changes nothing");
+    }
+
+    /// A 1-D shape: the four endpoint cells (`begin` to `end`) and the
+    /// pin and size cells of ADR 0084 rule 1.
+    fn one_d(begin: (f64, f64), end: (f64, f64)) -> Shape {
+        let mut shape = Shape::new(ShapeId { index: 0 }, 0);
+        shape.sheet.cells = vec![
+            number_cell("BeginX", begin.0),
+            number_cell("BeginY", begin.1),
+            number_cell("EndX", end.0),
+            number_cell("EndY", end.1),
+            number_cell("PinX", (begin.0 + end.0) / 2.0),
+            number_cell("PinY", (begin.1 + end.1) / 2.0),
+            number_cell("Width", end.0 - begin.0),
+            number_cell("Height", 0.5),
+        ];
+        shape
+    }
+
+    /// The cached value of one of `shape`'s cells.
+    fn value(doc: &Document, shape: ShapeId, name: &str) -> Option<CellValue> {
+        doc.shape(shape)
+            .expect("shape")
+            .sheet
+            .cells
+            .iter()
+            .find(|cell| cell.name.as_str() == name)
+            .and_then(|cell| cell.value.clone())
+    }
+
+    /// The formula of one of `shape`'s cells.
+    fn formula(doc: &Document, shape: ShapeId, name: &str) -> Option<String> {
+        doc.shape(shape)
+            .expect("shape")
+            .sheet
+            .cells
+            .iter()
+            .find(|cell| cell.name.as_str() == name)
+            .and_then(|cell| cell.formula.clone())
+    }
+
+    /// Task P7-50 goal 1: `group_shapes` and `ungroup_shape` map a
+    /// 1-D member's endpoint cells into the new parent's coordinates,
+    /// the same way the pins are, and a glued end keeps its formula.
+    #[test]
+    fn group_and_ungroup_rebase_a_one_d_members_endpoint_cells() {
+        use crate::connector::{ConnectorEnd, EndGlue};
+        let (mut doc, page) = document();
+        let mut target = box_shape(2.0, 1.0);
+        target.sheet.cells = vec![
+            number_cell("Width", 2.0),
+            number_cell("Height", 1.0),
+            number_cell("PinX", 10.0),
+            number_cell("PinY", 10.0),
+        ];
+        let target = doc.insert_shape(page, target, None).expect("target");
+        let target_visio = doc.shape(target).expect("target").visio_id;
+        let connector = doc
+            .insert_shape(page, one_d((4.0, 2.5), (6.0, 2.5)), None)
+            .expect("connector");
+        // The begin end is glued to the target's row 0; the end end is
+        // free.
+        doc.write_connector_end(
+            connector,
+            ConnectorEnd::Begin,
+            Point::new(4.0, 2.5),
+            EndGlue::Point {
+                sheet: target_visio,
+                ix: 0,
+            },
+        )
+        .expect("glue");
+
+        // The members' bounding box is (4, 2.25)..(11, 10.5), so the
+        // map into the group's coordinates is a shift by (-4, -2.25).
+        let group = doc.group_shapes(page, &[target, connector]).expect("group");
+        assert_eq!(
+            value(&doc, connector, "BeginX"),
+            Some(CellValue::Number(0.0)),
+            "begin x re-based"
+        );
+        assert_eq!(
+            value(&doc, connector, "BeginY"),
+            Some(CellValue::Number(0.25)),
+            "begin y re-based"
+        );
+        assert_eq!(value(&doc, connector, "EndX"), Some(CellValue::Number(2.0)));
+        assert_eq!(
+            value(&doc, connector, "EndY"),
+            Some(CellValue::Number(0.25))
+        );
+        assert!(
+            formula(&doc, connector, "BeginX").is_some_and(|text| text.starts_with("PAR(PNT(")),
+            "the glue formula survives the re-base"
+        );
+        assert_eq!(
+            formula(&doc, connector, "EndX"),
+            None,
+            "the free end stays a literal"
+        );
+
+        // Ungroup maps the same cells back through the group's frame.
+        let members = doc.ungroup_shape(group).expect("ungroup");
+        assert!(members.contains(&connector));
+        assert_eq!(
+            value(&doc, connector, "BeginX"),
+            Some(CellValue::Number(4.0))
+        );
+        assert_eq!(
+            value(&doc, connector, "BeginY"),
+            Some(CellValue::Number(2.5))
+        );
+        assert_eq!(value(&doc, connector, "EndX"), Some(CellValue::Number(6.0)));
+        assert_eq!(value(&doc, connector, "EndY"), Some(CellValue::Number(2.5)));
+        assert!(
+            formula(&doc, connector, "BeginX").is_some_and(|text| text.starts_with("PAR(PNT(")),
+            "the glue formula survives the round trip"
+        );
+        assert_eq!(
+            (
+                doc.connector_end(connector, ConnectorEnd::Begin),
+                doc.connector_end(connector, ConnectorEnd::End)
+            ),
+            (Ok(Point::new(4.0, 2.5)), Ok(Point::new(6.0, 2.5))),
+            "the endpoint cells read back the page points"
+        );
+    }
+
+    /// Task P7-50 goal 1: an ungroup maps the endpoint cells through
+    /// the dissolved group's whole frame (a rotating group rotates
+    /// them), not through a translation.
+    #[test]
+    fn ungroup_maps_the_endpoint_cells_through_a_rotating_groups_frame() {
+        use crate::connector::ConnectorEnd;
+        let (mut doc, page) = document();
+        let mut target = box_shape(2.0, 1.0);
+        target.sheet.cells = vec![
+            number_cell("Width", 2.0),
+            number_cell("Height", 1.0),
+            number_cell("PinX", 10.0),
+            number_cell("PinY", 10.0),
+        ];
+        let target = doc.insert_shape(page, target, None).expect("target");
+        let connector = doc
+            .insert_shape(page, one_d((4.0, 2.5), (6.0, 2.5)), None)
+            .expect("connector");
+        let group = doc.group_shapes(page, &[target, connector]).expect("group");
+        // A quarter turn of the group about its pin.
+        doc.write_cell(
+            SheetRef::Shape(group),
+            &CellName::from_static("Angle"),
+            &CellWrite::new(
+                format!("{}", std::f64::consts::FRAC_PI_2),
+                CellValue::Number(std::f64::consts::FRAC_PI_2),
+            ),
+        )
+        .expect("angle");
+        let (pin, loc_pin) = {
+            let read = |name: &str| value(&doc, group, name).expect("group cell");
+            match (read("PinX"), read("PinY"), read("LocPinX"), read("LocPinY")) {
+                (
+                    CellValue::Number(px),
+                    CellValue::Number(py),
+                    CellValue::Number(lx),
+                    CellValue::Number(ly),
+                ) => (Point::new(px, py), Point::new(lx, ly)),
+                other => panic!("unexpected group cells: {other:?}"),
+            }
+        };
+        // The group-local endpoint cells before the dissolve.
+        let begin = doc
+            .connector_end(connector, ConnectorEnd::Begin)
+            .expect("begin");
+        let end = doc
+            .connector_end(connector, ConnectorEnd::End)
+            .expect("end");
+        // The shape transform recipe (translate `-LocPin`, rotate,
+        // translate `Pin`) for a quarter turn: (x, y) maps to
+        // (PinX - (y - LocPinY), PinY + (x - LocPinX)).
+        let rotate =
+            |point: Point| Point::new(pin.x - (point.y - loc_pin.y), pin.y + (point.x - loc_pin.x));
+        let members = doc.ungroup_shape(group).expect("ungroup");
+        assert!(members.contains(&connector));
+        let expect_begin = rotate(begin);
+        let expect_end = rotate(end);
+        let got_begin = doc
+            .connector_end(connector, ConnectorEnd::Begin)
+            .expect("begin");
+        let got_end = doc
+            .connector_end(connector, ConnectorEnd::End)
+            .expect("end");
+        assert!(
+            (got_begin.x - expect_begin.x).abs() < 1e-9
+                && (got_begin.y - expect_begin.y).abs() < 1e-9,
+            "{got_begin:?} vs {expect_begin:?}"
+        );
+        assert!(
+            (got_end.x - expect_end.x).abs() < 1e-9 && (got_end.y - expect_end.y).abs() < 1e-9,
+            "{got_end:?} vs {expect_end:?}"
+        );
+    }
+
+    /// Task P7-50 goal 1: the re-base helper's documented skips (a
+    /// shape that is not 1-D, unreadable ends, a non-finite map, and a
+    /// shape the list does not hold) leave the cells alone and never
+    /// fail.
+    #[test]
+    fn mapped_ends_skip_what_they_cannot_map() {
+        use crate::connector::ConnectorEnd;
+        let (mut doc, page) = document();
+        let plain = doc
+            .insert_shape(page, box_shape(2.0, 1.0), None)
+            .expect("p");
+        let connector = doc
+            .insert_shape(page, one_d((4.0, 2.5), (6.0, 2.5)), None)
+            .expect("c");
+        let broken = doc
+            .insert_shape(page, one_d((0.0, 0.0), (1.0, 0.0)), None)
+            .expect("b");
+        for name in ["BeginX", "BeginY", "EndX", "EndY"] {
+            doc.write_cell(
+                SheetRef::Shape(broken),
+                &CellName::new(name),
+                &CellWrite::new("1/0", CellValue::Error("#DIV/0!".to_owned())),
+            )
+            .expect("break");
+        }
+        let identity = doc.mapped_ends(&[plain, connector, broken], |point| point);
+        assert_eq!(
+            identity,
+            vec![(connector, Point::new(4.0, 2.5), Point::new(6.0, 2.5))],
+            "only the 1-D shape with readable ends is mapped"
+        );
+        let infinite = doc.mapped_ends(&[connector], |_| Point::new(f64::INFINITY, 0.0));
+        assert!(infinite.is_empty(), "a non-finite map is skipped");
+        assert_eq!(
+            doc.write_rebased_ends(plain, &identity),
+            Ok(()),
+            "a shape the list does not hold keeps its cells"
+        );
+        assert_eq!(
+            doc.connector_end(connector, ConnectorEnd::Begin),
+            Ok(Point::new(4.0, 2.5))
+        );
     }
 
     #[test]

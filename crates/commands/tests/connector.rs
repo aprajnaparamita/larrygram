@@ -305,7 +305,13 @@ fn a_right_angle_style_applies_to_every_selected_connector() {
         assert_eq!(path(&ctx, connector).len(), 2, "{connector} is aligned");
     }
     for connector in [12, 13] {
-        assert_eq!(path(&ctx, connector).len(), 3, "{connector} has an elbow");
+        // An exit-aware right-angle route keeps its stub turns, so an
+        // elbow is at least three points (task P7-32).
+        assert!(
+            path(&ctx, connector).len() >= 3,
+            "{connector} has an elbow: {:?}",
+            path(&ctx, connector)
+        );
     }
 }
 

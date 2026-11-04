@@ -231,6 +231,27 @@ fn fixture() -> (AppCtx, Registry, PageId) {
         .expect("seed glue end");
     }
     dispatch(&mut ctx, &registry, "connector.reroute_all", Args::new()).expect("seed route");
+    // A stored route the router would not draw again (task P7-49 goal
+    // 1): every step's undo and redo must put these rows back byte for
+    // byte, so the seeds are not all fresh routes.
+    if let Some(session) = ctx.active_document_mut() {
+        let doc = &mut session.document;
+        let connector = tops[5];
+        let begin = doc
+            .connector_end(connector, larrygram_model::ConnectorEnd::Begin)
+            .expect("begin");
+        let end = doc
+            .connector_end(connector, larrygram_model::ConnectorEnd::End)
+            .expect("end");
+        let dip = |t: f64| {
+            larrygram_geom::Point::new(
+                begin.x + (end.x - begin.x) * t,
+                begin.y + (end.y - begin.y) * t - 0.5,
+            )
+        };
+        doc.write_connector_path(connector, &[begin, dip(0.25), dip(0.75), end])
+            .expect("custom rows");
+    }
     if let Some(session) = ctx.active_document_mut() {
         session.undo.clear();
     }

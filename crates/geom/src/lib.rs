@@ -13,6 +13,7 @@
 mod angle;
 mod curve;
 mod error;
+mod glue;
 mod hit;
 mod path;
 mod point;
@@ -25,6 +26,7 @@ mod units;
 pub use angle::Angle;
 pub use curve::{Arc, Cubic, Curve, EllipticalArc, Nurbs, NurbsPoint, Polyline, Spline};
 pub use error::Error;
+pub use glue::{Candidate, EndSpec, GlueEnd, GlueTarget, resolve_ends, resolve_pair};
 pub use hit::{
     FLATTEN_TOLERANCE, distance_point_path, distance_point_rect, distance_point_segment,
     path_contains,
@@ -32,7 +34,7 @@ pub use hit::{
 pub use path::{Path, Segment};
 pub use point::{Point, Size};
 pub use rect::Rect;
-pub use routing::{RouteOptions, RouteStyle, route};
+pub use routing::{Obstacle, RouteOptions, RouteStyle, route};
 pub use snap::{SnapCandidate, SnapKind, SnapResult, snap_axis, snap_grid, snap_point};
 pub use transform::Transform;
 pub use units::{Unit, UnitKind};

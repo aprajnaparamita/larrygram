@@ -151,14 +151,17 @@ pub(super) fn run_insert_shape(
         scaled,
     );
     let edit = staged?;
+    let mut step: Box<dyn Edit> = Box::new(edit);
     if glue_to.is_some() {
-        // Glue-on-drop: "any glued connector endpoints on the page
-        // re-route" (ADR 0046).
-        super::connector::reroute_quietly(ctx);
+        // Glue-on-drop: the connectors glued to the drop's shapes
+        // re-route (ADR 0046, scoped as ADR 0084 rule 5), and the
+        // rewritten rows join the step (task P7-49 goal 1).
+        let routes = super::connector::reroute_quietly(ctx, &[shape]);
+        step = super::connector::with_routes(step, routes);
     }
     select_new(ctx, session, page, shape)?;
     ctx.touch_session(session);
-    Ok(edit_outcome(label, Vec::new(), Box::new(edit)))
+    Ok(edit_outcome(label, Vec::new(), step))
 }
 
 /// The undo step of a finished drop (task P6-18 F14): the insertion

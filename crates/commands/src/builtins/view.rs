@@ -13,7 +13,6 @@ use crate::app::AppCtx;
 use crate::error::CommandError;
 use crate::{Invocation, Outcome, UiRequest};
 
-use super::connector::reroute_quietly_on;
 use super::{no_document, outcome};
 
 /// The zoom change of one `view.zoom.in` / `view.zoom.out` step.
@@ -32,36 +31,17 @@ const POINTS_PER_INCH: f64 = 96.0;
 
 /// `edit.undo`: reverts the newest edit of the active document.
 pub(super) fn run_undo(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandError> {
-    let page = ctx
-        .active_document()
-        .and_then(|session| session.active_page);
     match with_undo(ctx, |stack, ctx| stack.undo(ctx))? {
-        Some(label) => {
-            reroute_after_step(ctx, page);
-            Ok(outcome(format!("Undo {label}"), Vec::new()))
-        }
+        Some(label) => Ok(outcome(format!("Undo {label}"), Vec::new())),
         None => Ok(outcome("Nothing to undo", Vec::new())),
     }
 }
 
 /// `edit.redo`: re-applies the newest redoable edit.
 pub(super) fn run_redo(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandError> {
-    let page = ctx
-        .active_document()
-        .and_then(|session| session.active_page);
     match with_undo(ctx, |stack, ctx| stack.redo(ctx))? {
-        Some(label) => {
-            reroute_after_step(ctx, page);
-            Ok(outcome(format!("Redo {label}"), Vec::new()))
-        }
+        Some(label) => Ok(outcome(format!("Redo {label}"), Vec::new())),
         None => Ok(outcome("Nothing to redo", Vec::new())),
-    }
-}
-
-/// Re-routes the glued connectors after an undo or redo step (ADR 0045).
-fn reroute_after_step(ctx: &mut AppCtx, page: Option<larrygram_model::PageId>) {
-    if let Some(page) = page {
-        reroute_quietly_on(ctx, page);
     }
 }
 
