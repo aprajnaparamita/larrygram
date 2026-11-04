@@ -625,28 +625,27 @@ pub fn move_segment(path: &[Point], index: usize, to: f64) -> Result<Vec<Point>,
     if let Some(head) = path.get(..index) {
         out.extend_from_slice(head);
     }
-    // The begin side: a glued end stays and takes one new bend leg,
-    // a perpendicular neighbour stretches (its shared point slides
-    // along it) and a parallel neighbour takes a jog.
-    match path.get(index.saturating_sub(1)) {
-        _ if index == 0 => {
-            out.push(start);
-            out.push(begin);
-        }
-        Some(&previous) if perpendicular(previous, start, horizontal) => out.push(begin),
-        Some(_) => {
-            out.push(start);
-            out.push(begin);
-        }
-        None => out.push(begin),
+    // The begin side: a perpendicular neighbour stretches (its shared
+    // point slides along it to the moved line); the path's first point
+    // (it is glued) and a neighbour that runs along the moved segment
+    // cannot slide, so the shared point stays and a jog connects it to
+    // the moved line.
+    let previous = index
+        .checked_sub(1)
+        .and_then(|previous| path.get(previous))
+        .copied();
+    if previous.is_none_or(|previous| !perpendicular(previous, start, horizontal)) {
+        out.push(start);
+        out.push(begin);
+    } else {
+        out.push(begin);
     }
     out.push(end);
-    // The end side, mirrored.
-    match path.get(index.saturating_add(2)) {
-        _ if index.saturating_add(1) == path.len().saturating_sub(1) => out.push(finish),
-        Some(&next) if perpendicular(finish, next, horizontal) => {}
-        Some(_) => out.push(finish),
-        None => {}
+    // The end side, mirrored: a perpendicular neighbour's shared point
+    // is replaced by `end`, anything else takes the jog.
+    let next = path.get(index.saturating_add(2)).copied();
+    if next.is_none_or(|next| !perpendicular(finish, next, horizontal)) {
+        out.push(finish);
     }
     if let Some(tail) = path.get(index.saturating_add(2)..) {
         out.extend_from_slice(tail);

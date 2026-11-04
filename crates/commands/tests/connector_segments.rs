@@ -537,3 +537,139 @@ fn reset_connector_routes_even_a_never_connector_fresh() {
         "the same fresh route"
     );
 }
+
+// ---------------------------------------------------------------------------
+// The argument and subject contract
+// ---------------------------------------------------------------------------
+
+#[test]
+fn move_segment_names_its_bad_subjects_and_arguments() {
+    let (mut ctx, registry, page) = fixture();
+    let connector = draw_glued(&mut ctx, &registry);
+    let segment = |mut args: Args| {
+        args.set("segment", ArgValue::Integer(1));
+        args
+    };
+    // An unknown connector id.
+    let error = dispatch(
+        &mut ctx,
+        &registry,
+        "connector.move_segment",
+        segment(
+            Args::new()
+                .with("connector", ArgValue::Integer(99))
+                .with("to", ArgValue::Number(5.0)),
+        ),
+    )
+    .expect_err("an unknown id");
+    assert!(
+        matches!(&error, CommandError::InvalidArgs { message } if message.contains("unknown connector shape id 99")),
+        "{error:?}"
+    );
+    // A box has no connector ends.
+    let error = dispatch(
+        &mut ctx,
+        &registry,
+        "connector.move_segment",
+        segment(
+            Args::new()
+                .with("connector", ArgValue::Integer(1))
+                .with("to", ArgValue::Number(5.0)),
+        ),
+    )
+    .expect_err("a box");
+    assert!(
+        matches!(&error, CommandError::InvalidArgs { message } if message.contains("has no connector ends")),
+        "{error:?}"
+    );
+    // A non-finite target.
+    let error = dispatch(
+        &mut ctx,
+        &registry,
+        "connector.move_segment",
+        segment(
+            Args::new()
+                .with("connector", ArgValue::Integer(i64::from(connector)))
+                .with("to", ArgValue::Number(f64::NAN)),
+        ),
+    )
+    .expect_err("a non-finite to");
+    assert!(
+        matches!(&error, CommandError::InvalidArgs { message } if message.contains("to must be finite")),
+        "{error:?}"
+    );
+    // A segment the path has not.
+    let error = dispatch(
+        &mut ctx,
+        &registry,
+        "connector.move_segment",
+        Args::new()
+            .with("connector", ArgValue::Integer(i64::from(connector)))
+            .with("segment", ArgValue::Integer(99))
+            .with("to", ArgValue::Number(5.0)),
+    )
+    .expect_err("an out-of-range segment");
+    assert!(
+        matches!(&error, CommandError::InvalidArgs { message } if message.contains("cannot move the segment")),
+        "{error:?}"
+    );
+    // A curved connector has no straight-segment path to move.
+    let picked = shape(&ctx, page, connector);
+    select(&mut ctx, &[picked]);
+    dispatch(
+        &mut ctx,
+        &registry,
+        "connector.style",
+        Args::new().with("style", ArgValue::Text("curved".to_owned())),
+    )
+    .expect("curve");
+    let error = dispatch(
+        &mut ctx,
+        &registry,
+        "connector.move_segment",
+        segment(
+            Args::new()
+                .with("connector", ArgValue::Integer(i64::from(connector)))
+                .with("to", ArgValue::Number(5.0)),
+        ),
+    )
+    .expect_err("a curved path");
+    assert!(
+        matches!(&error, CommandError::Failed { message } if message.contains("no straight-segment path")),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn reset_connector_with_nothing_to_route_pushes_no_edit() {
+    let (mut ctx, registry, page) = fixture();
+    let connector = draw_glued(&mut ctx, &registry);
+    let connector_shape = shape(&ctx, page, connector);
+    // A geometry that computes belongs to recalc (ADR 0056): the
+    // router never writes its rows, so there is nothing to undo.
+    {
+        let session = ctx.active_document_mut().expect("session");
+        let entity = session.document.shape_mut(connector_shape).expect("shape");
+        for section in &mut entity.sheet.sections {
+            if section.name.as_str() == "Geometry" {
+                for row in &mut section.rows {
+                    for cell in &mut row.cells {
+                        cell.formula = Some("Width*0.5".to_owned());
+                    }
+                }
+            }
+        }
+    }
+    let picked = shape(&ctx, page, connector);
+    select(&mut ctx, &[picked]);
+    let before = undo_len(&ctx);
+    let outcome = dispatch(
+        &mut ctx,
+        &registry,
+        "connector.dyn.conn.reroute",
+        Args::new(),
+    )
+    .expect("reset");
+    assert!(outcome.edit.is_none(), "a formula-driven connector is kept");
+    assert_eq!(undo_len(&ctx), before, "no undo step");
+}

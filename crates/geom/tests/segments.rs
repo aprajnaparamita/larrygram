@@ -102,6 +102,30 @@ fn a_single_segment_path_gets_a_bend_at_both_ends() {
     );
 }
 
+#[test]
+fn a_neighbour_along_the_segment_at_the_far_end_takes_a_jog_too() {
+    // The collinear run sits at the moved segment's end side.
+    let path = [
+        p(0.0, 0.0),
+        p(0.0, 2.0),
+        p(2.0, 2.0),
+        p(4.0, 2.0),
+        p(4.0, 0.0),
+    ];
+    let moved = move_segment(&path, 1, 3.0).expect("the move succeeds");
+    assert_eq!(
+        moved,
+        vec![
+            p(0.0, 0.0),
+            p(0.0, 3.0),
+            p(2.0, 3.0),
+            p(2.0, 2.0),
+            p(4.0, 2.0),
+            p(4.0, 0.0)
+        ]
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Degenerate neighbours and refused inputs
 // ---------------------------------------------------------------------------
