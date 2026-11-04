@@ -151,6 +151,48 @@ fn text_blocks_count_as_hit() {
     assert!(hits.is_empty(), "{hits:?}");
 }
 
+/// Task P7-51 item 4: a text block larger than its laid-out text —
+/// the press hits through the whole block, and the shape's bounds are
+/// the block's (task P7-48's `TextNode::block` change).
+#[test]
+fn a_block_larger_than_its_text_hits_through_the_whole_block() {
+    let mut scene = Scene::new(8.5, 11.0);
+    // A 2 x 1 in block at (0, 0)..(2, 1) in page space whose one line
+    // of text lays out in the top-left corner only (0.2 x 0.15 in).
+    let mut text = text_block(Point::new(0.0, 1.0), 2.0, 1.0);
+    text.layout.width = 0.2;
+    text.layout.height = 0.15;
+    text.layout.lines.push(larrygram_text::Line {
+        glyphs: Vec::new(),
+        baseline: 0.12,
+        width: 0.2,
+        paragraph: 0,
+    });
+    scene.nodes.push(shape_node(
+        Some(ShapeId { index: 5 }),
+        Transform::identity(),
+        Path::new(),
+        false,
+        Some(text),
+    ));
+    // Inside the block, outside the laid-out text: the press hits the
+    // shape through the block.
+    let hits = hit_test(&scene, Point::new(1.5, 0.2), &HitOptions::default()).expect("no error");
+    assert_eq!(
+        shape(&hits),
+        vec![(vec![0], Some(ShapeId { index: 5 }), HitKind::Text)]
+    );
+    // Outside the block: no hit.
+    let hits = hit_test(&scene, Point::new(2.5, 0.2), &HitOptions::default()).expect("no error");
+    assert!(hits.is_empty(), "{hits:?}");
+    // The bounds are the block's, not the laid-out text's.
+    let bounds = node_bounds(&scene, &NodePath::new().child(0)).expect("no error");
+    assert_eq!(
+        bounds,
+        Rect::new(Point::new(0.0, 0.0), Point::new(2.0, 1.0))
+    );
+}
+
 #[test]
 fn the_fill_beats_the_text_of_one_shape() {
     let mut scene = Scene::new(8.5, 11.0);
