@@ -775,3 +775,111 @@ fn the_glue_and_draw_commands_name_their_bad_arguments() {
         "{error}"
     );
 }
+
+/// A point glue to an instance whose `Connection` rows live on its
+/// master walks the master chain and scales by the instance's size
+/// (the resolution's master rungs).
+#[test]
+fn point_glue_to_an_instances_master_points_resolves_them() {
+    use larrygram_geom::Point;
+    use larrygram_model::{Cell, Master, MasterId, Preserved, Row, Section, SectionName};
+    let (mut ctx, registry, page) = fixture();
+    let cell = |name: &str, value: f64| Cell {
+        name: CellName::new(name),
+        formula: Some(format!("{value}")),
+        value: Some(CellValue::Number(value)),
+        unit: larrygram_geom::Unit::Inches,
+        preserved: Preserved::new(),
+    };
+    // A master with one directed connection point, instantiated at
+    // twice its size.
+    let mut master_shape = box_shape(4, 2.0, 2.0);
+    {
+        let mut connection = Section::new(SectionName::from_static("Connection"));
+        let mut row = Row::new();
+        row.row_type = Some("Connection".to_owned());
+        row.ix = Some(0);
+        row.cells = vec![
+            cell("X", 2.0),
+            cell("Y", 1.0),
+            cell("DirX", 1.0),
+            cell("DirY", 0.0),
+        ];
+        connection.rows.push(row);
+        master_shape.sheet.sections.push(connection);
+    }
+    let instance = {
+        let doc = &mut ctx.active_document_mut().expect("session").document;
+        let master_shape = doc.add_shape(master_shape);
+        let mut master = Master::new(MasterId { index: 0 }, 5);
+        master.name_u = "Pointed".to_owned();
+        master.shapes.push(master_shape);
+        let master = doc.add_master(master).expect("master");
+        doc.instantiate_master(master, page, Point::new(5.0, 2.0), None)
+            .expect("instance")
+    };
+    let instance_visio = doc(&ctx).shape(instance).expect("instance").visio_id;
+    // Glue the connector's begin end to the instance's point 0.
+    let outcome = dispatch(
+        &mut ctx,
+        &registry,
+        "connector.glue_begin",
+        Args::new()
+            .with("connector", ArgValue::Integer(3))
+            .with("target", ArgValue::Integer(i64::from(instance_visio)))
+            .with("point", ArgValue::Integer(0)),
+    )
+    .expect("glue to the master's point");
+    assert!(
+        outcome
+            .message
+            .as_deref()
+            .is_some_and(|m| m.contains("glued")),
+        "{:?}",
+        outcome.message
+    );
+}
+
+/// A connection point index that overflows names its problem: a file
+/// may carry a row at `i32::MAX` (task P7-36 item 3's neighbours).
+#[test]
+fn an_overflowing_connection_point_index_is_named() {
+    use larrygram_model::{Cell, Preserved, Row, Section, SectionName, Shape};
+    let (mut ctx, registry, page) = fixture();
+    let cell = |name: &str, value: f64| Cell {
+        name: CellName::new(name),
+        formula: Some(format!("{value}")),
+        value: Some(CellValue::Number(value)),
+        unit: larrygram_geom::Unit::Inches,
+        preserved: Preserved::new(),
+    };
+    // A target whose one connection row sits at `i32::MAX`.
+    draw_glued(&mut ctx, &registry, page);
+    let mut odd = box_shape(5, 5.0, 2.0);
+    odd.sheet.sections.clear();
+    {
+        let mut connection = Section::new(SectionName::from_static("Connection"));
+        let mut row = Row::new();
+        row.row_type = Some("Connection".to_owned());
+        row.ix = Some(i32::MAX);
+        row.cells = vec![cell("X", 1.0), cell("Y", 1.0)];
+        connection.rows.push(row);
+        odd.sheet.sections.push(connection);
+    }
+    let odd_visio = {
+        let doc = &mut ctx.active_document_mut().expect("session").document;
+        let odd = doc.insert_shape(page, odd, None).expect("odd target");
+        doc.shape(odd).expect("odd target").visio_id
+    };
+    let error = dispatch(
+        &mut ctx,
+        &registry,
+        "connector.glue_begin",
+        Args::new()
+            .with("connector", ArgValue::Integer(3))
+            .with("target", ArgValue::Integer(i64::from(odd_visio)))
+            .with("point", ArgValue::Integer(i64::from(i32::MAX))),
+    )
+    .expect_err("overflow");
+    assert!(error.to_string().contains("too large"), "{error}");
+}

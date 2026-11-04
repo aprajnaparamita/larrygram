@@ -479,6 +479,23 @@ fn each_style_carries_its_cells_and_rows() {
             "{name} style cells"
         );
         assert_eq!(geometry_rows(&back, reopened), before_rows, "{name} rows");
+        // A second save patches the reopened source trees (the write
+        // path of a read document) and stays stable.
+        let twice = round_trip(&back);
+        let reopened = shape_by_id(&twice, page, 3);
+        assert_eq!(
+            (
+                own_cell(&twice, reopened, "ShapeRouteStyle"),
+                own_cell(&twice, reopened, "ConLineRouteExt"),
+            ),
+            before_style,
+            "{name} style cells after a patch save"
+        );
+        assert_eq!(
+            geometry_rows(&twice, reopened),
+            before_rows,
+            "{name} rows after a patch save"
+        );
     }
 }
 

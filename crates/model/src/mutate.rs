@@ -3245,7 +3245,7 @@ mod tests {
             row.cells
                 .iter()
                 .find(|cell| cell.name.as_str() == name)
-                .unwrap_or_else(|| panic!("cell {name}"))
+                .expect("the named cell")
         };
         // The route is the control polygon; the connector's box origin
         // (its pin minus its local pin) is (0, 0), so local points are
