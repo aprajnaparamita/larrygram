@@ -899,7 +899,10 @@ fn redo_of_a_new_text_box_restores_the_shape_and_its_text() {
 /// Item 9: any click with the Text tool first commits the text being
 /// typed (the typed text is never dropped); a click inside an
 /// existing text object edits that object's text and no new box
-/// appears.
+/// appears. Task P7-48 item 1: a click inside the object being edited
+/// is a caret move in its field — the edit stays and the typed text
+/// with it; a click on another shape commits first and edits that
+/// shape.
 #[test]
 fn a_click_with_the_text_tool_commits_first_and_edits_the_object() {
     for kind in LAYOUTS {
@@ -913,10 +916,19 @@ fn a_click_with_the_text_tool_commits_first_and_edits_the_object() {
             "{kind:?}: a click inside a text object edits its text"
         );
         type_text(&mut rig, "!");
-        // The second click inside the same object's border commits the
-        // typed text first (task P7-25: it used to drop it) and then
-        // edits the object again.
+        // The second click inside the same object keeps the edit and
+        // the typed text (task P7-48 item 1: the field's clicks are
+        // caret moves, not commits).
         click_at(&mut rig, pos);
+        assert!(
+            editing(&mut rig),
+            "{kind:?}: the click inside the field keeps the edit"
+        );
+        assert_eq!(shape_count(&rig), 2, "{kind:?}: no stray text box");
+        // A click on the other shape commits the typed text first
+        // (task P7-25: it used to drop it) and edits that shape.
+        let other = screen(&rig, SHAPE.0, SHAPE.1);
+        click_at(&mut rig, other);
         assert_eq!(
             shape_text(&rig, box_),
             "Box!",
@@ -924,9 +936,8 @@ fn a_click_with_the_text_tool_commits_first_and_edits_the_object() {
         );
         assert!(
             editing(&mut rig),
-            "{kind:?}: and starts editing the object again"
+            "{kind:?}: and starts editing the other shape"
         );
-        assert_eq!(shape_count(&rig), 2, "{kind:?}: no stray text box");
         press_key(&mut rig, egui::Key::Escape, egui::Modifiers::NONE);
         assert_eq!(shape_text(&rig, box_), "Box!", "{kind:?}: Escape keeps it");
     }

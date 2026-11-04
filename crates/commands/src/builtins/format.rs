@@ -100,8 +100,12 @@ use crate::{Invocation, Outcome, UiRequest};
 use super::edit::{document_mut, number_literal, selection_targets};
 use super::{CommandTable, edit_outcome, model_error, outcome};
 
-/// The implemented formatting commands (task P7-21).
-pub(crate) const TABLE: CommandTable = &[
+/// The text-format commands (task P7-41 item 1): the format commands
+/// [`can_format_text`] gates. This table is the one source of truth
+/// for "a click on this control keeps the text editor open" (the
+/// shell's commit rule asks [`super::is_text_format`]); the registry
+/// chains it onto [`TABLE`] like the other module tables.
+pub(crate) const TEXT_TABLE: CommandTable = &[
     ("text.font", "Font", can_format_text, run_font),
     (
         "text.font.size",
@@ -210,6 +214,10 @@ pub(crate) const TABLE: CommandTable = &[
         run_align_bottom,
     ),
     ("text.bullets", "Bullets", can_format_text, run_bullets),
+];
+
+/// The implemented formatting commands (task P7-21).
+pub(crate) const TABLE: CommandTable = &[
     (
         "format.set.fill.color",
         "Fill Color",

@@ -340,3 +340,122 @@ fn the_metric_rejects_different_dimensions() {
     let b = synthetic((8, 9), [10, 20, 30, 255]);
     assert!(compare_images(&a, &b).is_err());
 }
+
+// ---------------------------------------------------------------------------
+// The open in-place editor (task P7-41 item 9): the overlay's box,
+// font size and first baseline match the shape's drawn text, at 1x
+// and at 2x (the screenshot rig's scale), so the text shows once.
+// ---------------------------------------------------------------------------
+
+/// A press and a release in one frame at `pos` (the `interaction`
+/// module's click rule).
+fn click_at(rig: &mut ShellRig, pos: egui::Pos2) {
+    rig.harness().event(egui::Event::PointerMoved(pos));
+    rig.run();
+    for pressed in [true, false] {
+        rig.harness().event(egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+    }
+    rig.run();
+}
+
+/// A double click at `pos` (the P7-19 double-click window).
+fn double_click_at(rig: &mut ShellRig, pos: egui::Pos2) {
+    for _ in 0..60 {
+        rig.run();
+    }
+    click_at(rig, pos);
+    click_at(rig, pos);
+}
+
+/// Types `text` into the in-place editor's field.
+fn type_into_editor(rig: &mut ShellRig, text: &str) {
+    use egui::accesskit::Role;
+    use egui_kittest::kittest::Queryable;
+    rig.run();
+    let root = rig.harness().root();
+    let node = root
+        .query_all_by_role_and_label(Role::MultilineTextInput, "Text")
+        .next()
+        .expect("the editor field");
+    node.type_text(text);
+    rig.run();
+}
+
+/// Opens the in-place editor over the fixture rectangle's "MMMM" at
+/// `pixels_per_point` and renders the frame (task P7-41 item 9).
+fn editor_golden(name: &str, pixels_per_point: f32) {
+    let mut app = RichApp::rich().0;
+    app.settings.ui_layout = LayoutKind::PanelClassic;
+    app.settings.default_layout = LayoutKind::PanelClassic;
+    let mut rig = ShellRig::with_app_at(app, egui::vec2(1600.0, 900.0), pixels_per_point);
+    for _ in 0..3 {
+        rig.run();
+    }
+    // One double-click window for the edit (the P7-19 rule).
+    rig.harness().ctx.options_mut(|options| {
+        options.input_options.max_double_click_delay = 10.0;
+    });
+    // The caret must not blink in a snapshot (the screenshots rig's
+    // `steady_caret` rule).
+    rig.harness()
+        .ctx
+        .global_style_mut(|style| style.visuals.text_cursor.blink = false);
+    // Centre the fixture rectangle in the viewport, zoom 1.
+    {
+        let viewport = rig
+            .shell
+            .borrow()
+            .canvas_viewport()
+            .expect("the canvas drew");
+        let mut shell = rig.shell.borrow_mut();
+        let session = shell.app.active_document_mut().expect("session");
+        session.view.zoom = 1.0;
+        session.view.pan = larrygram_geom::Point::new(
+            f64::from(viewport.width()) / 2.0 / 96.0 - 3.0,
+            f64::from(viewport.height()) / 2.0 / 96.0 - (11.0 - 3.0),
+        );
+    }
+    rig.run();
+    rig.run();
+    // A light fill first (the `text_controls` rule): the black text
+    // hides on the fixture's dark fill, and the golden must show the
+    // drawn text under the overlay.
+    rig.click(egui::accesskit::Role::Button, "Fill Color menu");
+    rig.run();
+    rig.click(egui::accesskit::Role::Button, "Surface #F5F5F5");
+    rig.run();
+    // The rectangle's text first (the drawn text under the editor).
+    let pos = rig
+        .shell
+        .borrow()
+        .page_to_screen(larrygram_geom::Point::new(3.0, 3.0))
+        .expect("the canvas drew");
+    double_click_at(&mut rig, pos);
+    type_into_editor(&mut rig, "MMMM");
+    rig.harness().key_press(egui::Key::Escape);
+    rig.run();
+    // The editor again, over the drawn text: the review's case.
+    double_click_at(&mut rig, pos);
+    rig.run();
+    rig.run();
+    let image = rig.render();
+    check_golden(name, &image);
+}
+
+/// The open in-place editor at 1x display scale (task P7-41 item 9).
+#[test]
+fn golden_the_open_text_editor_at_1x() {
+    editor_golden("text-editor-open-1x", 1.0);
+}
+
+/// The open in-place editor at 2x display scale (task P7-41 item 9;
+/// the screenshot rig renders at 2x).
+#[test]
+fn golden_the_open_text_editor_at_2x() {
+    editor_golden("text-editor-open-2x", 2.0);
+}

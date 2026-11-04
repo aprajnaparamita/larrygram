@@ -100,32 +100,6 @@ const PANE_MIN_HEIGHT: f32 = 60.0;
 /// The full-screen toggle (task P7-20's `view.full_screen_mode`).
 const FULL_SCREEN: &str = "view.full_screen_mode";
 
-/// Commands that end a new text box's typing interaction before they
-/// run (task P7-37 item 5): a layout switch and closing the document
-/// end the editor, and undo/redo end an open undo group anyway (ADR
-/// 0040, amendment 2026-11-03). The shell writes the typed text the
-/// usual way and closes the group first.
-const TEXT_BOX_TRIGGERS: &[&str] = &[
-    "edit.redo",
-    "edit.undo",
-    "file.close",
-    "file.exit",
-    "file.new",
-    "file.new.blank.drawing",
-    "file.new.blank.drawing.metric",
-    "file.new.blank.drawing.us",
-    "file.open",
-    // The save paths (task P7-42): a save writes what the user has
-    // typed, so the group closes before it runs and the save's
-    // recorded marker is exact (ADR 0040, amendment 2026-11-03).
-    "file.save",
-    "file.save_as",
-    "view.ui_layout.panel_2016",
-    "view.ui_layout.panel_365",
-    "view.ui_layout.panel_classic",
-    "view.ui_layout.panel_modern",
-];
-
 /// The marker a changed drawing gets before its name (task P7-42 goal
 /// 4: our own marker, a dot before the name). It is applied in
 /// [`Shell::title_text`] alone, so every title shows the same mark.
@@ -550,6 +524,13 @@ impl Shell {
         self.canvas_viewport
     }
 
+    /// The canvas cache of this shell (task P7-48 item 2): the tests
+    /// read the canvas layer's raster, the picture under the editor
+    /// overlay.
+    pub fn canvas_cache(&self) -> &crate::canvas::CanvasCache {
+        &self.cache
+    }
+
     /// The Shapes window's rect of the last frame.
     pub fn shapes_window_rect(&self) -> Option<egui::Rect> {
         self.shapes_rect
@@ -690,6 +671,12 @@ impl Shell {
         // `close_requested`) while the walk is up or has something to
         // ask, and with nothing to ask the quit completes below.
         if ui.input(|input| input.viewport().close_requested()) {
+            // The window close button is not a command (task P7-41
+            // item 4, P7-42 review minor 6): the rule that replaced
+            // the trigger list covers this path too, so the quit walk
+            // asks about the drawing's real state and an empty new box
+            // cancels instead of reading as a change.
+            self.commit_open_edit();
             let had_walk = self.walk.is_some();
             self.begin_quit();
             if had_walk || self.walk.is_some() {
@@ -741,6 +728,32 @@ impl Shell {
                 input.key_pressed(egui::Key::F5),
             )
         });
+        // An open popup owns Escape (task P7-48 item 3): the shortcut
+        // pass would consume it (its `Esc` binding is
+        // `view.full_screen_mode`), so the shell sets the key aside for
+        // the pass and puts it back for the popup to close on.
+        let escape_aside = if crate::text_edit::other_layer_open(ui.ctx(), self.editor.shape) {
+            ui.ctx().input_mut(|input| {
+                let mut saved = Vec::new();
+                input.events.retain(|event| {
+                    let is_escape = matches!(
+                        event,
+                        egui::Event::Key {
+                            key: egui::Key::Escape,
+                            pressed: true,
+                            ..
+                        }
+                    );
+                    if is_escape {
+                        saved.push(event.clone());
+                    }
+                    !is_escape
+                });
+                saved
+            })
+        } else {
+            Vec::new()
+        };
         match shortcuts::dispatch(ui.ctx(), &mut self.shortcuts, &self.app, self.focus) {
             Ok(mut produced) => {
                 if escape && !f5 && !self.app.full_screen {
@@ -749,6 +762,11 @@ impl Shell {
                 intents.extend(produced);
             }
             Err(error) => self.note_error(error.to_string()),
+        }
+        if !escape_aside.is_empty() {
+            ui.ctx().input_mut(|input| {
+                input.events.splice(0..0, escape_aside).count();
+            });
         }
         self.sync_full_screen(ui.ctx());
         if self.app.full_screen {
@@ -1612,6 +1630,10 @@ impl Shell {
         {
             let session = self.app.active_document_mut();
             if let Some(session) = session {
+                // One text at a time (task P7-48 item 2): the canvas
+                // leaves out the text of the shape being edited — the
+                // editor shows it.
+                self.cache.set_hidden_text(self.editor.shape);
                 ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
                     match canvas::show_with_overlay(ui, session, &mut self.cache, &overlay) {
                         Ok(output) => {
@@ -1827,7 +1849,18 @@ impl Shell {
     /// full-screen mode; those owners must see it first.
     fn capture_escape(&mut self, egui_ctx: &Context) {
         let escape = egui_ctx.input(|input| input.key_pressed(egui::Key::Escape));
+        // An open popup or menu owns Escape (task P7-48 item 3): it
+        // closes and the open edit stays, so the shell leaves the key
+        // alone while one is up.
+        let popup = crate::text_edit::other_layer_open(egui_ctx, self.editor.shape);
+        if escape && popup && self.editor.is_active() {
+            // The popup takes the Escape and egui hands the keyboard
+            // nowhere (it unfocuses on Escape); the editor takes it
+            // back the same frame (task P7-48 item 3).
+            self.editor.refocus();
+        }
         self.escape_pressed = escape
+            && !popup
             && (self.editor.is_active()
                 || stencil::is_dragging(&self.tools)
                 || self.app.format_painter.is_some());
@@ -2053,14 +2086,21 @@ impl Shell {
     }
 
     /// Ends the typing interaction before a command that ends it
-    /// another way (task P7-37 item 5): the typed text is written the
-    /// usual way and the group closes first.
-    fn commit_open_text_box(&mut self) {
-        if self.text_box.is_none() {
+    /// another way (task P7-37 item 5, task P7-41 item 4): the typed
+    /// text is written the usual way and a new box's undo group closes
+    /// first. Any open edit commits this way, a new box's and an
+    /// existing shape's alike.
+    fn commit_open_edit(&mut self) {
+        if !self.editor.is_active() {
             return;
         }
+        let shape = self.editor.shape;
         let text = self.editor.finish().ok().flatten();
-        self.finish_text_box(text.as_ref());
+        let mut intents = Vec::new();
+        self.commit_text(shape, text.as_ref(), &mut intents);
+        if let Err(error) = self.dispatch(&intents) {
+            self.note_error(error.to_string());
+        }
     }
 
     /// Cancels the tracked box (task P7-37 item 1): no shape, no undo
@@ -2093,7 +2133,7 @@ impl Shell {
     /// as on any edited shape while the text is typed.
     fn open_text_box(&mut self, box_: crate::tools::text::PendingBox) {
         // An earlier interaction ends before a new one opens.
-        self.commit_open_text_box();
+        self.commit_open_edit();
         let Some(session) = self.app.active_document().map(|session| session.id) else {
             return;
         };
@@ -2117,10 +2157,13 @@ impl Shell {
             ))),
         };
         let shape = match opened {
-            Ok(results) if results.first().is_some_and(|result| result.is_ok()) => {
-                self.app.selection.anchor
-            }
-            Ok(_) => None,
+            // The outcome carries the new shape's id (task P7-41 item
+            // 7); no racing the selection for the anchor.
+            Ok(results) => results
+                .into_iter()
+                .next()
+                .and_then(|result| result.ok())
+                .and_then(|outcome| outcome.shape),
             Err(error) => {
                 self.note_error(error.to_string());
                 None
@@ -2141,6 +2184,22 @@ impl Shell {
     /// shape or undo group went away underneath it (task P7-37 item 5:
     /// every way the editor can end closes the group).
     fn sync_text_box(&mut self) {
+        // The pending box's emptiness (task P7-48 item 6): an empty
+        // new text box is not a change, and the moment it carries
+        // typed text it is one again.
+        let pending_empty = self.text_box.map(|_| self.editor.buffer.is_empty());
+        for session in &mut self.app.documents {
+            session.pending_text_empty = None;
+        }
+        if let (Some(tracked), Some(empty)) = (self.text_box, pending_empty)
+            && let Some(session) = self
+                .app
+                .documents
+                .iter_mut()
+                .find(|slot| slot.id == tracked.session)
+        {
+            session.pending_text_empty = Some(empty);
+        }
         let Some(tracked) = self.text_box else {
             return;
         };
@@ -2211,10 +2270,11 @@ impl Shell {
             self.text_seed = None;
             return;
         };
-        if self.text_box.is_some_and(|tracked| tracked.shape != shape) {
-            // A text edit on another shape ends the tracked box first
-            // (task P7-37 item 5).
-            self.commit_open_text_box();
+        if self.editor.shape.is_some_and(|open| open != shape) {
+            // A text edit on another shape commits the open edit first
+            // (task P7-37 item 5, task P7-41 item 4): the typed text
+            // lands instead of being dropped.
+            self.commit_open_edit();
         }
         if self.editor.shape == Some(shape) {
             self.text_seed = None;
@@ -2844,11 +2904,26 @@ impl Shell {
         &mut self,
         intent: &Intent,
     ) -> Result<Result<Outcome, CommandError>, UiError> {
-        if self.text_box.is_some() && TEXT_BOX_TRIGGERS.contains(&intent.command.as_str()) {
+        if self.editor.is_active()
+            && larrygram_commands::builtins::ends_text_editing(intent.command.as_str())
+        {
             // A command that ends the typing interaction another way
-            // (task P7-37 item 5): the typed text is written and the
-            // group closes before it runs.
-            self.commit_open_text_box();
+            // (task P7-37 item 5, task P7-41 item 4): the typed text is
+            // written and a new box's group closes before it runs. The
+            // text-format commands and the editor's own commands run
+            // over the open edit. An untyped new box cancels on the
+            // commit, so an Undo or Redo over it does nothing else
+            // (task P7-48 item 5).
+            let cancelled_box = self.text_box.is_some() && self.editor.buffer.is_empty();
+            self.commit_open_edit();
+            if cancelled_box
+                && matches!(
+                    intent.command.as_str(),
+                    "edit.undo" | "edit.redo" | "edit.redo.or.repeat"
+                )
+            {
+                return Ok(Ok(Outcome::message("The empty text box was cancelled")));
+            }
         }
         let source = intent.invocation.source;
         let first = dispatch_one(
@@ -2902,6 +2977,13 @@ impl Shell {
             // The explicit discard path ends the tracked box too (task
             // P7-37 item 5): no shape, no undo entry.
             self.cancel_text_box();
+        } else if self.editor.is_active()
+            && larrygram_commands::builtins::is_text_format(intent.command.as_str())
+        {
+            // A text-format command applies to the shape being edited
+            // and the editor keeps the keyboard and the caret (task
+            // P7-41 item 1).
+            self.editor.refocus();
         }
         Ok(Ok(outcome))
     }

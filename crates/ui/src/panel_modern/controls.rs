@@ -362,17 +362,23 @@ fn combo(
         .map(|id| id.as_str())
         .and_then(crate::pickers::picker_for)
     {
-        if let Some(inner) = Popup::menu(&response).show(|ui| {
-            if crate::pickers::show(
-                ui,
-                kind,
-                larrygram_commands::Source::CommandBar,
-                crate::pickers::fill_preview(draw.app),
-                out,
-            ) {
-                ui.close();
-            }
-        }) {
+        // The picker hosts its own field (the size box), so a click
+        // inside keeps the popup open (task P7-48 item 8): the rows
+        // close it when they apply.
+        if let Some(inner) = Popup::menu(&response)
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+            .show(|ui| {
+                if crate::pickers::show(
+                    ui,
+                    kind,
+                    larrygram_commands::Source::CommandBar,
+                    crate::pickers::fill_preview(draw.app),
+                    out,
+                ) {
+                    ui.close();
+                }
+            })
+        {
             let _ = inner;
         }
         return Ok(());
@@ -551,17 +557,23 @@ fn dropdown(
         .map(|id| id.as_str())
         .and_then(crate::pickers::picker_for)
     {
-        if let Some(inner) = Popup::menu(&response).show(|ui| {
-            if crate::pickers::show(
-                ui,
-                kind,
-                larrygram_commands::Source::CommandBar,
-                crate::pickers::fill_preview(draw.app),
-                out,
-            ) {
-                ui.close();
-            }
-        }) {
+        // The picker hosts its own field (the size box), so a click
+        // inside keeps the popup open (task P7-48 item 8): the rows
+        // close it when they apply.
+        if let Some(inner) = Popup::menu(&response)
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+            .show(|ui| {
+                if crate::pickers::show(
+                    ui,
+                    kind,
+                    larrygram_commands::Source::CommandBar,
+                    crate::pickers::fill_preview(draw.app),
+                    out,
+                ) {
+                    ui.close();
+                }
+            })
+        {
             let _ = inner;
         }
         return Ok(());
@@ -1067,6 +1079,16 @@ fn put(
     item: &Item,
     part: &'static str,
 ) -> egui::Response {
+    // A text-format control's press keeps the in-place editor open
+    // (task P7-41 item 1): record its widget rect as it draws. The
+    // command-bar controls are buttons and menus; the editor takes the
+    // keyboard back after their presses.
+    crate::text_edit::keep_editing_rect(
+        ui.ctx(),
+        item.command.as_ref().map(|id| id.as_str()),
+        rect,
+        true,
+    );
     ui.push_id((item.id.as_str(), part), |ui| {
         ui.add_enabled_ui(enabled, |ui| ui.put(rect, widget)).inner
     })

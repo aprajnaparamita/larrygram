@@ -838,11 +838,12 @@ fn undo_labels(rig: &ShellRig) -> Vec<String> {
         .collect()
 }
 
-/// The text controls are enabled while a new text box is typed, and
-/// choosing Bold, a font size and an alignment applies them to the
-/// box's text — its cells and the rendered picture (task P7-37 item
-/// 1). The command-bar click ends the edit and closes the group as
-/// one step labelled as the insert.
+/// The text controls are enabled while a new text box is typed, and a
+/// Bold click before anything is typed keeps the editor open and
+/// formats the box (task P7-41 item 1, review case 1: the old rule
+/// committed on the click, cancelled the group and dropped the box).
+/// Escape commits the typed text in the open group: one step labelled
+/// as the insert, the text bold.
 #[test]
 fn a_new_text_box_can_be_formatted_while_it_is_typed() {
     for kind in LAYOUTS {
@@ -864,10 +865,19 @@ fn a_new_text_box_can_be_formatted_while_it_is_typed() {
                 "{kind:?}: {name} enables while the new box is typed"
             );
         }
-        type_into_editor(&mut rig, "MMMM");
-        // Bold while typed: the click commits the typed text and
-        // records the format on it (the P7-29 rule).
+        // Bold before typing: the click keeps the edit and the format
+        // lands in the open group.
         click(&mut rig, Role::Button, "Bold");
+        assert!(
+            editing(&mut rig),
+            "{kind:?}: the Bold click keeps the editor open"
+        );
+        assert!(
+            undo_labels(&rig).is_empty(),
+            "{kind:?}: the steps collect in the open group, not on the stack"
+        );
+        type_into_editor(&mut rig, "MMMM");
+        press_key(&mut rig, egui::Key::Escape);
         assert_eq!(
             shape_text(&rig, box_).as_deref(),
             Some("MMMM"),
@@ -876,32 +886,223 @@ fn a_new_text_box_can_be_formatted_while_it_is_typed() {
         assert_eq!(
             row_number(&rig, box_, "Character", "Style"),
             Some(1.0),
-            "{kind:?}: the bold bit records"
+            "{kind:?}: the text is bold"
         );
-        // A font size from the list.
+        assert_eq!(
+            undo_labels(&rig),
+            vec!["Insert Text Box".to_owned()],
+            "{kind:?}: the commit is one step labelled as the insert"
+        );
+        // The picture paints the text at that format.
+        let after = ink(&mut rig, 3.1, 5.55, 4.9, 5.95);
+        assert!(after > 0, "{kind:?}: the text paints ({after})");
+    }
+}
+
+/// Typing, a Bold click, more typing, a font size from the list and
+/// Escape (task P7-41 item 2's second bullet): the editor stays open
+/// after every click, every keystroke is kept where the caret sat
+/// (the editor keeps the keyboard and the caret), and the whole box
+/// is one undo step.
+#[test]
+fn formatting_while_typing_keeps_every_keystroke_and_the_caret() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        choose_text_tool(&mut rig, kind);
+        let pos = screen(&rig, EMPTY.0, EMPTY.1);
+        click_at(&mut rig, pos);
+        assert!(editing(&mut rig), "{kind:?}: the box opens");
+        let box_ = last_shape(&rig.shell.borrow().app);
+        type_into_editor(&mut rig, "ab");
+        click(&mut rig, Role::Button, "Bold");
+        assert!(
+            editing(&mut rig),
+            "{kind:?}: still editing after the Bold click"
+        );
+        assert!(
+            !disabled(&mut rig, Role::Button, "Bold"),
+            "{kind:?}: the controls stay enabled after the click"
+        );
+        assert!(
+            undo_labels(&rig).is_empty(),
+            "{kind:?}: the steps collect in the open group"
+        );
+        type_into_editor(&mut rig, "cd");
         open_size_list(&mut rig, kind);
         click(&mut rig, Role::Button, "36 pt");
-        let size = row_number(&rig, box_, "Character", "Size").expect("the Size cell");
         assert!(
-            (size - 0.5).abs() < 1.0e-9,
-            "{kind:?}: the size records ({size})"
+            editing(&mut rig),
+            "{kind:?}: still editing after the size choice"
         );
-        // An alignment.
+        assert!(
+            !disabled(&mut rig, Role::Button, "Bold"),
+            "{kind:?}: the controls stay enabled after the size"
+        );
+        assert!(
+            undo_labels(&rig).is_empty(),
+            "{kind:?}: the size step is in the open group too"
+        );
         click(&mut rig, Role::Button, centre_name(kind));
+        assert!(
+            editing(&mut rig),
+            "{kind:?}: still editing after the alignment click"
+        );
+        type_into_editor(&mut rig, "ef");
+        // The caret kept its place across the click: the "X" lands
+        // where the caret sat (after the "e"), not at the end.
+        press_key(&mut rig, egui::Key::ArrowLeft);
+        click(&mut rig, Role::Button, "Italic");
+        assert!(
+            editing(&mut rig),
+            "{kind:?}: still editing after the Italic click"
+        );
+        assert!(
+            !disabled(&mut rig, Role::Button, "Italic"),
+            "{kind:?}: the controls stay enabled after the click"
+        );
+        type_into_editor(&mut rig, "X");
+        press_key(&mut rig, egui::Key::Escape);
+        assert_eq!(
+            shape_text(&rig, box_).as_deref(),
+            Some("abcdeXf"),
+            "{kind:?}: every keystroke kept, at the caret"
+        );
         assert_eq!(
             row_number(&rig, box_, "Paragraph", "HorzAlign"),
             Some(1.0),
             "{kind:?}: the alignment records"
         );
-        // The picture paints the text at that format.
-        let after = ink(&mut rig, 3.1, 5.55, 4.9, 5.95);
-        assert!(after > 0, "{kind:?}: the text paints ({after})");
-        // The commit is one undo step labelled as the insert.
         assert_eq!(
-            undo_labels(&rig).first().map(String::as_str),
-            Some("Insert Text Box"),
-            "{kind:?}: the commit is one step labelled as the insert"
+            undo_labels(&rig),
+            vec!["Insert Text Box".to_owned()],
+            "{kind:?}: one step labelled as the insert"
         );
+        // The picture paints the text at that format (review minor 6).
+        let after = ink(&mut rig, 2.1, 5.3, 3.9, 5.75);
+        assert!(after > 0, "{kind:?}: the text paints ({after})");
+    }
+}
+
+/// The same on an existing shape's edit (task P7-41 item 2's third
+/// bullet): one step per format click (as Visio), the editor still
+/// open after every click, and the typed text lands as its own last
+/// step.
+#[test]
+fn format_clicks_on_an_existing_shape_are_one_step_each() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        select_shape(&mut rig);
+        // A light fill first (the `text_controls` rule): the black
+        // text hides on the fixture's dark fill, and the flow checks
+        // the picture (review minor 6).
+        lighten_fill(&mut rig, kind);
+        let shape = rectangle(&rig.shell.borrow().app);
+        let pos = screen(&rig, SHAPE.0, SHAPE.1);
+        double_click_at(&mut rig, pos);
+        assert!(editing(&mut rig), "{kind:?}: the double click edits");
+        type_into_editor(&mut rig, "Hi");
+        click(&mut rig, Role::Button, "Bold");
+        assert!(
+            editing(&mut rig),
+            "{kind:?}: still editing after the Bold click"
+        );
+        assert_eq!(
+            undo_labels(&rig),
+            vec!["Set fill color #F5F5F5".to_owned(), "Bold".to_owned()],
+            "{kind:?}: one step per format click (as Visio)"
+        );
+        open_size_list(&mut rig, kind);
+        click(&mut rig, Role::Button, "36 pt");
+        assert!(
+            editing(&mut rig),
+            "{kind:?}: still editing after the size choice"
+        );
+        assert_eq!(
+            undo_labels(&rig),
+            vec![
+                "Set fill color #F5F5F5".to_owned(),
+                "Bold".to_owned(),
+                "Set font size".to_owned()
+            ],
+            "{kind:?}: the size is its own step"
+        );
+        // The Bold and 36 pt clicks record their cells (review minor
+        // 6), and the controls stay enabled after the clicks.
+        assert_eq!(
+            row_number(&rig, shape, "Character", "Style"),
+            Some(1.0),
+            "{kind:?}: the Bold click records the Style bit"
+        );
+        assert_eq!(
+            row_number(&rig, shape, "Character", "Size"),
+            Some(0.5),
+            "{kind:?}: the 36 pt choice records the Size cell"
+        );
+        assert!(
+            !disabled(&mut rig, Role::Button, "Bold"),
+            "{kind:?}: the controls stay enabled after the clicks"
+        );
+        type_into_editor(&mut rig, "!");
+        press_key(&mut rig, egui::Key::Escape);
+        assert_eq!(
+            shape_text(&rig, shape).as_deref(),
+            Some("Hi!"),
+            "{kind:?}: the typed text is kept"
+        );
+        assert_eq!(
+            undo_labels(&rig),
+            vec![
+                "Set fill color #F5F5F5".to_owned(),
+                "Bold".to_owned(),
+                "Set font size".to_owned(),
+                "Write shape text".to_owned()
+            ],
+            "{kind:?}: the text write is one more step"
+        );
+        // The picture paints the edited text (review minor 6).
+        let after = ink(&mut rig, 2.1, 3.2, 3.9, 3.5);
+        assert!(after > 0, "{kind:?}: the text paints ({after})");
+    }
+}
+
+/// Cmd+B while typing folds into the group (task P7-41 item 2's
+/// fourth bullet, the path the review probed by hand): the chord keeps
+/// the editor open and the commit is one step.
+#[test]
+fn cmd_b_while_typing_folds_into_the_group() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        choose_text_tool(&mut rig, kind);
+        let pos = screen(&rig, EMPTY.0, EMPTY.1);
+        click_at(&mut rig, pos);
+        assert!(editing(&mut rig), "{kind:?}: the box opens");
+        let box_ = last_shape(&rig.shell.borrow().app);
+        type_into_editor(&mut rig, "Hi");
+        chord(&mut rig, egui::Key::B);
+        assert!(
+            editing(&mut rig),
+            "{kind:?}: the chord keeps the editor open"
+        );
+        type_into_editor(&mut rig, "!");
+        press_key(&mut rig, egui::Key::Escape);
+        assert_eq!(
+            shape_text(&rig, box_).as_deref(),
+            Some("Hi!"),
+            "{kind:?}: the typed text is kept"
+        );
+        assert_eq!(
+            row_number(&rig, box_, "Character", "Style"),
+            Some(1.0),
+            "{kind:?}: the chord folded its bold into the group"
+        );
+        assert_eq!(
+            undo_labels(&rig),
+            vec!["Insert Text Box".to_owned()],
+            "{kind:?}: one step labelled as the insert"
+        );
+        // The picture paints the bold text (review minor 6).
+        let after = ink(&mut rig, 2.1, 5.3, 3.9, 5.75);
+        assert!(after > 0, "{kind:?}: the text paints ({after})");
     }
 }
 
@@ -1153,11 +1354,10 @@ fn undo_button(rig: &mut ShellRig) {
     rig.run();
 }
 
-/// The Undo button's click ends the typing interaction (the click
-/// commits the text and closes the group) and the next undo removes
-/// the whole new box in one step (task P7-37 item 1). The button is
-/// disabled while the group is open — its steps are not on the stack
-/// yet — so the first click only reaches the commit.
+/// Undo while a box is open (task P7-41 item 5): the button is
+/// enabled while the group collects its steps, and one click removes
+/// the whole new box — the click commits the typing (the group folds
+/// into one step) and undoes that step.
 #[test]
 fn the_undo_button_removes_the_whole_new_box() {
     for kind in LAYOUTS {
@@ -1167,24 +1367,927 @@ fn the_undo_button_removes_the_whole_new_box() {
         let pos = screen(&rig, EMPTY.0, EMPTY.1);
         click_at(&mut rig, pos);
         type_into_editor(&mut rig, "Hi");
-        let box_ = last_shape(&rig.shell.borrow().app);
         undo_button(&mut rig);
         assert!(!editing(&mut rig), "{kind:?}: the click ends the edit");
         assert_eq!(
+            shape_count(&rig),
+            before,
+            "{kind:?}: one click removes the whole box"
+        );
+        let shell = rig.shell.borrow();
+        let session = shell.app.active_document().expect("session");
+        assert!(
+            session.undo.undo_labels().is_empty(),
+            "{kind:?}: the committed step is undone again"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Item 3 (task P7-41): a save while the editor has focus commits the
+// box first, so a save never writes an empty box. Cmd+S and Cmd+P are
+// global bindings and dispatch while the editor holds the keyboard;
+// Save As and export reach their `file.*` commands from the File menu
+// or the File view, where the press rule ends the edit first.
+// ---------------------------------------------------------------------------
+
+/// A picker that answers every save with one temp path and counts the
+/// saves (the `unsaved` module's TempPicker pattern).
+#[derive(Clone)]
+struct SavePicker {
+    /// The path every save picks.
+    path: std::path::PathBuf,
+    /// How many saves were asked for.
+    saves: std::rc::Rc<std::cell::RefCell<usize>>,
+}
+
+impl SavePicker {
+    fn new(path: std::path::PathBuf) -> Self {
+        Self {
+            path,
+            saves: std::rc::Rc::new(std::cell::RefCell::new(0)),
+        }
+    }
+}
+
+impl larrygram_ui::dialogs::FilePicker for SavePicker {
+    fn open(
+        &self,
+        _request: &larrygram_ui::dialogs::OpenRequest,
+    ) -> Result<Option<larrygram_ui::dialogs::FileChoice>, larrygram_ui::UiError> {
+        Ok(None)
+    }
+
+    fn save(
+        &self,
+        _request: &larrygram_ui::dialogs::SaveRequest,
+        _data: &[u8],
+    ) -> Result<Option<larrygram_ui::dialogs::FileChoice>, larrygram_ui::UiError> {
+        *self.saves.borrow_mut() += 1;
+        Ok(Some(larrygram_ui::dialogs::FileChoice::Path(
+            self.path.clone(),
+        )))
+    }
+
+    fn poll(&self) -> larrygram_ui::dialogs::PickState {
+        larrygram_ui::dialogs::PickState::Idle
+    }
+}
+
+/// A private temp file path for one test's save.
+fn temp_target(name: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!(
+        "larrygram-text-controls-{}-{name}.vsdx",
+        std::process::id()
+    ))
+}
+
+/// The shape count of the saved file's active page (what the save
+/// wrote, not what the document holds after the fact).
+fn saved_shapes(target: &std::path::Path) -> usize {
+    let bytes = std::fs::read(target).expect("the save wrote the file");
+    let doc = larrygram_vsdx::read_document(&bytes, &larrygram_vsdx::Limits::default())
+        .expect("the saved file parses");
+    let page = doc.pages.first().expect("a page");
+    page.shapes.len()
+}
+
+/// The Save As command through the layout's own navigation: Panel
+/// Classic's File menu row, Panel Modern's File view page and its
+/// Browse button.
+fn save_as_command(rig: &mut ShellRig, kind: LayoutKind) {
+    match kind {
+        LayoutKind::PanelClassic => {
+            click(rig, Role::Button, "File");
+            click(rig, Role::MenuItem, "Save As...");
+        }
+        _ => {
+            rig.click_named("File");
+            click(rig, Role::Button, "Save As");
+            click(rig, Role::Button, "Browse\u{2026}");
+        }
+    }
+}
+
+/// Cmd+S dispatches while the editor has focus: the global binding
+/// runs `file.save`, and the commit rule writes the typed text and
+/// closes the group first, so the file carries the box with its text.
+#[test]
+fn a_save_while_typing_commits_the_box_and_writes_it() {
+    for kind in LAYOUTS {
+        let target = temp_target("typed");
+        let picker = SavePicker::new(target.clone());
+        let saves = picker.saves.clone();
+        let mut rig = shell_rig(kind);
+        rig.shell.borrow_mut().set_picker(Box::new(picker));
+        let before = shape_count(&rig);
+        choose_text_tool(&mut rig, kind);
+        let pos = screen(&rig, EMPTY.0, EMPTY.1);
+        click_at(&mut rig, pos);
+        type_into_editor(&mut rig, "Hi");
+        chord(&mut rig, egui::Key::S);
+        assert!(!editing(&mut rig), "{kind:?}: the save ends the edit");
+        assert_eq!(
+            *saves.borrow(),
+            1,
+            "{kind:?}: Cmd+S dispatched while the editor had focus"
+        );
+        let box_ = last_shape(&rig.shell.borrow().app);
+        assert_eq!(
             shape_text(&rig, box_).as_deref(),
             Some("Hi"),
-            "{kind:?}: the click commits the text"
+            "{kind:?}: the typed text committed before the write"
+        );
+        assert_eq!(shape_count(&rig), before + 1, "{kind:?}: the box is there");
+        assert_eq!(
+            undo_labels(&rig),
+            vec!["Insert Text Box".to_owned()],
+            "{kind:?}: one step labelled as the insert"
+        );
+        assert_eq!(
+            saved_shapes(&target),
+            before + 1,
+            "{kind:?}: the file carries the box"
+        );
+        {
+            let shell = rig.shell.borrow();
+            let session = shell.app.active_document().expect("session");
+            assert!(!session.is_dirty(), "{kind:?}: the save marked it saved");
+        }
+        let _ = std::fs::remove_file(&target);
+    }
+}
+
+/// A save with an empty new box open writes no empty box (item 3):
+/// the commit rule cancels the box before `file.save` runs, and the
+/// file holds only the fixture shapes.
+#[test]
+fn a_save_of_an_empty_new_box_writes_no_box() {
+    for kind in LAYOUTS {
+        let target = temp_target("empty");
+        let picker = SavePicker::new(target.clone());
+        let saves = picker.saves.clone();
+        let mut rig = shell_rig(kind);
+        rig.shell.borrow_mut().set_picker(Box::new(picker));
+        let before = shape_count(&rig);
+        choose_text_tool(&mut rig, kind);
+        let pos = screen(&rig, EMPTY.0, EMPTY.1);
+        click_at(&mut rig, pos);
+        assert!(editing(&mut rig), "{kind:?}: the box opens");
+        chord(&mut rig, egui::Key::S);
+        assert!(!editing(&mut rig), "{kind:?}: the save ends the edit");
+        assert_eq!(*saves.borrow(), 1, "{kind:?}: the save ran");
+        assert_eq!(shape_count(&rig), before, "{kind:?}: the empty box cancels");
+        assert!(undo_labels(&rig).is_empty(), "{kind:?}: no undo entry");
+        assert_eq!(
+            saved_shapes(&target),
+            before,
+            "{kind:?}: the file holds no empty box"
+        );
+        {
+            let shell = rig.shell.borrow();
+            let session = shell.app.active_document().expect("session");
+            assert!(
+                !session.is_dirty(),
+                "{kind:?}: the cancelled box left it unchanged"
+            );
+        }
+        let _ = std::fs::remove_file(&target);
+    }
+}
+
+/// The other file commands over an open edit commit it first too (item
+/// 3's check, item 4's pin): Cmd+P is `file.print`'s global binding —
+/// a stub today — and it still commits (or cancels) the box before it
+/// runs; Save As sees the committed box as well.
+#[test]
+fn a_file_command_over_an_open_edit_commits_it_first() {
+    for kind in LAYOUTS {
+        // Cmd+P over an empty box: the box cancels before the stub
+        // runs.
+        let mut rig = shell_rig(kind);
+        let before = shape_count(&rig);
+        choose_text_tool(&mut rig, kind);
+        let pos = screen(&rig, EMPTY.0, EMPTY.1);
+        click_at(&mut rig, pos);
+        assert!(editing(&mut rig), "{kind:?}: the box opens");
+        chord(&mut rig, egui::Key::P);
+        assert!(
+            !editing(&mut rig),
+            "{kind:?}: the print command ends the edit"
+        );
+        assert_eq!(
+            shape_count(&rig),
+            before,
+            "{kind:?}: the empty box cancels before the file command"
+        );
+        drop(rig);
+
+        // Save As over typed text: the edit ends first and the file
+        // command saves the committed box.
+        let target = temp_target("save_as");
+        let picker = SavePicker::new(target.clone());
+        let saves = picker.saves.clone();
+        let mut rig = shell_rig(kind);
+        rig.shell.borrow_mut().set_picker(Box::new(picker));
+        choose_text_tool(&mut rig, kind);
+        let pos = screen(&rig, EMPTY.0, EMPTY.1);
+        click_at(&mut rig, pos);
+        type_into_editor(&mut rig, "Hi");
+        save_as_command(&mut rig, kind);
+        assert!(!editing(&mut rig), "{kind:?}: the edit ended");
+        assert_eq!(
+            *saves.borrow(),
+            1,
+            "{kind:?}: Save As saved the committed box"
+        );
+        assert_eq!(
+            saved_shapes(&target),
+            before + 1,
+            "{kind:?}: the file carries the committed box"
+        );
+        let _ = std::fs::remove_file(&target);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Item 1 (task P7-48, the review's M1): the block is the box. The
+// commit test, the fill and the wrap width use the text block, joined
+// with the field's own rect.
+// ---------------------------------------------------------------------------
+
+/// The fixture rectangle's centre, in page inches, edited with its own
+/// text already drawn (the M1 flows need the drawn text to shrink the
+/// old ink box).
+fn edit_with_text(rig: &mut ShellRig, text: &str) {
+    select_shape(rig);
+    let pos = screen(rig, SHAPE.0, SHAPE.1);
+    double_click_at(rig, pos);
+    assert!(editing(rig), "the double click opens the editor");
+    type_into_editor(rig, text);
+    press_key(rig, egui::Key::Escape);
+    double_click_at(rig, pos);
+    assert!(editing(rig), "the editor re-opens over the drawn text");
+}
+
+/// A click just right of the last letter moves the caret and keeps the
+/// edit (task P7-48 item 1): the click lands inside the text block,
+/// outside the tight text.
+#[test]
+fn a_click_right_of_the_last_letter_keeps_the_edit() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        edit_with_text(&mut rig, "MMMM");
+        // Right of "MMMM" (which ends near x 2.55), on the first
+        // line, inside the text block (page y is up: the block's top
+        // edge is y 3.5 and the line sits just below it).
+        let pos = screen(&rig, 3.2, 3.35);
+        click_at(&mut rig, pos);
+        assert!(
+            editing(&mut rig),
+            "{kind:?}: the click right of the text keeps the edit"
+        );
+        type_into_editor(&mut rig, "X");
+        press_key(&mut rig, egui::Key::Escape);
+        let shape = rectangle(&rig.shell.borrow().app);
+        assert_eq!(
+            shape_text(&rig, shape).as_deref(),
+            Some("MMMMX"),
+            "{kind:?}: the caret moved to the click and typing lands"
+        );
+    }
+}
+
+/// A click on a newly typed second line keeps the edit, and so does a
+/// click on a line the field grew to below the text block (task P7-48
+/// item 1: the field's own response rect joins the commit test).
+#[test]
+fn a_click_on_a_typed_line_keeps_the_edit() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        edit_with_text(&mut rig, "MM");
+        // Enough text to wrap at the block width (about 14 M's a line
+        // at the drawn size): a second line appears below the first.
+        type_into_editor(&mut rig, &"M".repeat(20));
+        // The second line, inside the block but below the drawn text.
+        let pos = screen(&rig, 2.3, 3.15);
+        click_at(&mut rig, pos);
+        assert!(
+            editing(&mut rig),
+            "{kind:?}: the click on the second line keeps the edit"
+        );
+        // Enough text to grow the field past the block's height, then
+        // a click on a line below the block (the field's own rect
+        // joins the commit test).
+        type_into_editor(&mut rig, &"M".repeat(100));
+        let pos = screen(&rig, 2.3, 2.2);
+        click_at(&mut rig, pos);
+        assert!(
+            editing(&mut rig),
+            "{kind:?}: the click inside the grown field keeps the edit"
+        );
+        press_key(&mut rig, egui::Key::Escape);
+    }
+}
+
+/// The field wraps where the drawn text wraps (task P7-48 item 1): a
+/// long append wraps at the block width, not at 80 px.
+#[test]
+fn the_field_wraps_at_the_block_width() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        edit_with_text(&mut rig, "MM");
+        // Seven more M's: about 100 px of text — one line at the 192 px
+        // block width, two lines at the old 80 px wrap.
+        type_into_editor(&mut rig, &"M".repeat(7));
+        let band2 = ink(&mut rig, 2.05, 3.05, 3.95, 3.25);
+        assert_eq!(
+            band2, 0,
+            "{kind:?}: the append wraps at the block width, not at 80 px"
+        );
+        // The control: enough text wraps, and the second band shows it
+        // (the band sits where a wrapped line falls).
+        type_into_editor(&mut rig, &"M".repeat(30));
+        let band2 = ink(&mut rig, 2.05, 3.05, 3.95, 3.25);
+        assert!(
+            band2 > 0,
+            "{kind:?}: the long text wraps into the second band ({band2})"
+        );
+        press_key(&mut rig, egui::Key::Escape);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Item 2 (task P7-48, the review's M2): one text at a time. The canvas
+// leaves out the text of the shape being edited; only the editor
+// shows it. Its geometry, fill and line still draw.
+// ---------------------------------------------------------------------------
+
+/// The count of non-background pixels of the canvas raster (the
+/// canvas layer, under the editor overlay) in a page rectangle.
+fn raster_ink(rig: &ShellRig, x0: f64, y0: f64, x1: f64, y1: f64) -> usize {
+    let shell = rig.shell.borrow();
+    let cache = shell.canvas_cache();
+    let raster = cache.raster().expect("the canvas raster");
+    let (page_w, page_h) = cache.page_size();
+    let scale = f64::from(raster.width) / page_w;
+    let px = |x: f64| ((x.clamp(0.0, page_w) * scale) as u32).min(raster.width.saturating_sub(1));
+    let py = |y: f64| {
+        (((page_h - y.clamp(0.0, page_h)) * scale) as u32).min(raster.height.saturating_sub(1))
+    };
+    let (xmin, xmax) = (px(x0), px(x1));
+    let (ymin, ymax) = (py(y1), py(y0));
+    let mut counts: std::collections::HashMap<(u8, u8, u8), usize> =
+        std::collections::HashMap::new();
+    for x in xmin..xmax {
+        for y in ymin..ymax {
+            let i = ((y * raster.width + x) * 4) as usize;
+            let px = &raster.rgba[i..i + 4];
+            *counts.entry((px[0], px[1], px[2])).or_default() += 1;
+        }
+    }
+    let background = counts
+        .iter()
+        .max_by_key(|(_, count)| *count)
+        .map(|(colour, _)| *colour)
+        .unwrap_or((0, 0, 0));
+    let mut inked = 0;
+    for x in xmin..xmax {
+        for y in ymin..ymax {
+            let i = ((y * raster.width + x) * 4) as usize;
+            let px = &raster.rgba[i..i + 4];
+            let far = i32::from(px[0]) - i32::from(background.0);
+            let far = far
+                .abs()
+                .max((i32::from(px[1]) - i32::from(background.1)).abs());
+            let far = far.max((i32::from(px[2]) - i32::from(background.2)).abs());
+            if far > 40 {
+                inked += 1;
+            }
+        }
+    }
+    inked
+}
+
+/// The canvas does not draw the text of the shape being edited (task
+/// P7-48 item 2): with the editor open the shape's text pixels are
+/// absent from the canvas layer; after the edit they are back with the
+/// new text.
+#[test]
+fn the_canvas_leaves_out_the_text_being_edited() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        select_shape(&mut rig);
+        lighten_fill(&mut rig, kind);
+        let pos = screen(&rig, SHAPE.0, SHAPE.1);
+        double_click_at(&mut rig, pos);
+        type_into_editor(&mut rig, "MMMM");
+        press_key(&mut rig, egui::Key::Escape);
+        rig.run();
+        rig.run();
+        let with_text = raster_ink(&rig, 2.05, 3.2, 3.95, 3.47);
+        assert!(
+            with_text > 0,
+            "{kind:?}: the committed text draws ({with_text})"
+        );
+
+        // While the editor is open the canvas layer holds no text.
+        double_click_at(&mut rig, pos);
+        rig.run();
+        rig.run();
+        let hidden = raster_ink(&rig, 2.05, 3.2, 3.95, 3.47);
+        assert_eq!(
+            hidden, 0,
+            "{kind:?}: the edited text is absent from the canvas"
+        );
+
+        // When the edit ends the text comes back, with the new text.
+        type_into_editor(&mut rig, "!");
+        press_key(&mut rig, egui::Key::Escape);
+        rig.run();
+        rig.run();
+        let back = raster_ink(&rig, 2.05, 3.2, 3.95, 3.47);
+        assert!(back > 0, "{kind:?}: the text is back ({back})");
+        let shape = rectangle(&rig.shell.borrow().app);
+        assert_eq!(
+            shape_text(&rig, shape).as_deref(),
+            Some("MMMM!"),
+            "{kind:?}: with the edited text"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Item 3 (task P7-48, the review's M3): Escape belongs to an open
+// popup — it closes and the open edit stays.
+// ---------------------------------------------------------------------------
+
+/// Escape in the font size list closes the list and keeps the edit
+/// with its text (task P7-48 item 3); Escape again ends the edit.
+#[test]
+fn escape_in_a_format_popup_closes_the_popup_not_the_edit() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        choose_text_tool(&mut rig, kind);
+        let pos = screen(&rig, EMPTY.0, EMPTY.1);
+        click_at(&mut rig, pos);
+        assert!(editing(&mut rig), "{kind:?}: the box opens");
+        type_into_editor(&mut rig, "Hi");
+        open_size_list(&mut rig, kind);
+        assert!(
+            has(&mut rig, Role::Button, "36 pt"),
+            "{kind:?}: the size list opens"
+        );
+        press_key(&mut rig, egui::Key::Escape);
+        assert!(
+            !has(&mut rig, Role::Button, "36 pt"),
+            "{kind:?}: the Escape closes the list"
+        );
+        assert!(
+            editing(&mut rig),
+            "{kind:?}: and keeps the edit with its text"
+        );
+        type_into_editor(&mut rig, "!");
+        press_key(&mut rig, egui::Key::Escape);
+        let box_ = last_shape(&rig.shell.borrow().app);
+        assert_eq!(
+            shape_text(&rig, box_).as_deref(),
+            Some("Hi!"),
+            "{kind:?}: the typed text is kept"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Item 4 (task P7-48, the review's M4): the quit and close paths
+// commit the open edit first (real input).
+// ---------------------------------------------------------------------------
+
+/// The viewport commands of the last frame (the `unsaved` module's
+/// helper).
+fn sent(rig: &mut ShellRig, match_: fn(&egui::ViewportCommand) -> bool) -> bool {
+    rig.harness()
+        .output()
+        .viewport_output
+        .values()
+        .any(|output| output.commands.iter().any(match_))
+}
+
+/// The window close request (the window's close button; the `unsaved`
+/// module's helper).
+fn request_window_close(rig: &mut ShellRig) {
+    {
+        let harness = rig.harness();
+        let viewports = harness
+            .input_mut()
+            .viewports
+            .entry(egui::ViewportId::ROOT)
+            .or_default();
+        viewports.events.push(egui::ViewportEvent::Close);
+    }
+    rig.harness().step();
+}
+
+/// Whether the quit completed within ten frames (the `unsaved`
+/// module's helper).
+fn quit_completed(rig: &mut ShellRig) -> bool {
+    for _ in 0..10 {
+        rig.harness().step();
+        if rig.shell.borrow().quit_requested() {
+            return true;
+        }
+        if sent(rig, |command| {
+            matches!(command, egui::ViewportCommand::Close)
+        }) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Whether the three-way dialog is up and names `name` (the `unsaved`
+/// module's helper).
+fn unsaved_dialog_names(rig: &mut ShellRig, name: &str) -> bool {
+    rig.run();
+    rig.names()
+        .contains_key(&format!("Unsaved changes in {name}."))
+}
+
+/// Presses the unsaved-changes dialog's button named `name` (scoped
+/// to its window) with no frame after it: the caller watches the
+/// frames that answer it (the `unsaved` module's `dialog_press`).
+fn unsaved_dialog_press(rig: &mut ShellRig, name: &str) {
+    let rect = rig
+        .harness()
+        .ctx
+        .memory(|memory| {
+            memory.area_rect(egui::Id::unique(larrygram_ui::window_size::UNSAVED_WINDOW))
+        })
+        .expect("the dialog window");
+    let root = rig.harness().root();
+    let node = root
+        .query_all_by_role_and_label(Role::Button, name)
+        .find(|node| rect.contains_rect(node.rect()))
+        .unwrap_or_else(|| panic!("no dialog button named {name:?}"));
+    node.click();
+}
+
+/// Clicks the unsaved-changes dialog's button named `name` and runs
+/// the frames of the click (`unsaved` module's `dialog_click`).
+fn unsaved_dialog_click(rig: &mut ShellRig, name: &str) {
+    unsaved_dialog_press(rig, name);
+    rig.run();
+}
+
+/// Whether the window close finished: the Close command of the last
+/// frame, or within the next ten (the walk may answer over frames).
+fn close_finished(rig: &mut ShellRig) -> bool {
+    sent(rig, |command| {
+        matches!(command, egui::ViewportCommand::Close)
+    }) || quit_completed(rig)
+}
+
+/// Opens a new text box with `text` typed in it (nothing committed).
+fn type_a_new_box(rig: &mut ShellRig, kind: LayoutKind, text: &str) {
+    choose_text_tool(rig, kind);
+    let pos = screen(rig, EMPTY.0, EMPTY.1);
+    click_at(rig, pos);
+    assert!(editing(rig), "the box opens");
+    type_into_editor(rig, text);
+}
+
+/// The window close request with an empty new box on a clean drawing:
+/// no dialog (the commit rule cancels the box) and the window closes
+/// (task P7-48 item 4, the P7-42 review minor 6 case).
+#[test]
+fn a_close_request_with_an_empty_new_box_closes_quietly() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        type_a_new_box(&mut rig, kind, "");
+        request_window_close(&mut rig);
+        // The close finishes in the request's frame: read it before
+        // the dialog check runs frames of its own.
+        let closed = close_finished(&mut rig);
+        assert!(
+            !unsaved_dialog_names(&mut rig, "Untitled"),
+            "{kind:?}: an empty box is no change to ask about"
+        );
+        assert!(closed, "{kind:?}: the window closes");
+    }
+}
+
+/// The window close request with typed text: the dialog appears (the
+/// commit rule wrote the text first) and Don't Save closes the
+/// drawing without saving it (task P7-48 item 4).
+#[test]
+fn a_close_request_with_typed_text_asks_and_dont_save_closes() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        type_a_new_box(&mut rig, kind, "Hi");
+        request_window_close(&mut rig);
+        assert!(
+            unsaved_dialog_names(&mut rig, "Untitled"),
+            "{kind:?}: the typed text is a change to ask about"
+        );
+        // The answer is watched frame by frame (`run` settles over
+        // frames and the close would be gone from the output).
+        unsaved_dialog_press(&mut rig, "Don't Save");
+        assert!(close_finished(&mut rig), "{kind:?}: Don't Save closes");
+        assert!(
+            rig.shell.borrow().app.documents.is_empty(),
+            "{kind:?}: the drawing closed with its unsaved text"
+        );
+    }
+}
+
+/// Cmd+Q (Ctrl+Q off macOS) with typed text: the dialog appears (task
+/// P7-48 item 4).
+#[test]
+fn cmd_q_with_typed_text_asks() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        type_a_new_box(&mut rig, kind, "Hi");
+        chord(&mut rig, egui::Key::Q);
+        assert!(
+            unsaved_dialog_names(&mut rig, "Untitled"),
+            "{kind:?}: the dialog asks about the typed text"
+        );
+        unsaved_dialog_click(&mut rig, "Cancel");
+    }
+}
+
+/// `file.exit` from the File menu with typed text: the dialog appears
+/// (task P7-48 item 4). Panel Modern's File view has no Exit row
+/// (P7-42): its quit path is Cmd+Q above.
+#[test]
+fn file_exit_from_the_menu_with_typed_text_asks() {
+    let mut rig = shell_rig(LayoutKind::PanelClassic);
+    type_a_new_box(&mut rig, LayoutKind::PanelClassic, "Hi");
+    click(&mut rig, Role::Button, "File");
+    click(&mut rig, Role::MenuItem, "Exit");
+    assert!(
+        unsaved_dialog_names(&mut rig, "Untitled"),
+        "the dialog asks about the typed text"
+    );
+    unsaved_dialog_click(&mut rig, "Cancel");
+}
+
+// ---------------------------------------------------------------------------
+// Item 5 (task P7-48, the review's minor 1): Undo and Redo with an
+// open undo group.
+// ---------------------------------------------------------------------------
+
+/// The Undo label names the open group's step and one click undoes
+/// that step only (a typed box is committed and undone whole); Redo
+/// is disabled while the group is open and works afterwards (task
+/// P7-48 item 5, the labels and enabled state through accesskit).
+#[test]
+fn undo_names_the_open_group_and_redo_comes_back_after() {
+    {
+        // The dynamic label seam is Panel Modern's (task P7-48 item 5).
+        let kind = LayoutKind::PanelModern;
+        let mut rig = shell_rig(kind);
+        type_a_new_box(&mut rig, kind, "Hi");
+        // The group's step is what Undo names, and it is enabled.
+        assert!(
+            has(&mut rig, Role::Button, "Undo Insert Text Box"),
+            "{kind:?}: the Undo label names the group's step"
+        );
+        assert!(
+            !disabled(&mut rig, Role::Button, "Undo Insert Text Box"),
+            "{kind:?}: Undo is enabled with the group open"
+        );
+        // Redo is disabled while the group is open.
+        assert!(
+            has(&mut rig, Role::Button, "Can't Redo"),
+            "{kind:?}: Redo reads as disabled"
+        );
+        assert!(
+            disabled(&mut rig, Role::Button, "Can't Redo"),
+            "{kind:?}: Redo is disabled with the group open"
+        );
+
+        // One click undoes that step only: the typed box is committed
+        // and undone whole.
+        let before = shape_count(&rig);
+        click(&mut rig, Role::Button, "Undo Insert Text Box");
+        assert!(!editing(&mut rig), "{kind:?}: the edit ended");
+        assert_eq!(shape_count(&rig), before - 1, "{kind:?}: the box is gone");
+        assert!(undo_labels(&rig).is_empty(), "{kind:?}: the step is undone");
+
+        // Afterwards Redo comes back and restores the box with its text.
+        assert!(
+            has(&mut rig, Role::Button, "Repeat Insert Text Box"),
+            "{kind:?}: Redo names the undone step"
+        );
+        assert!(
+            !disabled(&mut rig, Role::Button, "Repeat Insert Text Box"),
+            "{kind:?}: Redo is enabled afterwards"
+        );
+        click(&mut rig, Role::Button, "Repeat Insert Text Box");
+        assert_eq!(shape_count(&rig), before, "{kind:?}: the box is back");
+        let box_ = last_shape(&rig.shell.borrow().app);
+        assert_eq!(
+            shape_text(&rig, box_).as_deref(),
+            Some("Hi"),
+            "{kind:?}: with its text"
+        );
+    }
+}
+
+/// Undo with an untyped box: the box is cancelled and nothing else is
+/// undone, with no error (task P7-48 item 5).
+#[test]
+fn undo_on_an_untyped_box_cancels_it_and_undoes_nothing_else() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        // One earlier step to survive the Undo: a committed first box.
+        type_a_new_box(&mut rig, kind, "First");
+        press_key(&mut rig, egui::Key::Escape);
+        assert_eq!(
+            undo_labels(&rig),
+            vec!["Insert Text Box".to_owned()],
+            "{kind:?}: the first box is one step"
+        );
+        let with_first = shape_count(&rig);
+
+        // A second box at another empty spot, nothing typed: Undo
+        // cancels it and keeps the first box and its step.
+        choose_text_tool(&mut rig, kind);
+        let pos = screen(&rig, 6.5, 5.5);
+        click_at(&mut rig, pos);
+        assert!(editing(&mut rig), "{kind:?}: the second box opens");
+        undo_button(&mut rig);
+        assert!(!editing(&mut rig), "{kind:?}: the edit ended");
+        assert_eq!(
+            shape_count(&rig),
+            with_first,
+            "{kind:?}: the empty box is cancelled"
         );
         assert_eq!(
             undo_labels(&rig),
             vec!["Insert Text Box".to_owned()],
-            "{kind:?}: one undo step, labelled as the insert"
+            "{kind:?}: the first box's step is not undone"
         );
-        undo_button(&mut rig);
+        assert!(
+            rig.shell.borrow().app.warnings.is_empty(),
+            "{kind:?}: no error was noted"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Item 6 (task P7-48, the review's minor 7): an empty new box is not
+// a change. (The macOS hook reads the same rule: NSTerminateNow.)
+// ---------------------------------------------------------------------------
+
+/// The title carries no changed marker while the pending box is
+/// empty, and one once it carries typed text (task P7-48 item 6); a
+/// drawing changed before the box stays marked.
+#[test]
+fn an_empty_new_box_marks_nothing_in_the_title() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
         assert_eq!(
-            shape_count(&rig),
-            before,
-            "{kind:?}: one undo removes the whole box"
+            rig.shell.borrow().window_title(),
+            "Untitled - Larrygram",
+            "{kind:?}: the fixture starts clean"
+        );
+        type_a_new_box(&mut rig, kind, "");
+        assert_eq!(
+            rig.shell.borrow().window_title(),
+            "Untitled - Larrygram",
+            "{kind:?}: an empty box marks nothing"
+        );
+        type_into_editor(&mut rig, "x");
+        assert_eq!(
+            rig.shell.borrow().window_title(),
+            "\u{2022} Untitled - Larrygram",
+            "{kind:?}: typed text is a change"
+        );
+        press_key(&mut rig, egui::Key::Backspace);
+        assert_eq!(
+            rig.shell.borrow().window_title(),
+            "Untitled - Larrygram",
+            "{kind:?}: the emptied box marks nothing again"
+        );
+        press_key(&mut rig, egui::Key::Escape);
+        drop(rig);
+
+        // A drawing changed before the box stays marked while the box
+        // is typed.
+        let mut rig = shell_rig(kind);
+        type_a_new_box(&mut rig, kind, "First");
+        press_key(&mut rig, egui::Key::Escape);
+        assert_eq!(
+            rig.shell.borrow().window_title(),
+            "\u{2022} Untitled - Larrygram",
+            "{kind:?}: the committed box marks the drawing"
+        );
+        type_a_new_box(&mut rig, kind, "");
+        assert_eq!(
+            rig.shell.borrow().window_title(),
+            "\u{2022} Untitled - Larrygram",
+            "{kind:?}: the empty box keeps the earlier change marked"
+        );
+        press_key(&mut rig, egui::Key::Escape);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Item 7 (task P7-48, the review's minor 2): a turned or flipped
+// shape drops the font metrics — and keeps working.
+// ---------------------------------------------------------------------------
+
+/// The editor works over a shape turned 30 degrees (task P7-48 item
+/// 7): the metrics drop (its first baseline is no screen axis' y) but
+/// the edit opens, takes typing and commits.
+#[test]
+fn editing_a_turned_shape_works() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        let shape = {
+            let shell = rig.shell.borrow();
+            rectangle(&shell.app)
+        };
+        {
+            let mut shell = rig.shell.borrow_mut();
+            let session = shell.app.active_document_mut().expect("session");
+            let cell = session
+                .document
+                .shape_mut(shape)
+                .expect("shape")
+                .sheet
+                .cells
+                .iter_mut()
+                .find(|cell| cell.name.as_str() == "Angle")
+                .expect("the Angle cell");
+            cell.value = Some(CellValue::Number(30.0f64.to_radians()));
+        }
+        rig.run();
+        rig.run();
+        let pos = screen(&rig, SHAPE.0, SHAPE.1);
+        double_click_at(&mut rig, pos);
+        assert!(
+            editing(&mut rig),
+            "{kind:?}: the edit opens on the turned shape"
+        );
+        type_into_editor(&mut rig, "Turned");
+        press_key(&mut rig, egui::Key::Escape);
+        assert_eq!(
+            shape_text(&rig, shape).as_deref(),
+            Some("Turned"),
+            "{kind:?}: the text commits on the turned shape"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Item 8 (task P7-48, the review's minor 3): a popup's own field keeps
+// its typing.
+// ---------------------------------------------------------------------------
+
+/// A press in a popup hands the keyboard back to the editor only when
+/// the popup has no focusable field of its own (task P7-48 item 8):
+/// the digits land in the Size picker's field, not in the shape text.
+#[test]
+fn a_popup_field_keeps_its_typing_while_editing() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        type_a_new_box(&mut rig, kind, "Hi");
+        open_size_list(&mut rig, kind);
+        {
+            rig.run();
+            let root = rig.harness().root();
+            let node = root
+                .query_all_by_role_and_label(Role::TextInput, "Size")
+                .next()
+                .expect("the Size picker's field");
+            node.click();
+            node.type_text("36");
+        }
+        rig.run();
+        {
+            let root = rig.harness().root();
+            let value = root
+                .query_all_by_role_and_label(Role::TextInput, "Size")
+                .next()
+                .and_then(|node| node.value());
+            assert_eq!(
+                value.as_deref(),
+                Some("36"),
+                "{kind:?}: the digits land in the picker's field"
+            );
+        }
+        // The shape text kept its own: the popup's typing never
+        // reached it.
+        press_key(&mut rig, egui::Key::Escape);
+        press_key(&mut rig, egui::Key::Escape);
+        let box_ = last_shape(&rig.shell.borrow().app);
+        assert_eq!(
+            shape_text(&rig, box_).as_deref(),
+            Some("Hi"),
+            "{kind:?}: not in the shape text"
         );
     }
 }

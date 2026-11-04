@@ -333,6 +333,15 @@ impl PanelModern {
             })
             .inner
             .accessible_name(label.as_str());
+        // A press on a keep-editing control keeps the in-place editor
+        // open (task P7-41 item 1, task P7-48 item 5): the QAT's Undo
+        // and Redo commit it themselves when they run.
+        crate::text_edit::keep_editing_rect(
+            ui.ctx(),
+            item.command.as_ref().map(|id| id.as_str()),
+            response.rect,
+            true,
+        );
         match item.kind {
             ItemKind::Split if !item.items.is_empty() || item.dynamic_label => {
                 // Undo: the label part runs the command, the arrow
@@ -347,6 +356,12 @@ impl PanelModern {
                     .inner
                     .accessible_name(common::DROPDOWN_TIP)
                     .on_hover_text(common::DROPDOWN_TIP);
+                crate::text_edit::keep_editing_rect(
+                    ui.ctx(),
+                    item.command.as_ref().map(|id| id.as_str()),
+                    arrow_response.rect,
+                    true,
+                );
                 if let Some(inner) =
                     egui::Popup::menu(&arrow_response).show(|ui| -> Result<(), UiError> {
                         let rows = match item.command.as_ref().map(|id| id.as_str()) {

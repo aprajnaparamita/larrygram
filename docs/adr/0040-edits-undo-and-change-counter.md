@@ -133,16 +133,27 @@ The first user is a new text box that is formatted while it is typed
 (P7-37): the insert, the format commands and the final text write are
 one step.
 
-- `UndoStack::begin_group(label)` opens a group. While it is open,
-  `push` appends to the group instead of the stack. Groups do not nest:
-  a second `begin_group` is an error.
+- `UndoStack::begin_group(label, unsaved)` opens a group: `unsaved` is
+  the caller's snapshot of the derived unsaved-changes state. The
+  shell-level seam is `AppCtx::begin_group(session, label)`, which
+  takes that snapshot itself. While the group is open, `push` appends
+  to the group instead of the stack. Groups do not nest: a second
+  `begin_group` is an error.
 - `end_group()` pushes the collected edits as one `CompositeEdit`
   under the label. An empty group pushes nothing.
 - `cancel_group(ctx)` reverts the collected edits in reverse order,
   with recording suspended (rule 2), and discards them. The document
   is as it was when the group opened, and its unsaved-changes state is
   restored too. The change counter still only moves forward (rule 3).
-- `undo` and `redo` end an open group first.
+  A failing `revert` stops the rollback and pushes the edits that were
+  not reverted as one step labelled as the group (task P7-41): the
+  stack stays consistent, the error is reported, and the unsaved state
+  is not restored (a partial revert must never mark the drawing
+  saved). The pushed step re-reverts the edit that failed: its revert
+  runs again as part of that step's own undo.
+- `undo` and `redo` end an open group first. `can_undo` is true while
+  a non-empty group is open (task P7-41): the Undo control commits the
+  interaction first and then undoes the folded step whole.
 - Only the shell opens a group, and it always closes it, with
   `end_group` or `cancel_group`, when the interaction ends by any path:
   commit, Escape, a click elsewhere (P7-25), a layout switch, closing
@@ -166,6 +177,13 @@ one comparison over counters the amendment above already moves:
   "clean" answer after a dropped step.
 - A fresh `file.new` drawing with no edits is not changed; neither is
   a just-opened file.
+- One exception (task P7-48): while a new, **empty** text box is being
+  typed (`DocumentSession::pending_text_empty == Some(true)`), the
+  session reads as it did when the box opened — the open group's
+  `unsaved` snapshot. The box's insert is provisional (the commit
+  without text cancels it), so it marks nothing; the moment the box
+  carries typed text it is a change again. That is the reading the
+  macOS hook's `NSTerminateNow` sees.
 - The undo group's `unsaved` snapshot takes the same derived read when
   the group opens, and `cancel_group` restores that verdict after the
   reverts: a group that saw an unchanged drawing marks the reverted

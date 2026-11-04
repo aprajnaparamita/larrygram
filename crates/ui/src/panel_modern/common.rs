@@ -131,14 +131,30 @@ pub(crate) fn display_label(item: &Item, app: &AppCtx) -> String {
         return fallback_label(command, &label);
     };
     match command {
-        "edit.undo" => match session.undo.undo_labels().pop() {
-            Some(action) => format!("Undo {action}"),
-            None => "Can't Undo".to_owned(),
-        },
-        "edit.redo.or.repeat" => match session.undo.redo_labels().first() {
-            Some(action) => format!("Repeat {action}"),
-            None => "Can't Redo".to_owned(),
-        },
+        // The open group's pending step is what Undo names and
+        // reaches first (task P7-48 item 5).
+        "edit.undo" => {
+            match session
+                .undo
+                .pending_label()
+                .or_else(|| session.undo.undo_labels().pop())
+            {
+                Some(action) => format!("Undo {action}"),
+                None => "Can't Undo".to_owned(),
+            }
+        }
+        "edit.redo.or.repeat" => {
+            if session.undo.pending_label().is_some() {
+                // Redo is disabled while the group is open (task
+                // P7-48 item 5).
+                "Can't Redo".to_owned()
+            } else {
+                match session.undo.redo_labels().first() {
+                    Some(action) => format!("Repeat {action}"),
+                    None => "Can't Redo".to_owned(),
+                }
+            }
+        }
         _ => label,
     }
 }
@@ -311,6 +327,25 @@ mod tests {
         let mut no_shortcut = item("a", None);
         no_shortcut.shortcut = None;
         assert_eq!(tooltip_text("Label", &no_shortcut), "Label");
+    }
+
+    /// Task P7-48 item 5: while a non-empty group is open the Undo
+    /// label names the group's step and Redo reads as disabled.
+    #[test]
+    fn dynamic_labels_name_the_open_groups_step() {
+        let mut app = app_with_document();
+        let session = app.documents[0].id;
+        app.begin_group(session, "Insert Text Box").expect("group");
+        app.push_edit(session, Box::new(NoopEdit("Insert Text Box")))
+            .expect("push");
+
+        let mut undo = item("qat.undo", Some("edit.undo"));
+        undo.dynamic_label = true;
+        assert_eq!(display_label(&undo, &app), "Undo Insert Text Box");
+
+        let mut redo = item("qat.redo", Some("edit.redo.or.repeat"));
+        redo.dynamic_label = true;
+        assert_eq!(display_label(&redo, &app), "Can't Redo");
     }
 
     #[test]

@@ -161,7 +161,11 @@ pub(super) fn run_insert_shape(
     }
     select_new(ctx, session, page, shape)?;
     ctx.touch_session(session);
-    Ok(edit_outcome(label, Vec::new(), step))
+    let mut outcome = edit_outcome(label, Vec::new(), step);
+    // The new shape's id (task P7-48 item 9): like the other creation
+    // commands.
+    outcome.shape = Some(shape);
+    Ok(outcome)
 }
 
 /// The undo step of a finished drop (task P6-18 F14): the insertion
@@ -293,7 +297,10 @@ fn text_box_at_page_centre(
     })?;
     select_new(ctx, session, page, shape)?;
     ctx.touch_session(session);
-    Ok(edit_outcome(label, Vec::new(), Box::new(edit)))
+    let mut outcome = edit_outcome(label, Vec::new(), Box::new(edit));
+    // The new shape's id (task P7-41 item 7).
+    outcome.shape = Some(shape);
+    Ok(outcome)
 }
 
 /// The undo record of one shape that `insert_shape` already put in the
@@ -427,7 +434,11 @@ fn insert_drawing(
     })?;
     select_new(ctx, session, page, shape)?;
     ctx.touch_session(session);
-    Ok(edit_outcome(label, Vec::new(), Box::new(edit)))
+    let mut outcome = edit_outcome(label, Vec::new(), Box::new(edit));
+    // The new shape's id (task P7-41 item 7): the caller opens its
+    // editor on this id instead of racing the selection.
+    outcome.shape = Some(shape);
+    Ok(outcome)
 }
 
 impl Drawing {
@@ -1202,6 +1213,75 @@ mod tests {
             doc.page(page).expect("page").shapes.len(),
             1,
             "only the fixture shape is on the page"
+        );
+    }
+
+    /// Task P7-48 item 9: `insert.shape` answers with its new shape's
+    /// id like the other creation commands — for every catalog master.
+    #[test]
+    fn insert_shape_outcome_carries_the_new_shape_id() {
+        let (mut ctx, _session, page, _shape) = fixture();
+        for entry in stencils::catalog() {
+            for master in &entry.masters {
+                let args = Args::new()
+                    .with("stencil", ArgValue::Text(entry.name.to_owned()))
+                    .with("master", ArgValue::Text(master.name.to_owned()))
+                    .with("x", ArgValue::Number(4.0))
+                    .with("y", ArgValue::Number(4.0));
+                let outcome = run_insert_shape(&mut ctx, &Invocation::new(args, Source::Ui))
+                    .unwrap_or_else(|error| panic!("{} drops: {error}", master.name));
+                let doc = &ctx.active_document().expect("session").document;
+                let id = *doc
+                    .page(page)
+                    .expect("page")
+                    .shapes
+                    .last()
+                    .expect("the new shape");
+                assert_eq!(
+                    outcome.shape,
+                    Some(id),
+                    "{}: the outcome names the new shape",
+                    master.name
+                );
+            }
+        }
+    }
+
+    /// Task P7-41 item 7: the outcome carries the new shape's id, so
+    /// the caller opens its editor without racing the selection.
+    #[test]
+    fn the_text_box_outcome_carries_the_new_shape_id() {
+        let (mut ctx, _session, page, _shape) = fixture();
+        let args = Args::new()
+            .with("x", ArgValue::Number(1.0))
+            .with("y", ArgValue::Number(1.0))
+            .with("width", ArgValue::Number(2.0))
+            .with("height", ArgValue::Number(0.5))
+            .with("allow_empty", ArgValue::Flag(true));
+        let outcome =
+            run_text_box(&mut ctx, &Invocation::new(args, Source::Ui)).expect("the box opens");
+        let doc = &ctx.active_document().expect("session").document;
+        let id = *doc
+            .page(page)
+            .expect("page")
+            .shapes
+            .last()
+            .expect("the new box");
+        assert_eq!(outcome.shape, Some(id), "the outcome names the new box");
+
+        let outcome =
+            run_text_box_horizontal(&mut ctx, &Invocation::empty(Source::Ui)).expect("box");
+        let doc = &ctx.active_document().expect("session").document;
+        let id = *doc
+            .page(page)
+            .expect("page")
+            .shapes
+            .last()
+            .expect("the new box");
+        assert_eq!(
+            outcome.shape,
+            Some(id),
+            "the page-centre box carries its id too"
         );
     }
 

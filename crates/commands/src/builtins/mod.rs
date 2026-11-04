@@ -61,6 +61,7 @@ pub(crate) const STUB_TABLES: &[CommandTable] = &[
     connector::TABLE,
     data::TABLE,
     edit::TABLE,
+    format::TEXT_TABLE,
     format::TABLE,
     insert::TABLE,
     page::TABLE,
@@ -469,6 +470,25 @@ pub(crate) fn edit_outcome(
     }
 }
 
+/// Whether `command` is a text-format command (task P7-41 item 1): its
+/// control formats the text of the shape being edited, so a click on
+/// the control keeps the in-place editor open (focus and caret
+/// included). The set is `format::TEXT_TABLE`, the same table the
+/// registry registers: one source of truth.
+pub fn is_text_format(command: &str) -> bool {
+    format::TEXT_TABLE.iter().any(|(id, ..)| *id == command)
+}
+
+/// Whether running `command` ends an in-place text edit (task P7-41
+/// item 4): every command does, except the text-format commands
+/// ([`is_text_format`]) and the editor's own commands
+/// (`text::EDITOR_OWN`). The shell commits the open edit before any
+/// other command runs, so a save never writes an empty box and a
+/// layout switch keeps the typed text.
+pub fn ends_text_editing(command: &str) -> bool {
+    !is_text_format(command) && !text::EDITOR_OWN.contains(&command)
+}
+
 /// Enabled when the selection is not empty (ADR 0041).
 pub(crate) fn has_selection(ctx: &AppCtx) -> Enabled {
     if ctx.selection.is_empty() {
@@ -546,6 +566,42 @@ mod tests {
                 CommandStatus::Implemented,
                 "{id} must be implemented"
             );
+        }
+    }
+
+    /// Task P7-41 items 1 and 4: the text-format set is the source of
+    /// truth for the commit-the-editor rule over it.
+    #[test]
+    fn the_text_format_set_gates_the_editor_commit_rule() {
+        for command in [
+            "text.font",
+            "text.font.size",
+            "text.font.color",
+            "format.text.bold",
+            "format.text.align_left",
+            "text.bullets",
+        ] {
+            assert!(is_text_format(command), "{command} is text format");
+            assert!(!ends_text_editing(command), "{command} keeps editing");
+        }
+        for command in ["text.begin", "text.commit", "text.cancel"] {
+            assert!(!is_text_format(command), "{command}");
+            assert!(!ends_text_editing(command), "{command} keeps editing");
+        }
+        for command in [
+            "file.save",
+            "file.save_as",
+            "file.exit",
+            "app.quit",
+            "edit.undo",
+            "edit.redo",
+            "view.ui_layout.panel_classic",
+            "shape.set.text",
+            "format.set.fill.color",
+            "insert.drawing.text_box",
+        ] {
+            assert!(!is_text_format(command), "{command}");
+            assert!(ends_text_editing(command), "{command} commits first");
         }
     }
 
