@@ -68,15 +68,16 @@ Phase 7: Panel and Classic layouts, the Larrygram rename and the welcome wizard.
 | [P7-37](tasks/P7-37.md) | implementer | P7-29 | I | merged (a new text box is a shape inside an undo group; one allowlist rule for the text controls; Opus review: merge, follow-ups in P7-41 and P7-42) | `bc4e1ef` |
 | [P7-39](tasks/P7-39.md) | implementer | P7-31 | I | merged with P7-31 (1-D moves, copies and drops, group delete, routability: 4,692 of 37,876 glued 1-D shapes in the wide corpus are not routable) | `aea93c6` |
 | [P7-40](tasks/P7-40.md) | implementer | P7-37 | I | merged (`Document::effective_text`; the renderer, the text controls and the editor follow it; 25 corpus instances inherit text, 4 visible) | `6cda0fb` |
-| [P7-41](tasks/P7-41.md) | implementer | P7-37, P7-40, P7-42 | I | handed off at `fcccd9a`; Opus review: the editor's box became the ink box (clicks inside commit), the drawn text shows under the field, Escape in a popup ends the edit; fixes in P7-48 on the same branch | — |
-| [P7-48](tasks/P7-48.md) | implementer | P7-41 | I | handed off at `995d343` on `agent/P7-41` (gate green at `1b71c51`); awaiting the Opus re-review, then merges with P7-41 | — |
+| [P7-41](tasks/P7-41.md) | implementer | P7-37, P7-40, P7-42 | I | merged with P7-48 (format clicks keep the editor open; every command commits first; the editor matches the drawn text; two Opus reviews, follow-up P7-51) | `fe04760` |
+| [P7-48](tasks/P7-48.md) | implementer | P7-41 | I | merged with P7-41 (the editor's box is the text block, the canvas leaves out the edited shape's text, Escape to popups, quit and close tests, Undo/Redo with an open group, an empty new box is not a change; hit-testing now uses the whole text block) | `fe04760` |
+| [P7-51](tasks/P7-51.md) | implementer | P7-48 | I | ready (the field takes the block's margins and alignment, a fresh empty-box flag, one keep-the-edit area, a hit test for the text block, review minors); parallel with P7-33 and P7-36 | — |
 | [P7-42](tasks/P7-42.md) | implementer | P7-37 | I | merged with P7-46 (one derived dirty rule; close and quit ask Save / Don't Save / Cancel; Cmd/Ctrl+Q, the close button and the macOS app-menu Quit take one walk; the title marker; hand-off gate green at `3ff85e9`) | `2c0468a` |
 | [P7-46](tasks/P7-46.md) | implementer | P7-42 | I | merged with P7-42 (NSTerminateNow with nothing changed, NSTerminateLater answered by the walk; a quit during Close is kept; serial hook tests; no quit on the web) | `2c0468a` |
 | [P7-47](tasks/P7-47.md) | implementer | P7-42, P7-46 | I | merged (an untitled save adopts the picked path and records it as recent; hand-off gate green at `3a6b148`) | `6d6fce8` |
 | [P7-43](tasks/P7-43.md) | test-engineer | P7-38 | I | merged with P7-38 (the 3× fallback, no stale PNGs, a state check per shot, no transparent edge, caret blink off) | `ecf9d2b` |
 | [P7-44](tasks/P7-44.md) | implementer | — | I | merged with P7-45 (our masters and drawn shapes centre their text; the Shape Data value field fills its row; hand-off gate green at `f4ec7b9`) | `230519c` |
 | [P7-45](tasks/P7-45.md) | implementer | P7-44 | I | merged with P7-44 (240-point panes, Rectangle and Ellipse centred, the ellipsis drawn not stored, local alignment and round-trip tests) | `230519c` |
-| [P7-38](tasks/P7-38.md) | test-engineer | — | I | merged with P7-43 (`cargo xtask screenshots [--only <id>] [--to <dir>]`; 7 shots on the website as of 2026-11-03, text-editing held back for P7-41; re-run after P7-32–P7-36, P7-41, P7-44) | `ecf9d2b` |
+| [P7-38](tasks/P7-38.md) | test-engineer | — | I | merged with P7-43 (`cargo xtask screenshots [--only <id>] [--to <dir>]`; 7 shots on the website as of 2026-11-03, text-editing held back for P7-51; re-run after P7-32–P7-36, P7-41, P7-44) | `ecf9d2b` |
 
 Tasks start as soon as their own dependencies merge (no whole-group waits); run at most twelve workers at once across Phase 7 and Phase 8.
 
