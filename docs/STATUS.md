@@ -61,10 +61,10 @@ Phase 7: Panel and Classic layouts, the Larrygram rename and the welcome wizard.
 | [P7-32](tasks/P7-32.md) | implementer | P7-31 | I | merged with P7-49 and P7-50 (one endpoint resolution in `larrygram_geom::glue`; right-angle routes leave along the exit directions and clear both shapes; the Connector tool glues by the drawing glue rule; two Opus reviews) | `8fbd73b` |
 | [P7-49](tasks/P7-49.md) | implementer | P7-32 | I | merged with P7-32 (undo restores the re-routed rows, moved connectors keep their path, routes clear both shapes, axis-aligned exits, groups that rotate and flip) | `8fbd73b` |
 | [P7-50](tasks/P7-50.md) | implementer | P7-49 | I | merged with P7-32 (group and ungroup re-base endpoint cells in the model, a rigid group move keeps its route, oriented boxes for rotated targets, point glue names the member; master review) | `8fbd73b` |
-| [P7-33](tasks/P7-33.md) | implementer | P7-32 | I | ready (end handles, re-glue, unglue, hover feedback, arrow-key unglue); parallel with P7-36 | — |
+| [P7-33](tasks/P7-33.md) | implementer | P7-32 | I | running (end handles, re-glue, unglue, hover feedback, arrow-key unglue); parallel with P7-36 | — |
 | [P7-34](tasks/P7-34.md) | implementer | P7-33 | I | waits for P7-33 (connection points: view check, tool, type, glue renumbering); parallel with P7-35 | — |
 | [P7-35](tasks/P7-35.md) | implementer | P7-33, P7-36 | I | waits (segment drags, Reset Connector, reroute options) | — |
-| [P7-36](tasks/P7-36.md) | implementer | P7-32 | I | ready (right angle, straight and curved styles, the controls, the storage round trip); parallel with P7-33 | — |
+| [P7-36](tasks/P7-36.md) | implementer | P7-32 | I | running (right angle, straight and curved styles, the controls, the storage round trip); parallel with P7-33 | — |
 | [P7-37](tasks/P7-37.md) | implementer | P7-29 | I | merged (a new text box is a shape inside an undo group; one allowlist rule for the text controls; Opus review: merge, follow-ups in P7-41 and P7-42) | `bc4e1ef` |
 | [P7-39](tasks/P7-39.md) | implementer | P7-31 | I | merged with P7-31 (1-D moves, copies and drops, group delete, routability: 4,692 of 37,876 glued 1-D shapes in the wide corpus are not routable) | `aea93c6` |
 | [P7-40](tasks/P7-40.md) | implementer | P7-37 | I | merged (`Document::effective_text`; the renderer, the text controls and the editor follow it; 25 corpus instances inherit text, 4 visible) | `6cda0fb` |
