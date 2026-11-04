@@ -20,8 +20,8 @@ use larrygram_commands::builtins::registry;
 use larrygram_commands::{ArgValue, Args, CommandError, Registry};
 use larrygram_geom::Point;
 use larrygram_model::{
-    Cell, CellName, CellValue, Connect, ConnectorEnd, Document, PageId, Preserved, Row, Section,
-    SectionName, Shape, ShapeId,
+    Cell, CellName, CellValue, Connect, ConnectorEnd, Document, Page, PageId, Preserved, Row,
+    Section, SectionName, Shape, ShapeId,
 };
 
 /// A cell with a literal formula.
@@ -362,6 +362,12 @@ fn a_free_end_lands_at_its_point_with_literal_cells() {
 
     dispatch(&mut ctx, &registry, "edit.undo", Args::new()).expect("undo");
     assert_eq!(state(doc(&ctx), page), before, "one undo restores exactly");
+    dispatch(&mut ctx, &registry, "edit.redo", Args::new()).expect("redo");
+    assert_eq!(
+        end(doc(&ctx), shape(&ctx, page, connector), ConnectorEnd::End),
+        Point::new(5.0, 5.5),
+        "redo re-applies the free point exactly"
+    );
 }
 
 #[test]
@@ -555,4 +561,135 @@ fn a_connector_inside_a_group_maps_the_point_through_the_parent_frame() {
         "the parent's coordinates"
     );
     cells_match_path(doc(&ctx), moved);
+}
+
+// ---------------------------------------------------------------------------
+// Model edges the end writes read through (the coverage ratchets: these
+// paths are what `connector.move_end`'s lookup, row and cell reads
+// take on odd input)
+// ---------------------------------------------------------------------------
+
+/// A `Connection` row whose `X`/`Y` cells are not numbers reads as no
+/// point (model `connection.rs`), and a row whose `DirX`/`DirY` cells
+/// are not numbers reads as no direction (the resolver's row read).
+#[test]
+fn a_connection_row_with_non_number_cells_reads_as_nothing() {
+    let mut document = Document::new();
+    let page = document.add_page("Page-1").expect("page");
+    let mut target = box_shape(1, 2.0, 2.0);
+    // One row with a text `Y` (no point) and one with a text `DirX`
+    // (a point, but no direction on that axis).
+    target.sheet.sections.clear();
+    let mut connection = Section::new(SectionName::from_static("Connection"));
+    let mut bad = Row::new();
+    bad.row_type = Some("Connection".to_owned());
+    bad.ix = Some(0);
+    let mut cells = vec![cell("X", 1.0)];
+    let mut text = Cell {
+        name: CellName::new("Y"),
+        formula: None,
+        value: Some(CellValue::Str("east".to_owned())),
+        unit: larrygram_geom::Unit::Inches,
+        preserved: Preserved::new(),
+    };
+    cells.push(text.clone());
+    bad.cells = cells;
+    connection.rows.push(bad);
+    let mut good = Row::new();
+    good.row_type = Some("Connection".to_owned());
+    good.ix = Some(1);
+    text.name = CellName::new("DirX");
+    good.cells = vec![cell("X", 1.0), cell("Y", 0.0), text];
+    connection.rows.push(good);
+    target.sheet.sections.push(connection);
+    document.insert_shape(page, target, None).expect("target");
+    let mut ctx = AppCtx::new(Settings::default());
+    ctx.open_document(DocumentSession::new(document, None));
+    let registry = registry().expect("registry");
+
+    // The row with the text `Y` has no point and drops out; the row
+    // with the text `DirX` keeps its point and glues.
+    let target = shape(&ctx, page, 1);
+    let points = doc(&ctx).connection_points_indexed(target);
+    assert_eq!(points, vec![(1, Point::new(1.0, 0.0))], "{points:?}");
+
+    // A connector drawn free, then point-glued to the good row.
+    let connector = draw_free(&mut ctx, &registry);
+    move_end(
+        &mut ctx,
+        &registry,
+        connector,
+        "end",
+        3.0,
+        2.0,
+        Some((1, Some(1))),
+    )
+    .expect("point glue");
+    let subject = shape(&ctx, page, connector);
+    assert_eq!(
+        (
+            number(doc(&ctx), subject, "EndX"),
+            number(doc(&ctx), subject, "EndY"),
+        ),
+        (2.0, 1.5),
+        "the row's local point through the box transform"
+    );
+}
+
+/// The page walk skips a page entry whose shape id no longer exists
+/// (model `document.rs`), so `connector.move_end` still finds its
+/// connector beside the dangling entry.
+#[test]
+fn a_dangling_page_entry_does_not_break_the_connector_lookup() {
+    let (mut ctx, registry, page) = fixture();
+    let connector = draw_free(&mut ctx, &registry);
+    if let Some(session) = ctx.active_document_mut()
+        && let Some(entity) = session.document.pages.get_mut(page.index as usize)
+    {
+        entity.shapes.push(ShapeId { index: 9999 });
+    }
+    move_end(&mut ctx, &registry, connector, "end", 5.0, 5.5, None).expect("free end");
+    let subject = shape(&ctx, page, connector);
+    assert_eq!(number(doc(&ctx), subject, "EndX"), 5.0);
+}
+
+/// A page sheet whose `PageWidth` is `Inh` defines no page size (model
+/// `lookup.rs`): the documented default stands.
+#[test]
+fn an_inherit_page_size_cell_defines_nothing() {
+    let mut document = Document::new();
+    let mut page = Page::new(PageId { index: 0 }, 1);
+    let mut width = cell("PageWidth", 0.0);
+    width.formula = Some("Inh".to_owned());
+    width.value = None;
+    page.sheet.cells = vec![width, cell("PageHeight", 11.0)];
+    document.pages.push(page);
+    assert_eq!(document.page_size(PageId { index: 0 }), (8.5, 11.0));
+}
+
+/// The strict argument contract's remaining edges: a negative point
+/// and a non-numeric one are argument errors with no dialog request.
+#[test]
+fn a_bad_point_is_an_argument_error_with_no_dialog_request() {
+    let (mut ctx, registry, _page) = fixture();
+    let connector = draw_free(&mut ctx, &registry);
+    for point in [-1, 9] {
+        let mut args = Args::new()
+            .with("connector", ArgValue::Integer(i64::from(connector)))
+            .with("end", ArgValue::Text("end".to_owned()))
+            .with("x", ArgValue::Number(5.0))
+            .with("y", ArgValue::Number(5.0))
+            .with("target", ArgValue::Integer(2))
+            .with("point", ArgValue::Integer(i64::from(point)));
+        let error = dispatch(&mut ctx, &registry, "connector.move_end", args)
+            .expect_err("a bad point fails");
+        assert!(
+            !matches!(error, CommandError::NeedsInput(_)),
+            "{point} must not ask for input"
+        );
+        assert!(
+            matches!(error, CommandError::InvalidArgs { .. }),
+            "{point}: {error}"
+        );
+    }
 }
