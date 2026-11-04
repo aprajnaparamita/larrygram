@@ -5800,4 +5800,116 @@ mod tests {
         assert_eq!(app.documents.len(), 1);
         assert!(app.documents[0].undo.can_undo());
     }
+
+    /// Task P7-34 items 2 and 4: with the Connection Point tool armed
+    /// and a point selected, the Delete key's `edit.clear` removes the
+    /// point instead of the shape.
+    #[test]
+    fn the_delete_key_removes_the_selected_point_with_the_tool_armed() {
+        use larrygram_commands::app::ActiveTool;
+        let (mut shell, shape) = shell_with_shape();
+        let point = {
+            let session = shell.app.active_document_mut().expect("session");
+            session
+                .document
+                .add_connection_point(shape, larrygram_geom::Point::new(0.5, 0.5))
+                .expect("add")
+        };
+        shell.app.selection.shapes = vec![shape];
+        shell.app.selection.anchor = Some(shape);
+        shell.app.active_tool = ActiveTool::ConnectionPoint;
+        shell.tools.tool = crate::tools::Tool::ConnectionPoint;
+        crate::tools::connection_point::select(&mut shell.tools, shape, point);
+
+        let results = shell
+            .dispatch(&[intent("edit.clear", Source::Ui)])
+            .expect("dispatch");
+        assert!(results[0].is_ok(), "{:?}", results[0]);
+        let session = shell.app.active_document().expect("session");
+        assert!(
+            session.document.connection_points_indexed(shape).is_empty(),
+            "the point is gone"
+        );
+        assert!(session.document.shape(shape).is_some(), "the shape stays");
+    }
+
+    /// Task P7-34 item 3: the connection-point menu's rows carry the
+    /// selected point's `shape` and `point` arguments, and an
+    /// invocation that already names a point is left alone. The
+    /// checked state reads the selected point's `Type` and the
+    /// per-window check.
+    #[test]
+    fn the_point_menu_rows_carry_the_selected_points_arguments() {
+        use larrygram_commands::app::ActiveTool;
+        use panel_classic::CheckedState;
+        let (mut shell, shape) = shell_with_shape();
+        let (first, second) = {
+            let session = shell.app.active_document_mut().expect("session");
+            let first = session
+                .document
+                .add_connection_point(shape, larrygram_geom::Point::new(0.5, 0.5))
+                .expect("add");
+            let second = session
+                .document
+                .add_connection_point(shape, larrygram_geom::Point::new(1.5, 0.5))
+                .expect("add");
+            (first, second)
+        };
+        shell.app.active_tool = ActiveTool::ConnectionPoint;
+        shell.tools.tool = crate::tools::Tool::ConnectionPoint;
+        crate::tools::connection_point::select(&mut shell.tools, shape, first);
+
+        // No arguments: the selected point's are injected.
+        let results = shell
+            .dispatch(&[intent("edit.connection_point.outward", Source::Ui)])
+            .expect("dispatch");
+        assert!(results[0].is_ok(), "{:?}", results[0]);
+        let session = shell.app.active_document().expect("session");
+        assert_eq!(
+            session.document.connection_point_type(shape, first),
+            Some(1),
+            "the selected point's Type is Outward"
+        );
+
+        // An invocation that names a point keeps its arguments.
+        let mut args = Args::new();
+        args.set("shape", ArgValue::Integer(1));
+        args.set("point", ArgValue::Integer(i64::from(second)));
+        let named = Intent::new(
+            CommandId::parse("edit.connection_point.inward").expect("id"),
+            Invocation::new(args, Source::Ui),
+        );
+        shell.dispatch(&[named]).expect("dispatch");
+        let session = shell.app.active_document().expect("session");
+        assert_eq!(
+            session.document.connection_point_type(shape, first),
+            Some(1)
+        );
+        assert_eq!(
+            session.document.connection_point_type(shape, second),
+            Some(0),
+            "the named point took the write"
+        );
+
+        // The checked state (task P7-34 items 1 and 3).
+        let checks = shell.shell_checks();
+        assert_eq!(
+            checks.is_checked("edit.connection_point.outward", &shell.app),
+            Some(true)
+        );
+        assert_eq!(
+            checks.is_checked("edit.connection_point.inward", &shell.app),
+            Some(false)
+        );
+        assert_eq!(
+            checks.is_checked("tools.connection.points", &shell.app),
+            Some(false)
+        );
+        shell.app.show_connection_points = true;
+        assert_eq!(
+            checks.is_checked("view.connections", &shell.app),
+            Some(true),
+            "both check ids read the one per-window state"
+        );
+    }
 }

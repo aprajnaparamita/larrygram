@@ -425,7 +425,7 @@ const POINTS_PER_INCH: f64 = 72.0;
 
 #[cfg(test)]
 mod tests {
-    use larrygram_model::{Document, Shape};
+    use larrygram_model::{CellName, Document, Row, Shape};
 
     use super::*;
 
@@ -472,6 +472,74 @@ mod tests {
         assert_eq!(selected(&machine), None);
     }
 
+    /// A literal numeric cell for the fixtures.
+    fn cell(name: &str, value: f64) -> larrygram_model::Cell {
+        larrygram_model::Cell {
+            name: CellName::new(name),
+            formula: Some(format!("{value}")),
+            value: Some(larrygram_model::CellValue::Number(value)),
+            unit: larrygram_geom::Unit::Inches,
+            preserved: larrygram_model::Preserved::new(),
+        }
+    }
+
+    /// A drawable 2 x 1 box at (3, 3) with two connection points (the
+    /// local `(0.25, 0.25)` and `(1.75, 0.25)`, i.e. page
+    /// `(2.25, 2.75)` and `(3.75, 2.75)`).
+    fn app_with_points() -> (AppCtx, ShapeId) {
+        let mut doc = Document::new();
+        let page = doc.add_page("Page-1").expect("page");
+        let mut shape = Shape::new(ShapeId { index: 0 }, 1);
+        shape.sheet.cells = vec![
+            cell("Width", 2.0),
+            cell("Height", 1.0),
+            cell("PinX", 3.0),
+            cell("PinY", 3.0),
+            cell("LocPinX", 1.0),
+            cell("LocPinY", 0.5),
+            cell("Angle", 0.0),
+            cell("FillPattern", 1.0),
+            cell("LinePattern", 1.0),
+        ];
+        let mut geometry =
+            larrygram_model::Section::new(larrygram_model::SectionName::from_static("Geometry"));
+        for (ix, (kind, px, py)) in [
+            ("MoveTo", 0.0, 0.0),
+            ("LineTo", 2.0, 0.0),
+            ("LineTo", 2.0, 1.0),
+            ("LineTo", 0.0, 1.0),
+            ("LineTo", 0.0, 0.0),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut row = Row::new();
+            row.row_type = Some(kind.to_owned());
+            row.ix = Some(i32::try_from(ix).unwrap_or(0));
+            row.cells = vec![cell("X", px), cell("Y", py)];
+            geometry.rows.push(row);
+        }
+        shape.sheet.sections.push(geometry);
+        let mut connection =
+            larrygram_model::Section::new(larrygram_model::SectionName::from_static("Connection"));
+        for (ix, (px, py)) in [(0.25, 0.25), (1.75, 0.25)].into_iter().enumerate() {
+            let mut row = Row::new();
+            row.row_type = Some("Connection".to_owned());
+            row.ix = Some(i32::try_from(ix).unwrap_or(0));
+            row.cells = vec![cell("X", px), cell("Y", py)];
+            connection.rows.push(row);
+        }
+        shape.sheet.sections.push(connection);
+        let shape = doc.insert_shape(page, shape, None).expect("insert");
+        let mut session = larrygram_commands::DocumentSession::new(doc, None);
+        session.active_page = Some(page);
+        let mut ctx = AppCtx::new(larrygram_commands::Settings::default());
+        ctx.open_document(session);
+        ctx.selection.shapes = vec![shape];
+        ctx.selection.anchor = Some(shape);
+        (ctx, shape)
+    }
+
     /// A shape with no points has no markers, and the state helpers
     /// read and write the selection.
     #[test]
@@ -491,5 +559,143 @@ mod tests {
         select(&mut machine, shape, 3);
         assert_eq!(selected(&machine), Some((shape, 3)));
         assert_eq!(all_points_mark(&ctx), None);
+    }
+
+    /// Task P7-34 item 2: the quiet edges — a double click and Cancel
+    /// do nothing, a plain click off the points clears the selection
+    /// and a Ctrl press off the shape arms no gesture.
+    #[test]
+    fn the_tool_edges_are_quiet() {
+        let (ctx, shape) = app_with_points();
+        let mut machine = ToolMachine::new();
+        machine.tool = crate::tools::Tool::ConnectionPoint;
+        select(&mut machine, shape, 1);
+        // A double click changes nothing.
+        let effect = handle(
+            &mut machine,
+            &ToolEvent::DoubleClick {
+                pos: Point::new(2.25, 2.75),
+            },
+            &ctx,
+        )
+        .expect("no error");
+        assert!(effect.intents.is_empty());
+        assert_eq!(selected(&machine), Some((shape, 1)));
+        // Cancel drops the drag in flight.
+        machine.connection_point.moving = Some(Moving {
+            shape,
+            ix: 1,
+            press: Point::new(1.0, 1.0),
+            at: Point::new(1.0, 1.0),
+        });
+        handle(&mut machine, &ToolEvent::Cancel, &ctx).expect("no error");
+        assert!(machine.connection_point.moving.is_none());
+        // A plain click off the points clears the selection.
+        handle(
+            &mut machine,
+            &ToolEvent::PointerDown {
+                pos: Point::new(5.0, 5.0),
+                modifiers: Modifiers::none(),
+            },
+            &ctx,
+        )
+        .expect("no error");
+        assert_eq!(selected(&machine), None);
+        // A Ctrl press off the shape arms no gesture.
+        handle(
+            &mut machine,
+            &ToolEvent::PointerDown {
+                pos: Point::new(9.0, 9.0),
+                modifiers: Modifiers {
+                    ctrl: true,
+                    ..Modifiers::none()
+                },
+            },
+            &ctx,
+        )
+        .expect("no error");
+        handle(
+            &mut machine,
+            &ToolEvent::PointerUp {
+                pos: Point::new(9.0, 9.0),
+                modifiers: Modifiers::none(),
+            },
+            &ctx,
+        )
+        .expect("no error");
+        assert_eq!(selected(&machine), None);
+    }
+
+    /// The point under the pointer is the nearest one in tolerance,
+    /// and the shape hit test sees the box (task P7-34 items 2 and 3).
+    #[test]
+    fn the_point_under_the_pointer_is_the_nearest() {
+        let (ctx, shape) = app_with_points();
+        let near = point_under(&ctx, Point::new(2.28, 2.72), 1.0);
+        assert_eq!(
+            near.map(|(shape, ix, _)| (shape, ix)),
+            Some((shape, 0)),
+            "the nearest point within tolerance"
+        );
+        assert_eq!(
+            point_under(&ctx, Point::new(3.0, 5.0), 1.0),
+            None,
+            "beyond tolerance there is no point"
+        );
+        assert!(
+            hits_shape(&ctx, shape, Point::new(3.0, 3.0), 1.0),
+            "the press hits the box"
+        );
+        assert!(!hits_shape(&ctx, shape, Point::new(8.0, 8.0), 1.0));
+    }
+
+    /// The overlay marks the shape's points and the selected one's own
+    /// style; with no shape selected it draws nothing (task P7-34
+    /// items 1 and 2).
+    #[test]
+    fn the_overlay_marks_the_points_and_the_selection() {
+        let (ctx, shape) = app_with_points();
+        let mut machine = ToolMachine::new();
+        machine.tool = crate::tools::Tool::ConnectionPoint;
+        select(&mut machine, shape, 0);
+        let effect = handle(
+            &mut machine,
+            &ToolEvent::PointerMove {
+                pos: Point::new(3.0, 3.0),
+                modifiers: Modifiers::none(),
+            },
+            &ctx,
+        )
+        .expect("no error");
+        match effect.overlay.marks.first() {
+            Some(OverlayMark::ConnectionPoints { points, selected }) => {
+                assert_eq!(points.len(), 2);
+                assert_eq!(*selected, Some(Point::new(2.25, 2.75)));
+            }
+            other => panic!("expected connection points, got {other:?}"),
+        }
+        // With no shape selected the overlay is empty.
+        let mut bare = AppCtx::new(larrygram_commands::Settings::default());
+        bare.open_document(larrygram_commands::DocumentSession::new(
+            Document::new(),
+            None,
+        ));
+        let overlay = overlay(&machine, &bare).expect("no error");
+        assert!(overlay.is_empty());
+    }
+
+    /// A stale shape produces no intents (task P7-34 item 2).
+    #[test]
+    fn intents_for_stale_shapes_are_absent() {
+        let (ctx, _) = app_with_points();
+        let ghost = ShapeId { index: 99 };
+        assert_eq!(
+            add_intent(&ctx, ghost, Point::new(1.0, 1.0)).expect("no error"),
+            None
+        );
+        assert_eq!(
+            move_intent(&ctx, ghost, 0, Point::new(1.0, 1.0)).expect("no error"),
+            None
+        );
     }
 }

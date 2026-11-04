@@ -344,3 +344,200 @@ fn a_shape_without_points_gains_them_from_nothing() {
     assert!(document.connection_points(id).is_empty());
     assert_eq!(document.next_connection_point_index(id), 0);
 }
+
+#[test]
+fn the_type_reads_back_with_its_default() {
+    let mut document = Document::new();
+    let mut with_type = row(0.0, 0.0);
+    with_type.ix = Some(0);
+    with_type.cells.push(cell("Type", 2.0));
+    let mut typed = row(1.0, 0.0);
+    typed.ix = Some(1);
+    typed.cells.push(cell("Type", 1.0));
+    let id = on_a_page(
+        &mut document,
+        shape(
+            &[("Width", 2.0), ("Height", 1.0)],
+            vec![connection_section(vec![with_type, typed])],
+        ),
+    );
+
+    assert_eq!(document.connection_point_type(id, 0), Some(2));
+    assert_eq!(document.connection_point_type(id, 1), Some(1));
+    document
+        .set_connection_point_type(id, 1, 0)
+        .expect("set type");
+    assert_eq!(document.connection_point_type(id, 1), Some(0));
+    // A stale row index or shape id answers None.
+    assert_eq!(document.connection_point_type(id, 9), None);
+    assert_eq!(
+        document.connection_point_type(ShapeId { index: 99 }, 0),
+        None
+    );
+}
+
+#[test]
+fn a_type_cell_of_another_kind_reads_as_the_default() {
+    let mut document = Document::new();
+    let mut bad = row(0.0, 0.0);
+    bad.ix = Some(0);
+    bad.cells.push(Cell {
+        name: CellName::new("Type"),
+        formula: None,
+        value: Some(CellValue::Str("inward".to_owned())),
+        unit: larrygram_geom::Unit::Unitsless,
+        preserved: Preserved::new(),
+    });
+    let id = on_a_page(
+        &mut document,
+        shape(
+            &[("Width", 2.0), ("Height", 1.0)],
+            vec![connection_section(vec![bad])],
+        ),
+    );
+    assert_eq!(
+        document.connection_point_type(id, 0),
+        Some(0),
+        "a non-numeric Type falls back to the documented default"
+    );
+}
+
+#[test]
+fn the_first_edit_fills_an_existing_empty_section() {
+    let mut document = Document::new();
+    let mut master_row = row(1.0, 1.0);
+    master_row.ix = Some(0);
+    let master_shape = document.add_shape(shape(
+        &[("Width", 2.0), ("Height", 2.0)],
+        vec![connection_section(vec![master_row])],
+    ));
+    let mut master = Master::new(MasterId { index: 0 }, 1);
+    master.shapes.push(master_shape);
+    document.masters.push(master);
+    let mut instance = shape(
+        &[("Width", 2.0), ("Height", 2.0)],
+        // An own but empty section: the copy fills it in place.
+        vec![connection_section(Vec::new())],
+    );
+    instance.master = Some(MasterId { index: 0 });
+    let id = on_a_page(&mut document, instance);
+
+    document
+        .add_connection_point(id, Point::new(0.0, 0.0))
+        .expect("add");
+    assert_eq!(
+        document.connection_points(id),
+        vec![Point::new(1.0, 1.0), Point::new(0.0, 0.0)],
+        "the inherited row landed in the existing section"
+    );
+}
+
+#[test]
+fn copy_in_keeps_unscalable_rows_verbatim() {
+    let mut document = Document::new();
+    // A master row whose `X` is not a number: the copy keeps it, and a
+    // master size that is not a number leaves the scale at one.
+    let mut odd = Row::new();
+    odd.row_type = Some("Connection".to_owned());
+    odd.ix = Some(0);
+    odd.cells.push(Cell {
+        name: CellName::new("X"),
+        formula: None,
+        value: Some(CellValue::Str("Width*0.5".to_owned())),
+        unit: larrygram_geom::Unit::Inches,
+        preserved: Preserved::new(),
+    });
+    odd.cells.push(cell("Y", 1.0));
+    let master_shape = document.add_shape(shape(
+        &[("Height", 2.0)],
+        vec![connection_section(vec![odd])],
+    ));
+    let mut width = Cell {
+        name: CellName::new("Width"),
+        formula: None,
+        value: Some(CellValue::Str("two".to_owned())),
+        unit: larrygram_geom::Unit::Inches,
+        preserved: Preserved::new(),
+    };
+    width.name = CellName::new("Width");
+    if let Some(entity) = document.shape_mut(master_shape) {
+        entity.sheet.cells.push(width);
+    }
+    let mut master = Master::new(MasterId { index: 0 }, 1);
+    master.shapes.push(master_shape);
+    document.masters.push(master);
+    let mut instance = shape(&[("Width", 4.0), ("Height", 4.0)], Vec::new());
+    instance.master = Some(MasterId { index: 0 });
+    let id = on_a_page(&mut document, instance);
+
+    document
+        .add_connection_point(id, Point::new(0.0, 0.0))
+        .expect("add");
+    let entity = document.shape(id).expect("shape");
+    let section = entity
+        .sheet
+        .sections
+        .iter()
+        .find(|section| section.name.as_str() == "Connection")
+        .expect("the copied section");
+    let copied = section.rows.first().expect("the copied row");
+    let x = copied
+        .cells
+        .iter()
+        .find(|cell| cell.name.as_str() == "X")
+        .expect("the X cell");
+    assert_eq!(
+        x.value,
+        Some(CellValue::Str("Width*0.5".to_owned())),
+        "a non-numeric X is copied verbatim"
+    );
+}
+
+#[test]
+fn a_broken_master_rung_copies_nothing() {
+    let mut document = Document::new();
+    // The instance names a master whose content shape the arena does
+    // not hold: the copy-in finds nothing and the edit still works.
+    let mut master = Master::new(MasterId { index: 0 }, 1);
+    master.shapes.push(ShapeId { index: 99 });
+    document.masters.push(master);
+    let mut instance = shape(&[("Width", 2.0), ("Height", 1.0)], Vec::new());
+    instance.master = Some(MasterId { index: 0 });
+    let id = on_a_page(&mut document, instance);
+
+    let ix = document
+        .add_connection_point(id, Point::new(1.0, 1.0))
+        .expect("add");
+    assert_eq!(ix, 0);
+    assert_eq!(document.connection_points(id), vec![Point::new(1.0, 1.0)]);
+}
+
+#[test]
+fn rows_by_position_move_and_delete_like_named_rows() {
+    // A fixture with its `Connection` section behind another section:
+    // the slot walk skips the other sections, and rows without an `IX`
+    // are addressed by their position.
+    let mut document = Document::new();
+    let mut geometry = Section::new(SectionName::from_static("Geometry"));
+    geometry.rows.push(row(0.0, 0.0));
+    let id = on_a_page(
+        &mut document,
+        shape(
+            &[("Width", 2.0), ("Height", 1.0)],
+            vec![
+                geometry,
+                connection_section(vec![row(0.0, 0.0), row(1.0, 1.0)]),
+            ],
+        ),
+    );
+
+    document
+        .move_connection_point(id, 1, Point::new(2.0, 2.0))
+        .expect("move by position");
+    assert_eq!(
+        document.connection_points(id),
+        vec![Point::new(0.0, 0.0), Point::new(2.0, 2.0)]
+    );
+    document.delete_connection_point(id, 0).expect("delete");
+    assert_eq!(document.connection_points(id), vec![Point::new(2.0, 2.0)]);
+}
