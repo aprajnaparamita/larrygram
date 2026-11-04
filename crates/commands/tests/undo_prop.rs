@@ -1189,6 +1189,76 @@ fn run_position(ctx: &mut AppCtx, registry: &Registry, id: &'static str, pick: u
     try_dispatch(ctx, registry, id, args);
 }
 
+/// `connector.point_add` (task P7-34): a new point on the first box.
+fn run_point_add(ctx: &mut AppCtx, registry: &Registry, id: &'static str, pick: u32) {
+    let Some(shape) = top_level(ctx)
+        .iter()
+        .copied()
+        .find(|shape| !is_connector_shape(ctx, *shape))
+    else {
+        return;
+    };
+    let mut args = numbers(&[
+        ("x", 0.25 + jitter(pick, 28)),
+        ("y", 0.25 + jitter(pick, 29)),
+    ]);
+    args.set("shape", ArgValue::Integer(i64::from(visio_of(ctx, shape))));
+    try_dispatch(ctx, registry, id, args);
+}
+
+/// `connector.point_move` (task P7-34): a point of the first box
+/// moves (a stale row index is a clean error, `try_dispatch` keeps
+/// the run going).
+fn run_point_move(ctx: &mut AppCtx, registry: &Registry, id: &'static str, pick: u32) {
+    let Some(shape) = top_level(ctx)
+        .iter()
+        .copied()
+        .find(|shape| !is_connector_shape(ctx, *shape))
+    else {
+        return;
+    };
+    let mut args = numbers(&[
+        ("x", 0.25 + jitter(pick, 30)),
+        ("y", 0.25 + jitter(pick, 31)),
+    ]);
+    args.set("shape", ArgValue::Integer(i64::from(visio_of(ctx, shape))));
+    args.set("point", ArgValue::Integer(i64::from(pick % 2)));
+    try_dispatch(ctx, registry, id, args);
+}
+
+/// `connector.point_delete` (task P7-34): a point of the first box
+/// goes (the row count changes over the picks, so stale indices are
+/// exercised too).
+fn run_point_delete(ctx: &mut AppCtx, registry: &Registry, id: &'static str, pick: u32) {
+    let Some(shape) = top_level(ctx)
+        .iter()
+        .copied()
+        .find(|shape| !is_connector_shape(ctx, *shape))
+    else {
+        return;
+    };
+    let mut args = numbers(&[]);
+    args.set("shape", ArgValue::Integer(i64::from(visio_of(ctx, shape))));
+    args.set("point", ArgValue::Integer(i64::from(pick % 2)));
+    try_dispatch(ctx, registry, id, args);
+}
+
+/// `edit.connection_point.*` (task P7-34 item 3): the `Type` of a
+/// point of the first box.
+fn run_point_type(ctx: &mut AppCtx, registry: &Registry, id: &'static str, pick: u32) {
+    let Some(shape) = top_level(ctx)
+        .iter()
+        .copied()
+        .find(|shape| !is_connector_shape(ctx, *shape))
+    else {
+        return;
+    };
+    let mut args = numbers(&[]);
+    args.set("shape", ArgValue::Integer(i64::from(visio_of(ctx, shape))));
+    args.set("point", ArgValue::Integer(i64::from(pick % 2)));
+    try_dispatch(ctx, registry, id, args);
+}
+
 /// Every editing command id of the registry and how the property runs
 /// it. The list is generated against the registry:
 /// `every_implemented_id_is_classified` fails when an implemented
@@ -1506,6 +1576,31 @@ const CASES: &[Case] = &[
         id: "connector.draw",
         run: run_draw,
     },
+    // Task P7-34: the connection-point commands (items 2 and 3).
+    Case {
+        id: "connector.point_add",
+        run: run_point_add,
+    },
+    Case {
+        id: "connector.point_move",
+        run: run_point_move,
+    },
+    Case {
+        id: "connector.point_delete",
+        run: run_point_delete,
+    },
+    Case {
+        id: "edit.connection_point.inward",
+        run: run_point_type,
+    },
+    Case {
+        id: "edit.connection_point.outward",
+        run: run_point_type,
+    },
+    Case {
+        id: "edit.connection_point.inward_and_outward",
+        run: run_point_type,
+    },
     Case {
         id: "edit.cut",
         run: run_cut,
@@ -1740,6 +1835,14 @@ const NON_EDITING: &[(&str, &str)] = &[
         "view.full_screen_mode",
         "window-mode flag only (P7-20, the tool pattern)",
     ),
+    (
+        "tools.connection.points",
+        "window-state flag only (task P7-34 item 1)",
+    ),
+    (
+        "view.connections",
+        "window-state flag only (task P7-34 item 1)",
+    ),
     ("view.toggle_grid", "view state only (ADR 0040 rule 3)"),
     ("view.rulers", "view state only (ADR 0040 rule 3)"),
     ("view.units", "view state only (ADR 0040 rule 3)"),
@@ -1877,6 +1980,10 @@ const NON_EDITING: &[(&str, &str)] = &[
     ("tools.text", "tool choice only (P5-17)"),
     ("tools.text_block", "tool choice only (task P7-25 item 4)"),
     ("tools.connector", "tool choice only (P5-17)"),
+    (
+        "tools.connection.point",
+        "tool choice only (task P7-34 item 2)",
+    ),
     ("shape.rectangle", "tool choice only (P5-17)"),
     ("shape.ellipse", "tool choice only (P5-17)"),
     ("shape.line", "tool choice only (P5-17)"),
