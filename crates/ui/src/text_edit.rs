@@ -60,6 +60,20 @@ pub struct TextEditor {
     /// text-format control click keeps the edit open and the field
     /// takes the keys back the same frame.
     refocus_requested: bool,
+    /// Where the edit drew last (task P7-51 item 3): the block and
+    /// field screen rects of the previous [`TextEditor::show`], the
+    /// shell's Text-tool keep-the-edit area.
+    shown: Option<ShownArea>,
+}
+
+/// Where the edit drew (task P7-51 item 3): the text block's screen
+/// rect and the field's own.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ShownArea {
+    /// The text block's screen rect (the overlay's box).
+    block: egui::Rect,
+    /// The field's screen rect.
+    field: egui::Rect,
 }
 
 impl TextEditor {
@@ -148,6 +162,16 @@ impl TextEditor {
         self.refocus_requested = true;
     }
 
+    /// Whether a press at `screen` lands in the edited text block's
+    /// keep-the-edit area (the block or the field's own rect) (task
+    /// P7-51 item 3): the edit stays and the caret moves to the
+    /// nearest position, so the shell's Text-tool rule drops the press
+    /// instead of committing. Reads where the edit drew last frame.
+    pub fn press_keeps_edit(&self, screen: egui::Pos2) -> bool {
+        self.shown
+            .is_some_and(|shown| shown.block.contains(screen) || shown.field.contains(screen))
+    }
+
     /// The shape's text as the editor started with it (unchanged-buffer
     /// detection): the effective text (task P7-40), so a master's text
     /// on an instance with none of its own is the start state. A stale
@@ -230,6 +254,15 @@ impl TextEditor {
         // The caret goes to the end of the buffer when the editor
         // opens (task P7-29 item 2).
         let buffer_chars = self.buffer.chars().count();
+        // The frame's press (the caret move of task P7-51 item 3 and
+        // the commit rule below).
+        let press = ui.input(|input| {
+            input
+                .pointer
+                .any_pressed()
+                .then(|| input.pointer.interact_pos())
+                .flatten()
+        });
         let mut commit = false;
         // The field's own rect joins the commit test (task P7-48 item
         // 1: a field that grows with typed lines never commits on a
@@ -244,8 +277,9 @@ impl TextEditor {
                 // A new text box's field fills the outlined box
                 // (task P7-26 item 3): a click anywhere inside the box
                 // moves the caret and keeps editing. An existing
-                // shape's edit keeps its one-row field (its click rule
-                // is task P7-25 item 9's commit-first).
+                // shape's edit keeps its one-row field; a press inside
+                // the block but off the field is the same keep-the-edit
+                // area (task P7-51 item 3), handled below.
                 let rows = if self.pending.is_some() {
                     let font = egui::TextStyle::Body.resolve(ui.style());
                     let row = ui.fonts_mut(|fonts| fonts.row_height(&font));
@@ -278,23 +312,57 @@ impl TextEditor {
                 // The editor's accessible name (task P7-24: the tests
                 // and screen readers find the field by it).
                 output.response.response = output.response.response.clone().accessible_name("Text");
-                if open_focus {
-                    output.response.request_focus();
-                } else if refocus {
-                    hand_keyboard(ui.ctx(), output.response.id);
-                }
-                if open_focus {
-                    // The caret sits at the end of the text when the
-                    // editor opens (task P7-29 item 2): a stale cursor
-                    // from an earlier edit of the same shape must not
-                    // survive the re-open (egui keeps the field's
-                    // state under its id). A refocus (task P7-41 item
-                    // 1) leaves the caret alone.
+                // A press inside the text block but off the field
+                // (task P7-51 item 3: one keep-the-edit area) moves
+                // the caret to the nearest position and keeps the
+                // edit. A press on a popup over the block belongs to
+                // the popup.
+                let pressed_caret = match press {
+                    Some(pos)
+                        if rect.contains(pos)
+                            && !output.response.rect.contains(pos)
+                            && !other_layer_at(ui.ctx(), pos, self.shape) =>
+                    {
+                        Some(output.galley.cursor_from_pos(
+                            pos - output.galley_pos + egui::vec2(output.galley.rect.left(), 0.0),
+                        ))
+                    }
+                    _ => None,
+                };
+                if let Some(cursor) = pressed_caret {
+                    // The caret moves to the press and the field takes
+                    // the keyboard (task P7-51 item 3).
                     output
                         .state
                         .cursor
-                        .set_char_range(Some(CCursorRange::one(CCursor::new(buffer_chars))));
+                        .set_char_range(Some(CCursorRange::one(cursor)));
                     output.state.store(ui.ctx(), output.response.id);
+                    output.response.request_focus();
+                    // egui surrenders the field's focus one frame
+                    // after a press outside it (the click that moved
+                    // the caret), so the field takes the keys back
+                    // again on the next frame (the refocus of task
+                    // P7-41 item 1).
+                    self.refocus_requested = true;
+                } else {
+                    if open_focus {
+                        output.response.request_focus();
+                    } else if refocus {
+                        hand_keyboard(ui.ctx(), output.response.id);
+                    }
+                    if open_focus {
+                        // The caret sits at the end of the text when the
+                        // editor opens (task P7-29 item 2): a stale cursor
+                        // from an earlier edit of the same shape must not
+                        // survive the re-open (egui keeps the field's
+                        // state under its id). A refocus (task P7-41 item
+                        // 1) leaves the caret alone.
+                        output
+                            .state
+                            .cursor
+                            .set_char_range(Some(CCursorRange::one(CCursor::new(buffer_chars))));
+                        output.state.store(ui.ctx(), output.response.id);
+                    }
                 }
                 // Escape commits (ADR 0044) — except when a popup
                 // or menu is open (task P7-48 item 3): Escape closes
@@ -306,18 +374,15 @@ impl TextEditor {
                 }
                 field_response = Some((output.response.rect, output.response.id));
             });
+        // Where the edit drew this frame (task P7-51 item 3): the
+        // shell's Text-tool rule reads it as its keep-the-edit area.
+        self.shown = field_response.map(|(field, _)| ShownArea { block: rect, field });
         // The commit-on-outside-press rule (ADR 0044, task P7-41 item
         // 1, task P7-48 item 1): a press inside the text block or the
         // field's own rect keeps the edit; a press on text-format UI
         // keeps it too and hands the keyboard back (the caret
         // untouched); any other press outside commits.
-        let commit_on_press = match ui.input(|input| {
-            input
-                .pointer
-                .any_pressed()
-                .then(|| input.pointer.interact_pos())
-                .flatten()
-        }) {
+        let commit_on_press = match press {
             Some(pos)
                 if !rect.contains(pos)
                     && !field_response.is_some_and(|(field, _)| field.contains(pos)) =>
@@ -455,6 +520,15 @@ pub fn other_layer_open(ctx: &egui::Context, shape: Option<ShapeId>) -> bool {
     })
 }
 
+/// Whether a press at `pos` lands on a foreground layer other than the
+/// editor's own area (a popup, menu or palette drawn over the block):
+/// the press belongs to that layer, not to the field.
+fn other_layer_at(ctx: &egui::Context, pos: egui::Pos2, shape: Option<ShapeId>) -> bool {
+    let own = editor_id(shape);
+    ctx.layer_id_at(pos)
+        .is_some_and(|layer| layer.order == egui::Order::Foreground && layer.id != own)
+}
+
 /// Hands the keyboard back to the editor's field `id` (task P7-41
 /// item 1) — but only when nothing else holds it (task P7-48 item 8):
 /// a popup's own field keeps its typing.
@@ -488,11 +562,7 @@ enum PressRule {
 /// not one of them: a press on it but off the text block commits, like
 /// any press outside.
 fn press_rule(ctx: &egui::Context, shape: Option<ShapeId>, pos: egui::Pos2) -> PressRule {
-    let own = editor_id(shape);
-    if ctx
-        .layer_id_at(pos)
-        .is_some_and(|layer| layer.order == egui::Order::Foreground && layer.id != own)
-    {
+    if other_layer_at(ctx, pos, shape) {
         return PressRule::KeepAndRefocus;
     }
     let pass = ctx.cumulative_pass_nr();

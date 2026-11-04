@@ -901,8 +901,10 @@ fn redo_of_a_new_text_box_restores_the_shape_and_its_text() {
 /// existing text object edits that object's text and no new box
 /// appears. Task P7-48 item 1: a click inside the object being edited
 /// is a caret move in its field — the edit stays and the typed text
-/// with it; a click on another shape commits first and edits that
-/// shape.
+/// with it. Task P7-51 item 3: the click is mid-word and the typed
+/// letter lands at the click (the caret moved there), not at the end.
+/// A click on another shape commits first (task P7-25: it used to
+/// drop it) and edits that shape.
 #[test]
 fn a_click_with_the_text_tool_commits_first_and_edits_the_object() {
     for kind in LAYOUTS {
@@ -915,15 +917,29 @@ fn a_click_with_the_text_tool_commits_first_and_edits_the_object() {
             editing(&mut rig),
             "{kind:?}: a click inside a text object edits its text"
         );
-        type_text(&mut rig, "!");
-        // The second click inside the same object keeps the edit and
-        // the typed text (task P7-48 item 1: the field's clicks are
-        // caret moves, not commits).
-        click_at(&mut rig, pos);
+        // Four equal glyphs, then a click mid-word: the caret moves to
+        // the click and the letter lands there (task P7-51 item 3).
+        press_key(
+            &mut rig,
+            egui::Key::A,
+            egui::Modifiers {
+                command: true,
+                ..egui::Modifiers::NONE
+            },
+        );
+        type_text(&mut rig, "MMMM");
+        let park = screen(&rig, 1.0, 5.5);
+        rig.harness().event(egui::Event::PointerMoved(park));
+        rig.run();
+        let image = rig.render();
+        let block = block_rect(&rig, (5.0, 2.75, 7.0, 3.25));
+        let ink = ink_bbox(&image, block.shrink(2.0), 1.0).expect("the typed text draws");
+        click_at(&mut rig, ink.center());
         assert!(
             editing(&mut rig),
             "{kind:?}: the click inside the field keeps the edit"
         );
+        type_text(&mut rig, "X");
         assert_eq!(shape_count(&rig), 2, "{kind:?}: no stray text box");
         // A click on the other shape commits the typed text first
         // (task P7-25: it used to drop it) and edits that shape.
@@ -931,15 +947,90 @@ fn a_click_with_the_text_tool_commits_first_and_edits_the_object() {
         click_at(&mut rig, other);
         assert_eq!(
             shape_text(&rig, box_),
-            "Box!",
-            "{kind:?}: the click keeps the typed text"
+            "MMXMM",
+            "{kind:?}: the letter landed at the click (mid-word)"
         );
         assert!(
             editing(&mut rig),
             "{kind:?}: and starts editing the other shape"
         );
         press_key(&mut rig, egui::Key::Escape, egui::Modifiers::NONE);
-        assert_eq!(shape_text(&rig, box_), "Box!", "{kind:?}: Escape keeps it");
+        assert_eq!(shape_text(&rig, box_), "MMXMM", "{kind:?}: Escape keeps it");
+    }
+}
+
+/// The in-place editor's buffer as the field publishes it.
+fn editor_value(rig: &mut ShellRig) -> Option<String> {
+    rig.run();
+    rig.harness()
+        .root()
+        .query_all_by_role_and_label(Role::MultilineTextInput, "Text")
+        .next()
+        .and_then(|node| node.value())
+}
+
+/// The undoable steps of the active document, oldest first.
+fn undo_labels(rig: &ShellRig) -> Vec<String> {
+    let shell = rig.shell.borrow();
+    let session = shell.app.active_document().expect("session");
+    session
+        .undo
+        .undo_labels()
+        .iter()
+        .map(|s| (*s).to_owned())
+        .collect()
+}
+
+/// Task P7-51 item 3: a Text-tool press inside the edited shape's
+/// text block but off the field keeps the edit and moves the caret to
+/// the nearest position, with no new undo step; the typed text lands
+/// in the edit.
+#[test]
+fn a_text_tool_click_below_the_field_keeps_the_edit() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        // One undo step first (the lightened fill), so the assertion
+        // reads "one step".
+        select_shape(&mut rig);
+        white_fill(&mut rig, kind);
+        choose_text_tool(&mut rig, kind);
+        let pos = screen(&rig, BOX.0, BOX.1);
+        click_at(&mut rig, pos);
+        assert!(editing(&mut rig), "{kind:?}: the click edits the text");
+        press_key(
+            &mut rig,
+            egui::Key::A,
+            egui::Modifiers {
+                command: true,
+                ..egui::Modifiers::NONE
+            },
+        );
+        type_text(&mut rig, "Hi");
+        // Below the one-row field, inside the text block.
+        let below = screen(&rig, 6.0, 2.85);
+        click_at(&mut rig, below);
+        assert!(
+            editing(&mut rig),
+            "{kind:?}: the click below the field keeps the edit"
+        );
+        assert_eq!(
+            undo_labels(&rig),
+            vec!["Set fill color #FFFFFF".to_owned()],
+            "{kind:?}: the press is no new undo step"
+        );
+        type_text(&mut rig, "!");
+        assert_eq!(
+            editor_value(&mut rig).as_deref(),
+            Some("Hi!"),
+            "{kind:?}: the text lands in the edit"
+        );
+        press_key(&mut rig, egui::Key::Escape, egui::Modifiers::NONE);
+        let box_ = text_box(&rig.shell.borrow().app);
+        assert_eq!(
+            shape_text(&rig, box_),
+            "Hi!",
+            "{kind:?}: the edit commits its text"
+        );
     }
 }
 

@@ -1711,10 +1711,28 @@ impl Shell {
             }
             events.insert(0, crate::tools::ToolEvent::Cancel);
         }
-        // Any click with the Text tool first commits the text being
-        // typed (task P7-25 item 9): the commit intents run before the
-        // click's own, so a click inside the object being typed sees
-        // the written text.
+        // A Text-tool press inside the edited shape's text block but
+        // off the field keeps the edit and moves the caret (task
+        // P7-51 item 3: one keep-the-edit area). The press is dropped:
+        // the tool neither commits the text nor opens a box over the
+        // block, and no undo step appears. The area is where the
+        // editor drew last frame.
+        if self.tools.tool == crate::tools::Tool::Text && self.editor.is_active() {
+            events.retain(|event| {
+                let pos = match event {
+                    crate::tools::ToolEvent::PointerDown { pos, .. }
+                    | crate::tools::ToolEvent::PointerUp { pos, .. }
+                    | crate::tools::ToolEvent::DoubleClick { pos } => *pos,
+                    _ => return true,
+                };
+                self.page_to_screen(pos)
+                    .is_none_or(|screen| !self.editor.press_keeps_edit(screen))
+            });
+        }
+        // Any other click with the Text tool first commits the text
+        // being typed (task P7-25 item 9): the commit intents run
+        // before the click's own, so a click inside the object being
+        // typed sees the written text.
         if self.tools.tool == crate::tools::Tool::Text
             && self.editor.is_active()
             && events
