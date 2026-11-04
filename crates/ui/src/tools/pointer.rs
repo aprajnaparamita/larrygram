@@ -264,6 +264,32 @@ fn down(
         effect.overlay = drag_overlay(ctx, scene, page_size, &mode)?;
         return Ok(effect);
     }
+    // Task P7-35 item 2: a press on a segment's midpoint handle drags
+    // that segment perpendicular to itself.
+    let segments = {
+        let scene = state.state.scene(ctx)?;
+        crate::handles::segment_handles(ctx, scene, &ctx.selection.shapes)
+    };
+    if let Some(segments) = &segments
+        && let Some(index) = crate::handles::segment_handle_at(segments, pos, zoom)
+    {
+        state.state.mode = Mode::Drag {
+            kind: HandleKind::ConnectorSegment(index),
+            start: pos,
+            current: pos,
+            frame: handle_frame.unwrap_or((Rect::new(pos, pos), Angle::default())),
+            moving: ctx.selection.shapes.clone(),
+            alt: modifiers.alt,
+            zoom,
+            descend: None,
+        };
+        let mode = state.state.mode.clone();
+        let Some(scene) = state.state.scene(ctx)? else {
+            return Ok(effect);
+        };
+        effect.overlay = drag_overlay(ctx, scene, page_size, &mode)?;
+        return Ok(effect);
+    }
     if ends.is_none()
         && let Some((bounds, angle)) = handle_frame
         && let Some(kind) = handle_at(pos, bounds, angle, zoom)?
@@ -681,9 +707,32 @@ fn marquee_overlay(start: Point, current: Point) -> Overlay {
 }
 
 /// The selection outline and handles of `shapes` (task P7-33 item 1:
-/// a selected connector shows its end handles only).
+/// a selected connector shows its end handles only), and the segment
+/// midpoint handles of a right-angle connector (task P7-35 item 1).
 fn overlay_for_shapes(ctx: &AppCtx, scene: &Scene, shapes: &[ShapeId]) -> Result<Overlay, UiError> {
-    crate::handles::selection_overlay(ctx, Some(scene), shapes)
+    let mut overlay = crate::handles::selection_overlay(ctx, Some(scene), shapes)?;
+    if let Some(segments) = crate::handles::segment_handles(ctx, Some(scene), shapes)
+        && !segments.is_empty()
+    {
+        // The midpoint handles ride the marker path: `render`'s
+        // overlay belongs to P7-34 (task P7-35's master notes).
+        overlay
+            .marks
+            .push(OverlayMark::GlueFeedback(larrygram_render::GlueFeedback {
+                outline: None,
+                point: None,
+                markers: segments.iter().map(|(_, at)| *at).collect(),
+            }));
+    }
+    Ok(overlay)
+}
+
+/// The route one segment drag would write (task P7-35 item 2): the
+/// segment moved to the pointer's normal coordinate.
+fn moved_route(path: &[Point], index: usize, current: Point) -> Option<Vec<Point>> {
+    let (a, b) = (path.get(index).copied()?, path.get(index + 1).copied()?);
+    let to = if a.y == b.y { current.y } else { current.x };
+    larrygram_geom::move_segment(path, index, to).ok()
 }
 
 /// The preview marks of the current gesture.
@@ -707,6 +756,22 @@ fn drag_overlay(
             ..
         } => {
             connector::end_drag_overlay(ctx, moving.first().copied(), *which, *current, *alt, *zoom)
+        }
+        // A segment drag (task P7-35 item 2): the moved route as the
+        // preview.
+        Mode::Drag {
+            kind: HandleKind::ConnectorSegment(index),
+            current,
+            moving,
+            ..
+        } => {
+            let mut overlay = Overlay::new();
+            if let Some(path) = crate::handles::segment_path(ctx, Some(scene), moving)
+                && let Some(points) = moved_route(&path, *index, *current)
+            {
+                overlay.marks.push(OverlayMark::ConnectorPreview { points });
+            }
+            Ok(overlay)
         }
         Mode::Drag {
             kind,
@@ -826,8 +891,9 @@ fn preview_frame(
             Ok((bounds, Angle::from_radians(angle.radians() + delta), None))
         }
         // An end drag previews through [`connector::end_drag_overlay`]
-        // (task P7-33 item 2); the frame never changes.
-        HandleKind::ConnectorEnd(_) => Ok((bounds, angle, None)),
+        // (task P7-33 item 2); the frame never changes. Neither does a
+        // segment drag's (task P7-35 item 2).
+        HandleKind::ConnectorEnd(_) | HandleKind::ConnectorSegment(_) => Ok((bounds, angle, None)),
     }
 }
 
@@ -915,6 +981,46 @@ fn drag_intent(
         // One `connector.move_end` per end drag (task P7-33 item 2).
         HandleKind::ConnectorEnd(which) => {
             connector::end_drag_intent(ctx, moving, which, start, current, alt, zoom)
+        }
+        // One `connector.move_segment` per segment drag (task P7-35
+        // item 2).
+        HandleKind::ConnectorSegment(index) => {
+            let Some(connector) = moving.first().copied() else {
+                return Ok(None);
+            };
+            let Some(path) = crate::handles::segment_path(ctx, scene, moving) else {
+                return Ok(None);
+            };
+            let (Some(a), Some(b)) = (path.get(index).copied(), path.get(index + 1).copied())
+            else {
+                return Ok(None);
+            };
+            let (before, to) = if a.y == b.y {
+                (a.y, current.y)
+            } else {
+                (a.x, current.x)
+            };
+            if to == before {
+                return Ok(None);
+            }
+            let Some(visio_id) = ctx
+                .active_document()
+                .and_then(|session| session.document.shape(connector))
+                .map(|found| found.visio_id)
+            else {
+                return Ok(None);
+            };
+            intent(
+                "connector.move_segment",
+                Args::new()
+                    .with("connector", ArgValue::Integer(i64::from(visio_id)))
+                    .with(
+                        "segment",
+                        ArgValue::Integer(i64::try_from(index).unwrap_or(i64::MAX)),
+                    )
+                    .with("to", ArgValue::Number(to)),
+            )
+            .map(Some)
         }
         HandleKind::Move => {
             let delta = current.sub(start);

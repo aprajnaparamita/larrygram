@@ -178,6 +178,7 @@ fn down(
         // block actions (task P7-25 item 4 moves and resizes only).
         Some(HandleKind::Rotate) => None,
         Some(HandleKind::ConnectorEnd(_)) => None,
+        Some(HandleKind::ConnectorSegment(_)) => None,
         // A press on the shape (but off the block) still moves the
         // block, as in Visio.
         None if press_on_shape(ctx, pos, frame.shape, zoom)? => Some(HandleKind::Move),
@@ -311,7 +312,7 @@ fn drag_intent(
         }
         // A rotate drag never starts (task P7-25 item 4).
         HandleKind::Rotate => Ok(None),
-        HandleKind::ConnectorEnd(_) => Ok(None),
+        HandleKind::ConnectorEnd(_) | HandleKind::ConnectorSegment(_) => Ok(None),
     }
 }
 
@@ -610,7 +611,7 @@ fn drag_overlay(mode: &Mode) -> Result<Overlay, UiError> {
                 })
             }
             HandleKind::Rotate => Ok(Overlay::new()),
-            HandleKind::ConnectorEnd(_) => Ok(Overlay::new()),
+            HandleKind::ConnectorEnd(_) | HandleKind::ConnectorSegment(_) => Ok(Overlay::new()),
         },
     }
 }

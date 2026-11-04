@@ -413,10 +413,21 @@ fn a_selected_connector_shows_two_end_handles_only(kind: LayoutKind) {
             zoom,
         )
         .expect("handles");
+        // The segment midpoint handles draw ink of their own (task
+        // P7-35 item 1): an anchor on one is not a resize-box glyph.
+        let segments = {
+            let shell = rig.shell.borrow();
+            let app = &shell.app;
+            larrygram_ui::handles::segment_handles(app, None, &app.selection.shapes)
+                .unwrap_or_default()
+        };
         let far = |at: larrygram_geom::Point| {
             marks
                 .iter()
                 .all(|mark| (mark.at.x - at.x).hypot(mark.at.y - at.y) * 96.0 > 30.0)
+                && segments
+                    .iter()
+                    .all(|(_, mid)| (mid.x - at.x).hypot(mid.y - at.y) * 96.0 > 30.0)
         };
         for (_kind, anchor) in anchors.iter().filter(|(_, at)| far(*at)) {
             assert!(

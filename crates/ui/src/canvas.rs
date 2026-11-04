@@ -750,6 +750,17 @@ fn handle_under(overlay: &Overlay, point: Point, zoom: f64) -> Option<HandleKind
                 .ok()
                 .flatten(),
         },
+        // The segment midpoint handles ride the marker path (task
+        // P7-35 item 1): a markers-only feedback is the selection's
+        // segment handles.
+        OverlayMark::GlueFeedback(feedback)
+            if feedback.outline.is_none() && feedback.point.is_none() =>
+        {
+            let segments: Vec<(usize, Point)> =
+                feedback.markers.iter().copied().enumerate().collect();
+            crate::handles::segment_handle_at(&segments, point, zoom)
+                .map(HandleKind::ConnectorSegment)
+        }
         _ => None,
     })
 }
@@ -775,6 +786,14 @@ pub(crate) fn cursor_for(kind: HandleKind, angle: Angle, dragging: bool) -> Curs
         HandleKind::Move => return CursorIcon::Move,
         // An end handle drags one point of the connector (task P7-33).
         HandleKind::ConnectorEnd(_) => {
+            return if dragging {
+                CursorIcon::Grabbing
+            } else {
+                CursorIcon::Grab
+            };
+        }
+        // A segment handle drags one segment (task P7-35 item 1).
+        HandleKind::ConnectorSegment(_) => {
             return if dragging {
                 CursorIcon::Grabbing
             } else {

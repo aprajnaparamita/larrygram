@@ -3392,6 +3392,9 @@ impl panel_classic::CheckedState for ShellChecks {
             // The connector style rows show the current style (task
             // P7-36 item 3).
             .or_else(|| crate::checked::connector_style_checked(app, command))
+            // The reroute rows show the current reroute behaviour
+            // (task P7-35 item 5).
+            .or_else(|| crate::checked::reroute_option_checked(app, command))
     }
 }
 
