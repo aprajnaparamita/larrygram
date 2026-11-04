@@ -1317,3 +1317,58 @@ fn an_unresolvable_glued_end_keeps_its_path_with_a_warning() {
     dispatch(&mut ctx, &registry, "connector.reroute_all", Args::new()).expect("reroute");
     assert_eq!(row_types(doc(&ctx), connector), before, "the path is kept");
 }
+
+/// A zoom fit with a stale active page names it (the fit's stale-page
+/// arm).
+#[test]
+fn a_zoom_fit_with_a_stale_page_is_named() {
+    let (mut ctx, registry, _page) = fixture();
+    ctx.active_document_mut().expect("session").active_page = Some(PageId { index: 5 });
+    let error = dispatch(
+        &mut ctx,
+        &registry,
+        "view.zoom.fit",
+        Args::new()
+            .with("width", ArgValue::Number(800.0))
+            .with("height", ArgValue::Number(600.0)),
+    )
+    .expect_err("stale");
+    assert!(error.to_string().contains("no active page"), "{error}");
+}
+
+/// A dynamic glue whose resolution lands nowhere keeps the end's
+/// stored point (the glue's finite-fallback arm).
+#[test]
+fn a_dynamic_glue_to_an_unresolvable_target_keeps_its_point() {
+    let (mut ctx, registry, page) = fixture();
+    draw_glued(&mut ctx, &registry, page);
+    let connector = shape(&ctx, page, 3);
+    // The dynamic target's pin turns non-finite: the resolution lands
+    // nowhere and the end keeps its point.
+    let left = shape(&ctx, page, 1);
+    {
+        let doc = &mut ctx.active_document_mut().expect("session").document;
+        if let Some(entity) = doc.shape_mut(left) {
+            for cell in &mut entity.sheet.cells {
+                if cell.name.as_str() == "PinX" {
+                    cell.value = Some(CellValue::Number(f64::NAN));
+                    cell.formula = None;
+                }
+            }
+        }
+    }
+    let outcome = dispatch(
+        &mut ctx,
+        &registry,
+        "connector.glue_begin",
+        Args::new()
+            .with("connector", ArgValue::Integer(3))
+            .with("target", ArgValue::Integer(1)),
+    )
+    .expect("glue");
+    assert!(!outcome.message.as_deref().unwrap_or_default().is_empty());
+    let begin = doc(&ctx)
+        .connector_end(connector, larrygram_model::ConnectorEnd::Begin)
+        .expect("begin");
+    assert!(begin.x.is_finite() && begin.y.is_finite(), "{begin:?}");
+}
