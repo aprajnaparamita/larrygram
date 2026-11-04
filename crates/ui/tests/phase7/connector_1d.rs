@@ -287,24 +287,32 @@ fn the_connector_draws_glues_and_strokes(kind: LayoutKind) {
             "the click hit-tests and selects the connector"
         );
     }
+    // P7-33 item 1: the handle code draws the begin and end handles of
+    // a selected connector, no resize box (was "eight resize handles").
+    let marks = {
+        let shell = rig.shell.borrow();
+        let ids: Vec<ShapeId> = shell.app.selection.shapes.clone();
+        larrygram_ui::handles::end_handles(&shell.app, None, &ids).expect("end handles")
+    };
+    assert_eq!(marks[0].end, larrygram_model::ConnectorEnd::Begin);
+    assert_eq!(marks[1].end, larrygram_model::ConnectorEnd::End);
     let resize_handles = {
         let shell = rig.shell.borrow();
-        let bounds = larrygram_ui::handles::selection_bounds(&shell.app).expect("bounds");
-        let handles = larrygram_ui::handles::handles_for(
-            bounds,
-            larrygram_geom::Angle::from_radians(0.0),
-            1.0,
-        )
-        .expect("handles");
-        handles
+        let ids: Vec<ShapeId> = shell.app.selection.shapes.clone();
+        let overlay =
+            larrygram_ui::handles::selection_overlay(&shell.app, None, &ids).expect("overlay");
+        overlay
+            .marks
             .iter()
-            .filter(|(kind, _)| matches!(kind, larrygram_ui::handles::HandleKind::Resize(_)))
+            .filter(|mark| {
+                matches!(
+                    mark,
+                    larrygram_render::OverlayMark::Handles { ends: None, .. }
+                )
+            })
             .count()
     };
-    assert_eq!(
-        resize_handles, 8,
-        "today's handle code draws eight resize handles on a 1-D shape (P7-33 owns the handles)"
-    );
+    assert_eq!(resize_handles, 0, "no resize box on a 1-D shape");
 }
 
 /// The x of the line's midpoint (page inches).

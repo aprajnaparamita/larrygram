@@ -1019,6 +1019,228 @@ mod tests {
         assert_eq!(args.integer("begin_target"), Some(2), "the topmost shape");
     }
 
+    // -------------------------------------------------------------------------
+    // Task P7-33: the end drag and the hover feedback
+    // -------------------------------------------------------------------------
+
+    /// A 1-D connector from (2, 3) to (4, 3) beside the fixture boxes
+    /// (Visio id 3), for the end-drag tests.
+    fn connector_fixture() -> (AppCtx, ShapeId) {
+        let mut doc = Document::new();
+        let mut page = Page::new(PageId { index: 0 }, 1);
+        page.sheet.cells = vec![cell("PageWidth", 10.0), cell("PageHeight", 8.0)];
+        for (visio_id, pin, points) in [
+            (1, (2.0, 3.0), vec![(0.0, 0.5), (2.0, 0.5)]),
+            (2, (7.0, 3.0), vec![(0.0, 0.5), (2.0, 0.5)]),
+        ] {
+            let shape = rectangle(ShapeId { index: 0 }, visio_id, pin, &points);
+            let id = doc.add_shape(shape);
+            page.shapes.push(id);
+        }
+        let mut shape = Shape::new(ShapeId { index: 0 }, 3);
+        shape.sheet.cells = vec![
+            cell("Width", 2.0),
+            cell("Height", 0.2),
+            cell("PinX", 3.0),
+            cell("PinY", 3.0),
+            cell("LocPinX", 1.0),
+            cell("LocPinY", 0.1),
+            cell("Angle", 0.0),
+            cell("BeginX", 2.0),
+            cell("BeginY", 3.0),
+            cell("EndX", 4.0),
+            cell("EndY", 3.0),
+        ];
+        let mut geometry = Section::new(SectionName::from_static("Geometry"));
+        for (ix, (kind, x, y)) in [("MoveTo", 0.0, 0.1), ("LineTo", 2.0, 0.1)]
+            .into_iter()
+            .enumerate()
+        {
+            let mut row = Row::new();
+            row.row_type = Some(kind.to_owned());
+            row.ix = Some(i32::try_from(ix).unwrap_or(0));
+            row.cells = vec![cell("X", x), cell("Y", y)];
+            geometry.rows.push(row);
+        }
+        shape.sheet.sections.push(geometry);
+        let id = doc.add_shape(shape);
+        page.shapes.push(id);
+        doc.pages.push(page);
+        let mut app = AppCtx::new(Settings::default());
+        app.open_document(DocumentSession::new(doc, None));
+        (app, id)
+    }
+
+    /// One completed end drag dispatches `connector.move_end` with the
+    /// glue the pointer rules pick (task P7-33 item 2).
+    #[test]
+    fn an_end_drag_dispatches_one_move_end_per_drag() {
+        let (app, connector) = connector_fixture();
+        // The release lands on shape 2's connection point 0 (page
+        // (6, 3)): point glue.
+        let intent = end_drag_intent(
+            &app,
+            &[connector],
+            ConnectorEnd::End,
+            Point::new(3.0, 3.0),
+            Point::new(6.0, 3.0),
+            false,
+            1.0,
+        )
+        .expect("no error")
+        .expect("one intent");
+        assert_eq!(intent.command.as_str(), "connector.move_end");
+        let args = &intent.invocation.args;
+        assert_eq!(args.integer("connector"), Some(3));
+        assert_eq!(args.text("end"), Some("end"));
+        assert_eq!(args.number("x"), Some(6.0));
+        assert_eq!(args.number("y"), Some(3.0));
+        assert_eq!(args.integer("target"), Some(2));
+        assert_eq!(args.integer("point"), Some(0));
+
+        // The begin end spells "begin".
+        let intent = end_drag_intent(
+            &app,
+            &[connector],
+            ConnectorEnd::Begin,
+            Point::new(2.0, 3.0),
+            Point::new(2.5, 3.5),
+            false,
+            1.0,
+        )
+        .expect("no error")
+        .expect("one intent");
+        assert_eq!(intent.invocation.args.text("end"), Some("begin"));
+    }
+
+    /// Alt suppresses glue (item 2): the run frees the end at the
+    /// release point, and a drag that moved nothing dispatches
+    /// nothing.
+    #[test]
+    fn alt_and_zero_drags_dispatch_no_glue_and_nothing() {
+        let (app, connector) = connector_fixture();
+        let intent = end_drag_intent(
+            &app,
+            &[connector],
+            ConnectorEnd::End,
+            Point::new(3.0, 3.0),
+            Point::new(6.0, 3.0),
+            true,
+            1.0,
+        )
+        .expect("no error")
+        .expect("one intent");
+        let args = &intent.invocation.args;
+        assert_eq!(args.get("target"), None, "Alt suppresses glue");
+        assert_eq!(args.get("point"), None);
+        assert_eq!(args.number("x"), Some(6.0));
+
+        assert!(
+            end_drag_intent(
+                &app,
+                &[connector],
+                ConnectorEnd::End,
+                Point::new(3.0, 3.0),
+                Point::new(3.0, 3.0),
+                false,
+                1.0,
+            )
+            .expect("no error")
+            .is_none(),
+            "a drag that moved nothing pushes nothing"
+        );
+        assert!(
+            end_drag_intent(
+                &app,
+                &[],
+                ConnectorEnd::End,
+                Point::new(0.0, 0.0),
+                Point::new(1.0, 1.0),
+                false,
+                1.0
+            )
+            .expect("no error")
+            .is_none(),
+            "no connector, no intent"
+        );
+    }
+
+    /// The end-drag overlay previews the route and carries the glue
+    /// feedback (item 3); no connector means an empty overlay.
+    #[test]
+    fn the_end_drag_overlay_previews_the_route_and_the_feedback() {
+        let (app, connector) = connector_fixture();
+        let overlay = end_drag_overlay(
+            &app,
+            Some(connector),
+            ConnectorEnd::End,
+            Point::new(6.0, 3.0),
+            false,
+            1.0,
+        )
+        .expect("no error");
+        assert!(
+            overlay
+                .marks
+                .iter()
+                .any(|mark| matches!(mark, OverlayMark::ConnectorPreview { .. })),
+            "{:?}",
+            overlay.marks
+        );
+        assert!(
+            overlay
+                .marks
+                .iter()
+                .any(|mark| matches!(mark, OverlayMark::GlueFeedback(_))),
+            "{:?}",
+            overlay.marks
+        );
+        let overlay = end_drag_overlay(
+            &app,
+            None,
+            ConnectorEnd::End,
+            Point::new(6.0, 3.0),
+            false,
+            1.0,
+        )
+        .expect("no error");
+        assert!(overlay.marks.is_empty());
+    }
+
+    /// The hover feedback (item 3): the hovered shape's connection
+    /// points as markers whether or not glue runs, the outline for
+    /// dynamic glue and the point for point glue.
+    #[test]
+    fn the_feedback_shows_the_markers_the_outline_and_the_point() {
+        let app = fixture();
+        // Point glue at shape 2's connection point (page (6, 3)).
+        let located = locate(&app, Point::new(6.0, 3.0), 1.0, false).expect("locate");
+        assert_eq!(located.feedback.point, Some(Point::new(6.0, 3.0)));
+        assert_eq!(located.feedback.outline, None);
+        assert_eq!(
+            located.feedback.markers.len(),
+            2,
+            "the owning shape's two points"
+        );
+        assert!(located.glue.is_some());
+
+        // Dynamic glue over shape 2's outline: its outline, no point.
+        let located = locate(&app, Point::new(7.0, 3.2), 1.0, false).expect("locate");
+        assert_eq!(located.feedback.point, None);
+        let outline = located.feedback.outline.expect("the target's outline");
+        assert!(outline.len() >= 3, "{outline:?}");
+        assert!(located.glue.is_some());
+
+        // Alt: no glue, but the markers stay; empty page: nothing.
+        let located = locate(&app, Point::new(7.0, 3.2), 1.0, true).expect("locate");
+        assert_eq!(located.glue, None);
+        assert_eq!(located.feedback.markers.len(), 2);
+        assert_eq!(located.feedback.outline, None);
+        let located = locate(&app, Point::new(0.5, 0.5), 1.0, false).expect("locate");
+        assert_eq!(located.glue, None);
+        assert_eq!(located.feedback, GlueFeedback::default());
+    }
+
     #[test]
     fn the_connector_master_is_in_the_catalog() {
         assert_eq!(connector_master(), Some(("Basic Flowchart", "Connector")));

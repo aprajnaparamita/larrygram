@@ -459,9 +459,13 @@ fn a_missing_argument_is_an_error_with_no_dialog_request() {
         assert!(matches!(error, CommandError::InvalidArgs { .. }), "{error}");
     }
 
-    // An unknown connector id is an argument error, and a 1-D target
-    // is refused (connectors are never glue targets).
+    // An unknown connector id is an argument error, an ordinary shape
+    // has no connector ends, and a 1-D target is refused (connectors
+    // are never glue targets).
     let error = move_end(&mut ctx, &registry, 99, "end", 5.0, 5.0, None).expect_err("unknown id");
+    assert!(matches!(error, CommandError::InvalidArgs { .. }), "{error}");
+    let error = move_end(&mut ctx, &registry, 1, "end", 5.0, 5.0, None)
+        .expect_err("an ordinary shape has no ends");
     assert!(matches!(error, CommandError::InvalidArgs { .. }), "{error}");
     let error = move_end(
         &mut ctx,
