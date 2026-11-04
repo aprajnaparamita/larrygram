@@ -62,7 +62,7 @@ Phase 7: Panel and Classic layouts, the Larrygram rename and the welcome wizard.
 | [P7-49](tasks/P7-49.md) | implementer | P7-32 | I | merged with P7-32 (undo restores the re-routed rows, moved connectors keep their path, routes clear both shapes, axis-aligned exits, groups that rotate and flip) | `8fbd73b` |
 | [P7-50](tasks/P7-50.md) | implementer | P7-49 | I | merged with P7-32 (group and ungroup re-base endpoint cells in the model, a rigid group move keeps its route, oriented boxes for rotated targets, point glue names the member; master review) | `8fbd73b` |
 | [P7-33](tasks/P7-33.md) | implementer | P7-32 | I | merged (1-D selection shows end handles only; end drags re-glue or free an end with one `connector.move_end`; glue feedback while drawing and dragging; plain and Shift arrows unglue and nudge selected connectors; Opus review: merge, majors 1 and 2 fixed on main by the master, minors deferred) | `2b4ac4c` |
-| [P7-34](tasks/P7-34.md) | implementer | P7-33 | I | ready (connection points: view check, tool, type, glue renumbering); parallel with P7-35 | — |
+| [P7-34](tasks/P7-34.md) | implementer | P7-33 | I | running (connection points: view check, tool, type, glue renumbering); parallel with P7-35 | — |
 | [P7-35](tasks/P7-35.md) | implementer | P7-33, P7-36 | I | waits (segment drags, Reset Connector, reroute options) | — |
 | [P7-36](tasks/P7-36.md) | implementer | P7-32 | I | running (right angle, straight and curved styles, the controls, the storage round trip); parallel with P7-33 | — |
 | [P7-37](tasks/P7-37.md) | implementer | P7-29 | I | merged (a new text box is a shape inside an undo group; one allowlist rule for the text controls; Opus review: merge, follow-ups in P7-41 and P7-42) | `bc4e1ef` |
