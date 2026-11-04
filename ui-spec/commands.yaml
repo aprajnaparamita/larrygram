@@ -1400,6 +1400,11 @@
   mapping_confidence: unknown
   visuicmd: null
 - fluent_ids: []
+  id: connector.move_end
+  label: Move Connector End
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
   id: connector.reroute_all
   label: Reroute All
   mapping_confidence: unknown

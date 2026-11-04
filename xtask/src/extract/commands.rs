@@ -709,6 +709,7 @@ pub const OUR_COMMANDS: &[(&str, &str)] = &[
     ("connector.line_jump_style.sides_6", "6 Sides"),
     ("connector.line_jump_style.sides_7", "7 Sides"),
     ("connector.line_jump_style.square", "Square"),
+    ("connector.move_end", "Move Connector End"),
     ("connector.reroute_all", "Reroute All"),
     ("connector.style", "Connector Style"),
     ("connector.unglue", "Unglue"),

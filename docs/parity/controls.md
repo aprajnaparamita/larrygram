@@ -763,6 +763,7 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | connector.draw | Draw Connector | implemented |
 | connector.glue_begin | Glue Begin | implemented |
 | connector.glue_end | Glue End | implemented |
+| connector.move_end | Move Connector End | implemented |
 | connector.reroute_all | Reroute All | implemented |
 | connector.style | Connector Style | implemented |
 | connector.unglue | Unglue | implemented |
