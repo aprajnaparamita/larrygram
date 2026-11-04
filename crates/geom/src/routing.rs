@@ -22,6 +22,11 @@ pub enum RouteStyle {
     Straight,
     /// Segments parallel to the axes (a simple elbow, no obstacles).
     RightAngle,
+    /// The right-angle route bent into a curve
+    /// ([`curve_through`](crate::curve_through), ADR 0084 rule 8):
+    /// `route` returns the right-angle points and the caller bends
+    /// them.
+    Curved,
 }
 
 /// A glue target's box as the router clears it: the rectangle in its
@@ -185,7 +190,7 @@ pub fn route(start: Point, end: Point, options: &RouteOptions) -> Result<Vec<Poi
     }
     match options.style {
         RouteStyle::Straight => Ok(vec![start, end]),
-        RouteStyle::RightAngle => {
+        RouteStyle::RightAngle | RouteStyle::Curved => {
             if same(start, end) {
                 return Ok(vec![start, end]);
             }
