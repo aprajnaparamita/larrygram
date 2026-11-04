@@ -381,26 +381,32 @@ fn locate(ctx: &AppCtx, pos: Point, zoom: f64, alt: bool) -> Result<Located, UiE
         if !inside_outline(&scene, entry, pos) {
             return None;
         }
-        doc.shape(target).map(|found| Glue {
-            visio_id: found.visio_id,
-            point: None,
+        doc.shape(target).map(|found| {
+            (
+                target,
+                Glue {
+                    visio_id: found.visio_id,
+                    point: None,
+                },
+            )
         })
     };
     let hits = hit_test(&scene, pos, &HitOptions::new(max_distance)).map_err(render_error)?;
-    let mut glue = hits.iter().find_map(|entry| hit_glue(entry.shape_id?));
-    if glue.is_none() {
+    let mut found = hits.iter().find_map(|entry| hit_glue(entry.shape_id?));
+    if found.is_none() {
         // The outline fallback: a press inside the outline of a shape
         // with no fill takes dynamic glue (the old bounds test).
-        glue = entries.iter().rev().find_map(|entry| hit_glue(entry.shape));
+        found = entries.iter().rev().find_map(|entry| hit_glue(entry.shape));
     }
-    // Dynamic glue highlights the hovered shape's outline; a free end
-    // highlights nothing (item 3).
+    // Dynamic glue highlights the glue target's outline, the group
+    // for a member's hit, so the feedback matches the release; a free
+    // end highlights nothing (item 3).
+    let outline = found
+        .as_ref()
+        .and_then(|(target, _)| target_outline(&scene, doc, &entries, *target));
+    let glue = found.map(|(_, glue)| glue);
     let feedback = GlueFeedback {
-        outline: if glue.is_some() {
-            hovered.and_then(|entry| outline_points(&scene, entry))
-        } else {
-            None
-        },
+        outline,
         point: None,
         markers: hovered.map_or_else(Vec::new, markers_of),
     };
@@ -444,6 +450,39 @@ fn outline_points(
     let first = points.first().copied()?;
     points.push(first);
     (points.len() >= 3).then_some(points)
+}
+
+/// The outline the dynamic-glue feedback draws for `target`: its own
+/// path when it is a drawable shape, else (a group) the frame of its
+/// members, the box its selection would show.
+fn target_outline(
+    scene: &larrygram_render::Scene,
+    doc: &larrygram_model::Document,
+    entries: &[crate::handles::NodeEntry],
+    target: ShapeId,
+) -> Option<Vec<Point>> {
+    if let Some(entry) = entries.iter().find(|entry| entry.shape == target) {
+        return outline_points(scene, entry);
+    }
+    let members = crate::handles::subtree_ids(doc, &[target]);
+    let paths: Vec<_> = entries
+        .iter()
+        .filter(|entry| members.contains(&entry.shape))
+        .map(|entry| entry.path.clone())
+        .collect();
+    if paths.is_empty() {
+        return None;
+    }
+    let overlay = larrygram_render::build_selection_overlay(scene, &paths).ok()?;
+    overlay.marks.into_iter().find_map(|mark| match mark {
+        OverlayMark::Handles { bounds, angle, .. } => {
+            let corners = crate::handles::rotated_corners(bounds, angle);
+            let mut points = corners.to_vec();
+            points.push(corners[0]);
+            Some(points)
+        }
+        _ => None,
+    })
 }
 
 /// The overlay of a connector end drag (task P7-33 items 2 and 3):
@@ -1205,6 +1244,56 @@ mod tests {
         )
         .expect("no error");
         assert!(overlay.marks.is_empty());
+    }
+
+    /// The hover outline follows the glue target (the P7-33 review's
+    /// major 1): over a group member, dynamic glue names the group, so
+    /// the outline is the group's (here the frame around both members,
+    /// the group having no geometry of its own), not the member's.
+    #[test]
+    fn the_hover_outline_over_a_group_member_is_the_groups() {
+        let left = rectangle(ShapeId { index: 0 }, 2, (4.0, 3.0), &[]);
+        let right = rectangle(ShapeId { index: 0 }, 3, (8.0, 3.0), &[]);
+        // A group with no geometry of its own: its outline is its
+        // members' frame.
+        let mut group = rectangle(ShapeId { index: 0 }, 1, (0.0, 0.0), &[]);
+        group.children = Vec::new();
+        group
+            .sheet
+            .sections
+            .retain(|section| section.name.as_str() != "Geometry");
+        let mut doc = Document::new();
+        let mut page = Page::new(PageId { index: 0 }, 1);
+        let left = doc.add_shape(left);
+        let right = doc.add_shape(right);
+        let group = doc.add_shape(group);
+        page.shapes.push(group);
+        for member in [left, right] {
+            if let Some(entity) = doc.shape_mut(group) {
+                entity.children.push(member);
+            }
+            if let Some(entity) = doc.shape_mut(member) {
+                entity.parent = Some(group);
+            }
+        }
+        doc.pages.push(page);
+        let mut ctx = AppCtx::new(Settings::default());
+        ctx.open_document(DocumentSession::new(doc, None));
+
+        let located = locate(&ctx, Point::new(4.0, 3.0), 1.0, false).expect("locate");
+        assert_eq!(
+            located.glue.map(|glue| glue.visio_id),
+            Some(1),
+            "the release glues to the group"
+        );
+        let outline = located.feedback.outline.expect("an outline");
+        let max_x = outline.iter().map(|point| point.x).fold(f64::MIN, f64::max);
+        let min_x = outline.iter().map(|point| point.x).fold(f64::MAX, f64::min);
+        assert!(
+            (min_x - 2.0).abs() < 1e-9 && (max_x - 8.0).abs() < 1e-9,
+            "the outline spans both members (x 2 to 8): {outline:?}"
+        );
+        assert_eq!(outline.first(), outline.last(), "a closed outline");
     }
 
     /// The hover feedback (item 3): the hovered shape's connection

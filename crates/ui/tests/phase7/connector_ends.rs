@@ -661,6 +661,23 @@ fn an_arrow_key_unglues_both_ends_and_nudges_in_one_step(kind: LayoutKind) {
         .expect("session")
         .undo
         .len();
+    // Ctrl, Alt and Cmd arrows are not the nudge (the P7-33 review's
+    // major 2): Ctrl+arrow belongs to `connector.auto_connect`, and
+    // the connector keeps its glue.
+    for modifiers in [
+        egui::Modifiers::CTRL,
+        egui::Modifiers::ALT,
+        egui::Modifiers::MAC_CMD,
+    ] {
+        press_key(&mut rig, egui::Key::ArrowRight, modifiers);
+        let held = snapshot(&rig);
+        assert_eq!(records(&held).len(), 2, "{modifiers:?} keeps both glues");
+        assert_eq!(
+            held.connector_end(connector, ConnectorEnd::Begin),
+            Ok(begin),
+            "{modifiers:?} does not nudge"
+        );
+    }
     press_key(&mut rig, egui::Key::ArrowRight, egui::Modifiers::NONE);
 
     let after = snapshot(&rig);

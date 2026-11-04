@@ -2325,32 +2325,7 @@ impl Shell {
     /// menu, whose access letters also reach `Event::Text`.
     fn text_edit_keys(&mut self, ui: &Ui, intents: &mut Vec<Intent>) {
         self.text_seed = None;
-        if self.editor.is_active() || self.focus != ShortcutScope::Page {
-            return;
-        }
-        // egui's focus is the widget that takes the keys (task P7-26
-        // item 2): the canvas's own id is the only focus that may
-        // start shape text.
-        let focused = ui.ctx().memory(|memory| memory.focused());
-        if focused.is_some() && focused != self.canvas_id {
-            return;
-        }
-        // An open menu or popup keeps its own keys (task P7-26 item
-        // 2): the state is the one the previous frame ended with.
-        if self.popup_open {
-            return;
-        }
-        if self.app.selection.shapes.is_empty() {
-            return;
-        }
-        if self.wizard.is_some()
-            || self.options_open
-            || self.page_setup.is_some()
-            || self.fill_dialog.is_some()
-            || self.line_dialog.is_some()
-            || self.about_open
-            || self.walk.is_some()
-        {
+        if !self.page_has_keys(ui) || self.app.selection.shapes.is_empty() {
             return;
         }
         let (f2, typed) = ui.input(|input| {
@@ -2912,14 +2887,38 @@ impl Shell {
         Ok(results)
     }
 
+    /// Whether the page holds the keyboard this frame: no text edit,
+    /// the page's shortcut scope, egui's focus on the canvas or
+    /// nowhere (task P7-26 item 2: a field over the canvas takes its
+    /// own keys), no open menu or popup (the state the previous frame
+    /// ended with), and no dialog. Typing into shapes and the arrow
+    /// keys' connector step both start only then.
+    fn page_has_keys(&self, ui: &Ui) -> bool {
+        if self.editor.is_active() || self.focus != ShortcutScope::Page {
+            return false;
+        }
+        let focused = ui.ctx().memory(|memory| memory.focused());
+        if focused.is_some() && focused != self.canvas_id {
+            return false;
+        }
+        !(self.popup_open
+            || self.wizard.is_some()
+            || self.options_open
+            || self.page_setup.is_some()
+            || self.fill_dialog.is_some()
+            || self.line_dialog.is_some()
+            || self.about_open
+            || self.walk.is_some())
+    }
+
     /// The nudge delta of this frame's arrow presses (task P7-33 item
     /// 5), `None` when the arrows are not the connector unglue step:
-    /// no connector is selected, a text edit has the keys, or no arrow
-    /// was pressed. The pressed arrows are consumed (removed from the
+    /// the page does not hold the keys ([`Self::page_has_keys`]), no
+    /// connector is selected, or no plain or Shift arrow was pressed. The pressed arrows are consumed (removed from the
     /// input) when the step runs, so the shortcut table's
     /// `arrange.nudge` stub does not fire beside it.
     fn arrow_nudge_delta(&self, ui: &Ui) -> Option<(f64, f64)> {
-        if self.editor.is_active() || ui.ctx().text_edit_focused() {
+        if !self.page_has_keys(ui) || ui.ctx().text_edit_focused() {
             return None;
         }
         let session = self.app.active_document()?;
@@ -2969,6 +2968,12 @@ impl Shell {
                 }) else {
                     return true;
                 };
+                // Only a plain or Shift arrow: Ctrl+arrow is
+                // `connector.auto_connect`'s, and Alt and Cmd arrows
+                // are not nudges.
+                if modifiers.ctrl || modifiers.alt || modifiers.command || modifiers.mac_cmd {
+                    return true;
+                }
                 let step = step(modifiers.shift);
                 delta.0 += dx * step;
                 delta.1 += dy * step;
