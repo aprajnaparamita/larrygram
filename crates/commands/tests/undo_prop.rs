@@ -882,13 +882,11 @@ fn run_unglue(ctx: &mut AppCtx, registry: &Registry, id: &'static str, pick: u32
     try_dispatch(ctx, registry, id, args);
 }
 
-/// `connector.style` over the first two top-level shapes.
+/// `connector.style` over the top-level shapes (the seed's two
+/// connectors take the style cells; a box takes none, task P7-36 item
+/// 3).
 fn run_style(ctx: &mut AppCtx, registry: &Registry, id: &'static str, pick: u32) {
-    let ids: Vec<i32> = top_level(ctx)
-        .iter()
-        .take(2)
-        .map(|s| visio_of(ctx, *s))
-        .collect();
+    let ids: Vec<i32> = top_level(ctx).iter().map(|s| visio_of(ctx, *s)).collect();
     select_visio(ctx, &ids);
     let mut args = numbers(&[]);
     args.set(
@@ -902,6 +900,7 @@ fn run_style(ctx: &mut AppCtx, registry: &Registry, id: &'static str, pick: u32)
     try_dispatch(ctx, registry, id, args);
 }
 
+<<<<<<< HEAD
 /// `connector.move_end` (task P7-33 item 4): the first connector's
 /// `begin` or `end` moves, with point glue on some picks, dynamic glue
 /// on others and a free end on the rest.
@@ -951,6 +950,15 @@ fn is_connector_shape(ctx: &AppCtx, shape: ShapeId) -> bool {
     ctx.active_document()
         .map(|session| session.document.is_connector(shape))
         .unwrap_or(false)
+=======
+/// The style controls (task P7-36 item 3): they dispatch
+/// `connector.style` with their own style over the same selection as
+/// [`run_style`].
+fn run_style_control(ctx: &mut AppCtx, registry: &Registry, id: &'static str, _pick: u32) {
+    let ids: Vec<i32> = top_level(ctx).iter().map(|s| visio_of(ctx, *s)).collect();
+    select_visio(ctx, &ids);
+    try_dispatch(ctx, registry, id, numbers(&[]));
+>>>>>>> 3276096 (test(commands): classify the style controls and line jump ids (ADR 0040 rule 4))
 }
 
 /// `connector.draw`: one connector master instance with one free end.
@@ -1458,6 +1466,39 @@ const CASES: &[Case] = &[
         id: "connector.style",
         run: run_style,
     },
+    // Task P7-36 item 3: the style controls dispatch `connector.style`.
+    Case {
+        id: "connector.right_angle",
+        run: run_style_control,
+    },
+    Case {
+        id: "connector.straight.lines",
+        run: run_style_control,
+    },
+    Case {
+        id: "connector.curved.lines",
+        run: run_style_control,
+    },
+    Case {
+        id: "connector.straight",
+        run: run_style_control,
+    },
+    Case {
+        id: "connector.curved",
+        run: run_style_control,
+    },
+    Case {
+        id: "format.set.dyn.conn.routing.style",
+        run: run_style_control,
+    },
+    Case {
+        id: "format.set.dyn.conn.appearance.straight",
+        run: run_style_control,
+    },
+    Case {
+        id: "format.set.dyn.conn.appearance.curved",
+        run: run_style_control,
+    },
     Case {
         id: "connector.move_end",
         run: run_move_end,
@@ -1742,6 +1783,84 @@ const NON_EDITING: &[(&str, &str)] = &[
     (
         "connector.reroute_all",
         "re-routing is not undoable on its own (ADR 0045 rule 3)",
+    ),
+    // Task P7-36 item 4: the line jump controls stay disabled (ADR
+    // 0084, out of scope) and never edit.
+    (
+        "connector.show.line.jumps",
+        "disabled: line jumps aren't available yet (task P7-36 item 4)",
+    ),
+    (
+        "connector.line_jump_style",
+        "disabled: line jumps aren't available yet (task P7-36 item 4)",
+    ),
+    (
+        "connector.line_jump_style.page_default",
+        "disabled: line jumps aren't available yet (task P7-36 item 4)",
+    ),
+    (
+        "connector.line_jump_style.arc",
+        "disabled: line jumps aren't available yet (task P7-36 item 4)",
+    ),
+    (
+        "connector.line_jump_style.gap",
+        "disabled: line jumps aren't available yet (task P7-36 item 4)",
+    ),
+    (
+        "connector.line_jump_style.square",
+        "disabled: line jumps aren't available yet (task P7-36 item 4)",
+    ),
+    (
+        "connector.line_jump_style.sides_2",
+        "disabled: line jumps aren't available yet (task P7-36 item 4)",
+    ),
+    (
+        "connector.line_jump_style.sides_3",
+        "disabled: line jumps aren't available yet (task P7-36 item 4)",
+    ),
+    (
+        "connector.line_jump_style.sides_4",
+        "disabled: line jumps aren't available yet (task P7-36 item 4)",
+    ),
+    (
+        "connector.line_jump_style.sides_5",
+        "disabled: line jumps aren't available yet (task P7-36 item 4)",
+    ),
+    (
+        "connector.line_jump_style.sides_6",
+        "disabled: line jumps aren't available yet (task P7-36 item 4)",
+    ),
+    (
+        "connector.line_jump_style.sides_7",
+        "disabled: line jumps aren't available yet (task P7-36 item 4)",
+    ),
+    (
+        "connector.add_line_jumps_to",
+        "disabled: line jumps aren't available yet (task P7-36 item 4)",
+    ),
+    (
+        "connector.add_line_jumps_to.no_lines",
+        "disabled: line jumps aren't available yet (task P7-36 item 4)",
+    ),
+    (
+        "connector.add_line_jumps_to.horizontal_lines",
+        "disabled: line jumps aren't available yet (task P7-36 item 4)",
+    ),
+    (
+        "connector.add_line_jumps_to.vertical_lines",
+        "disabled: line jumps aren't available yet (task P7-36 item 4)",
+    ),
+    (
+        "connector.add_line_jumps_to.last_routed_line",
+        "disabled: line jumps aren't available yet (task P7-36 item 4)",
+    ),
+    (
+        "connector.add_line_jumps_to.last_displayed_line",
+        "disabled: line jumps aren't available yet (task P7-36 item 4)",
+    ),
+    (
+        "connector.add_line_jumps_to.first_displayed_line",
+        "disabled: line jumps aren't available yet (task P7-36 item 4)",
     ),
     ("shape.enter_group", "selection only (P5-04)"),
     ("shape.exit_group", "selection only (P5-04)"),
