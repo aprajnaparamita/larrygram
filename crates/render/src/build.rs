@@ -1890,7 +1890,9 @@ fn build_text(ctx: &mut Ctx<'_>, id: ShapeId, width: f64, height: f64) -> Option
     // The first paragraph's horizontal alignment follows the layout's
     // own read of its `HorzAlign` row (task P7-51 item 1: the editor's
     // field aligns like the drawn text).
-    let horz_align = paragraphs.first().map_or(text::Align::Left, |para| para.align);
+    let horz_align = paragraphs
+        .first()
+        .map_or(text::Align::Left, |para| para.align);
     let block = text::Block {
         paragraphs,
         width: placement.width,
