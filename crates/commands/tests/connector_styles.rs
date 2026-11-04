@@ -31,7 +31,7 @@ fn fixture() -> (AppCtx, Registry, PageId) {
 /// A 2 x 1 in box at `(x, y)` with one connection point per side
 /// midpoint.
 fn box_shape(visio_id: i32, x: f64, y: f64) -> larrygram_model::Shape {
-    use larrygram_model::{Cell, Preserved, Row, Section, SectionName};
+    use larrygram_model::{Cell, Preserved, Row, Section, SectionName, Shape};
     let cell = |name: &str, value: f64| Cell {
         name: CellName::new(name),
         formula: Some(format!("{value}")),
