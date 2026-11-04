@@ -36,12 +36,26 @@ const MIN_DRAG_IN: f64 = 1.0 / 96.0;
 pub(crate) struct State {
     /// The selected point: the shape and its row index.
     selected: Option<(ShapeId, u32)>,
-    /// The point being dragged: the shape, its row index and the
-    /// current page point.
-    moving: Option<(ShapeId, u32, Point)>,
+    /// The point being dragged (task P7-34 item 2).
+    moving: Option<Moving>,
     /// The press of an add gesture (Ctrl on the shape): the point
     /// lands on release when the drag stayed a click.
     pending_add: Option<Point>,
+}
+
+/// The move drag of one point: where it started and where the pointer
+/// is now (the preview's marker).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Moving {
+    /// The shape whose point moves.
+    shape: ShapeId,
+    /// The point's row index.
+    ix: u32,
+    /// The press position (page inches): the drag threshold compares
+    /// the release against it.
+    press: Point,
+    /// The current position (page inches).
+    at: Point,
 }
 
 /// The point under `pos` (page inches) on the target shape's points,
@@ -121,7 +135,12 @@ fn down(
             if let Some((_, ix, at)) = hovered_point(ctx, shape, pos, zoom)
                 && state.connection_point.selected == Some((shape, ix))
             {
-                state.connection_point.moving = Some((shape, ix, at));
+                state.connection_point.moving = Some(Moving {
+                    shape,
+                    ix,
+                    press: pos,
+                    at,
+                });
                 return overlay_effect(state, ctx);
             }
             // Ctrl+click on the shape adds a point; the point lands on
@@ -148,8 +167,8 @@ fn down(
 
 /// One move: the move drag follows the pointer.
 fn moved(state: &mut ToolMachine, ctx: &AppCtx, pos: Point) -> Result<ToolEffect, UiError> {
-    if let Some((shape, ix, _)) = state.connection_point.moving {
-        state.connection_point.moving = Some((shape, ix, pos));
+    if let Some(moving) = &mut state.connection_point.moving {
+        moving.at = pos;
     }
     overlay_effect(state, ctx)
 }
@@ -161,9 +180,10 @@ fn moved(state: &mut ToolMachine, ctx: &AppCtx, pos: Point) -> Result<ToolEffect
 ///   point and selects the new row.
 fn up(state: &mut ToolMachine, ctx: &AppCtx, pos: Point) -> Result<ToolEffect, UiError> {
     let mut effect = overlay_effect(state, ctx)?;
-    if let Some((shape, ix, at)) = state.connection_point.moving.take() {
-        if ((at.x - pos.x).abs() >= MIN_DRAG_IN || (at.y - pos.y).abs() >= MIN_DRAG_IN)
-            && let Some(intent) = move_intent(ctx, shape, ix, pos)?
+    if let Some(moving) = state.connection_point.moving.take() {
+        if ((moving.press.x - pos.x).abs() >= MIN_DRAG_IN
+            || (moving.press.y - pos.y).abs() >= MIN_DRAG_IN)
+            && let Some(intent) = move_intent(ctx, moving.shape, moving.ix, pos)?
         {
             effect.intents.push(intent);
         }
@@ -196,7 +216,7 @@ fn overlay(state: &ToolMachine, ctx: &AppCtx) -> Result<Overlay, UiError> {
         return Ok(overlay);
     };
     let selected = match state.connection_point.moving {
-        Some((_, _, at)) => Some(at),
+        Some(moving) => Some(moving.at),
         None => state
             .connection_point
             .selected

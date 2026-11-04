@@ -2985,7 +2985,9 @@ impl Shell {
             Some(args)
         };
         let command = intent.command.as_str();
-        if command == "edit.delete" {
+        // The Delete key dispatches `edit.clear` (the shortcut table's
+        // Shapes scope), the Clear command the same.
+        if command == "edit.delete" || command == "edit.clear" {
             if let (Some(args), Ok(id)) = (
                 args_with_point(&Args::new()),
                 CommandId::parse("connector.point_delete"),
