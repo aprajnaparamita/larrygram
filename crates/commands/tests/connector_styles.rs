@@ -519,3 +519,259 @@ fn a_curved_route_re_routes_when_its_target_moves() {
         "the curve survives a re-route"
     );
 }
+
+// ---------------------------------------------------------------------------
+// The curved draw and move (task P7-36 item 2)
+// ---------------------------------------------------------------------------
+
+/// A connector drawn under a curved page default is drawn curved, and
+/// a body move keeps its curve (task P7-36 item 2).
+#[test]
+fn a_curved_draw_and_move_keep_the_curve() {
+    let (mut ctx, registry, page) = fixture();
+    // The page default is curved (nothing selected).
+    dispatch(
+        &mut ctx,
+        &registry,
+        "connector.style",
+        Args::new().with("style", ArgValue::Text("curved".to_owned())),
+    )
+    .expect("page default");
+    // A free-ended draw under the default.
+    dispatch(
+        &mut ctx,
+        &registry,
+        "connector.draw",
+        Args::new()
+            .with("stencil", ArgValue::Text("Basic Flowchart".to_owned()))
+            .with("master", ArgValue::Text("Connector".to_owned()))
+            .with("x", ArgValue::Number(3.0))
+            .with("y", ArgValue::Number(4.5))
+            .with("begin_x", ArgValue::Number(1.5))
+            .with("begin_y", ArgValue::Number(4.0))
+            .with("end_x", ArgValue::Number(4.5))
+            .with("end_y", ArgValue::Number(6.0)),
+    )
+    .expect("draw");
+    let connector = shape(&ctx, page, 3);
+    assert_eq!(
+        row_types(doc(&ctx), connector),
+        vec!["MoveTo", "NURBSTo"],
+        "the draw writes one NURBSTo row"
+    );
+
+    // A body move translates the curve and keeps the row (task P7-36
+    // item 2: `translate_one_d` moves the control points).
+    ctx.selection.shapes = vec![connector];
+    ctx.selection.anchor = Some(connector);
+    ctx.selection.page = Some(page);
+    dispatch(
+        &mut ctx,
+        &registry,
+        "shape.move",
+        Args::new()
+            .with("dx", ArgValue::Number(0.5))
+            .with("dy", ArgValue::Number(0.25)),
+    )
+    .expect("move");
+    assert_eq!(
+        row_types(doc(&ctx), connector),
+        vec!["MoveTo", "NURBSTo"],
+        "the curve survives a body move"
+    );
+    // One undo restores the pre-move curve.
+    dispatch(&mut ctx, &registry, "edit.undo", Args::new()).expect("undo");
+    assert_eq!(row_types(doc(&ctx), connector), vec!["MoveTo", "NURBSTo"]);
+}
+
+/// Styling two connectors at once writes both and reports the plural
+/// label (task P7-36 item 3).
+#[test]
+fn styling_two_connectors_writes_both() {
+    let (mut ctx, registry, page) = fixture();
+    draw_glued(&mut ctx, &registry, page);
+    dispatch(
+        &mut ctx,
+        &registry,
+        "connector.draw",
+        Args::new()
+            .with("stencil", ArgValue::Text("Basic Flowchart".to_owned()))
+            .with("master", ArgValue::Text("Connector".to_owned()))
+            .with("x", ArgValue::Number(2.0))
+            .with("y", ArgValue::Number(6.5))
+            .with("begin_target", ArgValue::Integer(1))
+            .with("end_target", ArgValue::Integer(2)),
+    )
+    .expect("second draw");
+    let first = shape(&ctx, page, 3);
+    let second = shape(&ctx, page, 4);
+    ctx.selection.shapes = vec![first, second];
+    ctx.selection.anchor = Some(second);
+    ctx.selection.page = Some(page);
+    let outcome = dispatch(
+        &mut ctx,
+        &registry,
+        "connector.style",
+        Args::new().with("style", ArgValue::Text("straight".to_owned())),
+    )
+    .expect("style both");
+    assert_eq!(
+        outcome.message.as_deref(),
+        Some("Connector style: straight")
+    );
+    for connector in [first, second] {
+        assert_eq!(
+            style_cells(doc(&ctx), connector),
+            (Some(CellValue::Number(2.0)), Some(CellValue::Number(1.0)))
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The read helpers' fallbacks (task P7-36 item 3)
+// ---------------------------------------------------------------------------
+
+/// The style reads fall back cleanly: no document, an unplaced shape,
+/// a stale page and a non-numeric page cell (task P7-36 item 3).
+#[test]
+fn the_style_reads_fall_back_cleanly() {
+    use larrygram_model::{Cell, Preserved, Section, SectionName, Shape};
+    // No document: no style.
+    let bare = AppCtx::new(Settings::default());
+    assert_eq!(connector_style(&bare), None);
+
+    // An unplaced shape: right angle (no cells reach it).
+    let (mut ctx, registry, page) = fixture();
+    let placed = {
+        let doc = &mut ctx.active_document_mut().expect("session").document;
+        let mut shape = Shape::new(ShapeId { index: 0 }, 7);
+        shape.sheet.cells = Vec::new();
+        doc.add_shape(shape)
+    };
+    ctx.selection.shapes = vec![placed];
+    ctx.selection.anchor = Some(placed);
+    assert_eq!(connector_style(&ctx), Some(RouteStyle::RightAngle));
+
+    // A page cell that is not a number falls through to right angle.
+    {
+        let doc = &mut ctx.active_document_mut().expect("session").document;
+        if let Some(entry) = doc.pages.get_mut(page.index as usize) {
+            entry.sheet.cells.push(Cell {
+                name: CellName::new("RouteStyle"),
+                formula: None,
+                value: Some(CellValue::Str("x".to_owned())),
+                unit: larrygram_geom::Unit::Unitsless,
+                preserved: Preserved::new(),
+            });
+        }
+    }
+    ctx.selection.shapes.clear();
+    ctx.selection.anchor = None;
+    assert_eq!(connector_style(&ctx), Some(RouteStyle::RightAngle));
+
+    // A stale active page: right angle (the page read fails).
+    ctx.active_document_mut().expect("session").active_page = Some(PageId { index: 9 });
+    assert_eq!(connector_style(&ctx), Some(RouteStyle::RightAngle));
+    let _ = (
+        &registry,
+        SectionName::from_static("Geometry"),
+        Section::new,
+    );
+}
+
+/// A page default change re-routes the inheritors and skips a record
+/// that names a gone shape (task P7-36 item 3).
+#[test]
+fn a_page_default_skips_a_record_naming_a_gone_shape() {
+    use larrygram_model::Connect;
+    let (mut ctx, registry, page) = fixture();
+    draw_glued(&mut ctx, &registry, page);
+    {
+        let doc = &mut ctx.active_document_mut().expect("session").document;
+        if let Some(entry) = doc.pages.get_mut(page.index as usize) {
+            let mut record = Connect::new();
+            record.from_sheet = 99;
+            record.from_cell = "BeginX".to_owned();
+            record.from_part = larrygram_model::mutate::VIS_BEGIN;
+            record.to_sheet = 1;
+            record.to_cell = "PinX".to_owned();
+            record.to_part = larrygram_model::mutate::VIS_WHOLE_SHAPE;
+            entry.connects.push(record);
+        }
+    }
+    ctx.selection.shapes.clear();
+    ctx.selection.anchor = None;
+    dispatch(
+        &mut ctx,
+        &registry,
+        "connector.style",
+        Args::new().with("style", ArgValue::Text("curved".to_owned())),
+    )
+    .expect("page default");
+    assert_eq!(
+        row_types(doc(&ctx), shape(&ctx, page, 3)),
+        vec!["MoveTo", "NURBSTo"]
+    );
+}
+
+// ---------------------------------------------------------------------------
+// The glue and draw argument arms (task P7-36 item 3's neighbours)
+// ---------------------------------------------------------------------------
+
+/// The glue and draw commands name their bad arguments (the glue
+/// record and draw validation arms).
+#[test]
+fn the_glue_and_draw_commands_name_their_bad_arguments() {
+    let (mut ctx, registry, page) = fixture();
+    draw_glued(&mut ctx, &registry, page);
+    for (point, expected) in [
+        (-1, "point must not be negative"),
+        (99, "connection point 99 does not exist"),
+    ] {
+        let error = dispatch(
+            &mut ctx,
+            &registry,
+            "connector.glue_begin",
+            Args::new()
+                .with("connector", ArgValue::Integer(3))
+                .with("target", ArgValue::Integer(1))
+                .with("point", ArgValue::Integer(point)),
+        )
+        .expect_err("bad point");
+        assert!(error.to_string().contains(expected), "{error}");
+    }
+    let error = dispatch(
+        &mut ctx,
+        &registry,
+        "connector.draw",
+        Args::new()
+            .with("stencil", ArgValue::Text("Basic Flowchart".to_owned()))
+            .with("master", ArgValue::Text("Connector".to_owned()))
+            .with("x", ArgValue::Number(3.0))
+            .with("y", ArgValue::Number(4.5))
+            .with("begin_point", ArgValue::Integer(0)),
+    )
+    .expect_err("point without target");
+    assert!(
+        error
+            .to_string()
+            .contains("begin_point needs a begin_target"),
+        "{error}"
+    );
+    let error = dispatch(
+        &mut ctx,
+        &registry,
+        "connector.draw",
+        Args::new()
+            .with("stencil", ArgValue::Text("Basic Flowchart".to_owned()))
+            .with("master", ArgValue::Text("Connector".to_owned()))
+            .with("x", ArgValue::Number(3.0))
+            .with("y", ArgValue::Number(4.5))
+            .with("end_point", ArgValue::Integer(0)),
+    )
+    .expect_err("end point without target");
+    assert!(
+        error.to_string().contains("end_point needs an end_target"),
+        "{error}"
+    );
+}

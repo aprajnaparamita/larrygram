@@ -365,23 +365,30 @@ fn row_number_cell(name: &str, value: f64, unit: Unit) -> Cell {
 /// The `NURBSTo` row cells of one curve (task P7-36 item 2): the
 /// ShapeSheet `NURBSTo` reference's `X`/`Y` (the last control point),
 /// `A`/`B` (its knot and weight, `A` being the spline's second-to-last
-/// knot) and `C`/`D` (the first knot and weight), then `E`.
+/// knot) and `C`/`D` (the first knot and weight), then `E`. The
+/// caller's route has at least three points ([`curve_through`]), so
+/// the first and last control points always exist; the flat spellings
+/// keep the helper total without a dead arm.
 fn nurbs_row_cells(nurbs: &Nurbs, local: &[Point]) -> Vec<Cell> {
-    let (first, last) = match (nurbs.points.first(), nurbs.points.last()) {
-        (Some(first), Some(last)) => (first, last),
-        _ => return Vec::new(),
-    };
+    let first_knot = nurbs.points.first().map(|point| point.knot).unwrap_or(0.0);
+    let first_weight = nurbs
+        .points
+        .first()
+        .map(|point| point.weight)
+        .unwrap_or(1.0);
+    let last_knot = nurbs.points.last().map(|point| point.knot).unwrap_or(1.0);
+    let last_weight = nurbs.points.last().map(|point| point.weight).unwrap_or(1.0);
     // The curve's end is its last control point (the clamped end); the
     // caller's last route point is the same number, spelled from the
     // control data so the row can never disagree with `E`.
-    let end = local.last().copied().unwrap_or(Point::new(last.x, last.y));
+    let end = local.last().copied().unwrap_or(Point::new(0.0, 0.0));
     let mut cells = vec![
         row_number_cell("X", end.x, Unit::Inches),
         row_number_cell("Y", end.y, Unit::Inches),
-        row_number_cell("A", last.knot, Unit::Unitsless),
-        row_number_cell("B", last.weight, Unit::Unitsless),
-        row_number_cell("C", first.knot, Unit::Unitsless),
-        row_number_cell("D", first.weight, Unit::Unitsless),
+        row_number_cell("A", last_knot, Unit::Unitsless),
+        row_number_cell("B", last_weight, Unit::Unitsless),
+        row_number_cell("C", first_knot, Unit::Unitsless),
+        row_number_cell("D", first_weight, Unit::Unitsless),
     ];
     cells.push(nurbs_formula_cell(nurbs));
     cells
@@ -1831,9 +1838,6 @@ impl Document {
         connector: ShapeId,
         path: &[Point],
     ) -> Result<(), Error> {
-        if curve_through(path).is_none() {
-            return self.write_connector_path(connector, path);
-        }
         if self.shape(connector).is_none() {
             return Err(Error::UnknownShape(connector));
         }
@@ -1848,6 +1852,9 @@ impl Document {
             if !point.x.is_finite() || !point.y.is_finite() {
                 return Err(Error::BadCell("non-finite path point"));
             }
+        }
+        if curve_through(path).is_none() {
+            return self.write_connector_path(connector, path);
         }
         if self.is_connector(connector) {
             self.write_connector_ends(connector, begin, end)?;
@@ -3143,6 +3150,38 @@ mod tests {
         assert_eq!(error, Error::BadCell("non-finite master size"));
     }
 
+    /// A 1-D master's end cell that is not a number gives no
+    /// begin-to-end vector: the instance sizes from `Width`/`Height`
+    /// (the `master_end_vector` read's fallback arm).
+    #[test]
+    fn a_non_numeric_end_cell_gives_no_master_end_vector() {
+        let (mut doc, page) = document();
+        let mut content = box_shape(2.0, 1.0);
+        content.sheet.cells.push(Cell {
+            name: CellName::new("BeginX"),
+            formula: None,
+            value: Some(CellValue::Str("x".to_owned())),
+            unit: Unit::Inches,
+            preserved: Preserved::new(),
+        });
+        for (name, value) in [("BeginY", 0.0), ("EndX", 2.0), ("EndY", 0.0)] {
+            content.sheet.cells.push(number_cell(name, value));
+        }
+        let content = doc.insert_shape(page, content, None).expect("c");
+        let mut master = Master::new(MasterId { index: 0 }, 0);
+        master.name_u = "Mixed".to_owned();
+        master.shapes.push(content);
+        let master = doc.add_master(master).expect("master");
+        let instance = doc
+            .instantiate_master(master, page, Point::new(5.0, 5.0), None)
+            .expect("the instance sizes from Width/Height");
+        let entity = doc.shape(instance).expect("instance");
+        assert!(entity.sheet.cells.iter().any(|cell| {
+            cell.name.as_str() == "Width"
+                && matches!(cell.value, Some(CellValue::Number(value)) if value == 2.0)
+        }));
+    }
+
     #[test]
     fn write_connector_path_maps_page_points_into_the_local_box() {
         let (mut doc, page) = document();
@@ -3323,9 +3362,19 @@ mod tests {
         let section = &doc.shape(connector).expect("c").sheet.sections[0];
         assert_eq!(section.rows.len(), 1);
         assert_eq!(section.rows[0].row_type.as_deref(), Some("MoveTo"));
+        let three = [
+            Point::new(0.0, 0.0),
+            Point::new(1.0, 1.0),
+            Point::new(2.0, 0.0),
+        ];
         assert_eq!(
-            doc.write_connector_curve(ShapeId { index: 9 }, &[Point::new(0.0, 0.0)]),
+            doc.write_connector_curve(ShapeId { index: 9 }, &three),
             Err(Error::UnknownShape(ShapeId { index: 9 }))
+        );
+        let too_long = vec![Point::new(0.0, 0.0); MAX_PATH_POINTS + 1];
+        assert_eq!(
+            doc.write_connector_curve(connector, &too_long),
+            Err(Error::BadCell("connector path too long"))
         );
     }
 

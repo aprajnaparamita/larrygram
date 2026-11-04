@@ -353,12 +353,10 @@ fn join(
     // 180-degree turn, ignoring the box check (a check that fails
     // every candidate must not answer a route that turns back through
     // a shape); the first elbow only when none qualifies.
-    for corners in &candidates {
-        if turns_no_180(start, out, corners, back, end) {
-            return corners.clone();
-        }
-    }
-    candidates.into_iter().next().unwrap_or_default()
+    candidates
+        .into_iter()
+        .find(|corners| turns_no_180(start, out, corners, back, end))
+        .unwrap_or_default()
 }
 
 /// The full route of one candidate: start, stub out, corners, stub

@@ -591,9 +591,6 @@ fn every_corpus_file_with_connects_keeps_its_records_and_formulas() {
     for path in &files {
         let bytes = std::fs::read(path).expect("read corpus file");
         let document = read_document(&bytes, &Limits::DEFAULT).expect("open corpus file");
-        if !has_connects(&document) {
-            continue;
-        }
         let name = path
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
@@ -606,7 +603,9 @@ fn every_corpus_file_with_connects_keeps_its_records_and_formulas() {
             before,
             "{name} changed in the round trip"
         );
-        checked.push(name);
+        if has_connects(&document) {
+            checked.push(name);
+        }
     }
     // The corpus files with `Connects` today (task P7-36 item 5).
     for expected in ["testfile3.vsdx", "tdf136564-WhiteTextBackground.vsdx"] {

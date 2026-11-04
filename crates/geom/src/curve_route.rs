@@ -39,11 +39,7 @@ pub fn curve_through(route: &[Point]) -> Option<Nurbs> {
         .iter()
         .enumerate()
         .map(|(index, point)| {
-            let knot = if width <= 0.0 {
-                0.0
-            } else {
-                ((index as f64 - span) / width).clamp(0.0, 1.0)
-            };
+            let knot = ((index as f64 - span) / width).clamp(0.0, 1.0);
             NurbsPoint {
                 x: point.x,
                 y: point.y,

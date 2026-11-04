@@ -248,3 +248,62 @@ fn line_jumps_disabled(_ctx: &AppCtx) -> crate::Enabled {
 fn run_line_jumps(_ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandError> {
     Err(CommandError::failed(LINE_JUMBS_REASON))
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::app::{DocumentSession, Settings};
+    use larrygram_model::{Document, Shape, ShapeId};
+
+    use super::*;
+
+    /// An app with one document and one page, nothing selected.
+    fn app() -> AppCtx {
+        let mut doc = Document::new();
+        let page = doc.add_page("Page-1").expect("page");
+        let mut shape = Shape::new(ShapeId { index: 0 }, 1);
+        shape.sheet.cells = Vec::new();
+        let shape = doc.insert_shape(page, shape, None).expect("shape");
+        let mut app = AppCtx::new(Settings::default());
+        app.open_document(DocumentSession::new(doc, None));
+        app.selection.page = Some(page);
+        app.selection.shapes = vec![shape];
+        app.selection.anchor = Some(shape);
+        app
+    }
+
+    /// The enabled states (task P7-36 item 3): the page default with
+    /// nothing selected, the style with a styleable selection, and the
+    /// refusal for anything else.
+    #[test]
+    fn style_enabled_follows_the_selection() {
+        let mut ctx = app();
+        {
+            let shell_doc = ctx.active_document().expect("session");
+            let selected = shell_doc.document.shape(ShapeId { index: 0 });
+            assert!(selected.is_some());
+        }
+        assert_eq!(
+            style_enabled(&ctx),
+            Enabled::no("no connector in the selection to style")
+        );
+        ctx.selection.shapes.clear();
+        ctx.selection.anchor = None;
+        assert!(style_enabled(&ctx).value, "nothing selected sets the page");
+        assert!(!style_enabled(&AppCtx::new(Settings::default())).value);
+    }
+
+    /// The line jump bodies fail cleanly when reached (task P7-36
+    /// item 4): the registry refuses them first.
+    #[test]
+    fn run_line_jumps_fails_cleanly_when_reached() {
+        let mut ctx = app();
+        let error =
+            run_line_jumps(&mut ctx, &Invocation::empty(crate::Source::Test)).expect_err("refused");
+        assert!(
+            error
+                .to_string()
+                .contains("Line jumps aren't available yet"),
+            "{error}"
+        );
+    }
+}

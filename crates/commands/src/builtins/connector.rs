@@ -1047,9 +1047,7 @@ fn page_style(doc: &Document, page: PageId) -> RouteStyle {
 /// 3).
 fn page_inheritors(doc: &Document, page: PageId) -> Vec<ShapeId> {
     let mut out = Vec::new();
-    let Ok(ids) = connector_visio_ids(doc, page) else {
-        return out;
-    };
+    let ids = connector_visio_ids(doc, page).unwrap_or_default();
     for visio_id in ids {
         let Some(shape) = doc.shape_by_visio_id(page, visio_id) else {
             continue;
