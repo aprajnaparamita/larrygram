@@ -943,6 +943,27 @@ fn run_move_end(ctx: &mut AppCtx, registry: &Registry, id: &'static str, pick: u
     try_dispatch(ctx, registry, id, args);
 }
 
+/// `connector.move_segment` (task P7-35 item 2): the first connector's
+/// segment 1, moved off its own line (the seed's only axis-aligned
+/// segment; a diagonal one is refused and pushes nothing).
+fn run_move_segment(ctx: &mut AppCtx, registry: &Registry, id: &'static str, pick: u32) {
+    let tops = top_level(ctx);
+    let Some(connector) = tops
+        .iter()
+        .copied()
+        .find(|shape| is_connector_shape(ctx, *shape))
+    else {
+        return;
+    };
+    let mut args = numbers(&[("to", 100.0 + jitter(pick, 28))]);
+    args.set(
+        "connector",
+        ArgValue::Integer(i64::from(visio_of(ctx, connector))),
+    );
+    args.set("segment", ArgValue::Integer(1));
+    try_dispatch(ctx, registry, id, args);
+}
+
 /// Whether the shape is a 1-D connector (the `connector.move_end`
 /// subject).
 fn is_connector_shape(ctx: &AppCtx, shape: ShapeId) -> bool {
@@ -1501,6 +1522,29 @@ const CASES: &[Case] = &[
     Case {
         id: "connector.move_end",
         run: run_move_end,
+    },
+    // Task P7-35: the segment move, Reset Connector and the reroute
+    // options (the three options write `ConFixedCode` over the same
+    // selection as `run_style`).
+    Case {
+        id: "connector.move_segment",
+        run: run_move_segment,
+    },
+    Case {
+        id: "connector.dyn.conn.reroute",
+        run: run_style_control,
+    },
+    Case {
+        id: "format.set.dyn.conn.reroute.freely",
+        run: run_style_control,
+    },
+    Case {
+        id: "format.set.dyn.conn.reroute.on.crossover",
+        run: run_style_control,
+    },
+    Case {
+        id: "format.set.dyn.conn.reroute.never",
+        run: run_style_control,
     },
     Case {
         id: "connector.draw",
