@@ -1272,13 +1272,13 @@ fn an_unresolvable_glued_end_keeps_its_path_with_a_warning() {
         let doc = &mut ctx.active_document_mut().expect("session").document;
         if let Some(entity) = doc.shape_mut(left) {
             for section in &mut entity.sheet.sections {
-                if section.name.as_str() == "Connection" {
-                    if let Some(row) = section.rows.first_mut() {
-                        for cell in &mut row.cells {
-                            if cell.name.as_str() == "X" {
-                                cell.value = Some(CellValue::Number(f64::NAN));
-                                cell.formula = None;
-                            }
+                if section.name.as_str() == "Connection"
+                    && let Some(row) = section.rows.first_mut()
+                {
+                    for cell in &mut row.cells {
+                        if cell.name.as_str() == "X" {
+                            cell.value = Some(CellValue::Number(f64::NAN));
+                            cell.formula = None;
                         }
                     }
                 }
