@@ -33,6 +33,7 @@ mod section;
 mod shape;
 mod sheet;
 pub mod stencils;
+pub mod style_cells;
 mod style;
 mod text;
 mod theme;

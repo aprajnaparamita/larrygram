@@ -45,7 +45,7 @@ use crate::shape::Shape;
 use crate::text::{TextContent, TextPart};
 use crate::values::{CellReader, RowTarget, SheetRef};
 
-use larrygram_geom::{Angle, Point, Size, Transform, Unit};
+use larrygram_geom::{Angle, Nurbs, Point, Size, Transform, Unit, curve_through};
 
 use std::collections::{BTreeSet, HashSet};
 
@@ -358,6 +358,73 @@ fn row_number_cell(name: &str, value: f64, unit: Unit) -> Cell {
         formula: Some(literal(value)),
         value: Some(CellValue::Number(value)),
         unit,
+        preserved: Preserved::new(),
+    }
+}
+
+/// The `NURBSTo` row cells of one curve (task P7-36 item 2): the
+/// ShapeSheet `NURBSTo` reference's `X`/`Y` (the last control point),
+/// `A`/`B` (its knot and weight, `A` being the spline's second-to-last
+/// knot) and `C`/`D` (the first knot and weight), then `E`.
+fn nurbs_row_cells(nurbs: &Nurbs, local: &[Point]) -> Vec<Cell> {
+    let (first, last) = match (nurbs.points.first(), nurbs.points.last()) {
+        (Some(first), Some(last)) => (first, last),
+        _ => return Vec::new(),
+    };
+    // The curve's end is its last control point (the clamped end); the
+    // caller's last route point is the same number, spelled from the
+    // control data so the row can never disagree with `E`.
+    let end = local
+        .last()
+        .copied()
+        .unwrap_or(Point::new(last.x, last.y));
+    let mut cells = vec![
+        row_number_cell("X", end.x, Unit::Inches),
+        row_number_cell("Y", end.y, Unit::Inches),
+        row_number_cell("A", last.knot, Unit::Unitsless),
+        row_number_cell("B", last.weight, Unit::Unitsless),
+        row_number_cell("C", first.knot, Unit::Unitsless),
+        row_number_cell("D", first.weight, Unit::Unitsless),
+    ];
+    cells.push(nurbs_formula_cell(nurbs));
+    cells
+}
+
+/// The `E` cell of a `NURBSTo` row: the `NURBS()` formula of the
+/// ShapeSheet reference, listing the control points **between** the
+/// row's start and end (the row's `X`/`Y` and `C`/`D` complete the
+/// polygon; ADR 0022's knot rule, and the wide corpus's rows). The
+/// formula text is the cell's cached value with no `F`: recalc owns no
+/// cell of a routed row (ADR 0056's split), and a `NURBS()` formula
+/// would make the row formula-driven and freeze re-routing.
+fn nurbs_formula_cell(nurbs: &Nurbs) -> Cell {
+    let mut text = format!(
+        "NURBS({}, {}, {}, {}",
+        literal(nurbs.knot_last),
+        nurbs.degree,
+        nurbs.x_type,
+        nurbs.y_type
+    );
+    let interior = nurbs
+        .points
+        .iter()
+        .take(nurbs.points.len().saturating_sub(1))
+        .skip(1);
+    for point in interior {
+        text.push_str(&format!(
+            ", {},{},{},{}",
+            literal(point.x),
+            literal(point.y),
+            literal(point.knot),
+            literal(point.weight)
+        ));
+    }
+    text.push(')');
+    Cell {
+        name: CellName::new("E"),
+        formula: None,
+        value: Some(CellValue::Str(text)),
+        unit: Unit::Unitsless,
         preserved: Preserved::new(),
     }
 }
@@ -1740,6 +1807,88 @@ impl Document {
         Ok(())
     }
 
+    /// Writes the connector's curved path (ADR 0084 rule 8, task
+    /// P7-36 item 2): one `NURBSTo` row from the begin point to the end
+    /// point, whose control points are the route's points on a clamped
+    /// uniform knot vector with weights 1 ([`curve_through`]).
+    ///
+    /// The write shares [`Document::write_connector_path`]'s contract:
+    /// the points arrive in the parent's coordinates and are mapped
+    /// into the connector's own local box; a 1-D connector's endpoint,
+    /// pin and size cells stay true; the rows replace the `Geometry`
+    /// sections. A route of fewer than three points is straight: the
+    /// plain `MoveTo`/`LineTo` rows of [`Document::write_connector_path`]
+    /// (a two-point route is a straight `LineTo`).
+    ///
+    /// The row follows the ShapeSheet `NURBSTo` reference: `X`/`Y` the
+    /// last control point, `A` its knot (the second-to-last knot of the
+    /// spline), `B` its weight, `C` and `D` the first knot and weight,
+    /// and `E` the `NURBS()` formula. The formula lists the control
+    /// points **between** the row's start and end (the wide corpus's
+    /// rows, and the knot-count rule of ADR 0022); `E` stores the
+    /// formula text as its cached value with no `F`, so recalc leaves
+    /// the row to the router (ADR 0056's split) and a re-route still
+    /// rewrites it.
+    pub fn write_connector_curve(
+        &mut self,
+        connector: ShapeId,
+        path: &[Point],
+    ) -> Result<(), Error> {
+        if curve_through(path).is_none() {
+            return self.write_connector_path(connector, path);
+        }
+        if self.shape(connector).is_none() {
+            return Err(Error::UnknownShape(connector));
+        }
+        let (begin, end) = match (path.first(), path.last()) {
+            (Some(begin), Some(end)) => (*begin, *end),
+            _ => return Err(Error::BadCell("empty connector path")),
+        };
+        if path.len() > MAX_PATH_POINTS {
+            return Err(Error::BadCell("connector path too long"));
+        }
+        for point in path {
+            if !point.x.is_finite() || !point.y.is_finite() {
+                return Err(Error::BadCell("non-finite path point"));
+            }
+        }
+        if self.is_connector(connector) {
+            self.write_connector_ends(connector, begin, end)?;
+            self.write_connector_pins(connector, begin, end)?;
+        }
+        let frame = self.frame_of(connector)?;
+        let inverse = frame
+            .transform()
+            .invert()
+            .map_err(|_| Error::BadCell("singular shape transform"))?;
+        let local: Vec<Point> = path.iter().map(|point| inverse.apply(*point)).collect();
+        // `curve_through` returns `Some` (checked above) and never
+        // panics, so the control data exists for the mapped points too:
+        // the knots and degree depend on the point count only.
+        let nurbs = curve_through(&local).ok_or(Error::BadCell("empty connector path"))?;
+        let mut move_to = Row::new();
+        move_to.row_type = Some("MoveTo".to_owned());
+        move_to.ix = Some(0);
+        if let Some(first) = local.first() {
+            move_to.cells = vec![
+                row_number_cell("X", first.x, Unit::Inches),
+                row_number_cell("Y", first.y, Unit::Inches),
+            ];
+        }
+        let mut curve = Row::new();
+        curve.row_type = Some("NURBSTo".to_owned());
+        curve.ix = Some(1);
+        curve.cells = nurbs_row_cells(&nurbs, &local);
+        let mut sections = vec![Section::new(SectionName::from_static("Geometry"))];
+        if let Some(section) = sections.first_mut() {
+            section.rows = vec![move_to, curve];
+        }
+        if let Some(entity) = self.shape_mut(connector) {
+            replace_geometry_sections(&mut entity.sheet.sections, sections);
+        }
+        Ok(())
+    }
+
     /// The next free Visio `ID` on the page (the largest in use plus one).
     ///
     /// The walk covers the page's whole shape tree (sub-shape ids are
@@ -3030,6 +3179,156 @@ mod tests {
         );
         assert_eq!(
             doc.write_connector_path(ShapeId { index: 9 }, &[Point::new(0.0, 0.0)]),
+            Err(Error::UnknownShape(ShapeId { index: 9 }))
+        );
+    }
+
+    /// Task P7-36 item 2: the curved write is one `MoveTo` and one
+    /// `NURBSTo` row whose `E` formula lists the interior control
+    /// points (the row's `X`/`Y` and `C`/`D` complete the polygon).
+    #[test]
+    fn write_connector_curve_writes_one_nurbs_row() {
+        let (mut doc, page) = document();
+        let connector = doc
+            .insert_shape(page, box_shape(2.0, 2.0), None)
+            .expect("c");
+        let route = [
+            Point::new(0.0, 0.0),
+            Point::new(1.0, 2.0),
+            Point::new(3.0, 2.0),
+            Point::new(4.0, 0.0),
+        ];
+        doc.write_connector_curve(connector, &route).expect("curve");
+        let section = &doc.shape(connector).expect("c").sheet.sections[0];
+        assert_eq!(section.rows.len(), 2);
+        assert_eq!(section.rows[0].row_type.as_deref(), Some("MoveTo"));
+        let row = &section.rows[1];
+        assert_eq!(row.row_type.as_deref(), Some("NURBSTo"));
+        assert_eq!(row.ix, Some(1));
+        let cells = |name: &str| {
+            row.cells
+                .iter()
+                .find(|cell| cell.name.as_str() == name)
+                .unwrap_or_else(|| panic!("cell {name}"))
+        };
+        // The route is the control polygon; the connector's box origin
+        // (its pin minus its local pin) is (0, 0), so local points are
+        // the route points. Four points make one degree-3 Bezier span
+        // with knot vector 0, 0, 0, 0, 1, 1, 1, 1.
+        assert_eq!(cells("X").value, Some(CellValue::Number(4.0)));
+        assert_eq!(cells("Y").value, Some(CellValue::Number(0.0)));
+        assert_eq!(cells("A").value, Some(CellValue::Number(0.0)));
+        assert_eq!(cells("B").value, Some(CellValue::Number(1.0)));
+        assert_eq!(cells("C").value, Some(CellValue::Number(0.0)));
+        assert_eq!(cells("D").value, Some(CellValue::Number(1.0)));
+        assert_eq!(cells("E").formula, None, "E is the cached value only");
+        assert_eq!(
+            cells("E").value,
+            Some(CellValue::Str(
+                "NURBS(1, 3, 1, 1, 1,2,0,1, 3,2,0,1)".to_owned()
+            ))
+        );
+    }
+
+    /// The written rows read back as the curve the renderer draws
+    /// (ADR 0022's assembly: the row's start plus `E`'s points plus
+    /// its end).
+    #[test]
+    fn write_connector_curve_reads_back_as_a_nurbs() {
+        use crate::geometry::GeometryRow;
+        let (mut doc, page) = document();
+        let connector = doc
+            .insert_shape(page, box_shape(2.0, 2.0), None)
+            .expect("c");
+        let route: Vec<Point> = (0..5).map(|i| Point::new(i as f64, 0.0)).collect();
+        doc.write_connector_curve(connector, &route).expect("curve");
+        let geometry = doc.shape_geometry(connector).expect("reads");
+        assert_eq!(geometry.paths.len(), 1);
+        let rows = &geometry.paths[0].rows;
+        assert_eq!(rows.len(), 2);
+        match &rows[1] {
+            GeometryRow::NurbsTo {
+                x,
+                y,
+                second_last_knot,
+                last_weight,
+                first_knot,
+                first_weight,
+                data,
+            } => {
+                assert_eq!((*x, *y), (4.0, 0.0));
+                // Five points: U[i] = (i - 3) / 2, so the last point's
+                // knot is 0.5 and the vector is 0, 0, 0, 0, 0.5, 1.
+                assert_eq!(*second_last_knot, 0.5);
+                assert_eq!(*last_weight, 1.0);
+                assert_eq!(*first_knot, 0.0);
+                assert_eq!(*first_weight, 1.0);
+                let data = data.as_ref().expect("E decodes");
+                assert_eq!(data.degree, 3);
+                assert_eq!(data.knot_last, 1.0);
+                assert_eq!(data.x_type, 1);
+                assert_eq!(data.y_type, 1);
+                assert_eq!(data.points.len(), 3, "the interior control points");
+                assert_eq!(data.points[0].x, 1.0);
+                assert_eq!(data.points[2].x, 3.0);
+                assert_eq!(data.points[1].knot, 0.0);
+            }
+            other => panic!("expected a NURBSTo row, got {other:?}"),
+        }
+    }
+
+    /// A two-point route is a straight `LineTo`, and the write keeps a
+    /// 1-D connector's endpoint cells true (task P7-36 item 2).
+    #[test]
+    fn write_connector_curve_falls_back_to_a_straight_line() {
+        use crate::connector::ConnectorEnd;
+        let (mut doc, page) = document();
+        let connector = doc.insert_shape(page, one_d((0.0, 0.0), (2.0, 0.0)), None).expect("c");
+        doc.write_connector_curve(
+            connector,
+            &[Point::new(1.0, 1.0), Point::new(5.0, 3.0)],
+        )
+        .expect("line");
+        let section = &doc.shape(connector).expect("c").sheet.sections[0];
+        assert_eq!(section.rows.len(), 2);
+        assert_eq!(section.rows[0].row_type.as_deref(), Some("MoveTo"));
+        assert_eq!(section.rows[1].row_type.as_deref(), Some("LineTo"));
+        assert_eq!(
+            doc.connector_end(connector, ConnectorEnd::Begin),
+            Ok(Point::new(1.0, 1.0))
+        );
+        assert_eq!(
+            doc.connector_end(connector, ConnectorEnd::End),
+            Ok(Point::new(5.0, 3.0))
+        );
+    }
+
+    /// The curved write refuses what the straight write refuses (task
+    /// P7-36 item 2: never panics, never writes a bad row).
+    #[test]
+    fn write_connector_curve_rejects_bad_input() {
+        let (mut doc, page) = document();
+        let connector = doc
+            .insert_shape(page, box_shape(2.0, 2.0), None)
+            .expect("c");
+        assert_eq!(
+            doc.write_connector_curve(connector, &[]),
+            Err(Error::BadCell("empty connector path"))
+        );
+        assert_eq!(
+            doc.write_connector_curve(connector, &[Point::new(0.0, f64::NAN)]),
+            Err(Error::BadCell("non-finite path point"))
+        );
+        assert_eq!(
+            doc.write_connector_curve(connector, &[Point::new(0.0, 0.0)]),
+            Ok(()),
+            "one point is a lone MoveTo, as in write_connector_path"
+        );
+        let section = &doc.shape(connector).expect("c").sheet.sections[0];
+        assert_eq!(section.rows.len(), 1);
+        assert_eq!(section.rows[0].row_type.as_deref(), Some("MoveTo"));
+        assert_eq!(
+            doc.write_connector_curve(ShapeId { index: 9 }, &[Point::new(0.0, 0.0)]),
             Err(Error::UnknownShape(ShapeId { index: 9 }))
         );
     }
