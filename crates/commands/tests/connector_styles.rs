@@ -1008,3 +1008,61 @@ fn the_draw_and_unglue_input_arms_are_named() {
     assert!(!unknown.to_string().is_empty(), "{unknown}");
     let _ = page;
 }
+
+/// Glue to an instance whose sizes are missing scales nothing: the
+/// master rung's fallback axis scale is 1 (the resolution's master
+/// rungs).
+#[test]
+fn master_points_on_an_unsized_instance_resolve_unscaled() {
+    use larrygram_model::{Cell, Master, MasterId, Preserved, Row, Section, SectionName, Shape};
+    let (mut ctx, registry, page) = fixture();
+    let cell = |name: &str, value: f64| Cell {
+        name: CellName::new(name),
+        formula: Some(format!("{value}")),
+        value: Some(CellValue::Number(value)),
+        unit: larrygram_geom::Unit::Inches,
+        preserved: Preserved::new(),
+    };
+    // A master shape with one connection row and no size cells, and
+    // an instance of the master with no cells at all.
+    let mut master_shape = Shape::new(ShapeId { index: 0 }, 5);
+    {
+        let mut connection = Section::new(SectionName::from_static("Connection"));
+        let mut row = Row::new();
+        row.row_type = Some("Connection".to_owned());
+        row.ix = Some(0);
+        row.cells = vec![cell("X", 1.0), cell("Y", 1.0)];
+        connection.rows.push(row);
+        master_shape.sheet.sections.push(connection);
+    }
+    let instance_visio = {
+        let doc = &mut ctx.active_document_mut().expect("session").document;
+        let master_shape = doc.add_shape(master_shape);
+        let mut master = Master::new(MasterId { index: 0 }, 6);
+        master.name_u = "Unsized".to_owned();
+        master.shapes.push(master_shape);
+        let master = doc.add_master(master).expect("master");
+        let mut instance = Shape::new(ShapeId { index: 0 }, 7);
+        instance.master = Some(master);
+        let instance = doc.insert_shape(page, instance, None).expect("instance");
+        doc.shape(instance).expect("instance").visio_id
+    };
+    let outcome = dispatch(
+        &mut ctx,
+        &registry,
+        "connector.glue_begin",
+        Args::new()
+            .with("connector", ArgValue::Integer(3))
+            .with("target", ArgValue::Integer(i64::from(instance_visio)))
+            .with("point", ArgValue::Integer(0)),
+    )
+    .expect("glue to the master's point");
+    assert!(
+        outcome
+            .message
+            .as_deref()
+            .is_some_and(|m| m.contains("glued")),
+        "{:?}",
+        outcome.message
+    );
+}

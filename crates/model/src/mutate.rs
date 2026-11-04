@@ -2158,6 +2158,70 @@ impl Document {
 mod tests {
     use super::*;
 
+    /// Every documented unit spelling maps to its unit (the
+    /// ShapeSheet table's `default_unit` spellings); an unknown
+    /// spelling is unitless.
+    #[test]
+    fn every_unit_spelling_maps_to_its_unit() {
+        for (name, unit) in [
+            ("in", Unit::Inches),
+            ("inch", Unit::Inches),
+            ("inches", Unit::Inches),
+            ("ft", Unit::Feet),
+            ("foot", Unit::Feet),
+            ("feet", Unit::Feet),
+            ("yd", Unit::Yards),
+            ("yard", Unit::Yards),
+            ("yards", Unit::Yards),
+            ("mi", Unit::Miles),
+            ("mile", Unit::Miles),
+            ("miles", Unit::Miles),
+            ("mm", Unit::Millimeters),
+            ("millimeter", Unit::Millimeters),
+            ("millimeters", Unit::Millimeters),
+            ("cm", Unit::Centimeters),
+            ("centimeter", Unit::Centimeters),
+            ("centimeters", Unit::Centimeters),
+            ("m", Unit::Meters),
+            ("meter", Unit::Meters),
+            ("meters", Unit::Meters),
+            ("km", Unit::Kilometers),
+            ("kilometer", Unit::Kilometers),
+            ("kilometers", Unit::Kilometers),
+            ("pt", Unit::Points),
+            ("point", Unit::Points),
+            ("points", Unit::Points),
+            ("pica", Unit::Picas),
+            ("picas", Unit::Picas),
+            ("cicero", Unit::Ciceros),
+            ("ciceros", Unit::Ciceros),
+            ("ang", Unit::Angstroms),
+            ("angstrom", Unit::Angstroms),
+            ("angstroms", Unit::Angstroms),
+            ("nm", Unit::Nanometers),
+            ("nanometer", Unit::Nanometers),
+            ("nanometers", Unit::Nanometers),
+            ("micron", Unit::Microns),
+            ("microns", Unit::Microns),
+            ("micrometer", Unit::Microns),
+            ("micrometers", Unit::Microns),
+            ("millipoint", Unit::Millipoints),
+            ("millipoints", Unit::Millipoints),
+            ("deg", Unit::Degrees),
+            ("degree", Unit::Degrees),
+            ("degrees", Unit::Degrees),
+            ("rad", Unit::Radians),
+            ("radian", Unit::Radians),
+            ("radians", Unit::Radians),
+            ("%", Unit::Percent),
+            ("percent", Unit::Percent),
+            (" IN ", Unit::Inches),
+            ("nonesuch", Unit::Unitsless),
+        ] {
+            assert_eq!(unit_from_name(name), unit, "{name}");
+        }
+    }
+
     /// A document with one page.
     fn document() -> (Document, PageId) {
         let mut doc = Document::new();
