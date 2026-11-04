@@ -8,9 +8,9 @@
 //! and overlay marks, never a model mutation (ADR 0042).
 
 use larrygram_commands::{AppCtx, ArgValue, Args, CommandId, Invocation, Source};
-use larrygram_geom::{Point, RouteOptions, RouteStyle, route};
-use larrygram_model::stencils;
-use larrygram_render::{HitOptions, Overlay, OverlayMark, hit_test};
+use larrygram_geom::{Point, RouteOptions, RouteStyle, Segment, route};
+use larrygram_model::{ConnectorEnd, ShapeId, stencils};
+use larrygram_render::{GlueFeedback, HitOptions, Overlay, OverlayMark, hit_test};
 
 use super::{Modifiers, ToolEffect, ToolEvent, ToolMachine};
 use crate::UiError;
@@ -50,6 +50,8 @@ enum Mode {
         current: Point,
         /// The current end's glue target.
         end_glue: Option<Glue>,
+        /// The hover feedback under the pointer (task P7-33 item 3).
+        feedback: GlueFeedback,
     },
 }
 
@@ -107,12 +109,13 @@ fn down(
     modifiers: Modifiers,
     zoom: f64,
 ) -> Result<ToolEffect, UiError> {
-    let (start, start_glue) = locate(ctx, pos, zoom, modifiers.alt)?;
+    let located = locate(ctx, pos, zoom, modifiers.alt)?;
     state.connector.mode = Mode::Dragging {
-        start,
-        start_glue,
-        current: start,
+        start: located.at,
+        start_glue: located.glue,
+        current: located.at,
         end_glue: None,
+        feedback: located.feedback,
     };
     Ok(preview(state, RouteStyle::Straight))
 }
@@ -131,12 +134,13 @@ fn moved(
     else {
         return Ok(ToolEffect::new());
     };
-    let (current, end_glue) = locate(ctx, pos, zoom, modifiers.alt)?;
+    let located = locate(ctx, pos, zoom, modifiers.alt)?;
     state.connector.mode = Mode::Dragging {
         start,
         start_glue,
-        current,
-        end_glue,
+        current: located.at,
+        end_glue: located.glue,
+        feedback: located.feedback,
     };
     Ok(preview(state, RouteStyle::Straight))
 }
@@ -155,11 +159,13 @@ fn up(
         start_glue,
         current: _,
         end_glue: _,
+        feedback: _,
     } = mode
     else {
         return Ok(ToolEffect::new());
     };
-    let (current, end_glue) = locate(_ctx, pos, zoom, modifiers.alt)?;
+    let located = locate(_ctx, pos, zoom, modifiers.alt)?;
+    let (current, end_glue) = (located.at, located.glue);
     let delta = current.sub(start);
     if delta.x.hypot(delta.y) < MIN_DRAG_IN {
         return Ok(ToolEffect::new());
@@ -203,13 +209,14 @@ fn up(
     Ok(effect)
 }
 
-/// The routed preview overlay of the current drag.
+/// The routed preview overlay of the current drag (task P7-33 item 3:
+/// the route plus the glue feedback under the pointer).
 fn preview(state: &ToolMachine, style: RouteStyle) -> ToolEffect {
     let Mode::Dragging {
         start,
         current,
-        start_glue: _,
-        end_glue: _,
+        feedback,
+        ..
     } = &state.connector.mode
     else {
         return ToolEffect::new();
@@ -220,6 +227,9 @@ fn preview(state: &ToolMachine, style: RouteStyle) -> ToolEffect {
     {
         overlay.marks.push(OverlayMark::ConnectorPreview { points });
     }
+    overlay
+        .marks
+        .push(OverlayMark::GlueFeedback(feedback.clone()));
     ToolEffect {
         intents: Vec::new(),
         overlay,
@@ -243,6 +253,18 @@ fn top_level(
     top
 }
 
+/// What one [`locate`] found (task P7-33): where the end lands, what
+/// it glues to and the hover feedback to draw.
+#[derive(Debug, Clone, PartialEq)]
+struct Located {
+    /// The landing point (page inches).
+    at: Point,
+    /// The glue the end would take, `None` for a free end.
+    glue: Option<Glue>,
+    /// The feedback marks under the pointer (item 3).
+    feedback: GlueFeedback,
+}
+
 /// The glue rule of one endpoint (ADR 0084 rule 6): point glue within
 /// the snap distance of a connection point, otherwise dynamic glue to
 /// the topmost non-connector shape whose outline contains the pointer,
@@ -255,28 +277,50 @@ fn top_level(
 /// box, task P7-50 minor 1), and a text block larger than its shape
 /// does not glue outside the outline. Connectors are never glue
 /// targets. Alt suppresses glue entirely.
-fn locate(
-    ctx: &AppCtx,
-    pos: Point,
-    zoom: f64,
-    alt: bool,
-) -> Result<(Point, Option<Glue>), UiError> {
-    if alt {
-        return Ok((pos, None));
-    }
+///
+/// The feedback (task P7-33 item 3) shows the hovered shape's
+/// connection points as markers whether or not glue runs, the target's
+/// outline for dynamic glue and the single point for point glue.
+fn locate(ctx: &AppCtx, pos: Point, zoom: f64, alt: bool) -> Result<Located, UiError> {
+    let free = Located {
+        at: pos,
+        glue: None,
+        feedback: GlueFeedback::default(),
+    };
     let Some(scene) = scene_for(ctx)? else {
-        return Ok((pos, None));
+        return Ok(free);
     };
     let Some(session) = ctx.active_document() else {
-        return Ok((pos, None));
+        return Ok(free);
     };
     let doc = &session.document;
     let entries = node_entries(&scene);
     let max_distance = SNAP_DISTANCE_PX / (zoom * crate::canvas::POINTS_PER_INCH);
-    let mut nearest: Option<(f64, Point, Glue)> = None;
+
+    // The shape under the pointer (task P7-33 item 3): its connection
+    // points show as markers whether or not the view check is on.
+    let hovered = entries
+        .iter()
+        .rev()
+        .find(|entry| !doc.is_connector(entry.shape) && inside_outline(&scene, entry, pos));
+    let markers_of = |entry: &crate::handles::NodeEntry| entry_points(doc, entry);
+    if alt {
+        // Alt suppresses glue entirely (rule 6); the markers stay.
+        return Ok(Located {
+            at: pos,
+            glue: None,
+            feedback: GlueFeedback {
+                outline: None,
+                point: None,
+                markers: hovered.map_or_else(Vec::new, markers_of),
+            },
+        });
+    }
+
+    let mut nearest: Option<(f64, Point, Glue, usize)> = None;
     // Paint order reversed: a tie between connection points goes to
     // the topmost shape (task P7-49 goal 8).
-    for entry in entries.iter().rev() {
+    for (index, entry) in entries.iter().enumerate().rev() {
         // Point glue names the shape that owns the `Connection` row
         // (task P7-50 goal 4): a group member's row glues to the
         // member, not to its top-level ancestor.
@@ -293,7 +337,7 @@ fn locate(
             }
             let delta = point.sub(pos);
             let gap = delta.x.hypot(delta.y);
-            if gap <= max_distance && nearest.as_ref().is_none_or(|(best, _, _)| gap < *best) {
+            if gap <= max_distance && nearest.as_ref().is_none_or(|(best, _, _, _)| gap < *best) {
                 nearest = Some((
                     gap,
                     point,
@@ -301,12 +345,23 @@ fn locate(
                         visio_id: owner.visio_id,
                         point: Some(ix),
                     },
+                    index,
                 ));
             }
         }
     }
-    if let Some((_, point, glue)) = nearest {
-        return Ok((point, Some(glue)));
+    if let Some((_, point, glue, index)) = nearest {
+        // Point glue: the highlighted point is the row's, and the
+        // markers are the owning shape's connection points.
+        return Ok(Located {
+            at: point,
+            glue: Some(glue),
+            feedback: GlueFeedback {
+                outline: None,
+                point: Some(point),
+                markers: entries.get(index).map_or_else(Vec::new, markers_of),
+            },
+        });
     }
 
     let snapped = {
@@ -317,7 +372,7 @@ fn locate(
     // Dynamic glue: the topmost non-connector shape whose own outline
     // contains the pointer (fill ignored, task P7-50 minor 1). A hit
     // on a group member maps to its top-level ancestor.
-    let hit_glue = |shape: larrygram_model::ShapeId| {
+    let hit_glue = |shape: ShapeId| {
         let target = top_level(doc, shape);
         if doc.is_connector(target) {
             return None;
@@ -338,7 +393,143 @@ fn locate(
         // with no fill takes dynamic glue (the old bounds test).
         glue = entries.iter().rev().find_map(|entry| hit_glue(entry.shape));
     }
-    Ok((snapped, glue))
+    // Dynamic glue highlights the hovered shape's outline; a free end
+    // highlights nothing (item 3).
+    let feedback = GlueFeedback {
+        outline: if glue.is_some() {
+            hovered.and_then(|entry| outline_points(&scene, entry))
+        } else {
+            None
+        },
+        point: None,
+        markers: hovered.map_or_else(Vec::new, markers_of),
+    };
+    Ok(Located {
+        at: snapped,
+        glue,
+        feedback,
+    })
+}
+
+/// One entry's connection points in page space (task P7-33 item 3).
+fn entry_points(doc: &larrygram_model::Document, entry: &crate::handles::NodeEntry) -> Vec<Point> {
+    doc.connection_points_indexed(entry.shape)
+        .into_iter()
+        .map(|(_, local)| entry.transform.apply(local))
+        .filter(|point| point.x.is_finite() && point.y.is_finite())
+        .collect()
+}
+
+/// The entry's drawable outline in page space, closed (the first point
+/// repeated at the end), or `None` when it has no outline.
+fn outline_points(
+    scene: &larrygram_render::Scene,
+    entry: &crate::handles::NodeEntry,
+) -> Option<Vec<Point>> {
+    let shape = scene_shape(scene, entry.path.indices())?;
+    let mut points: Vec<Point> = Vec::new();
+    for segment in shape.path.segments() {
+        let point = match segment {
+            Segment::MoveTo(point) | Segment::LineTo(point) => Some(*point),
+            Segment::QuadTo { to, .. } | Segment::CubicTo { to, .. } => Some(*to),
+            _ => None,
+        };
+        if let Some(point) = point {
+            let point = entry.transform.apply(point);
+            if point.x.is_finite() && point.y.is_finite() {
+                points.push(point);
+            }
+        }
+    }
+    let first = points.first().copied()?;
+    points.push(first);
+    (points.len() >= 3).then_some(points)
+}
+
+/// The overlay of a connector end drag (task P7-33 items 2 and 3):
+/// the routed preview from the end that stays, plus the glue feedback
+/// of the hovered target.
+pub fn end_drag_overlay(
+    ctx: &AppCtx,
+    connector: Option<ShapeId>,
+    end: ConnectorEnd,
+    pos: Point,
+    alt: bool,
+    zoom: f64,
+) -> Result<Overlay, UiError> {
+    let mut overlay = Overlay::new();
+    let Some(connector) = connector else {
+        return Ok(overlay);
+    };
+    let located = locate(ctx, pos, zoom, alt)?;
+    if let Some(ends) = crate::handles::end_handles(ctx, None, &[connector])
+        && let Some(other) = ends.iter().find(|mark| mark.end != end)
+        && let Ok(points) = route(
+            other.at,
+            located.at,
+            &RouteOptions::new(RouteStyle::Straight),
+        )
+        && points.len() >= 2
+    {
+        overlay.marks.push(OverlayMark::ConnectorPreview { points });
+    }
+    overlay
+        .marks
+        .push(OverlayMark::GlueFeedback(located.feedback));
+    Ok(overlay)
+}
+
+/// The `connector.move_end` intent of one completed end drag (task
+/// P7-33 item 2: one command per drag, one undo step). A drag that
+/// moved nothing (below one inch/96) emits nothing.
+pub fn end_drag_intent(
+    ctx: &AppCtx,
+    shapes: &[ShapeId],
+    end: ConnectorEnd,
+    start: Point,
+    current: Point,
+    alt: bool,
+    zoom: f64,
+) -> Result<Option<crate::Intent>, UiError> {
+    let Some(connector) = shapes.first().copied() else {
+        return Ok(None);
+    };
+    let delta = current.sub(start);
+    if delta.x.hypot(delta.y) < MIN_DRAG_IN {
+        return Ok(None);
+    }
+    let located = locate(ctx, current, zoom, alt)?;
+    let Some(session) = ctx.active_document() else {
+        return Ok(None);
+    };
+    let Some(visio_id) = session
+        .document
+        .shape(connector)
+        .map(|found| found.visio_id)
+    else {
+        return Ok(None);
+    };
+    let mut args = Args::new()
+        .with("connector", ArgValue::Integer(i64::from(visio_id)))
+        .with(
+            "end",
+            ArgValue::Text(
+                match end {
+                    ConnectorEnd::Begin => "begin",
+                    ConnectorEnd::End => "end",
+                }
+                .to_owned(),
+            ),
+        )
+        .with("x", ArgValue::Number(located.at.x))
+        .with("y", ArgValue::Number(located.at.y));
+    if let Some(glue) = located.glue {
+        args.set("target", ArgValue::Integer(i64::from(glue.visio_id)));
+        if let Some(point) = glue.point {
+            args.set("point", ArgValue::Integer(i64::from(point)));
+        }
+    }
+    Ok(Some(intent("connector.move_end", args)?))
 }
 
 /// Whether the pointer is inside the shape's own outline, ignoring

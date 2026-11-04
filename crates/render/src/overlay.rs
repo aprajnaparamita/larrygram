@@ -15,10 +15,38 @@
 //! their transformed bounds.
 
 use larrygram_geom::{Angle, Point, Rect};
+use larrygram_model::ConnectorEnd;
 
 use crate::error::Error;
 use crate::hit::{NodePath, node_bounds, oriented_bounds, placement};
 use crate::scene::Scene;
+
+/// One connector end's handle mark (task P7-33 item 1): the end's
+/// page point and whether the end is glued (the UI draws a filled
+/// accent marker) or free (a hollow one).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EndMark {
+    /// Which connector end the handle moves.
+    pub end: ConnectorEnd,
+    /// The handle's anchor, in page inches.
+    pub at: Point,
+    /// Whether the end is glued.
+    pub glued: bool,
+}
+
+/// What a dragged connector end will glue to, and the points to show
+/// (task P7-33 item 3): the target's outline for dynamic glue, the
+/// single highlighted point for point glue, and the connection points
+/// of the shape under the pointer as markers. P7-34 reuses it.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct GlueFeedback {
+    /// The target's outline (page space) for dynamic glue.
+    pub outline: Option<Vec<Point>>,
+    /// The single highlighted point for point glue.
+    pub point: Option<Point>,
+    /// Connection points to show as markers (page space).
+    pub markers: Vec<Point>,
+}
 
 /// One overlay mark (ADR 0042).
 #[derive(Debug, Clone, PartialEq)]
@@ -32,12 +60,16 @@ pub enum OverlayMark {
         angle: Angle,
     },
     /// The resize and rotate handles of the selection, at their anchor
-    /// points (the UI draws the glyphs).
+    /// points (the UI draws the glyphs). With `ends` the selection is a
+    /// 1-D connector: its begin and end handles draw instead of the
+    /// resize and rotate ones (task P7-33 item 1).
     Handles {
         /// The selection bounds, in page inches.
         bounds: Rect,
         /// The selection rotation.
         angle: Angle,
+        /// The connector end handles of a 1-D selection.
+        ends: Option<[EndMark; 2]>,
     },
     /// The marquee rectangle while it is dragged.
     RubberBand(Rect),
@@ -53,6 +85,9 @@ pub enum OverlayMark {
         /// The routed points, in page inches (ADR 0045).
         points: Vec<Point>,
     },
+    /// The glue feedback under the pointer while a connector end is
+    /// drawn or dragged (task P7-33 item 3).
+    GlueFeedback(GlueFeedback),
 }
 
 /// The transient marks of one frame (ADR 0042).
@@ -113,7 +148,11 @@ pub fn build_selection_overlay(scene: &Scene, nodes: &[NodePath]) -> Result<Over
         )),
     };
     if let Some((bounds, angle)) = handles {
-        overlay.marks.push(OverlayMark::Handles { bounds, angle });
+        overlay.marks.push(OverlayMark::Handles {
+            bounds,
+            angle,
+            ends: None,
+        });
     }
     Ok(overlay)
 }
@@ -192,9 +231,14 @@ mod tests {
             other => panic!("expected a selection outline, got {other:?}"),
         }
         match overlay.marks.get(1) {
-            Some(OverlayMark::Handles { bounds, angle }) => {
+            Some(OverlayMark::Handles {
+                bounds,
+                angle,
+                ends,
+            }) => {
                 assert_eq!(bounds.width(), 2.0);
                 assert_eq!(angle.radians(), FRAC_PI_2);
+                assert_eq!(*ends, None, "no connector end handles");
             }
             other => panic!("expected handles, got {other:?}"),
         }
@@ -236,15 +280,65 @@ mod tests {
         let overlay = build_selection_overlay(&scene, &paths).expect("no error");
         assert_eq!(overlay.marks.len(), 3);
         match overlay.marks.get(2) {
-            Some(OverlayMark::Handles { bounds, angle }) => {
+            Some(OverlayMark::Handles {
+                bounds,
+                angle,
+                ends,
+            }) => {
                 assert_eq!(
                     *bounds,
                     Rect::new(Point::new(0.0, 0.0), Point::new(4.0, 4.0))
                 );
                 assert_eq!(angle.radians(), 0.0);
+                assert_eq!(*ends, None);
             }
             other => panic!("expected handles, got {other:?}"),
         }
+    }
+
+    /// Task P7-33 item 1 and 3: the end-handle marks and the glue
+    /// feedback are plain marks with the fields the UI draws.
+    #[test]
+    fn end_handles_and_glue_feedback_carry_their_marks() {
+        let ends = [
+            EndMark {
+                end: ConnectorEnd::Begin,
+                at: Point::new(1.0, 2.0),
+                glued: true,
+            },
+            EndMark {
+                end: ConnectorEnd::End,
+                at: Point::new(3.0, 4.0),
+                glued: false,
+            },
+        ];
+        let mut overlay = Overlay::new();
+        overlay.marks.push(OverlayMark::Handles {
+            bounds: Rect::new(Point::new(1.0, 2.0), Point::new(3.0, 4.0)),
+            angle: Angle::default(),
+            ends: Some(ends),
+        });
+        overlay.marks.push(OverlayMark::GlueFeedback(GlueFeedback {
+            outline: Some(vec![Point::new(0.0, 0.0), Point::new(1.0, 1.0)]),
+            point: Some(Point::new(0.5, 0.5)),
+            markers: vec![Point::new(0.25, 0.25)],
+        }));
+        assert_eq!(overlay.marks.len(), 2);
+        match overlay.marks.first() {
+            Some(OverlayMark::Handles {
+                ends: Some(ends), ..
+            }) => {
+                assert!(ends[0].glued, "the begin is glued");
+                assert_eq!(ends[1].end, ConnectorEnd::End);
+                assert!(!ends[1].glued);
+            }
+            other => panic!("expected end handles, got {other:?}"),
+        }
+        assert!(matches!(
+            overlay.marks.get(1),
+            Some(OverlayMark::GlueFeedback(GlueFeedback { .. }))
+        ));
+        assert_eq!(GlueFeedback::default().outline, None);
     }
 
     #[test]

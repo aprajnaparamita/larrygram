@@ -13,15 +13,12 @@ use larrygram_commands::app::Selection;
 use larrygram_commands::{AppCtx, ArgValue, Args, CommandId, Invocation, SessionId, Source};
 use larrygram_geom::{Angle, Point, Rect};
 use larrygram_model::{Document, PageId, ShapeId};
-use larrygram_render::{
-    HitOptions, Overlay, OverlayMark, Scene, build_selection_overlay, hit_marquee, hit_test,
-};
+use larrygram_render::{HitOptions, Overlay, OverlayMark, Scene, hit_marquee, hit_test};
 
-use super::{Modifiers, ToolEffect, ToolEvent};
+use super::{Modifiers, ToolEffect, ToolEvent, connector};
 use crate::UiError;
 use crate::handles::{
-    HandleKind, ResizeEdge, handle_at, paths_for_shapes, rect_center, render_error, scene_for,
-    selection_frame,
+    HandleKind, ResizeEdge, handle_at, rect_center, render_error, scene_for, selection_frame,
 };
 use crate::snap::Snapper;
 use crate::tools::ToolMachine;
@@ -240,7 +237,35 @@ fn down(
     // marquee); the move interior is a plain press only, so Shift and
     // Ctrl still toggle and add shapes.
     let plain = !modifiers.shift && !modifiers.ctrl;
-    if let Some((bounds, angle)) = handle_frame
+    // Task P7-33 items 1 and 2: a selected connector shows its begin
+    // and end handles only, and a press on one drags that end.
+    let ends = {
+        let scene = state.state.scene(ctx)?;
+        crate::handles::end_handles(ctx, scene, &ctx.selection.shapes)
+    };
+    if let Some(kind) = ends
+        .as_ref()
+        .and_then(|ends| crate::handles::end_handle_at(ends, pos, zoom))
+    {
+        state.state.mode = Mode::Drag {
+            kind: HandleKind::ConnectorEnd(kind),
+            start: pos,
+            current: pos,
+            frame: handle_frame.unwrap_or((Rect::new(pos, pos), Angle::default())),
+            moving: ctx.selection.shapes.clone(),
+            alt: modifiers.alt,
+            zoom,
+            descend: None,
+        };
+        let mode = state.state.mode.clone();
+        let Some(scene) = state.state.scene(ctx)? else {
+            return Ok(effect);
+        };
+        effect.overlay = drag_overlay(ctx, scene, page_size, &mode)?;
+        return Ok(effect);
+    }
+    if ends.is_none()
+        && let Some((bounds, angle)) = handle_frame
         && let Some(kind) = handle_at(pos, bounds, angle, zoom)?
         && (plain || kind != HandleKind::Move)
     {
@@ -655,13 +680,10 @@ fn marquee_overlay(start: Point, current: Point) -> Overlay {
     overlay
 }
 
-/// The selection outline and handles of `shapes`.
+/// The selection outline and handles of `shapes` (task P7-33 item 1:
+/// a selected connector shows its end handles only).
 fn overlay_for_shapes(ctx: &AppCtx, scene: &Scene, shapes: &[ShapeId]) -> Result<Overlay, UiError> {
-    let paths = paths_for_shapes(scene, ctx, shapes)?;
-    if paths.is_empty() {
-        return Ok(Overlay::new());
-    }
-    build_selection_overlay(scene, &paths).map_err(render_error)
+    crate::handles::selection_overlay(ctx, Some(scene), shapes)
 }
 
 /// The preview marks of the current gesture.
@@ -674,6 +696,18 @@ fn drag_overlay(
     match mode {
         Mode::Idle | Mode::Pressed { .. } => overlay_for_shapes(ctx, scene, &ctx.selection.shapes),
         Mode::Marquee { start, current, .. } => Ok(marquee_overlay(*start, *current)),
+        // An end drag (task P7-33 items 2 and 3): the routed preview
+        // and the glue feedback of the hovered target.
+        Mode::Drag {
+            kind: HandleKind::ConnectorEnd(which),
+            current,
+            moving,
+            alt,
+            zoom,
+            ..
+        } => {
+            connector::end_drag_overlay(ctx, moving.first().copied(), *which, *current, *alt, *zoom)
+        }
         Mode::Drag {
             kind,
             start,
@@ -696,10 +730,30 @@ fn drag_overlay(
                 *alt,
                 *zoom,
             )?;
-            overlay
-                .marks
-                .push(OverlayMark::SelectionOutline { bounds, angle });
-            overlay.marks.push(OverlayMark::Handles { bounds, angle });
+            // A connector's drag preview shows its end handles,
+            // translated with the frame: no resize box (task P7-33
+            // item 1).
+            if let Some(ends) = crate::handles::end_handles(ctx, Some(scene), moving) {
+                let shift = bounds.min.sub(frame.0.min);
+                let ends = ends.map(|mark| larrygram_render::EndMark {
+                    at: mark.at.add(shift),
+                    ..mark
+                });
+                overlay.marks.push(OverlayMark::Handles {
+                    bounds,
+                    angle,
+                    ends: Some(ends),
+                });
+            } else {
+                overlay
+                    .marks
+                    .push(OverlayMark::SelectionOutline { bounds, angle });
+                overlay.marks.push(OverlayMark::Handles {
+                    bounds,
+                    angle,
+                    ends: None,
+                });
+            }
             if let Some(kind) = snapped {
                 let center = rect_center(bounds);
                 let half = 0.25 / zoom.max(1.0e-9);
@@ -771,6 +825,9 @@ fn preview_frame(
             let delta = now_angle - start_angle;
             Ok((bounds, Angle::from_radians(angle.radians() + delta), None))
         }
+        // An end drag previews through [`connector::end_drag_overlay`]
+        // (task P7-33 item 2); the frame never changes.
+        HandleKind::ConnectorEnd(_) => Ok((bounds, angle, None)),
     }
 }
 
@@ -855,6 +912,10 @@ fn drag_intent(
     }
     let snapper = Snapper::default();
     match kind {
+        // One `connector.move_end` per end drag (task P7-33 item 2).
+        HandleKind::ConnectorEnd(which) => {
+            connector::end_drag_intent(ctx, moving, which, start, current, alt, zoom)
+        }
         HandleKind::Move => {
             let delta = current.sub(start);
             let result = snapper.snap_move(ctx, scene, moving, delta, zoom, alt)?;
