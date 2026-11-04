@@ -412,7 +412,11 @@ fn unglue_and_style_report_missing_input_and_both_ends() {
         Args::new().with("style", ArgValue::Flag(true)),
     )
     .expect_err("bad style type");
-    assert!(bad.to_string().contains("straight or right_angle"), "{bad}");
+    assert!(
+        bad.to_string()
+            .contains("style must be right_angle, straight or curved"),
+        "{bad}"
+    );
 
     // The plural and singular re-route messages.
     let outcome =

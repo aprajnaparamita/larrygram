@@ -135,7 +135,10 @@ mod tests {
     /// With no page value the style is right angle.
     #[test]
     fn a_missing_page_value_means_right_angle() {
-        assert_eq!(connector_style(None, None, None, None), RouteStyle::RightAngle);
+        assert_eq!(
+            connector_style(None, None, None, None),
+            RouteStyle::RightAngle
+        );
         assert_eq!(
             connector_style(None, Some(2.0), None, None),
             RouteStyle::RightAngle
@@ -150,7 +153,18 @@ mod tests {
     /// right angle (ADR 0084 rule 8).
     #[test]
     fn sixteen_directed_and_unknown_values_route_as_right_angle() {
-        for value in [16.0, 3.0, 6.0, 15.0, 17.0, 22.0, -1.0, 99.0, f64::INFINITY, f64::NAN] {
+        for value in [
+            16.0,
+            3.0,
+            6.0,
+            15.0,
+            17.0,
+            22.0,
+            -1.0,
+            99.0,
+            f64::INFINITY,
+            f64::NAN,
+        ] {
             assert_eq!(
                 connector_style(Some(value), Some(2.0), None, None),
                 RouteStyle::RightAngle,

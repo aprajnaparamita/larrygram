@@ -71,7 +71,9 @@ fn five_points_space_the_one_interior_knot() {
 
 #[test]
 fn many_points_keep_the_ends_and_space_the_interior_knots() {
-    let route: Vec<Point> = (0..10).map(|i| Point::new(i as f64, (i % 3) as f64)).collect();
+    let route: Vec<Point> = (0..10)
+        .map(|i| Point::new(i as f64, (i % 3) as f64))
+        .collect();
     let nurbs = curve_through(&route).expect("a curve");
     assert_eq!(nurbs.degree, 3);
     let (xy, knots, _) = control(&nurbs);
@@ -96,9 +98,7 @@ fn the_flattened_curve_starts_and_ends_on_the_route() {
         Point::new(8.0, 0.0),
     ];
     let nurbs = curve_through(&route).expect("a curve");
-    let cubics = Curve::Nurbs(nurbs)
-        .to_cubics(0.001)
-        .expect("flattens");
+    let cubics = Curve::Nurbs(nurbs).to_cubics(0.001).expect("flattens");
     let first = cubics.first().expect("a segment");
     let last = cubics.last().expect("a segment");
     assert_eq!(first.from, route[0]);

@@ -374,10 +374,7 @@ fn nurbs_row_cells(nurbs: &Nurbs, local: &[Point]) -> Vec<Cell> {
     // The curve's end is its last control point (the clamped end); the
     // caller's last route point is the same number, spelled from the
     // control data so the row can never disagree with `E`.
-    let end = local
-        .last()
-        .copied()
-        .unwrap_or(Point::new(last.x, last.y));
+    let end = local.last().copied().unwrap_or(Point::new(last.x, last.y));
     let mut cells = vec![
         row_number_cell("X", end.x, Unit::Inches),
         row_number_cell("Y", end.y, Unit::Inches),
@@ -3283,12 +3280,11 @@ mod tests {
     fn write_connector_curve_falls_back_to_a_straight_line() {
         use crate::connector::ConnectorEnd;
         let (mut doc, page) = document();
-        let connector = doc.insert_shape(page, one_d((0.0, 0.0), (2.0, 0.0)), None).expect("c");
-        doc.write_connector_curve(
-            connector,
-            &[Point::new(1.0, 1.0), Point::new(5.0, 3.0)],
-        )
-        .expect("line");
+        let connector = doc
+            .insert_shape(page, one_d((0.0, 0.0), (2.0, 0.0)), None)
+            .expect("c");
+        doc.write_connector_curve(connector, &[Point::new(1.0, 1.0), Point::new(5.0, 3.0)])
+            .expect("line");
         let section = &doc.shape(connector).expect("c").sheet.sections[0];
         assert_eq!(section.rows.len(), 2);
         assert_eq!(section.rows[0].row_type.as_deref(), Some("MoveTo"));
