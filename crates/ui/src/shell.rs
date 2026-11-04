@@ -3389,6 +3389,9 @@ impl panel_classic::CheckedState for ShellChecks {
             // The text toggles read the selection's cells (task P7-24
             // item 10).
             .or_else(|| crate::checked::text_toggle_checked(app, command))
+            // The connector style rows show the current style (task
+            // P7-36 item 3).
+            .or_else(|| crate::checked::connector_style_checked(app, command))
     }
 }
 

@@ -785,6 +785,14 @@ fn show_menu_entry(
         }
         _ => {
             let action = resolve(item);
+            // A row whose command reports itself checked draws the
+            // mark (task P7-36 item 3: the connector style rows show
+            // the current style). The bundled fonts carry no
+            // check-mark glyph, so the mark is painted, as the Panel
+            // Classic menus paint theirs.
+            let checked = item.command.as_ref().and_then(|command| {
+                crate::checked::connector_style_checked(draw.app, command.as_str())
+            });
             let atoms = menu_row_atoms(ui.ctx(), item, &label, enabled(&action));
             let widget = Button::new(atoms).frame(false);
             let response = ui
@@ -817,12 +825,37 @@ fn show_menu_entry(
                     out.push(intent.clone());
                 }
             }
+            if checked == Some(true) {
+                paint_check(ui, response.rect);
+            }
             if let Action::Disabled { reason } = &action {
                 response.on_disabled_hover_text(reason.as_str());
             }
             Ok(())
         }
     }
+}
+
+/// A check mark painted in a menu row's right margin (task P7-36 item
+/// 3): the mark of the row whose command reports itself checked.
+fn paint_check(ui: &Ui, rect: egui::Rect) {
+    let stroke = egui::Stroke::new(1.5, ui.visuals().text_color());
+    let right = rect.right() - 4.0;
+    let center = rect.center();
+    ui.painter().line_segment(
+        [
+            egui::pos2(right - 7.0, center.y),
+            egui::pos2(right - 3.5, center.y + 3.5),
+        ],
+        stroke,
+    );
+    ui.painter().line_segment(
+        [
+            egui::pos2(right - 3.5, center.y + 3.5),
+            egui::pos2(right + 2.5, center.y - 4.0),
+        ],
+        stroke,
+    );
 }
 
 /// The `list` entries of a menu item, as rows. An empty list shows one
