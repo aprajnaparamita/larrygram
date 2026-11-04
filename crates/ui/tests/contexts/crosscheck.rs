@@ -41,6 +41,7 @@ const NO_ROW: &[&str] = &[
     "connector.draw",
     "connector.glue_begin",
     "connector.glue_end",
+    "connector.move_end",
     "connector.reroute_all",
     "connector.unglue",
     "data.set.property",

@@ -174,9 +174,10 @@ fn down(
     let kind = match handle_at(pos, frame.bounds, frame.angle, zoom)? {
         Some(HandleKind::Move) => Some(HandleKind::Move),
         Some(HandleKind::Resize(edge)) => Some(HandleKind::Resize(edge)),
-        // The rotate handle is not a text block action (task P7-25
-        // item 4 moves and resizes only).
+        // The rotate handle and a connector end handle are not text
+        // block actions (task P7-25 item 4 moves and resizes only).
         Some(HandleKind::Rotate) => None,
+        Some(HandleKind::ConnectorEnd(_)) => None,
         // A press on the shape (but off the block) still moves the
         // block, as in Visio.
         None if press_on_shape(ctx, pos, frame.shape, zoom)? => Some(HandleKind::Move),
@@ -310,6 +311,7 @@ fn drag_intent(
         }
         // A rotate drag never starts (task P7-25 item 4).
         HandleKind::Rotate => Ok(None),
+        HandleKind::ConnectorEnd(_) => Ok(None),
     }
 }
 
@@ -559,6 +561,7 @@ fn overlay_for(frame: Frame) -> Result<Overlay, UiError> {
     overlay.marks.push(OverlayMark::Handles {
         bounds: frame.bounds,
         angle: frame.angle,
+        ends: None,
     });
     Ok(overlay)
 }
@@ -607,6 +610,7 @@ fn drag_overlay(mode: &Mode) -> Result<Overlay, UiError> {
                 })
             }
             HandleKind::Rotate => Ok(Overlay::new()),
+            HandleKind::ConnectorEnd(_) => Ok(Overlay::new()),
         },
     }
 }

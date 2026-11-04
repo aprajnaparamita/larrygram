@@ -135,7 +135,8 @@ fn box_shape(x: f64, y: f64) -> Shape {
 }
 
 /// A two-point connector at `(x, y)`; the transform cells are all the
-/// path writer needs.
+/// path writer needs. It carries the 1-D endpoint cells (task P7-33:
+/// `connector.move_end` moves a real connector's ends).
 fn connector_shape(x: f64, y: f64) -> Shape {
     let mut shape = Shape::new(ShapeId { index: 0 }, 0);
     shape.sheet.cells = vec![
@@ -146,6 +147,11 @@ fn connector_shape(x: f64, y: f64) -> Shape {
         cell("LocPinX", 1.0),
         cell("LocPinY", 0.5),
         cell("Angle", 0.0),
+        cell("BeginX", x - 1.0),
+        cell("BeginY", y),
+        cell("EndX", x + 1.0),
+        cell("EndY", y),
+        cell("ObjType", 2.0),
     ];
     let mut geometry = Section::new(SectionName::from_static("Geometry"));
     for (ix, (kind, px, py)) in [("MoveTo", 0.0, 0.5), ("LineTo", 2.0, 0.5)]
@@ -896,6 +902,57 @@ fn run_style(ctx: &mut AppCtx, registry: &Registry, id: &'static str, pick: u32)
     try_dispatch(ctx, registry, id, args);
 }
 
+/// `connector.move_end` (task P7-33 item 4): the first connector's
+/// `begin` or `end` moves, with point glue on some picks, dynamic glue
+/// on others and a free end on the rest.
+fn run_move_end(ctx: &mut AppCtx, registry: &Registry, id: &'static str, pick: u32) {
+    let tops = top_level(ctx);
+    let Some(connector) = tops
+        .iter()
+        .copied()
+        .find(|shape| is_connector_shape(ctx, *shape))
+    else {
+        return;
+    };
+    let mut args = numbers(&[("x", 3.0 + jitter(pick, 26)), ("y", 6.0 + jitter(pick, 27))]);
+    args.set(
+        "connector",
+        ArgValue::Integer(i64::from(visio_of(ctx, connector))),
+    );
+    args.set(
+        "end",
+        ArgValue::Text(if pick.is_multiple_of(2) {
+            "begin".to_owned()
+        } else {
+            "end".to_owned()
+        }),
+    );
+    if !pick.is_multiple_of(3) {
+        let target = tops
+            .iter()
+            .copied()
+            .find(|shape| !is_connector_shape(ctx, *shape));
+        if let Some(target) = target {
+            args.set(
+                "target",
+                ArgValue::Integer(i64::from(visio_of(ctx, target))),
+            );
+            if !pick.is_multiple_of(4) {
+                args.set("point", ArgValue::Integer(i64::from(pick % 2)));
+            }
+        }
+    }
+    try_dispatch(ctx, registry, id, args);
+}
+
+/// Whether the shape is a 1-D connector (the `connector.move_end`
+/// subject).
+fn is_connector_shape(ctx: &AppCtx, shape: ShapeId) -> bool {
+    ctx.active_document()
+        .map(|session| session.document.is_connector(shape))
+        .unwrap_or(false)
+}
+
 /// `connector.draw`: one connector master instance with one free end.
 fn run_draw(ctx: &mut AppCtx, registry: &Registry, id: &'static str, pick: u32) {
     let mut args = numbers(&[
@@ -1400,6 +1457,10 @@ const CASES: &[Case] = &[
     Case {
         id: "connector.style",
         run: run_style,
+    },
+    Case {
+        id: "connector.move_end",
+        run: run_move_end,
     },
     Case {
         id: "connector.draw",

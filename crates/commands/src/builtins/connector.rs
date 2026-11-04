@@ -66,7 +66,7 @@ pub(crate) const TABLE: CommandTable = &[
 
 /// Which connector endpoint a glue record names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum End {
+pub(super) enum End {
     /// The `BeginX` end (`VisFromParts` `visBegin`, 9).
     Begin,
     /// The `EndX` end (`VisFromParts` `visEnd`, 12).
@@ -75,7 +75,7 @@ enum End {
 
 impl End {
     /// The `FromCell` value of this end.
-    fn cell(self) -> &'static str {
+    pub(super) fn cell(self) -> &'static str {
         match self {
             End::Begin => "BeginX",
             End::End => "EndX",
@@ -83,7 +83,7 @@ impl End {
     }
 
     /// The `FromPart` value of this end.
-    fn part(self) -> i32 {
+    pub(super) fn part(self) -> i32 {
         match self {
             End::Begin => mutate::VIS_BEGIN,
             End::End => mutate::VIS_END,
@@ -91,7 +91,7 @@ impl End {
     }
 
     /// This end's slot in a two-end array (`connects_of` order).
-    fn slot(self) -> usize {
+    pub(super) fn slot(self) -> usize {
         match self {
             End::Begin => 0,
             End::End => 1,
@@ -99,7 +99,7 @@ impl End {
     }
 
     /// The endpoint of one `Connect` record (the `connects_of` rule).
-    fn of(connect: &Connect) -> Self {
+    pub(super) fn of(connect: &Connect) -> Self {
         if connect.from_part == mutate::VIS_END
             || connect.from_part == mutate::VIS_END_X
             || connect.from_part == mutate::VIS_END_Y
@@ -112,7 +112,7 @@ impl End {
     }
 
     /// This end in the model's vocabulary (task P7-31).
-    fn connector_end(self) -> ConnectorEnd {
+    pub(super) fn connector_end(self) -> ConnectorEnd {
         match self {
             End::Begin => ConnectorEnd::Begin,
             End::End => ConnectorEnd::End,
@@ -120,7 +120,7 @@ impl End {
     }
 
     /// The endpoint spelled by the `connector.unglue` argument.
-    fn parse(text: &str) -> Option<Self> {
+    pub(super) fn parse(text: &str) -> Option<Self> {
         match text {
             "begin" => Some(End::Begin),
             "end" => Some(End::End),
@@ -130,7 +130,7 @@ impl End {
 }
 
 /// The active page and its session.
-fn active_page(ctx: &AppCtx) -> Result<(SessionId, PageId), CommandError> {
+pub(super) fn active_page(ctx: &AppCtx) -> Result<(SessionId, PageId), CommandError> {
     let session = ctx.active_document().ok_or_else(no_document)?;
     let page = session
         .active_page
@@ -146,7 +146,7 @@ fn active_page(ctx: &AppCtx) -> Result<(SessionId, PageId), CommandError> {
 
 /// One integer argument: an `ArgValue::Integer`, a whole `Number`, or a
 /// decimal `Text` (the control channel may send any of the three).
-fn need_integer(args: &Args, name: &str, prompt: &str) -> Result<i32, CommandError> {
+pub(super) fn need_integer(args: &Args, name: &str, prompt: &str) -> Result<i32, CommandError> {
     let invalid = || CommandError::invalid_args(format!("{name} must be a whole number"));
     match args.get(name) {
         None => Err(CommandError::NeedsInput(NeededInput::Number {
@@ -201,7 +201,11 @@ fn connector_shape(ctx: &AppCtx, page: PageId, args: &Args) -> Result<ShapeId, C
 
 /// The target shape of a glue run. A 1-D shape is refused: connectors
 /// are never glue targets (ADR 0084 rule 1, task P7-49 goal 6).
-fn target_shape(ctx: &AppCtx, page: PageId, args: &Args) -> Result<ShapeId, CommandError> {
+pub(super) fn target_shape(
+    ctx: &AppCtx,
+    page: PageId,
+    args: &Args,
+) -> Result<ShapeId, CommandError> {
     let session = ctx.active_document().ok_or_else(no_document)?;
     let visio_id = need_integer(args, "target", "target shape id")?;
     let target = session
@@ -232,7 +236,7 @@ fn refuse_connector_target(
 }
 
 /// The `Connect` record for one endpoint glue.
-fn glue_record(
+pub(super) fn glue_record(
     connector: ShapeId,
     target: ShapeId,
     target_visio_id: i32,
@@ -289,7 +293,7 @@ fn glue_record(
 /// (a legacy record-only connector) keeps its records as its only
 /// glue: nothing migrates it.
 #[derive(Debug)]
-struct GlueEdit {
+pub(super) struct GlueEdit {
     session: SessionId,
     label: String,
     page: PageKey,
@@ -315,7 +319,7 @@ impl GlueEdit {
     /// Stages the replacement of `connector`'s `end` glue with `new`
     /// (the end lands on `at`).
     #[allow(clippy::too_many_arguments)] // one staging seam
-    fn new(
+    pub(super) fn new(
         doc: &Document,
         session: SessionId,
         label: impl Into<String>,
@@ -576,7 +580,11 @@ pub(crate) fn subtree_visio_ids(doc: &Document, roots: &[ShapeId]) -> Vec<i32> {
 /// a connector inside a group are in its parent's coordinates (task
 /// P7-39's open issue), so the resolved page point maps into the
 /// parent's space on its way to the cells.
-fn end_cells_point(doc: &Document, connector: ShapeId, at: Point) -> Result<Point, CommandError> {
+pub(super) fn end_cells_point(
+    doc: &Document,
+    connector: ShapeId,
+    at: Point,
+) -> Result<Point, CommandError> {
     let parent = parent_transform(doc, connector)?;
     let inverse = parent.invert().map_err(|_| singular())?;
     Ok(inverse.apply(at))
@@ -1131,7 +1139,7 @@ fn run_draw(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError>
 /// back to the end's own stored point. The returned flag is true when a
 /// record named a connection row its target does not have (the end fell
 /// back to dynamic glue, with one warning per such end).
-fn resolved_ends(
+pub(super) fn resolved_ends(
     doc: &Document,
     page: PageId,
     connector: ShapeId,
@@ -1283,7 +1291,7 @@ fn need_text(args: &Args, name: &str, prompt: &str) -> Result<String, CommandErr
 }
 
 /// One optional Visio shape id argument.
-fn optional_visio_id(args: &Args, name: &str) -> Result<Option<i32>, CommandError> {
+pub(super) fn optional_visio_id(args: &Args, name: &str) -> Result<Option<i32>, CommandError> {
     match args.get(name) {
         None => Ok(None),
         Some(_) => need_integer(args, name, "shape id").map(Some),
@@ -1291,7 +1299,7 @@ fn optional_visio_id(args: &Args, name: &str) -> Result<Option<i32>, CommandErro
 }
 
 /// One optional connection row `IX` argument.
-fn optional_row(args: &Args, name: &str) -> Result<Option<i32>, CommandError> {
+pub(super) fn optional_row(args: &Args, name: &str) -> Result<Option<i32>, CommandError> {
     match args.get(name) {
         None => Ok(None),
         Some(_) => {

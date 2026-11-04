@@ -12,10 +12,11 @@
 use std::collections::BTreeSet;
 
 use larrygram_commands::AppCtx;
-use larrygram_geom::{Angle, Point, Rect, Transform};
-use larrygram_model::{Document, ShapeId};
+use larrygram_geom::{Angle, Point, Rect, Segment, Transform};
+use larrygram_model::{ConnectorEnd, Document, ShapeId};
 use larrygram_render::{
-    BuildOptions, NodePath, OverlayMark, Scene, build_scene, build_selection_overlay,
+    BuildOptions, EndMark, NodePath, Overlay, OverlayMark, Scene, build_scene,
+    build_selection_overlay,
 };
 
 use crate::UiError;
@@ -43,7 +44,7 @@ pub enum ResizeEdge {
 }
 
 /// What a handle does (ADR 0042).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum HandleKind {
     /// Move the selection (the interior of the bounds).
@@ -52,6 +53,8 @@ pub enum HandleKind {
     Resize(ResizeEdge),
     /// Rotate around the selection's pin (the handle above the bounds).
     Rotate,
+    /// Move one end of a selected connector (task P7-33 item 1).
+    ConnectorEnd(ConnectorEnd),
 }
 
 /// The screen-pixel hit tolerance of a handle outside the selection
@@ -193,6 +196,146 @@ pub fn handles_for(
     Ok(handles)
 }
 
+/// The two end handles of a selected connector (task P7-33 item 1):
+/// `None` unless exactly one shape is selected and it is a connector
+/// (`Document::is_connector`). The anchors are the drawn route's end
+/// points in page inches, `glued` comes from the end's `Connects`
+/// record or glue formula.
+pub fn end_handles(
+    ctx: &AppCtx,
+    scene: Option<&Scene>,
+    shapes: &[ShapeId],
+) -> Option<[EndMark; 2]> {
+    let session = ctx.active_document()?;
+    let connector = *shapes.first()?;
+    if shapes.len() != 1 || !session.document.is_connector(connector) {
+        return None;
+    }
+    let built;
+    let scene: &Scene = match scene {
+        Some(scene) => scene,
+        None => {
+            built = scene_for(ctx).ok()?;
+            built.as_ref()?
+        }
+    };
+    let entries = node_entries(scene);
+    let entry = entries.iter().find(|entry| entry.shape == connector)?;
+    let node = scene_shape(scene, entry.path.indices())?;
+    let (begin, finish) = path_ends(&node.path)?;
+    let glued = |end: ConnectorEnd| end_is_glued(&session.document, connector, end);
+    Some([
+        EndMark {
+            end: ConnectorEnd::Begin,
+            at: entry.transform.apply(begin),
+            glued: glued(ConnectorEnd::Begin),
+        },
+        EndMark {
+            end: ConnectorEnd::End,
+            at: entry.transform.apply(finish),
+            glued: glued(ConnectorEnd::End),
+        },
+    ])
+}
+
+/// The end handle at `point` (page inches, `zoom` for the screen-pixel
+/// tolerance of [`TOLERANCE_PX`]): the nearest handle within reach,
+/// like [`handle_at`]'s rule.
+pub fn end_handle_at(ends: &[EndMark; 2], point: Point, zoom: f64) -> Option<ConnectorEnd> {
+    if !finite(point) {
+        return None;
+    }
+    let pixel = inches_per_pixel(zoom);
+    let square = HANDLE_HALF_PX * pixel;
+    let reach = TOLERANCE_PX * pixel;
+    let mut best: Option<(ConnectorEnd, f64)> = None;
+    for mark in ends {
+        let delta = point.sub(mark.at);
+        let distance = delta.x.hypot(delta.y);
+        let hit = delta.x.abs().max(delta.y.abs()) <= square || distance <= reach;
+        if hit && best.is_none_or(|(_, held)| distance < held) {
+            best = Some((mark.end, distance));
+        }
+    }
+    best.map(|(end, _)| end)
+}
+
+/// Whether one connector end is glued (task P7-33 item 1): its
+/// `Connects` record, or the endpoint glue formula Visio keeps beside
+/// the record.
+fn end_is_glued(doc: &Document, connector: ShapeId, end: ConnectorEnd) -> bool {
+    let slot = match end {
+        ConnectorEnd::Begin => 0,
+        ConnectorEnd::End => 1,
+    };
+    if doc
+        .page_of(connector)
+        .and_then(|page| doc.connects_of(page, connector).ok())
+        .is_some_and(|ends| ends.get(slot).is_some_and(Option::is_some))
+    {
+        return true;
+    }
+    let cell = match end {
+        ConnectorEnd::Begin => "BeginX",
+        ConnectorEnd::End => "EndX",
+    };
+    doc.shape(connector)
+        .and_then(|entity| {
+            entity
+                .sheet
+                .cells
+                .iter()
+                .find(|found| found.name.as_str() == cell)
+        })
+        .and_then(|found| found.formula.as_deref())
+        .is_some_and(|formula| {
+            let upper = formula.trim().trim_start_matches('=').to_ascii_uppercase();
+            upper.starts_with("PAR(PNT(") || upper.starts_with("_WALKGLUE(")
+        })
+}
+
+/// The scene's shape node at `indices` (the [`NodePath`] rule), or
+/// `None` for a group node or a path that does not resolve.
+pub(crate) fn scene_shape<'a>(
+    scene: &'a Scene,
+    indices: &[usize],
+) -> Option<&'a larrygram_render::scene::Shape> {
+    use larrygram_render::scene::Node;
+    let (last, parents) = indices.split_last()?;
+    let mut nodes = scene.nodes.as_slice();
+    for index in parents {
+        match nodes.get(*index)? {
+            Node::Group(group) => nodes = group.children.as_slice(),
+            _ => return None,
+        }
+    }
+    match nodes.get(*last)? {
+        Node::Shape(shape) => Some(shape.as_ref()),
+        _ => None,
+    }
+}
+
+/// A drawable path's first and last absolute points (the connector's
+/// route ends; task P7-33 item 1).
+fn path_ends(path: &larrygram_geom::Path) -> Option<(Point, Point)> {
+    let mut first = None;
+    let mut last = None;
+    for segment in path.segments() {
+        let point = match segment {
+            Segment::MoveTo(point) | Segment::LineTo(point) => Some(*point),
+            Segment::QuadTo { to, .. } | Segment::CubicTo { to, .. } => Some(*to),
+            _ => None,
+        };
+        if let Some(point) = point {
+            if first.is_none() {
+                first = Some(point);
+            }
+            last = Some(point);
+        }
+    }
+    Some((first?, last?))
+}
+
 /// The union bounds of the selection in page inches (one shape: its
 /// rotated bounds; several: the axis-aligned union).
 ///
@@ -236,11 +379,51 @@ pub(crate) fn selection_frame(
     }
     let overlay = build_selection_overlay(scene, &paths).map_err(render_error)?;
     for mark in overlay.marks {
-        if let OverlayMark::Handles { bounds, angle } = mark {
+        if let OverlayMark::Handles { bounds, angle, .. } = mark {
             return Ok(Some((bounds, angle)));
         }
     }
     Ok(None)
+}
+
+/// The selection's display overlay (task P7-33 item 1): the outlines
+/// and handle marks of [`build_selection_overlay`], except that a
+/// selected connector shows its begin and end handles only — no
+/// resize box, no rotation handle and no outline.
+pub fn selection_overlay(
+    ctx: &AppCtx,
+    scene: Option<&Scene>,
+    shapes: &[ShapeId],
+) -> Result<Overlay, UiError> {
+    let built;
+    let scene: &Scene = match scene {
+        Some(scene) => scene,
+        None => {
+            built = scene_for(ctx)?;
+            return match built.as_ref() {
+                Some(scene) => selection_overlay(ctx, Some(scene), shapes),
+                None => Ok(Overlay::new()),
+            };
+        }
+    };
+    let paths = paths_for_shapes(scene, ctx, shapes)?;
+    if paths.is_empty() {
+        return Ok(Overlay::new());
+    }
+    let mut overlay = build_selection_overlay(scene, &paths).map_err(render_error)?;
+    if let Some(ends) = end_handles(ctx, Some(scene), shapes) {
+        let mut bounds = Rect::new(ends[0].at, ends[0].at);
+        for mark in &ends {
+            bounds = bounds.union(Rect::new(mark.at, mark.at));
+        }
+        overlay.marks.clear();
+        overlay.marks.push(OverlayMark::Handles {
+            bounds,
+            angle: Angle::from_radians(0.0),
+            ends: Some(ends),
+        });
+    }
+    Ok(overlay)
 }
 
 /// The active page's scene, or `None` with no open document or page.
@@ -692,6 +875,176 @@ mod tests {
         let wanted = subtree_ids(doc, &[group]);
         assert_eq!(wanted.len(), 1);
         assert_eq!(subtree_ids(doc, &[ShapeId { index: 99 }]).len(), 1);
+    }
+
+    // -------------------------------------------------------------------------
+    // Task P7-33 item 1: the 1-D selection handles
+    // -------------------------------------------------------------------------
+
+    /// A 1-D connector from (2, 3) to (4, 3): the endpoint cells and a
+    /// straight path. `begin_glue` glues its begin (a record or a bare
+    /// glue formula), `end_glue` its end.
+    fn connector_document(begin_glue: bool, end_glue: bool) -> (AppCtx, ShapeId) {
+        let mut doc = Document::new();
+        let mut shape = Shape::new(ShapeId { index: 0 }, 1);
+        shape.sheet.cells = vec![
+            cell("Width", 2.0),
+            cell("Height", 0.2),
+            cell("PinX", 3.0),
+            cell("PinY", 3.0),
+            cell("LocPinX", 1.0),
+            cell("LocPinY", 0.1),
+            cell("Angle", 0.0),
+            cell("BeginX", 2.0),
+            cell("BeginY", 3.0),
+            cell("EndX", 4.0),
+            cell("EndY", 3.0),
+        ];
+        if end_glue {
+            // A glue formula with no record still reads as glued
+            // (Visio keeps both; P7-33 item 1).
+            if let Some(found) = shape
+                .sheet
+                .cells
+                .iter_mut()
+                .find(|entry| entry.name.as_str() == "EndX")
+            {
+                found.formula = Some("_WALKGLUE(EndTrigger,BegTrigger,WalkPreference)".to_owned());
+            }
+        }
+        let mut geometry = Section::new(SectionName::from_static("Geometry"));
+        for (ix, (kind, x, y)) in [("MoveTo", 0.0, 0.1), ("LineTo", 2.0, 0.1)]
+            .into_iter()
+            .enumerate()
+        {
+            let mut row = Row::new();
+            row.row_type = Some(kind.to_owned());
+            row.ix = Some(i32::try_from(ix).unwrap_or(0));
+            row.cells = vec![cell("X", x), cell("Y", y)];
+            geometry.rows.push(row);
+        }
+        shape.sheet.sections.push(geometry);
+        let id = doc.add_shape(shape);
+        let mut page = Page::new(PageId { index: 0 }, 1);
+        page.shapes.push(id);
+        if begin_glue {
+            page.connects.push(larrygram_model::Connect {
+                from_sheet: 1,
+                from_cell: "BeginX".to_owned(),
+                from_part: 9,
+                to_sheet: 2,
+                to_cell: "PinX".to_owned(),
+                to_part: 3,
+                ..larrygram_model::Connect::default()
+            });
+        }
+        doc.pages.push(page);
+        let mut app = AppCtx::new(Settings::default());
+        app.open_document(DocumentSession::new(doc, None));
+        app.selection.shapes = vec![id];
+        app.selection.anchor = Some(id);
+        app.selection.page = Some(PageId { index: 0 });
+        (app, id)
+    }
+
+    /// The end handles of a connector selection come from the drawn
+    /// route, and the glue state comes from the record or the formula.
+    #[test]
+    fn the_end_handles_carry_the_route_ends_and_the_glue_state() {
+        let (app, id) = connector_document(true, true);
+        let marks = end_handles(&app, None, &[id]).expect("a connector has end handles");
+        assert_eq!(marks[0].end, larrygram_model::ConnectorEnd::Begin);
+        assert_eq!(marks[0].at, Point::new(2.0, 3.0), "the route's first point");
+        assert!(marks[0].glued, "a record glues the begin");
+        assert_eq!(marks[1].end, larrygram_model::ConnectorEnd::End);
+        assert_eq!(marks[1].at, Point::new(4.0, 3.0), "the route's last point");
+        assert!(marks[1].glued, "a bare glue formula glues the end");
+
+        let (app, id) = connector_document(false, false);
+        let marks = end_handles(&app, None, &[id]).expect("end handles");
+        assert!(!marks[0].glued && !marks[1].glued, "both ends free");
+    }
+
+    /// No end handles for an empty selection, a multi-shape selection
+    /// or an ordinary shape.
+    #[test]
+    fn end_handles_need_exactly_one_selected_connector() {
+        let (app, id) = connector_document(false, false);
+        assert_eq!(end_handles(&app, None, &[]), None);
+        assert_eq!(end_handles(&app, None, &[id, id]), None);
+        let (plain, _plain_id) = shape_document(0.0);
+        assert_eq!(
+            end_handles(&plain, None, &plain.selection.shapes.clone()),
+            None
+        );
+        // No open document: no handles.
+        let empty = AppCtx::new(Settings::default());
+        assert_eq!(end_handles(&empty, None, &[id]), None);
+        // No active page: no scene, no handles.
+        let mut session = DocumentSession::new(Document::new(), None);
+        session.active_page = None;
+        let mut no_page = AppCtx::new(Settings::default());
+        no_page.open_document(session);
+        assert_eq!(end_handles(&no_page, None, &[id]), None);
+    }
+
+    /// The nearest end handle within reach wins; a non-finite point
+    /// never hits.
+    #[test]
+    fn an_end_handle_hits_on_its_square_and_its_reach() {
+        let marks = [
+            larrygram_render::EndMark {
+                end: larrygram_model::ConnectorEnd::Begin,
+                at: Point::new(0.0, 0.0),
+                glued: true,
+            },
+            larrygram_render::EndMark {
+                end: larrygram_model::ConnectorEnd::End,
+                at: Point::new(2.0, 0.0),
+                glued: false,
+            },
+        ];
+        assert_eq!(
+            end_handle_at(&marks, Point::new(0.0, 0.0), 1.0),
+            Some(larrygram_model::ConnectorEnd::Begin)
+        );
+        assert_eq!(
+            end_handle_at(&marks, Point::new(2.01, 0.0), 1.0),
+            Some(larrygram_model::ConnectorEnd::End),
+            "the nearer handle wins inside both reaches"
+        );
+        assert_eq!(end_handle_at(&marks, Point::new(1.0, 0.0), 1.0), None);
+        assert_eq!(end_handle_at(&marks, Point::new(f64::NAN, 0.0), 1.0), None);
+    }
+
+    /// The selection overlay of a connector carries the end handles
+    /// only; an ordinary shape keeps its outline and handle frame.
+    #[test]
+    fn the_selection_overlay_replaces_the_box_for_a_connector() {
+        let (app, id) = connector_document(true, false);
+        let overlay = selection_overlay(&app, None, &[id]).expect("overlay");
+        assert_eq!(overlay.marks.len(), 1, "{:?}", overlay.marks);
+        match overlay.marks.first() {
+            Some(OverlayMark::Handles {
+                ends: Some(ends), ..
+            }) => {
+                assert!(ends[0].glued);
+                assert!(!ends[1].glued);
+            }
+            other => panic!("expected the end handles, got {other:?}"),
+        }
+        let (plain, plain_id) = shape_document(0.0);
+        let overlay = selection_overlay(&plain, None, &[plain_id]).expect("overlay");
+        assert_eq!(overlay.marks.len(), 2, "outline and handle frame");
+        // Nothing drawable: an empty overlay, never an error.
+        let mut session = DocumentSession::new(Document::new(), None);
+        session.active_page = None;
+        let mut no_page = AppCtx::new(Settings::default());
+        no_page.open_document(session);
+        assert_eq!(
+            selection_overlay(&no_page, None, &[id]).expect("no error"),
+            Overlay::new()
+        );
     }
 
     #[test]

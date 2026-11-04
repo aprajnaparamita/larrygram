@@ -126,6 +126,9 @@ pub struct CanvasColors {
     pub snap_guide: Color32,
     /// The marquee fill: the selection colour at a low alpha.
     pub marquee_fill: Color32,
+    /// The theme accent (`accent`): the glued-end markers and the glue
+    /// feedback highlight (task P7-33).
+    pub accent: Color32,
 }
 
 /// The alpha of the marquee fill over the selection colour.
@@ -148,6 +151,7 @@ impl CanvasColors {
             snap_guide: crate::theme::color(theme, "canvas.snap_guide"),
             marquee_fill: crate::theme::color(theme, "canvas.selection")
                 .gamma_multiply(MARQUEE_ALPHA),
+            accent: crate::theme::color(theme, "accent"),
         }
     }
 
@@ -174,6 +178,7 @@ impl Default for CanvasColors {
             handle_fill: Color32::WHITE,
             snap_guide: Color32::from_rgb(220, 80, 60),
             marquee_fill: Color32::from_rgb(31, 111, 235).gamma_multiply(MARQUEE_ALPHA),
+            accent: Color32::from_rgb(31, 111, 235),
         }
     }
 }
@@ -731,11 +736,20 @@ fn screen_to_page(
 /// The selection handle under `point` in the overlay's handle frame.
 fn handle_under(overlay: &Overlay, point: Point, zoom: f64) -> Option<HandleKind> {
     overlay.marks.iter().find_map(|mark| match mark {
-        OverlayMark::Handles { bounds, angle } => {
-            crate::handles::handle_at(point, *bounds, *angle, zoom)
+        OverlayMark::Handles {
+            bounds,
+            angle,
+            ends,
+        } => match ends {
+            // A selected connector: its begin and end handles only
+            // (task P7-33 item 1).
+            Some(ends) => {
+                crate::handles::end_handle_at(ends, point, zoom).map(HandleKind::ConnectorEnd)
+            }
+            None => crate::handles::handle_at(point, *bounds, *angle, zoom)
                 .ok()
-                .flatten()
-        }
+                .flatten(),
+        },
         _ => None,
     })
 }
@@ -759,6 +773,14 @@ fn handle_angle(overlay: &Overlay) -> Angle {
 pub(crate) fn cursor_for(kind: HandleKind, angle: Angle, dragging: bool) -> CursorIcon {
     let (dx, dy) = match kind {
         HandleKind::Move => return CursorIcon::Move,
+        // An end handle drags one point of the connector (task P7-33).
+        HandleKind::ConnectorEnd(_) => {
+            return if dragging {
+                CursorIcon::Grabbing
+            } else {
+                CursorIcon::Grab
+            };
+        }
         HandleKind::Rotate => {
             return if dragging {
                 CursorIcon::Grabbing
@@ -861,7 +883,33 @@ fn draw_overlay(
                     ));
                 }
             }
-            OverlayMark::Handles { bounds, angle } => {
+            OverlayMark::Handles {
+                bounds,
+                angle,
+                ends,
+            } => {
+                if let Some(ends) = ends {
+                    // A selected connector: a filled accent marker for
+                    // a glued end, a hollow one for a free end (task
+                    // P7-33 item 1).
+                    for mark in ends {
+                        let center = to_screen(mark.at);
+                        let rect = Rect::from_center_size(
+                            center,
+                            egui::vec2(HANDLE_HALF * 2.0, HANDLE_HALF * 2.0),
+                        );
+                        if mark.glued {
+                            painter.rect_filled(rect, 0.0, colors.accent);
+                        }
+                        painter.rect_stroke(
+                            rect,
+                            0.0,
+                            Stroke::new(1.0, colors.accent),
+                            egui::StrokeKind::Middle,
+                        );
+                    }
+                    continue;
+                }
                 let zoom = k / POINTS_PER_INCH;
                 if let Ok(handles) = crate::handles::handles_for(*bounds, *angle, zoom) {
                     for (kind, point) in handles {
@@ -916,6 +964,38 @@ fn draw_overlay(
                         points,
                         Stroke::new(1.5, colors.selection),
                     ));
+                }
+            }
+            // The glue feedback of a dragged connector end (task P7-33
+            // item 3): the target's outline or the single highlighted
+            // point, and the connection points as hollow markers.
+            OverlayMark::GlueFeedback(feedback) => {
+                if let Some(outline) = &feedback.outline {
+                    let points: Vec<Pos2> = outline.iter().map(|point| to_screen(*point)).collect();
+                    if points.len() >= 2 {
+                        painter.add(egui::Shape::line(points, Stroke::new(1.5, colors.accent)));
+                    }
+                }
+                for marker in &feedback.markers {
+                    let center = to_screen(*marker);
+                    let rect = Rect::from_center_size(
+                        center,
+                        egui::vec2(HANDLE_HALF * 1.5, HANDLE_HALF * 1.5),
+                    );
+                    painter.rect_stroke(
+                        rect,
+                        0.0,
+                        Stroke::new(1.0, colors.accent),
+                        egui::StrokeKind::Middle,
+                    );
+                }
+                if let Some(point) = feedback.point {
+                    painter.circle(
+                        to_screen(point),
+                        HANDLE_HALF,
+                        colors.accent,
+                        Stroke::new(1.0, colors.accent),
+                    );
                 }
             }
             _ => {}
@@ -1894,7 +1974,42 @@ mod tests {
         overlay.marks.push(OverlayMark::Handles {
             bounds: PageRect::new(Point::new(0.0, 0.0), Point::new(1.0, 1.0)),
             angle: larrygram_geom::Angle::default(),
+            ends: None,
         });
+        // The 1-D end handles (task P7-33 item 1) and the glue feedback
+        // (item 3): a glued and a free end, the outline, the point and
+        // the markers.
+        overlay.marks.push(OverlayMark::Handles {
+            bounds: PageRect::new(Point::new(0.0, 0.0), Point::new(1.0, 1.0)),
+            angle: larrygram_geom::Angle::default(),
+            ends: Some([
+                larrygram_render::EndMark {
+                    end: larrygram_model::ConnectorEnd::Begin,
+                    at: Point::new(0.0, 0.0),
+                    glued: true,
+                },
+                larrygram_render::EndMark {
+                    end: larrygram_model::ConnectorEnd::End,
+                    at: Point::new(1.0, 1.0),
+                    glued: false,
+                },
+            ]),
+        });
+        overlay
+            .marks
+            .push(OverlayMark::GlueFeedback(larrygram_render::GlueFeedback {
+                outline: Some(vec![
+                    Point::new(0.0, 0.0),
+                    Point::new(1.0, 0.0),
+                    Point::new(1.0, 1.0),
+                    Point::new(0.0, 0.0),
+                ]),
+                point: Some(Point::new(0.5, 0.5)),
+                markers: vec![Point::new(0.25, 0.25)],
+            }));
+        overlay.marks.push(OverlayMark::GlueFeedback(
+            larrygram_render::GlueFeedback::default(),
+        ));
         overlay.marks.push(OverlayMark::RubberBand(PageRect::new(
             Point::new(0.0, 0.0),
             Point::new(2.0, 2.0),

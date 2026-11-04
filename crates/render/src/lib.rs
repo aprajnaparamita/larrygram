@@ -24,7 +24,7 @@ pub use error::Error;
 pub use hit::{
     Hit, HitKind, HitOptions, NodePath, hit_marquee, hit_test, node_bounds, scene_bounds,
 };
-pub use overlay::{Overlay, OverlayMark, build_selection_overlay};
+pub use overlay::{EndMark, GlueFeedback, Overlay, OverlayMark, build_selection_overlay};
 pub use png::{PngOptions, render_png};
 pub use raster::{RasterImage, RasterOptions, render_raster};
 pub use scene::{Rgba, Scene};
