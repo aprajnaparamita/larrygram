@@ -100,6 +100,12 @@ const PANE_MIN_HEIGHT: f32 = 60.0;
 /// The full-screen toggle (task P7-20's `view.full_screen_mode`).
 const FULL_SCREEN: &str = "view.full_screen_mode";
 
+/// The plain arrow-key nudge step in page inches (task P7-33 item 5).
+/// Shift+arrow nudges one screen pixel at the current zoom
+/// (docs/ui/connectors.md section 3); the plain step is ours: the
+/// allowed sources do not document Visio's.
+pub const NUDGE_IN: f64 = 0.125;
+
 /// The marker a changed drawing gets before its name (task P7-42 goal
 /// 4: our own marker, a dot before the name). It is applied in
 /// [`Shell::title_text`] alone, so every title shows the same mark.
@@ -714,6 +720,14 @@ impl Shell {
             // The Shapes window takes its arrow keys and Enter before
             // the shortcut table nudges shapes with them (task P7-19).
             self.shapes.handle_keys(ui.ctx());
+        }
+        // The connector unglue step of the arrow keys (task P7-33
+        // item 5): with connectors selected an arrow key unglues both
+        // ends of each and nudges them in one `shape.move` edit (ADR
+        // 0084 rule 1: a move unglues each end whose target does not
+        // move with it). Ordinary shapes keep today's arrow behaviour.
+        if let Some(delta) = self.arrow_nudge_delta(ui) {
+            self.nudge_connectors(delta);
         }
         // F2 and a typed character start editing the selected shape's
         // text (task P7-25 item 8).
@@ -2896,6 +2910,110 @@ impl Shell {
             results.push(self.dispatch_intent(intent)?);
         }
         Ok(results)
+    }
+
+    /// The nudge delta of this frame's arrow presses (task P7-33 item
+    /// 5), `None` when the arrows are not the connector unglue step:
+    /// no connector is selected, a text edit has the keys, or no arrow
+    /// was pressed. The pressed arrows are consumed (removed from the
+    /// input) when the step runs, so the shortcut table's
+    /// `arrange.nudge` stub does not fire beside it.
+    fn arrow_nudge_delta(&self, ui: &Ui) -> Option<(f64, f64)> {
+        if self.editor.is_active() || ui.ctx().text_edit_focused() {
+            return None;
+        }
+        let session = self.app.active_document()?;
+        if !self
+            .app
+            .selection
+            .shapes
+            .iter()
+            .any(|shape| session.document.is_connector(*shape))
+        {
+            return None;
+        }
+        let zoom = if session.view.zoom.is_finite() && session.view.zoom > 0.0 {
+            session.view.zoom
+        } else {
+            1.0
+        };
+        // Shift+arrow nudges one screen pixel at the current zoom
+        // (docs/ui/connectors.md section 3); the plain step is ours:
+        // the allowed sources do not document Visio's.
+        let step = |shift: bool| {
+            if shift {
+                1.0 / (zoom * canvas::POINTS_PER_INCH)
+            } else {
+                NUDGE_IN
+            }
+        };
+        let mut delta = (0.0, 0.0);
+        let mut fired = false;
+        ui.ctx().input_mut(|input| {
+            input.events.retain(|event| {
+                let egui::Event::Key {
+                    key,
+                    pressed: true,
+                    modifiers,
+                    ..
+                } = event
+                else {
+                    return true;
+                };
+                let Some((dx, dy)) = (match key {
+                    egui::Key::ArrowLeft => Some((-1.0, 0.0)),
+                    egui::Key::ArrowRight => Some((1.0, 0.0)),
+                    egui::Key::ArrowUp => Some((0.0, 1.0)),
+                    egui::Key::ArrowDown => Some((0.0, -1.0)),
+                    _ => None,
+                }) else {
+                    return true;
+                };
+                let step = step(modifiers.shift);
+                delta.0 += dx * step;
+                delta.1 += dy * step;
+                fired = true;
+                false
+            });
+        });
+        fired.then_some(delta)
+    }
+
+    /// Runs the connector unglue step's one `shape.move` over the
+    /// selected connectors (task P7-33 item 5). The command moves the
+    /// selection, so the step runs it over the connectors alone and
+    /// restores the selection after: the ordinary shapes of a mixed
+    /// selection keep today's arrow behaviour.
+    fn nudge_connectors(&mut self, delta: (f64, f64)) {
+        let Some(session) = self.app.active_document() else {
+            return;
+        };
+        let connectors: Vec<ShapeId> = self
+            .app
+            .selection
+            .shapes
+            .iter()
+            .copied()
+            .filter(|shape| session.document.is_connector(*shape))
+            .collect();
+        if connectors.is_empty() {
+            return;
+        }
+        let args = larrygram_commands::Args::new()
+            .with("dx", ArgValue::Number(delta.0))
+            .with("dy", ArgValue::Number(delta.1));
+        let Ok(command) = CommandId::parse("shape.move") else {
+            return;
+        };
+        let saved_shapes = std::mem::replace(&mut self.app.selection.shapes, connectors);
+        let saved_anchor = self.app.selection.anchor;
+        self.app.selection.anchor = saved_shapes.last().copied();
+        let intent = Intent::new(command, Invocation::new(args, Source::Shortcut));
+        if let Err(error) = self.dispatch(&[intent]) {
+            self.note_error(error.to_string());
+        }
+        self.app.selection.shapes = saved_shapes;
+        self.app.selection.anchor = saved_anchor;
     }
 
     /// Dispatches one intent, answering a `NeedsInput` from an
