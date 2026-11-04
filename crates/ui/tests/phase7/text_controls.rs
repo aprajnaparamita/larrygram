@@ -2195,6 +2195,50 @@ fn an_empty_new_box_marks_nothing_in_the_title() {
 }
 
 // ---------------------------------------------------------------------------
+// Item 2 (task P7-51): the empty-box flag is fresh after the editor
+// has taken the frame's keystrokes.
+// ---------------------------------------------------------------------------
+
+/// The first typed character marks the drawing in its own frame (task
+/// P7-51 item 2): the title marker and the published changed flag
+/// (`is_dirty`, what `publish_changed` publishes) read fresh after one
+/// frame, not one frame late.
+#[test]
+fn the_first_typed_character_marks_the_drawing_in_its_own_frame() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        type_a_new_box(&mut rig, kind, "");
+        assert_eq!(
+            rig.shell.borrow().window_title(),
+            "Untitled - Larrygram",
+            "{kind:?}: an empty box marks nothing"
+        );
+        // The first character, in exactly one frame.
+        {
+            rig.run();
+            let root = rig.harness().root();
+            let node = root
+                .query_all_by_role_and_label(Role::MultilineTextInput, "Text")
+                .next()
+                .expect("the editor field");
+            node.type_text("x");
+        }
+        rig.harness().run_steps(1);
+        let shell = rig.shell.borrow();
+        let session = shell.app.active_document().expect("session");
+        assert!(
+            session.is_dirty(),
+            "{kind:?}: the published changed flag is fresh"
+        );
+        assert_eq!(
+            shell.window_title(),
+            "\u{2022} Untitled - Larrygram",
+            "{kind:?}: the title marker is fresh"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Item 7 (task P7-48, the review's minor 2): a turned or flipped
 // shape drops the font metrics — and keeps working.
 // ---------------------------------------------------------------------------
