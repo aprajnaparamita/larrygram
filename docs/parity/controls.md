@@ -23,6 +23,8 @@ A row listed in `ui-spec/out-of-scope.txt` stays `out-of-scope` even when a comm
 | BlankPageInsertVisio | button | BlankPageInsertVisio | tab/TabInsert/GroupInsertPages | implemented |
 | Bold | toggleButton | Bold | tab/TabHome/GroupFont | implemented |
 | Bullets | toggleButton | Bullets | tab/TabHome/GroupParagraph | implemented |
+| ConnectionPointTool | toggleButton | ConnectionPointTool | tab/TabHome/GroupTools | implemented |
+| ConnectionPoints | checkBox | ConnectionPoints | tab/TabView/GroupVisualAids | implemented |
 | ConnectorCurvedLines | toggleButton | ConnectorCurvedLines | tab/TabDesignVisio/GroupLayoutRouting | implemented |
 | ConnectorRightAngle | toggleButton | ConnectorRightAngle | tab/TabDesignVisio/GroupLayoutRouting | implemented |
 | ConnectorShowLineJumps | toggleButton | ConnectorShowLineJumps | tab/TabDesignVisio/GroupLayoutRouting | implemented |
@@ -128,8 +130,6 @@ A row listed in `ui-spec/out-of-scope.txt` stays `out-of-scope` even when a comm
 | CloudSkyDriveUpsellGroup | group | CloudSkyDriveUpsellGroup | backstage/TabSave | stub |
 | CommentingPane | toggleButton | CommentingPane | tab/TabReviewWord/GroupComments | stub |
 | CommentsPaneSplitButton | toggleButton | CommentsPaneSplitButton | tab/TabReviewWord/GroupComments | stub |
-| ConnectionPointTool | toggleButton | ConnectionPointTool | tab/TabHome/GroupTools | stub |
-| ConnectionPoints | checkBox | ConnectionPoints | tab/TabView/GroupVisualAids | stub |
 | ContactUs | button | ContactUs | tab/HelpTab/GroupHelpAndSupport | stub |
 | ContainerDisband | button | ContainerDisband | tab/TabFormat/GroupMembership | stub |
 | ContainerGallery | gallery | ContainerGallery | tab/TabInsert/GroupDiagramParts | stub |
@@ -784,6 +784,9 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | connector.line_jump_style.sides_7 | 7 Sides | implemented |
 | connector.line_jump_style.square | Square | implemented |
 | connector.move_end | Move Connector End | implemented |
+| connector.point_add | Add Connection Point | implemented |
+| connector.point_delete | Delete Connection Point | implemented |
+| connector.point_move | Move Connection Point | implemented |
 | connector.reroute_all | Reroute All | implemented |
 | connector.right_angle | Right-Angle Connector | implemented |
 | connector.show.line.jumps | Show Line Jumps | implemented |
@@ -793,6 +796,9 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | connector.unglue | Unglue | implemented |
 | data.set.property | Value | implemented |
 | edit.clear | Delete | implemented |
+| edit.connection_point.inward | Inward | implemented |
+| edit.connection_point.inward_and_outward | Inward & Outward | implemented |
+| edit.connection_point.outward | Outward | implemented |
 | edit.copy | Copy | implemented |
 | edit.cut | Cut | implemented |
 | edit.delete | Delete | implemented |
@@ -903,6 +909,8 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | tools.backgrounds | Backgrounds | implemented |
 | tools.blank.page.insert | Blank Page Insert | implemented |
 | tools.blank.page.insert.visio | Blank Page Insert Visio | implemented |
+| tools.connection.point | Connection Point | implemented |
+| tools.connection.points | Connection Points | implemented |
 | tools.connector | Connector Tool | implemented |
 | tools.ellipse | Ellipse | implemented |
 | tools.format_painter | Format Painter | implemented |
@@ -916,6 +924,7 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | tools.strikethrough | Strikethrough | implemented |
 | tools.text | Text Tool | implemented |
 | tools.text_block | Text Block Tool | implemented |
+| view.connections | Connections | implemented |
 | view.custom | Custom | implemented |
 | view.fit.in.window | Window | implemented |
 | view.full_screen_mode | Full Screen | implemented |
@@ -1083,9 +1092,6 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | edit.action | Action... | stub |
 | edit.break.ole.link | Link | stub |
 | edit.cancel.in.place.editing | Editing | stub |
-| edit.connection_point.inward | Inward | stub |
-| edit.connection_point.inward_and_outward | Inward & Outward | stub |
-| edit.connection_point.outward | Outward | stub |
 | edit.convert.object | Object | stub |
 | edit.create_shortcut | Create Shortcut | stub |
 | edit.del.connect.pt | Pt | stub |
@@ -1546,8 +1552,6 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | tools.commenting | Commenting | stub |
 | tools.comments.pane | Comments Pane Split | stub |
 | tools.connection | Connection Point Tool | stub |
-| tools.connection.point | Connection Point | stub |
-| tools.connection.points | Connection Points | stub |
 | tools.contact.us | Contact Us | stub |
 | tools.control.properties | Control Properties | stub |
 | tools.controls | Controls | stub |
@@ -1743,7 +1747,6 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | view.cascade_all | Cascade All | stub |
 | view.center.drawing | Drawing | stub |
 | view.collapse.shapes.window | Window | stub |
-| view.connections | Connections | stub |
 | view.direction.toggle | Direction | stub |
 | view.explorer.active | Active | stub |
 | view.explorer.delete | Delete | stub |
