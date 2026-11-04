@@ -596,7 +596,7 @@ pub(super) fn end_cells_point(
 /// the value a freed end's cells keep (ADR 0084 rule 2). A shape
 /// without the endpoint cells falls back to its geometry path's end in
 /// page space, then the pin.
-fn stored_end_point(doc: &Document, connector: ShapeId, end: End) -> Point {
+pub(super) fn stored_end_point(doc: &Document, connector: ShapeId, end: End) -> Point {
     if doc.is_connector(connector)
         && let Ok(point) = doc.connector_end(connector, end.connector_end())
     {
@@ -2403,7 +2403,7 @@ fn route_one(
 /// begin/end parts, ADR 0045), as opposed to a shape-to-shape glue such
 /// as the glue-on-drop of ADR 0046 (`Connections.X*` from a connection
 /// point): only connector ends are routed (task P5-11).
-fn is_connector_end(connect: &Connect) -> bool {
+pub(super) fn is_connector_end(connect: &Connect) -> bool {
     matches!(
         connect.from_part,
         mutate::VIS_BEGIN
@@ -2658,7 +2658,7 @@ fn axis_scale(instance: Option<f64>, master: Option<f64>) -> f64 {
 
 /// The `Connection` row index of a record (`VisToParts` = 100 + IX, or
 /// the `Connections.Xn` cell with a one-based `n`).
-fn connection_index(connect: &Connect) -> Option<usize> {
+pub(super) fn connection_index(connect: &Connect) -> Option<usize> {
     if connect.to_part >= mutate::VIS_CONNECTION_POINT {
         return usize::try_from(connect.to_part - mutate::VIS_CONNECTION_POINT).ok();
     }

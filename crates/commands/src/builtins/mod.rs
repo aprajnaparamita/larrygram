@@ -13,6 +13,7 @@
 
 mod arrange;
 mod clipboard;
+mod connection_points;
 mod connector;
 mod connector_ends;
 mod connector_styles;
@@ -61,6 +62,7 @@ pub(crate) type CommandTable = &'static [(&'static str, &'static str, EnabledFn,
 pub(crate) const STUB_TABLES: &[CommandTable] = &[
     arrange::TABLE,
     clipboard::TABLE,
+    connection_points::TABLE,
     connector::TABLE,
     connector_ends::TABLE,
     connector_styles::TABLE,

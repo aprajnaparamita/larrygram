@@ -1405,6 +1405,21 @@
   mapping_confidence: unknown
   visuicmd: null
 - fluent_ids: []
+  id: connector.point_add
+  label: Add Connection Point
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: connector.point_delete
+  label: Delete Connection Point
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: connector.point_move
+  label: Move Connection Point
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
   id: connector.reroute_all
   label: Reroute All
   mapping_confidence: unknown
