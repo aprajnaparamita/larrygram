@@ -779,6 +779,11 @@ pub(crate) struct GeometryEdit {
     /// The effective geometry rows at construction: the scale input, so
     /// a redo re-scales the same rows instead of the scaled ones.
     source: Vec<Section>,
+    /// The shape's own `Connection` sections at construction: their
+    /// constant points scale with the geometry, so a point stays at the
+    /// same place on the shape (an edited catalog shape's rows are
+    /// literals, task P7-34).
+    connections: Vec<Section>,
     /// The shape's own geometry sections before the first rescale.
     old_sections: Option<Vec<Section>>,
     /// Every cell of the source rows (the recalc pass recomputes the
@@ -805,8 +810,20 @@ impl GeometryEdit {
             )));
         }
         let source = geometry_source(doc, shape);
+        let connections: Vec<Section> = doc
+            .shape(shape)
+            .map(|entity| {
+                entity
+                    .sheet
+                    .sections
+                    .iter()
+                    .filter(|section| section.name.as_str() == "Connection")
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default();
         let mut dirty = Vec::new();
-        for section in &source {
+        for section in source.iter().chain(&connections) {
             for (at, row) in section.rows.iter().enumerate() {
                 let target = RowTarget {
                     position: Some(at),
@@ -829,6 +846,7 @@ impl GeometryEdit {
             from,
             to,
             source,
+            connections,
             old_sections: None,
             dirty,
         })
@@ -1031,7 +1049,8 @@ impl Edit for GeometryEdit {
             self.old_sections = Some(entity.sheet.sections.clone());
         }
         let scaled = scale_sections(&self.source, self.from, self.to);
-        if !scaled.touched {
+        let points = scale_sections(&self.connections, self.from, self.to);
+        if !scaled.touched && !points.touched {
             // Every row computes from its formulas: the recalc pass owns
             // them (ADR 0056) and this step writes nothing.
             return Ok(());
@@ -1040,7 +1059,22 @@ impl Edit for GeometryEdit {
         let entity = doc
             .shape_mut(shape)
             .ok_or_else(|| CommandError::failed(format!("unknown shape id {}", shape.index)))?;
-        replace_geometry_sections(&mut entity.sheet.sections, scaled.sections);
+        if scaled.touched {
+            replace_geometry_sections(&mut entity.sheet.sections, scaled.sections);
+        }
+        if points.touched {
+            let mut fresh = points.sections.into_iter();
+            for slot in entity
+                .sheet
+                .sections
+                .iter_mut()
+                .filter(|section| section.name.as_str() == "Connection")
+            {
+                if let Some(section) = fresh.next() {
+                    *slot = section;
+                }
+            }
+        }
         ctx.touch_session(session);
         Ok(())
     }

@@ -461,3 +461,32 @@ fn the_tool_and_the_checks_take_their_window_state() {
         "both ids read and write the same state"
     );
 }
+
+/// A resize scales the shape's own constant connection points with its
+/// geometry (an edited catalog shape's rows are literals), and the
+/// undo puts them back.
+#[test]
+fn a_resize_scales_the_own_connection_points() {
+    let (mut ctx, registry, page) = fixture();
+    let shape = doc(&ctx).shape_by_visio_id(page, 1).expect("box");
+    ctx.selection.shapes = vec![shape];
+    ctx.selection.anchor = Some(shape);
+    let before = doc(&ctx).connection_points_indexed(shape);
+    assert_eq!(
+        before,
+        vec![(0, Point::new(1.0, 1.0)), (1, Point::new(1.0, 0.0))]
+    );
+    dispatch(
+        &mut ctx,
+        &registry,
+        "shape.set.width",
+        Args::new().with("width", ArgValue::Number(4.0)),
+    )
+    .expect("set width");
+    assert_eq!(
+        doc(&ctx).connection_points_indexed(shape),
+        vec![(0, Point::new(2.0, 1.0)), (1, Point::new(2.0, 0.0))]
+    );
+    dispatch(&mut ctx, &registry, "edit.undo", Args::new()).expect("undo");
+    assert_eq!(doc(&ctx).connection_points_indexed(shape), before);
+}
