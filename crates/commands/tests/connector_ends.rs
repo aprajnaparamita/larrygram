@@ -693,3 +693,43 @@ fn a_bad_point_is_an_argument_error_with_no_dialog_request() {
         );
     }
 }
+
+/// Extreme member pins make the group re-base overflow to infinity:
+/// `Document::group_shapes` refuses it with a clear error and mutates
+/// nothing (model `mutate.rs`, the checked arithmetic the group and
+/// the connector writes share).
+#[test]
+fn a_group_rebase_that_overflows_is_refused_without_mutating() {
+    let mut document = Document::new();
+    let page = document.add_page("Page-1").expect("page");
+    // One box whose corners sit at the origin (pin and local pin
+    // cancel) and one whose corners sit at the extreme negative value
+    // (local pin zero): the extent is finite, but `pin - min` for the
+    // first box overflows to infinity.
+    let mut big = box_shape(1, 0.0, 0.0);
+    let mut small = box_shape(2, 0.0, 5.0);
+    for (shape, pin, loc) in [(&mut big, 1.7e308, 1.7e308), (&mut small, -1.7e308, 0.0)] {
+        for entry in &mut shape.sheet.cells {
+            match entry.name.as_str() {
+                "PinX" => entry.value = Some(CellValue::Number(pin)),
+                "LocPinX" => entry.value = Some(CellValue::Number(loc)),
+                _ => {}
+            }
+        }
+    }
+    let big = document.insert_shape(page, big, None).expect("big");
+    let small = document.insert_shape(page, small, None).expect("small");
+    let before = document.clone();
+    let error = document
+        .group_shapes(page, &[big, small])
+        .expect_err("the re-base overflows");
+    assert!(
+        matches!(error, larrygram_model::Error::BadCell(_)),
+        "{error}"
+    );
+    assert_eq!(
+        document.shapes.len(),
+        before.shapes.len(),
+        "nothing changed"
+    );
+}
