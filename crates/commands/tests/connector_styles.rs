@@ -1230,3 +1230,62 @@ fn a_move_of_a_single_row_path_uses_the_ends() {
         "the move falls back to the straight line between the ends"
     );
 }
+
+/// A page style cell that carries a formula and no cached value falls
+/// through like a missing cell (the reads' value arms).
+#[test]
+fn a_formula_only_page_style_cell_falls_through() {
+    let (mut ctx, registry, page) = fixture();
+    let connector = draw_glued(&mut ctx, &registry, page);
+    {
+        let doc = &mut ctx.active_document_mut().expect("session").document;
+        if let Some(entry) = doc.pages.get_mut(page.index as usize) {
+            entry.sheet.cells.push(Cell {
+                name: CellName::new("RouteStyle"),
+                formula: Some("2".to_owned()),
+                value: None,
+                unit: larrygram_geom::Unit::Unitsless,
+                preserved: Preserved::new(),
+            });
+        }
+    }
+    // With the connector selected the shape read sees no value.
+    ctx.selection.shapes = vec![connector];
+    ctx.selection.anchor = Some(connector);
+    assert_eq!(connector_style(&ctx), Some(RouteStyle::RightAngle));
+    // With nothing selected the page read sees no value either.
+    ctx.selection.shapes.clear();
+    ctx.selection.anchor = None;
+    assert_eq!(connector_style(&ctx), Some(RouteStyle::RightAngle));
+}
+
+/// A glue whose resolved point is not finite leaves the stored path
+/// and warns (the re-route's unresolvable-glue arm).
+#[test]
+fn an_unresolvable_glued_end_keeps_its_path_with_a_warning() {
+    let (mut ctx, registry, page) = fixture();
+    draw_glued(&mut ctx, &registry, page);
+    let connector = shape(&ctx, page, 3);
+    // The point-glue target's row turns non-finite after the glue.
+    let left = shape(&ctx, page, 1);
+    {
+        let doc = &mut ctx.active_document_mut().expect("session").document;
+        if let Some(entity) = doc.shape_mut(left) {
+            for section in &mut entity.sheet.sections {
+                if section.name.as_str() == "Connection" {
+                    if let Some(row) = section.rows.first_mut() {
+                        for cell in &mut row.cells {
+                            if cell.name.as_str() == "X" {
+                                cell.value = Some(CellValue::Number(f64::NAN));
+                                cell.formula = None;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let before = row_types(doc(&ctx), connector);
+    dispatch(&mut ctx, &registry, "connector.reroute_all", Args::new()).expect("reroute");
+    assert_eq!(row_types(doc(&ctx), connector), before, "the path is kept");
+}
