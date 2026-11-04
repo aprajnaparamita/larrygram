@@ -5,7 +5,7 @@
 //! icon resource at build time, and `tests/build_support.rs` includes
 //! the same file so the container format is unit tested (a build
 //! script's own tests never run). No code here is committed as an
-//! asset: the `.ico` is derived from the brand `icon.svg` at build
+//! asset: the `.ico` is derived from the brand `app-icon.svg` at build
 //! time (task R11 master notes).
 
 /// The icon sizes in the `.ico`, in pixels (task R11 goal 3).
@@ -17,7 +17,7 @@ pub const ICON_SIZES: [u32; 6] = [16, 32, 48, 64, 128, 256];
 /// section 6).
 pub fn build_ico(svg: &str) -> Result<Vec<u8>, String> {
     let tree = resvg::usvg::Tree::from_str(svg, &resvg::usvg::Options::default())
-        .map_err(|error| format!("cannot parse icon.svg: {error}"))?;
+        .map_err(|error| format!("cannot parse app-icon.svg: {error}"))?;
     let width = tree.size().width().max(1.0);
     let height = tree.size().height().max(1.0);
     let mut images = Vec::with_capacity(ICON_SIZES.len());
@@ -107,9 +107,9 @@ mod tests {
                 .join("ui")
                 .join("assets")
                 .join("brand")
-                .join("icon.svg"),
+                .join("app-icon.svg"),
         )
-        .expect("the brand icon.svg reads");
+        .expect("the brand app-icon.svg reads");
         let ico = build_ico(&svg).expect("the brand icon rasterises");
         assert_eq!(&ico[4..6], &(ICON_SIZES.len() as u16).to_le_bytes());
     }

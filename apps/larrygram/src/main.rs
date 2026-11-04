@@ -151,12 +151,12 @@ fn help_text() -> &'static str {
     "usage: larrygram [--ui-layout panel-modern|panel-classic|panel-2016|panel-365] [<path>...] [--help]"
 }
 
-/// The app icon source: the single `icon.svg` brand asset (ADR 0067).
-///
-/// The web build serves the same file as the favicon
-/// (`apps/larrygram-web/index.html`); no raster copy is committed.
+/// The app icon source: `app-icon.svg`, the brand `icon.svg` artwork
+/// on an opaque white rounded square (ADR 0067). The packages' icons
+/// come from the same file; the web favicon stays the transparent
+/// `icon.svg`. No raster copy is committed.
 fn window_icon_svg() -> &'static [u8] {
-    include_bytes!("../../../crates/ui/assets/brand/icon.svg")
+    include_bytes!("../../../crates/ui/assets/brand/app-icon.svg")
 }
 
 /// Rasterises one SVG to the RGBA window icon (ADR 0067).
@@ -164,8 +164,10 @@ fn window_icon_svg() -> &'static [u8] {
 /// The pixels are unmultiplied alpha, as [`egui::IconData`] asks.
 /// A broken SVG is an error, never a panic (AGENTS.md section 6).
 fn rasterise_icon(svg: &str, size: u32) -> Result<egui::IconData, AppError> {
-    let tree = resvg::usvg::Tree::from_str(svg, &resvg::usvg::Options::default())
-        .map_err(|error| AppError::new(format!("window icon: cannot parse icon.svg: {error}")))?;
+    let tree =
+        resvg::usvg::Tree::from_str(svg, &resvg::usvg::Options::default()).map_err(|error| {
+            AppError::new(format!("window icon: cannot parse app-icon.svg: {error}"))
+        })?;
     let mut pixmap = resvg::tiny_skia::Pixmap::new(size, size).ok_or_else(|| {
         AppError::new(format!(
             "window icon: cannot allocate a {size}x{size} pixmap"
@@ -205,10 +207,11 @@ fn unpremultiply(premultiplied: &[u8]) -> Vec<u8> {
     out
 }
 
-/// The window icon from `icon.svg`, at [`ICON_PX`] (ADR 0067).
+/// The window icon from `app-icon.svg`, at [`ICON_PX`] (ADR 0067).
 fn window_icon() -> Result<egui::IconData, AppError> {
-    let svg = std::str::from_utf8(window_icon_svg())
-        .map_err(|error| AppError::new(format!("window icon: icon.svg is not UTF-8: {error}")))?;
+    let svg = std::str::from_utf8(window_icon_svg()).map_err(|error| {
+        AppError::new(format!("window icon: app-icon.svg is not UTF-8: {error}"))
+    })?;
     rasterise_icon(svg, ICON_PX)
 }
 
@@ -843,16 +846,16 @@ mod tests {
     }
 
     #[test]
-    fn the_window_icon_comes_from_the_brand_icon_svg() {
+    fn the_window_icon_comes_from_the_brand_app_icon_svg() {
         // The embedded bytes are the brand asset, unchanged.
         let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         let brand = std::fs::read(
             manifest
                 .join("..")
                 .join("..")
-                .join("crates/ui/assets/brand/icon.svg"),
+                .join("crates/ui/assets/brand/app-icon.svg"),
         )
-        .expect("the brand icon.svg reads");
+        .expect("the brand app-icon.svg reads");
         assert_eq!(window_icon_svg(), brand.as_slice());
 
         // The window icon is a rasterisation of those bytes.
@@ -864,10 +867,9 @@ mod tests {
             (ICON_PX * ICON_PX * 4) as usize,
             "RGBA pixels, one per pixel"
         );
-        assert!(
-            icon.rgba.chunks_exact(4).any(|pixel| pixel[3] > 0),
-            "the raster is not fully transparent"
-        );
+        // Opaque at the centre: the white square backs the artwork.
+        let centre = ((ICON_PX / 2) * ICON_PX + ICON_PX / 2) as usize * 4;
+        assert_eq!(icon.rgba[centre + 3], 255, "the icon's centre is opaque");
 
         let options = native_options();
         let wired = options.viewport.icon.as_deref().expect("the icon is wired");
@@ -916,10 +918,12 @@ mod tests {
             favicon,
             "the copied file keeps the favicon's name"
         );
+        let brand = std::fs::read(manifest.join("../../crates/ui/assets/brand/icon.svg"))
+            .expect("the brand icon.svg reads");
         assert_eq!(
             web_asset(&source),
-            window_icon_svg(),
-            "the favicon bytes are the brand icon.svg the window icon rasterises"
+            brand,
+            "the favicon bytes are the brand icon.svg"
         );
     }
 }

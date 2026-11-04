@@ -2,7 +2,7 @@
 //! icon resource.
 //!
 //! On a Windows host building for Windows, the script rasterises the
-//! brand `icon.svg` at build time into a multi-size `.ico` (the
+//! brand `app-icon.svg` at build time into a multi-size `.ico` (the
 //! shared `build_support/icon.rs`, also unit tested through
 //! `tests/build_support.rs`) and embeds it with `winresource` (MIT),
 //! so Explorer, the zip listing and taskbar pins show the Larrygram
@@ -73,7 +73,7 @@ fn embed_windows_icon() -> Result<(), String> {
     Ok(())
 }
 
-/// The brand `icon.svg` (ADR 0067): `crates/ui/assets/brand/icon.svg`.
+/// The app icon (ADR 0067): `crates/ui/assets/brand/app-icon.svg`.
 #[cfg(windows)]
 fn icon_svg_path() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -83,5 +83,5 @@ fn icon_svg_path() -> PathBuf {
         .join("ui")
         .join("assets")
         .join("brand")
-        .join("icon.svg")
+        .join("app-icon.svg")
 }

@@ -264,8 +264,9 @@ pub fn target_directory(json: &str) -> Result<PathBuf> {
         .ok_or_else(|| "cargo metadata: no `target_directory`".to_owned())
 }
 
-/// The brand icon source, relative to the workspace root (ADR 0067).
-pub const ICON_SVG: &str = "crates/ui/assets/brand/icon.svg";
+/// The packages' icon source, relative to the workspace root (ADR
+/// 0067): the brand artwork on an opaque white rounded square.
+pub const ICON_SVG: &str = "crates/ui/assets/brand/app-icon.svg";
 
 /// The macOS target triple (task R9 decisions). Lives here, not in
 /// [`mac`], because [`check_host`] names it on every host.
@@ -370,7 +371,7 @@ pub fn version_from_root(root: &Path) -> Result<String> {
 /// this one function.
 pub fn render_png(svg: &str, size: u32) -> Result<Vec<u8>> {
     let tree = resvg::usvg::Tree::from_str(svg, &resvg::usvg::Options::default())
-        .map_err(|e| format!("cannot parse icon.svg: {e}"))?;
+        .map_err(|e| format!("cannot parse app-icon.svg: {e}"))?;
     let width = tree.size().width().max(1.0);
     let height = tree.size().height().max(1.0);
     let mut pixmap = resvg::tiny_skia::Pixmap::new(size, size)
@@ -635,7 +636,8 @@ mod tests {
     #[test]
     fn render_png_rasterises_the_brand_icon() {
         let root = util::root();
-        let svg = std::fs::read_to_string(root.join(ICON_SVG)).expect("the brand icon.svg reads");
+        let svg =
+            std::fs::read_to_string(root.join(ICON_SVG)).expect("the brand app-icon.svg reads");
         let png = render_png(&svg, 256).unwrap();
         assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n", "not a PNG");
         let be32 = |start: usize| {

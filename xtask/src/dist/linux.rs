@@ -12,7 +12,7 @@
 //! - `larrygram.desktop` — the desktop entry from
 //!   `apps/larrygram/linux/larrygram.desktop` (task R9 goal 3);
 //! - `larrygram.png` — the 256 px icon rasterised from the brand
-//!   `icon.svg` at package time (task R9 goal 3);
+//!   `app-icon.svg` at package time (task R9 goal 3);
 //! - `INSTALL.txt` — where to copy the desktop entry and the icon
 //!   (task R9 goal 3);
 //! - `LICENSE`, `NOTICE`, `ATTRIBUTION.md` and the bundled font

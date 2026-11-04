@@ -11,7 +11,7 @@
 //! 2. render `Contents/Info.plist` from the committed template in
 //!    `apps/larrygram/macos/Info.plist`, with the workspace version
 //!    from `Cargo.toml`;
-//! 3. rasterise the brand `crates/ui/assets/brand/icon.svg` at the
+//! 3. rasterise the brand `crates/ui/assets/brand/app-icon.svg` at the
 //!    standard `.iconset` sizes with our own rasteriser (the same
 //!    resvg the app uses for its window icon, ADR 0067) and pack the
 //!    PNGs into `Contents/Resources/Larrygram.icns` with the system
@@ -628,7 +628,8 @@ mod tests {
     #[test]
     fn rasterise_iconset_writes_the_standard_pngs() {
         let root = util::root();
-        let svg = std::fs::read_to_string(root.join(ICON_SVG)).expect("the brand icon.svg reads");
+        let svg =
+            std::fs::read_to_string(root.join(ICON_SVG)).expect("the brand app-icon.svg reads");
         let tmp = TempDir::new("iconset");
         let out = tmp.join("AppIcon.iconset");
         let written = rasterise_iconset(&svg, &out).unwrap();

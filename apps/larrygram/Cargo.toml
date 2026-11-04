@@ -32,13 +32,13 @@ larrygram-ui = { path = "../../crates/ui" }
 larrygram-ui-spec = { path = "../../crates/ui-spec" }
 # The window-icon rasteriser (ADR 0067, task P7-16): the same resvg
 # 0.45 the ui crate rasterises its icons with (the `egui_extras` svg
-# pin). The brand `icon.svg` is outline paths and gradients only, so
+# pin). The brand `app-icon.svg` is paths, gradients and one blur, so
 # no text or raster-image features. MIT OR Apache-2.0 (already in the
 # tree through egui_extras).
 resvg = { version = "0.45.1", default-features = false }
 
 # The Windows icon resource (task R11 goal 3, task R12 goal 4): the
-# build script rasterises the brand `icon.svg` into a `.ico` (with
+# build script rasterises the brand `app-icon.svg` into a `.ico` (with
 # the same resvg 0.45.1 the app rasterises its window icon with) and
 # embeds it with winresource. Both are build-host tools: for
 # build-dependencies the cfg is the build host, so they compile only

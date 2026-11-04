@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1024 1024">
+  <title>app-icon.svg</title>
+  <defs>
+    <filter id="app-icon-shadow" x="-10%" y="-10%" width="120%" height="125%">
+      <feGaussianBlur stdDeviation="14"/>
+    </filter>
+  </defs>
+  <rect x="100" y="112" width="824" height="824" rx="185" fill="#000000" fill-opacity="0.28" filter="url(#app-icon-shadow)"/>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="#ffffff"/>
+  <g transform="translate(170.8 175.4) scale(0.66)">
+  <defs>
+    <style>
+      .cls-1{fill:#000000;stroke:#1a5fd6;stroke-width:22;stroke-linecap:round}
+      .cls-2{fill:url(#linear-gradient-1)}
+      .cls-3{fill:#1b5bd9}
+      .cls-4{fill:url(#linear-gradient-2)}
+      .cls-5{fill:#3f86e6}
+      .cls-6{fill:url(#linear-gradient-3)}
+    </style>
+    <linearGradient id="linear-gradient-1" x1="272" y1="100" x2="541.663" y2="531.461" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2a7bf0"/>
+      <stop offset="1" stop-color="#1e66e0"/>
+    </linearGradient>
+    <clipPath id="clip-path-1">
+      <path d="M336 100 L688 100 C723.346 100 752 128.654 752 164 L752 336 C752 371.346 723.346 400 688 400 L336 400 C300.654 400 272 371.346 272 336 L272 164 C272 128.654 300.654 100 336 100 Z"/>
+    </clipPath>
+    <linearGradient id="linear-gradient-2" x1="70" y1="580" x2="410" y2="920" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#5fa0f2"/>
+      <stop offset="1" stop-color="#4c90ec"/>
+    </linearGradient>
+    <clipPath id="clip-path-2">
+      <path d="M410 750 C410 843.888 333.888 920 240 920 C146.112 920 70 843.888 70 750 C70 656.112 146.112 580 240 580 C333.888 580 410 656.112 410 750 Z"/>
+    </clipPath>
+    <linearGradient id="linear-gradient-3" x1="564" y1="620" x2="775.765" y2="972.941" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2a7bf0"/>
+      <stop offset="1" stop-color="#1e66e0"/>
+    </linearGradient>
+    <clipPath id="clip-path-3">
+      <path d="M620 620 L908 620 C938.928 620 964 645.072 964 676 L964 804 C964 834.928 938.928 860 908 860 L620 860 C589.072 860 564 834.928 564 804 L564 676 C564 645.072 589.072 620 620 620 Z"/>
+    </clipPath>
+  </defs>
+  
+  <g id="Layer_1" data-name="Layer 1">
+    <g>
+      <path d="M420 300 L240 750" class="cls-1"/>
+      <path d="M604 300 L764 740" class="cls-1"/>
+    </g>
+    <path d="M336 100 L688 100 C723.346 100 752 128.654 752 164 L752 336 C752 371.346 723.346 400 688 400 L336 400 C300.654 400 272 371.346 272 336 L272 164 C272 128.654 300.654 100 336 100 Z" class="cls-2"/>
+    <g clip-path="url(#clip-path-1)">
+      <path d="M690 90 C630 250 500 356.667 300 410 L770 410 L770 90 Z" class="cls-3"/>
+    </g>
+    <path d="M410 750 C410 843.888 333.888 920 240 920 C146.112 920 70 843.888 70 750 C70 656.112 146.112 580 240 580 C333.888 580 410 656.112 410 750 Z" class="cls-4"/>
+    <g clip-path="url(#clip-path-2)">
+      <path d="M372 600 C347.333 753.333 260 848.333 110 885 L430 940 L430 600 Z" class="cls-5"/>
+    </g>
+    <path d="M620 620 L908 620 C938.928 620 964 645.072 964 676 L964 804 C964 834.928 938.928 860 908 860 L620 860 C589.072 860 564 834.928 564 804 L564 676 C564 645.072 589.072 620 620 620 Z" class="cls-6"/>
+    <g clip-path="url(#clip-path-3)">
+      <path d="M915 610 C868.333 743.333 760 830 590 870 L975 870 L975 610 Z" class="cls-3"/>
+    </g>
+  </g>
+  </g>
+</svg>

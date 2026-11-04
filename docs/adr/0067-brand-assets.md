@@ -107,3 +107,13 @@ may keep it.
 the MIT licence, replaced by any fork. The three goldens that render
 them (`about.png`, `wizard-welcome.png`, `wizard-layout.png`) keep the
 same restriction.
+
+## Amendment 2026-11-05: the app icon is opaque
+
+The user asked for the app icon to be opaque on white rather than
+transparent. `crates/ui/assets/brand/app-icon.svg` is derived from
+`icon.svg`: the same artwork, unmodified and scaled to 66%, centred
+on a white rounded square of 824 px on the 1024 px canvas (the macOS
+icon grid) with a soft shadow. The macOS `.icns`, the Windows `.ico`,
+the Linux package icon and the window icon rasterise `app-icon.svg`.
+The web favicon stays the transparent `icon.svg`. Both files are MIT.
