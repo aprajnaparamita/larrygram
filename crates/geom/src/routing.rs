@@ -22,6 +22,11 @@ pub enum RouteStyle {
     Straight,
     /// Segments parallel to the axes (a simple elbow, no obstacles).
     RightAngle,
+    /// The right-angle route bent into a curve
+    /// ([`curve_through`](crate::curve_through), ADR 0084 rule 8):
+    /// `route` returns the right-angle points and the caller bends
+    /// them.
+    Curved,
 }
 
 /// A glue target's box as the router clears it: the rectangle in its
@@ -185,7 +190,7 @@ pub fn route(start: Point, end: Point, options: &RouteOptions) -> Result<Vec<Poi
     }
     match options.style {
         RouteStyle::Straight => Ok(vec![start, end]),
-        RouteStyle::RightAngle => {
+        RouteStyle::RightAngle | RouteStyle::Curved => {
             if same(start, end) {
                 return Ok(vec![start, end]);
             }
@@ -348,12 +353,10 @@ fn join(
     // 180-degree turn, ignoring the box check (a check that fails
     // every candidate must not answer a route that turns back through
     // a shape); the first elbow only when none qualifies.
-    for corners in &candidates {
-        if turns_no_180(start, out, corners, back, end) {
-            return corners.clone();
-        }
-    }
-    candidates.into_iter().next().unwrap_or_default()
+    candidates
+        .into_iter()
+        .find(|corners| turns_no_180(start, out, corners, back, end))
+        .unwrap_or_default()
 }
 
 /// The full route of one candidate: start, stub out, corners, stub

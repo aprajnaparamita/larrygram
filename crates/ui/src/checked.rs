@@ -1,13 +1,44 @@
-//! The checked state the text toggles read (task P7-27 item 2): one
-//! layout-neutral seam both panels share, so Panel Modern does not
-//! call into [`crate::panel_classic`].
+//! The checked state the text toggles and the connector style rows
+//! read (task P7-27 item 2): one layout-neutral seam both panels
+//! share, so Panel Modern does not call into [`crate::panel_classic`].
 //!
 //! The seam answers `Some(on)` for the `format.text.*` toggles of a
-//! selected shape and `None` for every other command and with no
-//! selection.
+//! selected shape and for the connector style controls (task P7-36
+//! item 3), and `None` for every other command.
 
 use larrygram_commands::app::AppCtx;
+use larrygram_geom::RouteStyle;
 use larrygram_model::{CellName, SheetRef};
+
+/// The checked state of the connector style controls (task P7-36 item
+/// 3): each style row shows the current style checked — the selection
+/// anchor's (or first selected connector's) style, else the page
+/// default, the `connector.style` read. The mark shows where the
+/// control acts: a connector in the selection, or nothing selected
+/// (the page default); any other selection leaves the rows unmarked,
+/// as it leaves them disabled. `None` for every other command and
+/// with no active document.
+pub fn connector_style_checked(app: &AppCtx, command: &str) -> Option<bool> {
+    let wanted = match command {
+        "connector.right_angle" | "format.set.dyn.conn.routing.style" => RouteStyle::RightAngle,
+        "connector.straight"
+        | "connector.straight.lines"
+        | "format.set.dyn.conn.appearance.straight" => RouteStyle::Straight,
+        "connector.curved" | "connector.curved.lines" | "format.set.dyn.conn.appearance.curved" => {
+            RouteStyle::Curved
+        }
+        _ => return None,
+    };
+    let connector_selected = app.selection.shapes.iter().any(|shape| {
+        app.active_document()
+            .is_some_and(|session| session.document.is_connector(*shape))
+    });
+    if !app.selection.shapes.is_empty() && !connector_selected {
+        return None;
+    }
+    let current = larrygram_commands::builtins::connector_style(app)?;
+    Some(current == wanted)
+}
 
 /// The checked state of the text toggles (task P7-24 item 10): Bold,
 /// Italic and Underline read the selection anchor's `Character`

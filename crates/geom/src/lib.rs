@@ -12,6 +12,7 @@
 
 mod angle;
 mod curve;
+mod curve_route;
 mod error;
 mod glue;
 mod hit;
@@ -25,6 +26,7 @@ mod units;
 
 pub use angle::Angle;
 pub use curve::{Arc, Cubic, Curve, EllipticalArc, Nurbs, NurbsPoint, Polyline, Spline};
+pub use curve_route::curve_through;
 pub use error::Error;
 pub use glue::{Candidate, EndSpec, GlueEnd, GlueTarget, resolve_ends, resolve_pair};
 pub use hit::{

@@ -34,6 +34,7 @@ mod shape;
 mod sheet;
 pub mod stencils;
 mod style;
+pub mod style_cells;
 mod text;
 mod theme;
 mod values;

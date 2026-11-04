@@ -23,6 +23,10 @@ A row listed in `ui-spec/out-of-scope.txt` stays `out-of-scope` even when a comm
 | BlankPageInsertVisio | button | BlankPageInsertVisio | tab/TabInsert/GroupInsertPages | implemented |
 | Bold | toggleButton | Bold | tab/TabHome/GroupFont | implemented |
 | Bullets | toggleButton | Bullets | tab/TabHome/GroupParagraph | implemented |
+| ConnectorCurvedLines | toggleButton | ConnectorCurvedLines | tab/TabDesignVisio/GroupLayoutRouting | implemented |
+| ConnectorRightAngle | toggleButton | ConnectorRightAngle | tab/TabDesignVisio/GroupLayoutRouting | implemented |
+| ConnectorShowLineJumps | toggleButton | ConnectorShowLineJumps | tab/TabDesignVisio/GroupLayoutRouting | implemented |
+| ConnectorStraightLines | toggleButton | ConnectorStraightLines | tab/TabDesignVisio/GroupLayoutRouting | implemented |
 | ConnectorTool | toggleButton | ConnectorTool | tab/TabHome/GroupTools | implemented |
 | ConnectorsGallery | menu | ConnectorsGallery | tab/TabDesignVisio/GroupLayoutRouting | implemented |
 | Copy | button | Copy | tab/TabIconEditor/GroupIconEditClipboard | implemented |
@@ -126,10 +130,6 @@ A row listed in `ui-spec/out-of-scope.txt` stays `out-of-scope` even when a comm
 | CommentsPaneSplitButton | toggleButton | CommentsPaneSplitButton | tab/TabReviewWord/GroupComments | stub |
 | ConnectionPointTool | toggleButton | ConnectionPointTool | tab/TabHome/GroupTools | stub |
 | ConnectionPoints | checkBox | ConnectionPoints | tab/TabView/GroupVisualAids | stub |
-| ConnectorCurvedLines | toggleButton | ConnectorCurvedLines | tab/TabDesignVisio/GroupLayoutRouting | stub |
-| ConnectorRightAngle | toggleButton | ConnectorRightAngle | tab/TabDesignVisio/GroupLayoutRouting | stub |
-| ConnectorShowLineJumps | toggleButton | ConnectorShowLineJumps | tab/TabDesignVisio/GroupLayoutRouting | stub |
-| ConnectorStraightLines | toggleButton | ConnectorStraightLines | tab/TabDesignVisio/GroupLayoutRouting | stub |
 | ContactUs | button | ContactUs | tab/HelpTab/GroupHelpAndSupport | stub |
 | ContainerDisband | button | ContainerDisband | tab/TabFormat/GroupMembership | stub |
 | ContainerGallery | gallery | ContainerGallery | tab/TabInsert/GroupDiagramParts | stub |
@@ -760,11 +760,35 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | arrange.send_backward | Send Backward | implemented |
 | arrange.send_to_back | Send to Back | implemented |
 | arrange.ungroup | Ungroup | implemented |
+| connector.add_line_jumps_to | Add Line Jumps To | implemented |
+| connector.add_line_jumps_to.first_displayed_line | First Displayed Line | implemented |
+| connector.add_line_jumps_to.horizontal_lines | Horizontal Lines | implemented |
+| connector.add_line_jumps_to.last_displayed_line | Last Displayed Line | implemented |
+| connector.add_line_jumps_to.last_routed_line | Last Routed Line | implemented |
+| connector.add_line_jumps_to.no_lines | No Lines | implemented |
+| connector.add_line_jumps_to.vertical_lines | Vertical Lines | implemented |
+| connector.curved | Curved Connector | implemented |
+| connector.curved.lines | Curved Lines | implemented |
 | connector.draw | Draw Connector | implemented |
 | connector.glue_begin | Glue Begin | implemented |
 | connector.glue_end | Glue End | implemented |
+| connector.line_jump_style | Line Jump Style | implemented |
+| connector.line_jump_style.arc | Arc | implemented |
+| connector.line_jump_style.gap | Gap | implemented |
+| connector.line_jump_style.page_default | Page Default | implemented |
+| connector.line_jump_style.sides_2 | 2 Sides | implemented |
+| connector.line_jump_style.sides_3 | 3 Sides | implemented |
+| connector.line_jump_style.sides_4 | 4 Sides | implemented |
+| connector.line_jump_style.sides_5 | 5 Sides | implemented |
+| connector.line_jump_style.sides_6 | 6 Sides | implemented |
+| connector.line_jump_style.sides_7 | 7 Sides | implemented |
+| connector.line_jump_style.square | Square | implemented |
 | connector.move_end | Move Connector End | implemented |
 | connector.reroute_all | Reroute All | implemented |
+| connector.right_angle | Right-Angle Connector | implemented |
+| connector.show.line.jumps | Show Line Jumps | implemented |
+| connector.straight | Straight Connector | implemented |
+| connector.straight.lines | Straight Lines | implemented |
 | connector.style | Connector Style | implemented |
 | connector.unglue | Unglue | implemented |
 | data.set.property | Value | implemented |
@@ -804,6 +828,9 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | format.line_color.use_default | Use Default | implemented |
 | format.line_ends.no_line_ends | No Line Ends | implemented |
 | format.line_pattern.no_line | No Line | implemented |
+| format.set.dyn.conn.appearance.curved | Curved | implemented |
+| format.set.dyn.conn.appearance.straight | Straight | implemented |
+| format.set.dyn.conn.routing.style | Style | implemented |
 | format.set.fill.color | Fill Color | implemented |
 | format.set.line.color | Line Color | implemented |
 | format.set.line.ends | Ends | implemented |
@@ -993,34 +1020,10 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | arrange.space.shapes.avoid.page.breaks.toggle | Toggle | stub |
 | arrange.subtract | Shapes Object Subtract | stub |
 | arrange.trim | Shapes Object Trim | stub |
-| connector.add_line_jumps_to | Add Line Jumps To | stub |
-| connector.add_line_jumps_to.first_displayed_line | First Displayed Line | stub |
-| connector.add_line_jumps_to.horizontal_lines | Horizontal Lines | stub |
-| connector.add_line_jumps_to.last_displayed_line | Last Displayed Line | stub |
-| connector.add_line_jumps_to.last_routed_line | Last Routed Line | stub |
-| connector.add_line_jumps_to.no_lines | No Lines | stub |
-| connector.add_line_jumps_to.vertical_lines | Vertical Lines | stub |
 | connector.auto_connect | AutoConnect | stub |
 | connector.conn.points | Points | stub |
-| connector.curved | Curved Connector | stub |
-| connector.curved.lines | Curved Lines | stub |
 | connector.dyn.conn.reroute | Reroute | stub |
 | connector.dynamic.grid | Dynamic Grid | stub |
-| connector.line_jump_style | Line Jump Style | stub |
-| connector.line_jump_style.arc | Arc | stub |
-| connector.line_jump_style.gap | Gap | stub |
-| connector.line_jump_style.page_default | Page Default | stub |
-| connector.line_jump_style.sides_2 | 2 Sides | stub |
-| connector.line_jump_style.sides_3 | 3 Sides | stub |
-| connector.line_jump_style.sides_4 | 4 Sides | stub |
-| connector.line_jump_style.sides_5 | 5 Sides | stub |
-| connector.line_jump_style.sides_6 | 6 Sides | stub |
-| connector.line_jump_style.sides_7 | 7 Sides | stub |
-| connector.line_jump_style.square | Square | stub |
-| connector.right_angle | Right-Angle Connector | stub |
-| connector.show.line.jumps | Show Line Jumps | stub |
-| connector.straight | Straight Connector | stub |
-| connector.straight.lines | Straight Lines | stub |
 | data.auto.connect | Connect | stub |
 | data.auto.link | Link | stub |
 | data.auto.link.wiz | Wiz | stub |
@@ -1262,14 +1265,11 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | format.set.add.markup | Markup | stub |
 | format.set.char.color | Color | stub |
 | format.set.container.properties | Properties | stub |
-| format.set.dyn.conn.appearance.curved | Curved | stub |
 | format.set.dyn.conn.appearance.default | Default | stub |
-| format.set.dyn.conn.appearance.straight | Straight | stub |
 | format.set.dyn.conn.reroute.as.needed | Needed | stub |
 | format.set.dyn.conn.reroute.freely | Freely | stub |
 | format.set.dyn.conn.reroute.never | Never | stub |
 | format.set.dyn.conn.reroute.on.crossover | Crossover | stub |
-| format.set.dyn.conn.routing.style | Style | stub |
 | format.set.fill.pattern | Pattern | stub |
 | format.set.fill.shadow | Shadow | stub |
 | format.set.header.footer | Footer | stub |

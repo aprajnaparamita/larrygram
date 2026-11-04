@@ -29,7 +29,8 @@ use larrygram_geom::{
 use larrygram_model::CellReader;
 use larrygram_model::{
     Cell, CellLookup, CellName, CellValue, CellWrite, Connect, ConnectorEnd, Document, EndGlue,
-    PageId, Resolved, Row, RowTarget, Section, Shape, ShapeId, Sheet, SheetRef, mutate,
+    GeometryRow, PageId, Row, RowTarget, Section, Shape, ShapeId, Sheet, SheetRef, mutate,
+    style_cells,
 };
 use larrygram_shapesheet::CellAddress;
 
@@ -816,140 +817,286 @@ pub(super) fn run_reroute_all(
     ))
 }
 
-/// `connector.style`: sets `ShapeRouteStyle` on every selected shape.
+/// `connector.style`: sets the connector style (ADR 0084 rule 8, task
+/// P7-36 item 3). Arg `style` (`"right_angle"`, `"straight"` or
+/// `"curved"`), optional `page_default` flag. Writes the cells on the
+/// selected connectors, or on the page sheet when `page_default` is
+/// true or nothing is selected, and re-routes the affected connectors
+/// in one undoable edit.
 pub(super) fn run_style(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError> {
     let style = match inv.args.get("style") {
-        Some(ArgValue::Text(text)) => match text.as_str() {
-            "straight" => RouteStyle::Straight,
-            "right_angle" => RouteStyle::RightAngle,
-            _ => {
-                return Err(CommandError::invalid_args(
-                    "style must be straight or right_angle",
-                ));
-            }
-        },
+        Some(ArgValue::Text(text)) => style_from_value(text).ok_or_else(|| {
+            CommandError::invalid_args("style must be right_angle, straight or curved")
+        })?,
         Some(_) => {
             return Err(CommandError::invalid_args(
-                "style must be straight or right_angle",
+                "style must be right_angle, straight or curved",
             ));
         }
         None => {
             return Err(CommandError::NeedsInput(NeededInput::Text {
-                prompt: "connector style (straight or right_angle)".to_owned(),
+                prompt: "connector style (right_angle, straight or curved)".to_owned(),
                 default: None,
             }));
         }
     };
+    set_style(ctx, style, inv.args.flag("page_default"))
+}
+
+/// The body of `connector.style` and of every style control (task
+/// P7-36 item 3): one undoable edit that writes the style cells and
+/// re-routes the affected connectors.
+///
+/// With `page_default` true, or with nothing selected, the cells go on
+/// the page sheet (`RouteStyle`, `LineRouteExt`); otherwise on each
+/// selected routable connector (`ShapeRouteStyle`, `ConLineRouteExt`,
+/// the table of ADR 0084 rule 8). The re-route covers the styled
+/// connectors and, for a page default, the page's connectors that
+/// inherit their style from the page.
+pub(crate) fn set_style(
+    ctx: &mut AppCtx,
+    style: RouteStyle,
+    page_default: Option<bool>,
+) -> Result<Outcome, CommandError> {
     let (session, page) = active_page(ctx)?;
     let targets: Vec<ShapeId> = {
         let doc = &ctx.active_document().ok_or_else(no_document)?.document;
-        ctx.selection
-            .shapes
-            .iter()
-            .copied()
-            .filter(|shape| doc.page_of(*shape) == Some(page))
-            // A 1-D shape that is not routable (a line or a 1-D arrow)
-            // takes no style cells (ADR 0084 rule 1, amended).
-            .filter(|shape| !doc.is_connector(*shape) || doc.is_routable(*shape))
-            .collect()
+        style_targets(doc, page, &ctx.selection.shapes)
     };
-    if targets.is_empty() {
-        return Err(CommandError::failed("no selected shape to style"));
+    let on_page = page_default.unwrap_or(false) || ctx.selection.shapes.is_empty();
+    if !on_page && targets.is_empty() {
+        return Err(CommandError::failed("no selected connector to style"));
     }
-    let route_style = route_style_value(style);
-    let mut edit = CompositeEdit::new(if targets.len() == 1 {
+    let spelling = route_style_value(style);
+    let mut edit = CompositeEdit::new(if on_page {
+        "Set page connector style".to_owned()
+    } else if targets.len() == 1 {
         "Set connector style".to_owned()
     } else {
-        format!("Set connector style on {} shapes", targets.len())
+        format!("Set connector style on {} connectors", targets.len())
     });
     {
         let doc = &ctx.active_document().ok_or_else(no_document)?.document;
+        let (route_value, ext_value) = style_cells::style_values(style);
+        let cells: [(&str, f64); 2] = if on_page {
+            [
+                (style_cells::PAGE_ROUTE_STYLE, route_value),
+                (style_cells::PAGE_LINE_ROUTE_EXT, ext_value),
+            ]
+        } else {
+            [
+                (style_cells::SHAPE_ROUTE_STYLE, route_value),
+                (style_cells::CON_LINE_ROUTE_EXT, ext_value),
+            ]
+        };
         for &shape in &targets {
-            let step = CellEdit::new(
-                doc,
-                session,
-                "Set connector style",
-                SheetRef::Shape(shape),
-                "ShapeRouteStyle",
-                CellWrite::new(
-                    route_style.to_string(),
-                    CellValue::Number(f64::from(route_style)),
-                ),
-            );
-            edit.push(Box::new(step?));
+            for (name, value) in cells {
+                let step = CellEdit::new(
+                    doc,
+                    session,
+                    "Set connector style",
+                    SheetRef::Shape(shape),
+                    name,
+                    CellWrite::new(mutate::literal(value), CellValue::Number(value)),
+                );
+                edit.push(Box::new(step?));
+            }
+        }
+        if on_page {
+            for (name, value) in cells {
+                let step = CellEdit::new(
+                    doc,
+                    session,
+                    "Set connector style",
+                    SheetRef::Page(page),
+                    name,
+                    CellWrite::new(mutate::literal(value), CellValue::Number(value)),
+                );
+                edit.push(Box::new(step?));
+            }
         }
     }
     edit.apply(ctx)?;
-    let routes = reroute_connectors(ctx, page, &targets)?;
+    let affected: Vec<ShapeId> = if on_page {
+        let doc = &ctx.active_document().ok_or_else(no_document)?.document;
+        page_inheritors(doc, page)
+    } else {
+        targets.clone()
+    };
+    let routes = reroute_connectors(ctx, page, &affected)?;
     Ok(edit_outcome(
-        if style == RouteStyle::Straight {
-            "Connector style: straight"
+        if on_page {
+            format!("Page connector style: {spelling}")
         } else {
-            "Connector style: right angle"
+            format!("Connector style: {spelling}")
         },
         Vec::new(),
         with_routes(Box::new(edit), routes),
     ))
 }
 
-/// The `ShapeRouteStyle` value of a [`RouteStyle`] (Microsoft Learn,
-/// "ShapeRouteStyle Cell"): 1 = right angle, 2 = straight.
-fn route_style_value(style: RouteStyle) -> i32 {
-    if style == RouteStyle::RightAngle {
-        1
-    } else {
-        2
+/// The style targets of a selection (task P7-36 item 3): the selected
+/// shapes the style cells apply to — routable 1-D shapes (ADR 0084
+/// rule 1, amended: a line or a 1-D arrow takes none) and legacy
+/// record-only connectors (a `FromSheet` of a glue record without
+/// endpoint cells).
+pub(crate) fn style_targets(doc: &Document, page: PageId, shapes: &[ShapeId]) -> Vec<ShapeId> {
+    let routed = connector_visio_ids(doc, page).unwrap_or_default();
+    shapes
+        .iter()
+        .copied()
+        .filter(|shape| doc.page_of(*shape) == Some(page))
+        .filter(|shape| {
+            if doc.is_connector(*shape) {
+                doc.is_routable(*shape)
+            } else {
+                doc.shape(*shape)
+                    .is_some_and(|entity| routed.contains(&entity.visio_id))
+            }
+        })
+        .collect()
+}
+
+/// The `connector.style` `style` argument spelling of a [`RouteStyle`]
+/// (task P7-36 item 3).
+pub fn route_style_value(style: RouteStyle) -> &'static str {
+    match style {
+        RouteStyle::Straight => "straight",
+        RouteStyle::Curved => "curved",
+        _ => "right_angle",
     }
 }
 
-/// The [`RouteStyle`] a `ShapeRouteStyle` cached value spells (ADR 0084
-/// rule 8): 2 is straight lines; 1 (right angle), 16, the directed
-/// styles (3-15, 17-22) and unknown values all route as **right
-/// angle** in the alpha. Only 2 means straight; the old straight
-/// default goes.
-fn style_from_value(value: f64) -> RouteStyle {
-    if value == 2.0 {
-        RouteStyle::Straight
-    } else {
-        RouteStyle::RightAngle
+/// The [`RouteStyle`] a `connector.style` `style` argument spells
+/// (task P7-36 item 3).
+pub fn style_from_value(value: &str) -> Option<RouteStyle> {
+    match value {
+        "right_angle" => Some(RouteStyle::RightAngle),
+        "straight" => Some(RouteStyle::Straight),
+        "curved" => Some(RouteStyle::Curved),
+        _ => None,
     }
 }
 
-/// The style a connector routes with (ADR 0084 rule 8): its
-/// `ShapeRouteStyle` value when it has one, else the page's
-/// `RouteStyle`, else right angle. A missing or 0 cell value falls
-/// through to the page; a missing page value means right angle.
-fn connector_style(doc: &Document, connector: ShapeId) -> RouteStyle {
-    if let Some(value) = nonzero_number(doc.resolve(connector, &CellName::new("ShapeRouteStyle"))) {
-        return style_from_value(value);
+/// The style the style controls show as checked (task P7-36 item 3):
+/// the selection anchor's (or first selected connector's) style, else
+/// the page default, else right angle. `None` with no active document.
+pub fn connector_style(app: &AppCtx) -> Option<RouteStyle> {
+    let session = app.active_document()?;
+    let doc = &session.document;
+    let selected = app
+        .selection
+        .anchor
+        .or_else(|| app.selection.shapes.first().copied());
+    if let Some(shape) = selected.filter(|shape| doc.is_connector(*shape)) {
+        return Some(shape_style(doc, shape));
     }
-    if let Some(page) = doc.page_of(connector)
-        && let Some(value) =
-            nonzero_number(doc.resolve_page_cell(page, &CellName::new("RouteStyle")))
+    let page = session.active_page?;
+    Some(page_style(doc, page))
+}
+
+/// The style a connector routes with (ADR 0084 rule 8, task P7-36
+/// item 1): its own cells first, then the page's, then right angle
+/// ([`style_cells::connector_style`]). The **own** cells decide: a
+/// master's cells must not block the page default from reaching a
+/// fresh connector. A value that is only read is never rewritten.
+fn shape_style(doc: &Document, connector: ShapeId) -> RouteStyle {
+    let page_value = |name: &str| -> Option<f64> {
+        let page = doc.page_of(connector)?;
+        match doc
+            .resolve_page_cell(page, &CellName::new(name))
+            .ok()?
+            .value?
+        {
+            CellValue::Number(value) => Some(*value),
+            _ => None,
+        }
+    };
+    style_cells::connector_style(
+        own_number(doc, connector, style_cells::SHAPE_ROUTE_STYLE),
+        own_number(doc, connector, style_cells::CON_LINE_ROUTE_EXT),
+        page_value(style_cells::PAGE_ROUTE_STYLE),
+        page_value(style_cells::PAGE_LINE_ROUTE_EXT),
+    )
+}
+
+/// The page's default style (task P7-36 item 3): the page sheet's
+/// `RouteStyle` and `LineRouteExt`, then right angle.
+fn page_style(doc: &Document, page: PageId) -> RouteStyle {
+    let value = |name: &str| -> Option<f64> {
+        match doc
+            .resolve_page_cell(page, &CellName::new(name))
+            .ok()?
+            .value?
+        {
+            CellValue::Number(value) => Some(*value),
+            _ => None,
+        }
+    };
+    style_cells::connector_style(
+        None,
+        None,
+        value(style_cells::PAGE_ROUTE_STYLE),
+        value(style_cells::PAGE_LINE_ROUTE_EXT),
+    )
+}
+
+/// The page's routable connectors that inherit their style: a cell
+/// that is missing or 0 falls through to the page (ADR 0084 rule 8),
+/// so a page default change re-routes exactly these (task P7-36 item
+/// 3).
+fn page_inheritors(doc: &Document, page: PageId) -> Vec<ShapeId> {
+    let mut out = Vec::new();
+    let ids = connector_visio_ids(doc, page).unwrap_or_default();
+    for visio_id in ids {
+        let Some(shape) = doc.shape_by_visio_id(page, visio_id) else {
+            continue;
+        };
+        if doc.is_routable(shape) && inherits_style(doc, shape) {
+            out.push(shape);
+        }
+    }
+    out
+}
+
+/// Whether either of the connector's own style cells is missing or 0
+/// (so the page's value reaches it).
+fn inherits_style(doc: &Document, connector: ShapeId) -> bool {
+    let absent = |name: &str| {
+        !matches!(
+            own_number(doc, connector, name),
+            Some(value) if value.is_finite() && value != 0.0
+        )
+    };
+    absent(style_cells::SHAPE_ROUTE_STYLE) || absent(style_cells::CON_LINE_ROUTE_EXT)
+}
+
+/// The shape's own cached cell value, with no master chain and no
+/// defaults (task P7-36 item 1: the read order names "the shape's
+/// cells", and a master's cells must not block the page default).
+fn own_number(doc: &Document, shape: ShapeId, name: &str) -> Option<f64> {
+    match doc
+        .shape(shape)?
+        .sheet
+        .cells
+        .iter()
+        .find(|cell| cell.name.as_str() == name)
+        .and_then(|cell| cell.value.as_ref())
     {
-        return style_from_value(value);
+        Some(CellValue::Number(value)) => Some(*value),
+        _ => None,
     }
-    RouteStyle::RightAngle
 }
 
 /// The style one connector's path takes (ADR 0084 rule 1, amended): a
 /// 1-D shape that is not routable stays a straight line from begin to
 /// end; a routable one (or a legacy record-only connector) follows
-/// [`connector_style`].
+/// [`shape_style`].
 fn route_style_for(doc: &Document, connector: ShapeId) -> RouteStyle {
     if doc.is_connector(connector) && !doc.is_routable(connector) {
         RouteStyle::Straight
     } else {
-        connector_style(doc, connector)
-    }
-}
-
-/// The finite non-zero number a resolution carries, or `None` for a
-/// missing cell, 0 (page default, ADR 0084 rule 8) or a non-number.
-fn nonzero_number(resolved: Result<Resolved<'_>, larrygram_model::Error>) -> Option<f64> {
-    match resolved.ok()?.value? {
-        CellValue::Number(value) if value.is_finite() && *value != 0.0 => Some(*value),
-        _ => None,
+        shape_style(doc, connector)
     }
 }
 
@@ -1094,7 +1241,8 @@ fn run_draw(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError>
 
         let mut path_edit = {
             let doc = &ctx.active_document().ok_or_else(no_document)?.document;
-            let options = RouteOptions::new(route_style_for(doc, connector))
+            let style = route_style_for(doc, connector);
+            let options = RouteOptions::new(style)
                 .with_exits(begin.exit, finish.exit)
                 .with_boxes(
                     boxes.first().copied().flatten(),
@@ -1103,7 +1251,11 @@ fn run_draw(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError>
             let points = route(begin.point, finish.point, &options).map_err(|error| {
                 CommandError::failed(format!("cannot route connector: {error}"))
             })?;
-            PathEdit::new(doc, session, connector, points)?
+            if style == RouteStyle::Curved {
+                PathEdit::curved(doc, session, connector, points)?
+            } else {
+                PathEdit::new(doc, session, connector, points)?
+            }
         };
         path_edit.apply(ctx)?;
         edits.push(Box::new(path_edit));
@@ -1346,6 +1498,9 @@ struct PathEdit {
     /// whole sheet.
     old_sheet: Sheet,
     points: Vec<Point>,
+    /// Whether the write is the curved one (one `NURBSTo` row, task
+    /// P7-36 item 2).
+    curved: bool,
     /// The row cells the path write replaces (ADR 0056's dirty set).
     dirty: Vec<CellAddress>,
 }
@@ -1357,24 +1512,67 @@ impl PathEdit {
         connector: ShapeId,
         points: Vec<Point>,
     ) -> Result<Self, CommandError> {
+        Self::build(doc, session, connector, points, false)
+    }
+
+    /// A curved draw (task P7-36 item 2): the write is one `MoveTo`
+    /// and one `NURBSTo` row.
+    fn curved(
+        doc: &Document,
+        session: SessionId,
+        connector: ShapeId,
+        points: Vec<Point>,
+    ) -> Result<Self, CommandError> {
+        Self::build(doc, session, connector, points, true)
+    }
+
+    fn build(
+        doc: &Document,
+        session: SessionId,
+        connector: ShapeId,
+        points: Vec<Point>,
+        curved: bool,
+    ) -> Result<Self, CommandError> {
         let old_sheet = doc
             .shape(connector)
             .ok_or_else(|| CommandError::failed("the connector shape is missing"))?
             .sheet
             .clone();
         let mut dirty = Vec::new();
-        for (position, _) in points.iter().enumerate() {
-            let target = RowTarget {
-                position: Some(position),
-                ix: Some(i32::try_from(position).unwrap_or(i32::MAX)),
-            };
-            for cell in ["X", "Y"] {
-                dirty.push(CellAddress::in_row(
-                    SheetRef::Shape(connector),
-                    larrygram_model::SectionName::from_static("Geometry"),
-                    target,
-                    CellName::new(cell),
-                ));
+        if curved {
+            // One `MoveTo` row and one `NURBSTo` row (task P7-36 item
+            // 2).
+            for (position, cells) in [
+                (0usize, ["X", "Y"].as_slice()),
+                (1, ["X", "Y", "A", "B", "C", "D", "E"].as_slice()),
+            ] {
+                let target = RowTarget {
+                    position: Some(position),
+                    ix: Some(i32::try_from(position).unwrap_or(i32::MAX)),
+                };
+                for &cell in cells {
+                    dirty.push(CellAddress::in_row(
+                        SheetRef::Shape(connector),
+                        larrygram_model::SectionName::from_static("Geometry"),
+                        target,
+                        CellName::new(cell),
+                    ));
+                }
+            }
+        } else {
+            for (position, _) in points.iter().enumerate() {
+                let target = RowTarget {
+                    position: Some(position),
+                    ix: Some(i32::try_from(position).unwrap_or(i32::MAX)),
+                };
+                for cell in ["X", "Y"] {
+                    dirty.push(CellAddress::in_row(
+                        SheetRef::Shape(connector),
+                        larrygram_model::SectionName::from_static("Geometry"),
+                        target,
+                        CellName::new(cell),
+                    ));
+                }
             }
         }
         if doc.is_connector(connector) {
@@ -1394,6 +1592,7 @@ impl PathEdit {
             connector,
             old_sheet,
             points,
+            curved,
             dirty,
         })
     }
@@ -1412,7 +1611,11 @@ impl Edit for PathEdit {
         let connector = self.connector;
         let points = self.points.clone();
         let doc = document_mut(ctx, session)?;
-        write_path(doc, connector, &points)?;
+        if self.curved {
+            write_curve(doc, connector, &points)?;
+        } else {
+            write_path(doc, connector, &points)?;
+        }
         ctx.touch_session(session);
         Ok(())
     }
@@ -1475,26 +1678,81 @@ pub(crate) fn translate_one_d(
             .map_err(model_error);
     }
     // The drawn rows through the page transform: a moved route keeps
-    // its bends. Rows that give fewer than two points become the
+    // its bends and, for a curved route, its control points (task
+    // P7-36 item 2). Rows that give fewer than two points become the
     // straight line between the ends.
     let transform = page_transform(doc, shape)?;
-    let mut path: Vec<Point> = doc
+    let mut curved = false;
+    let mut path: Vec<Point> = Vec::new();
+    if let Some(rowed) = doc
         .shape_geometry(shape)
         .ok()
         .and_then(|geometry| geometry.paths.into_iter().next())
-        .map(|path| {
-            path.rows
-                .iter()
-                .filter_map(row_point)
-                .map(|point| transform.apply(point))
-                .collect()
-        })
-        .unwrap_or_default();
+    {
+        let (width, height) = size_cells(doc, shape);
+        for row in &rowed.rows {
+            match row {
+                GeometryRow::NurbsTo { x, y, data, .. } => {
+                    curved = true;
+                    if let Some(data) = data {
+                        for point in &data.points {
+                            let local = fraction_point(
+                                point.x,
+                                point.y,
+                                data.x_type,
+                                data.y_type,
+                                width,
+                                height,
+                            );
+                            path.push(transform.apply(local));
+                        }
+                    }
+                    path.push(transform.apply(Point::new(*x, *y)));
+                }
+                _ => {
+                    if let Some(point) = row_point(row) {
+                        path.push(transform.apply(point));
+                    }
+                }
+            }
+        }
+    }
     if path.len() < 2 {
         path = vec![begin, end];
+        curved = false;
     }
     let moved: Vec<Point> = path.into_iter().map(shift).collect();
-    write_path(doc, shape, &moved)
+    if curved {
+        write_curve(doc, shape, &moved)
+    } else {
+        write_path(doc, shape, &moved)
+    }
+}
+
+/// The shape's cached `Width`/`Height`, for fraction-of-size NURBS
+/// control points; 1.0 when the cell is missing or not a finite
+/// number.
+fn size_cells(doc: &Document, shape: ShapeId) -> (f64, f64) {
+    let value = |name: &str| -> f64 {
+        match doc
+            .resolve(shape, &CellName::new(name))
+            .ok()
+            .and_then(|resolved| resolved.value)
+        {
+            Some(CellValue::Number(value)) if value.is_finite() => *value,
+            _ => 1.0,
+        }
+    };
+    (value("Width"), value("Height"))
+}
+
+/// A `NURBS()` control point in local coordinates (`xType`/`yType` 0
+/// scales by the shape's size, 1 is local; the `NURBS()` reference).
+fn fraction_point(x: f64, y: f64, x_type: u32, y_type: u32, width: f64, height: f64) -> Point {
+    Point::new(
+        if x_type == 0 { x * width } else { x },
+        if y_type == 0 { y * height } else { y },
+    )
 }
 
 /// The error of a parent transform that cannot be inverted.
@@ -2124,7 +2382,11 @@ fn route_one(
         CommandError::failed(format!("cannot route connector {visio_id}: {error}"))
     })?;
     let before = PathRows::capture(doc, connector);
-    write_path(doc, connector, &points)?;
+    if style == RouteStyle::Curved {
+        write_curve(doc, connector, &points)?;
+    } else {
+        write_path(doc, connector, &points)?;
+    }
     let after = PathRows::capture(doc, connector);
     entries.push(RouteRows {
         shape: connector,
@@ -2510,6 +2772,27 @@ fn row_point(row: &larrygram_model::GeometryRow) -> Option<Point> {
     }
 }
 
+/// The connector's **page-space** path mapped into its parent's space
+/// (task P5-11: `geometry_endpoints` reads the rows back through the
+/// same chain; the model's writes map on into the shape's own local
+/// box).
+fn mapped_path(
+    doc: &Document,
+    connector: ShapeId,
+    points: &[Point],
+) -> Result<Vec<Point>, CommandError> {
+    let parent = match doc
+        .shape(connector)
+        .ok_or_else(|| CommandError::failed("the connector is gone"))?
+        .parent
+    {
+        Some(parent) => page_transform(doc, parent)?,
+        None => Transform::identity(),
+    };
+    let inverse = parent.invert().map_err(|_| singular())?;
+    Ok(points.iter().map(|point| inverse.apply(*point)).collect())
+}
+
 /// Writes the connector's **page-space** path as its literal geometry
 /// rows (ADR 0045).
 ///
@@ -2523,17 +2806,22 @@ fn write_path(
     connector: ShapeId,
     points: &[Point],
 ) -> Result<(), CommandError> {
-    let parent = match doc
-        .shape(connector)
-        .ok_or_else(|| CommandError::failed("the connector is gone"))?
-        .parent
-    {
-        Some(parent) => page_transform(doc, parent)?,
-        None => Transform::identity(),
-    };
-    let inverse = parent.invert().map_err(|_| singular())?;
-    let local: Vec<Point> = points.iter().map(|point| inverse.apply(*point)).collect();
+    let local = mapped_path(doc, connector, points)?;
     doc.write_connector_path(connector, &local)
+        .map_err(model_error)
+}
+
+/// Writes the connector's **page-space** curved path (task P7-36 item
+/// 2): [`Document::write_connector_curve`] bends the route's points
+/// into one `NURBSTo` row, in the same parent mapping as
+/// [`write_path`].
+fn write_curve(
+    doc: &mut Document,
+    connector: ShapeId,
+    points: &[Point],
+) -> Result<(), CommandError> {
+    let local = mapped_path(doc, connector, points)?;
+    doc.write_connector_curve(connector, &local)
         .map_err(model_error)
 }
 
@@ -2739,18 +3027,26 @@ mod tests {
     }
 
     #[test]
-    fn the_style_values_match_the_shapesheet_reference() {
-        assert_eq!(route_style_value(RouteStyle::RightAngle), 1);
-        assert_eq!(route_style_value(RouteStyle::Straight), 2);
-        assert_eq!(style_from_value(1.0), RouteStyle::RightAngle);
-        assert_eq!(style_from_value(2.0), RouteStyle::Straight);
-        // ADR 0084 rule 8: right angle everywhere the old default was
-        // straight (0, 16, the directed styles and unknown values).
-        assert_eq!(style_from_value(0.0), RouteStyle::RightAngle);
-        assert_eq!(style_from_value(f64::NAN), RouteStyle::RightAngle);
-        assert_eq!(style_from_value(16.0), RouteStyle::RightAngle);
-        assert_eq!(style_from_value(3.0), RouteStyle::RightAngle);
-        assert_eq!(style_from_value(22.0), RouteStyle::RightAngle);
+    fn the_style_spellings_round_trip_the_table() {
+        assert_eq!(route_style_value(RouteStyle::RightAngle), "right_angle");
+        assert_eq!(route_style_value(RouteStyle::Straight), "straight");
+        assert_eq!(route_style_value(RouteStyle::Curved), "curved");
+        for style in [
+            RouteStyle::RightAngle,
+            RouteStyle::Straight,
+            RouteStyle::Curved,
+        ] {
+            assert_eq!(style_from_value(route_style_value(style)), Some(style));
+        }
+        assert_eq!(style_from_value("right-angle"), None);
+        assert_eq!(style_from_value(""), None);
+        // The cells a choice writes (ADR 0084 rule 8's table).
+        assert_eq!(
+            style_cells::style_values(RouteStyle::RightAngle),
+            (1.0, 1.0)
+        );
+        assert_eq!(style_cells::style_values(RouteStyle::Straight), (2.0, 1.0));
+        assert_eq!(style_cells::style_values(RouteStyle::Curved), (1.0, 2.0));
     }
 
     #[test]
@@ -2758,9 +3054,8 @@ mod tests {
         let (mut ctx, session, page, connector, _left, _right) = fixture();
         // No local style and no page value: right angle (ADR 0084 rule 8).
         let doc = ctx.active_document().expect("session").document.clone();
-        assert_eq!(connector_style(&doc, connector), RouteStyle::RightAngle);
-        // A missing or 0 cell value falls through to the page's
-        // `RouteStyle`.
+        assert_eq!(shape_style(&doc, connector), RouteStyle::RightAngle);
+        // A missing or 0 cell value falls through to the page's cells.
         let doc = document_mut(&mut ctx, session).expect("session");
         doc.write_cell(
             SheetRef::Page(page),
@@ -2769,17 +3064,41 @@ mod tests {
         )
         .expect("page style");
         let doc = ctx.active_document().expect("session").document.clone();
-        assert_eq!(connector_style(&doc, connector), RouteStyle::Straight);
-        // A local value of 16 (center-to-centre) routes as right angle.
+        assert_eq!(shape_style(&doc, connector), RouteStyle::Straight);
+        // The curved pair on the page reaches a connector with no cells
+        // of its own (task P7-36 item 1).
         let doc = document_mut(&mut ctx, session).expect("session");
         doc.write_cell(
-            SheetRef::Shape(connector),
-            &CellName::new("ShapeRouteStyle"),
-            &CellWrite::new("16", CellValue::Number(16.0)),
+            SheetRef::Page(page),
+            &CellName::new("RouteStyle"),
+            &CellWrite::new("1", CellValue::Number(1.0)),
         )
-        .expect("local style");
+        .expect("page style");
+        doc.write_cell(
+            SheetRef::Page(page),
+            &CellName::new("LineRouteExt"),
+            &CellWrite::new("2", CellValue::Number(2.0)),
+        )
+        .expect("page ext");
         let doc = ctx.active_document().expect("session").document.clone();
-        assert_eq!(connector_style(&doc, connector), RouteStyle::RightAngle);
+        assert_eq!(shape_style(&doc, connector), RouteStyle::Curved);
+        // Local values 16 and 6 (center-to-centre and multi-connector)
+        // route as right angle over a curved page (ADR 0084 rule 8).
+        for value in [16.0, 6.0, 23.0] {
+            let doc = document_mut(&mut ctx, session).expect("session");
+            doc.write_cell(
+                SheetRef::Shape(connector),
+                &CellName::new("ShapeRouteStyle"),
+                &CellWrite::new(mutate::literal(value), CellValue::Number(value)),
+            )
+            .expect("local style");
+            let doc = ctx.active_document().expect("session").document.clone();
+            assert_eq!(
+                shape_style(&doc, connector),
+                RouteStyle::RightAngle,
+                "{value}"
+            );
+        }
     }
 
     #[test]
@@ -3070,23 +3389,20 @@ mod tests {
         let bad_style = dispatch(
             &mut ctx,
             "connector.style",
-            Args::new().with("style", ArgValue::Text("curved".to_owned())),
+            Args::new().with("style", ArgValue::Text("diagonal".to_owned())),
         )
         .expect_err("bad style");
         assert!(
-            bad_style.to_string().contains("straight or right_angle"),
+            bad_style
+                .to_string()
+                .contains("style must be right_angle, straight or curved"),
             "{bad_style}"
         );
 
-        let no_selection = dispatch(
-            &mut ctx,
-            "connector.style",
-            Args::new().with("style", ArgValue::Text("straight".to_owned())),
-        )
-        .expect_err("no selection");
+        let no_style = dispatch(&mut ctx, "connector.style", Args::new()).expect_err("no style");
         assert!(
-            no_selection.to_string().contains("no selected shape"),
-            "{no_selection}"
+            no_style.to_string().contains("connector style"),
+            "{no_style}"
         );
     }
 
