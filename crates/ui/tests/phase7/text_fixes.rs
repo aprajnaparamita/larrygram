@@ -19,8 +19,8 @@ use egui_kittest::kittest::{NodeT, Queryable};
 use larrygram_commands::app::AppCtx;
 use larrygram_geom::{Point, Unit};
 use larrygram_model::{
-    Cell, CellName, CellValue, Document, Page, PageId, Preserved, Row, Section, SectionName, Shape,
-    ShapeId, TextContent, TextPart,
+    Cell, CellName, CellValue, Color, Document, Master, MasterId, Page, PageId, Preserved, Row,
+    Section, SectionName, Shape, ShapeId, TextContent, TextPart,
 };
 use larrygram_ui_spec::LayoutKind;
 
@@ -901,8 +901,10 @@ fn redo_of_a_new_text_box_restores_the_shape_and_its_text() {
 /// existing text object edits that object's text and no new box
 /// appears. Task P7-48 item 1: a click inside the object being edited
 /// is a caret move in its field — the edit stays and the typed text
-/// with it; a click on another shape commits first and edits that
-/// shape.
+/// with it. Task P7-51 item 3: the click is mid-word and the typed
+/// letter lands at the click (the caret moved there), not at the end.
+/// A click on another shape commits first (task P7-25: it used to
+/// drop it) and edits that shape.
 #[test]
 fn a_click_with_the_text_tool_commits_first_and_edits_the_object() {
     for kind in LAYOUTS {
@@ -915,15 +917,29 @@ fn a_click_with_the_text_tool_commits_first_and_edits_the_object() {
             editing(&mut rig),
             "{kind:?}: a click inside a text object edits its text"
         );
-        type_text(&mut rig, "!");
-        // The second click inside the same object keeps the edit and
-        // the typed text (task P7-48 item 1: the field's clicks are
-        // caret moves, not commits).
-        click_at(&mut rig, pos);
+        // Four equal glyphs, then a click mid-word: the caret moves to
+        // the click and the letter lands there (task P7-51 item 3).
+        press_key(
+            &mut rig,
+            egui::Key::A,
+            egui::Modifiers {
+                command: true,
+                ..egui::Modifiers::NONE
+            },
+        );
+        type_text(&mut rig, "MMMM");
+        let park = screen(&rig, 1.0, 5.5);
+        rig.harness().event(egui::Event::PointerMoved(park));
+        rig.run();
+        let image = rig.render();
+        let block = block_rect(&rig, (5.0, 2.75, 7.0, 3.25));
+        let ink = ink_bbox(&image, block.shrink(2.0), 1.0).expect("the typed text draws");
+        click_at(&mut rig, ink.center());
         assert!(
             editing(&mut rig),
             "{kind:?}: the click inside the field keeps the edit"
         );
+        type_text(&mut rig, "X");
         assert_eq!(shape_count(&rig), 2, "{kind:?}: no stray text box");
         // A click on the other shape commits the typed text first
         // (task P7-25: it used to drop it) and edits that shape.
@@ -931,15 +947,90 @@ fn a_click_with_the_text_tool_commits_first_and_edits_the_object() {
         click_at(&mut rig, other);
         assert_eq!(
             shape_text(&rig, box_),
-            "Box!",
-            "{kind:?}: the click keeps the typed text"
+            "MMXMM",
+            "{kind:?}: the letter landed at the click (mid-word)"
         );
         assert!(
             editing(&mut rig),
             "{kind:?}: and starts editing the other shape"
         );
         press_key(&mut rig, egui::Key::Escape, egui::Modifiers::NONE);
-        assert_eq!(shape_text(&rig, box_), "Box!", "{kind:?}: Escape keeps it");
+        assert_eq!(shape_text(&rig, box_), "MMXMM", "{kind:?}: Escape keeps it");
+    }
+}
+
+/// The in-place editor's buffer as the field publishes it.
+fn editor_value(rig: &mut ShellRig) -> Option<String> {
+    rig.run();
+    rig.harness()
+        .root()
+        .query_all_by_role_and_label(Role::MultilineTextInput, "Text")
+        .next()
+        .and_then(|node| node.value())
+}
+
+/// The undoable steps of the active document, oldest first.
+fn undo_labels(rig: &ShellRig) -> Vec<String> {
+    let shell = rig.shell.borrow();
+    let session = shell.app.active_document().expect("session");
+    session
+        .undo
+        .undo_labels()
+        .iter()
+        .map(|s| (*s).to_owned())
+        .collect()
+}
+
+/// Task P7-51 item 3: a Text-tool press inside the edited shape's
+/// text block but off the field keeps the edit and moves the caret to
+/// the nearest position, with no new undo step; the typed text lands
+/// in the edit.
+#[test]
+fn a_text_tool_click_below_the_field_keeps_the_edit() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        // One undo step first (the lightened fill), so the assertion
+        // reads "one step".
+        select_shape(&mut rig);
+        white_fill(&mut rig, kind);
+        choose_text_tool(&mut rig, kind);
+        let pos = screen(&rig, BOX.0, BOX.1);
+        click_at(&mut rig, pos);
+        assert!(editing(&mut rig), "{kind:?}: the click edits the text");
+        press_key(
+            &mut rig,
+            egui::Key::A,
+            egui::Modifiers {
+                command: true,
+                ..egui::Modifiers::NONE
+            },
+        );
+        type_text(&mut rig, "Hi");
+        // Below the one-row field, inside the text block.
+        let below = screen(&rig, 6.0, 2.85);
+        click_at(&mut rig, below);
+        assert!(
+            editing(&mut rig),
+            "{kind:?}: the click below the field keeps the edit"
+        );
+        assert_eq!(
+            undo_labels(&rig),
+            vec!["Set fill color #FFFFFF".to_owned()],
+            "{kind:?}: the press is no new undo step"
+        );
+        type_text(&mut rig, "!");
+        assert_eq!(
+            editor_value(&mut rig).as_deref(),
+            Some("Hi!"),
+            "{kind:?}: the text lands in the edit"
+        );
+        press_key(&mut rig, egui::Key::Escape, egui::Modifiers::NONE);
+        let box_ = text_box(&rig.shell.borrow().app);
+        assert_eq!(
+            shape_text(&rig, box_),
+            "Hi!",
+            "{kind:?}: the edit commits its text"
+        );
     }
 }
 
@@ -1998,6 +2089,415 @@ fn the_format_shape_pane_keeps_the_typed_character_start() {
             shape_text(&rig, shape),
             "Q",
             "{kind:?}: the shape's text is untouched"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Item 1 (task P7-51): the field sits where the text is drawn — the
+// block's text margins and the first paragraph's horizontal alignment
+// through the scene. Every flow is real input in both layouts.
+// ---------------------------------------------------------------------------
+
+/// A text cell.
+fn str_cell(name: &str, value: &str) -> Cell {
+    Cell {
+        name: CellName::new(name),
+        formula: Some(format!("\"{value}\"")),
+        value: Some(CellValue::Str(value.to_owned())),
+        unit: Unit::Unitsless,
+        preserved: Preserved::new(),
+    }
+}
+
+/// The `Paragraph` and `Character` rows of a fixture shape: one
+/// paragraph of `horz` alignment and one run in the "Selawik" face at
+/// 12 pt (the face the theme registers, so the field draws with the
+/// drawn face and the two wrap alike).
+fn text_rows(horz: f64) -> Vec<Section> {
+    let mut paragraph = Section::new(SectionName::from_static("Paragraph"));
+    let mut para = Row::new();
+    para.ix = Some(0);
+    para.cells = vec![cell("HorzAlign", horz)];
+    paragraph.rows.push(para);
+    let mut character = Section::new(SectionName::from_static("Character"));
+    let mut run = Row::new();
+    run.ix = Some(0);
+    run.cells = vec![str_cell("Font", "Selawik"), cell("Size", 1.0 / 6.0)];
+    character.rows.push(run);
+    vec![paragraph, character]
+}
+
+/// The document of the centred-master flow (task P7-51 item 1): one
+/// instance of a master whose shape's paragraph is centred and whose
+/// text is `MASTER_TEXT` (our masters centre their text, P7-44). The
+/// instance has no text of its own (task P7-40).
+fn centred_master_document() -> (AppCtx, ShapeId) {
+    let mut document = Document::new();
+    let mut page = Page::new(PageId { index: 0 }, 1);
+    page.name = "Page-1".to_owned();
+    let mut master_shape = text_shape(SHAPE.0, SHAPE.1, 2.0, 1.0, "MM", 101);
+    master_shape.sheet.sections.extend(text_rows(1.0));
+    let master_shape = document.add_shape(master_shape);
+    let mut master = Master::new(MasterId { index: 0 }, 100);
+    master.name_u = "Centred box".to_owned();
+    master.shapes = vec![master_shape];
+    document.masters.push(master);
+    let mut instance = text_shape(SHAPE.0, SHAPE.1, 2.0, 1.0, "", 1);
+    instance.master = Some(MasterId { index: 0 });
+    let instance = document.add_shape(instance);
+    page.shapes.push(instance);
+    document.pages.push(page);
+    let mut app = AppCtx::new(crate::seen_settings());
+    app.open_document(larrygram_commands::DocumentSession::new(document, None));
+    app.selection.page = Some(PageId { index: 0 });
+    (app, instance)
+}
+
+/// The document of the margins flow (task P7-51 item 1): one shape
+/// with `LeftMargin` 0.5 in and left-aligned text.
+fn margin_document() -> (AppCtx, ShapeId) {
+    let mut document = Document::new();
+    let mut page = Page::new(PageId { index: 0 }, 1);
+    page.name = "Page-1".to_owned();
+    let mut shape = text_shape(SHAPE.0, SHAPE.1, 2.0, 1.0, "MM", 1);
+    shape.sheet.cells.push(cell("LeftMargin", 0.5));
+    shape.sheet.sections.extend(text_rows(0.0));
+    let shape = document.add_shape(shape);
+    page.shapes.push(shape);
+    document.pages.push(page);
+    let mut app = AppCtx::new(crate::seen_settings());
+    app.open_document(larrygram_commands::DocumentSession::new(document, None));
+    app.selection.page = Some(PageId { index: 0 });
+    (app, shape)
+}
+
+/// A colour cell.
+fn colour_cell(name: &str, value: Color) -> Cell {
+    Cell {
+        name: CellName::new(name),
+        formula: None,
+        value: Some(CellValue::Color(value)),
+        unit: Unit::Unitsless,
+        preserved: Preserved::new(),
+    }
+}
+
+/// The document of the wrap flow (task P7-51 item 1): one shape whose
+/// 1 x 0.5 in text block has 0.25 in side margins (a 0.5 in inner
+/// width) and the left-aligned two-word text "MMM MMM", which wraps
+/// between the words when drawn.
+fn wrap_document() -> (AppCtx, ShapeId) {
+    let mut document = Document::new();
+    let mut page = Page::new(PageId { index: 0 }, 1);
+    page.name = "Page-1".to_owned();
+    let mut shape = text_shape(SHAPE.0, SHAPE.1, 2.0, 1.0, "MMM MMM", 1);
+    // A light fill (the black drawn text must read on it).
+    shape.sheet.cells.push(colour_cell(
+        "FillForegnd",
+        Color {
+            r: 245,
+            g: 245,
+            b: 245,
+        },
+    ));
+    shape.sheet.cells.extend([
+        cell("TxtPinX", 1.0),
+        cell("TxtPinY", 0.5),
+        cell("TxtLocPinX", 0.5),
+        cell("TxtLocPinY", 0.25),
+        cell("TxtWidth", 1.0),
+        cell("TxtHeight", 0.5),
+        cell("LeftMargin", 0.25),
+        cell("RightMargin", 0.25),
+    ]);
+    shape.sheet.sections.extend(text_rows(0.0));
+    let shape = document.add_shape(shape);
+    page.shapes.push(shape);
+    document.pages.push(page);
+    let mut app = AppCtx::new(crate::seen_settings());
+    app.open_document(larrygram_commands::DocumentSession::new(document, None));
+    app.selection.page = Some(PageId { index: 0 });
+    (app, shape)
+}
+
+/// A shell in `kind` over `app` at display scale `ppp`, the fixture
+/// rectangle centred in the viewport (the text fixtures' rule).
+fn placement_rig(app: AppCtx, kind: LayoutKind, ppp: f32) -> ShellRig {
+    let mut app = app;
+    app.settings.ui_layout = kind;
+    app.settings.default_layout = kind;
+    let mut rig = ShellRig::with_app_at(app, egui::vec2(1600.0, 900.0), ppp);
+    rig.harness().ctx.options_mut(|options| {
+        options.input_options.max_double_click_delay = 10.0;
+    });
+    // The caret must not add ink to the measurements (the screenshots
+    // rig's `steady_caret` rule, and no zero-width caret either).
+    rig.harness().ctx.global_style_mut(|style| {
+        style.visuals.text_cursor.blink = false;
+        style.visuals.text_cursor.stroke.width = 0.0;
+        style.visuals.text_cursor.stroke.color = egui::Color32::TRANSPARENT;
+        style.visuals.text_cursor.preview = false;
+    });
+    rig.run();
+    {
+        let viewport = rig
+            .shell
+            .borrow()
+            .canvas_viewport()
+            .expect("the canvas drew");
+        let mut shell = rig.shell.borrow_mut();
+        let session = shell.app.active_document_mut().expect("session");
+        let k = 96.0;
+        session.view.zoom = 1.0;
+        session.view.pan = Point::new(
+            f64::from(viewport.width()) / 2.0 / k - SHAPE.0,
+            f64::from(viewport.height()) / 2.0 / k - (11.0 - SHAPE.1),
+        );
+    }
+    rig.run();
+    rig.run();
+    rig
+}
+
+/// Opens the in-place editor over the fixture shape and replaces its
+/// text with `text` (double click, select all, type).
+fn edit_text(rig: &mut ShellRig, text: &str) {
+    select_shape(rig);
+    let pos = screen(rig, SHAPE.0, SHAPE.1);
+    double_click_at(rig, pos);
+    assert!(editing(rig), "the double click opens the editor");
+    press_key(
+        rig,
+        egui::Key::A,
+        egui::Modifiers {
+            command: true,
+            ..egui::Modifiers::NONE
+        },
+    );
+    type_text(rig, text);
+}
+
+/// The screen rect of the page box `(x0, y0, x1, y1)` in `rig`.
+fn block_rect(rig: &ShellRig, bounds: (f64, f64, f64, f64)) -> egui::Rect {
+    let top_left = screen(rig, bounds.0, bounds.3);
+    let bottom_right = screen(rig, bounds.2, bounds.1);
+    egui::Rect::from_min_max(top_left, bottom_right)
+}
+
+/// The screen bounding box of the ink in `region`, in image pixels
+/// scaled by `ppp` (the far-from-background rule of the picture
+/// checks: the region's most common colour is its background).
+fn ink_bbox(image: &image::RgbaImage, region: egui::Rect, ppp: f32) -> Option<egui::Rect> {
+    let scale = |v: f32| (v * ppp).round() as i64;
+    let (px0, py0) = (scale(region.min.x).max(0), scale(region.min.y).max(0));
+    let (px1, py1) = (
+        scale(region.max.x).min(i64::from(image.width())),
+        scale(region.max.y).min(i64::from(image.height())),
+    );
+    let mut counts: std::collections::HashMap<(u8, u8, u8), usize> =
+        std::collections::HashMap::new();
+    for y in py0..py1 {
+        for x in px0..px1 {
+            let p = image.get_pixel(x as u32, y as u32);
+            *counts.entry((p[0], p[1], p[2])).or_default() += 1;
+        }
+    }
+    let background = counts
+        .iter()
+        .max_by_key(|(_, count)| *count)
+        .map(|(colour, _)| *colour)?;
+    let (mut min_x, mut min_y) = (i64::MAX, i64::MAX);
+    let (mut max_x, mut max_y) = (i64::MIN, i64::MIN);
+    for y in py0..py1 {
+        for x in px0..px1 {
+            let p = image.get_pixel(x as u32, y as u32);
+            let far = i32::from(p[0]) - i32::from(background.0);
+            let far = far
+                .abs()
+                .max((i32::from(p[1]) - i32::from(background.1)).abs());
+            let far = far.max((i32::from(p[2]) - i32::from(background.2)).abs());
+            if far > 40 {
+                min_x = min_x.min(x);
+                min_y = min_y.min(y);
+                max_x = max_x.max(x);
+                max_y = max_y.max(y);
+            }
+        }
+    }
+    if min_x > max_x {
+        return None;
+    }
+    let inv = 1.0 / ppp;
+    Some(egui::Rect::from_min_max(
+        egui::pos2(min_x as f32 * inv, min_y as f32 * inv),
+        egui::pos2((max_x + 1) as f32 * inv, (max_y + 1) as f32 * inv),
+    ))
+}
+
+/// The `(left, right)` x extents of each ink band (one per text line)
+/// in `region`, top to bottom, in screen pixels.
+fn ink_bands(image: &image::RgbaImage, region: egui::Rect, ppp: f32) -> Vec<(f32, f32)> {
+    let scale = |v: f32| (v * ppp).round() as i64;
+    let (px0, py0) = (scale(region.min.x).max(0), scale(region.min.y).max(0));
+    let (px1, py1) = (
+        scale(region.max.x).min(i64::from(image.width())),
+        scale(region.max.y).min(i64::from(image.height())),
+    );
+    let mut counts: std::collections::HashMap<(u8, u8, u8), usize> =
+        std::collections::HashMap::new();
+    for y in py0..py1 {
+        for x in px0..px1 {
+            let p = image.get_pixel(x as u32, y as u32);
+            *counts.entry((p[0], p[1], p[2])).or_default() += 1;
+        }
+    }
+    let background = counts
+        .iter()
+        .max_by_key(|(_, count)| *count)
+        .map(|(colour, _)| *colour)
+        .unwrap_or((0, 0, 0));
+    let inked = |x: i64, y: i64| {
+        let p = image.get_pixel(x as u32, y as u32);
+        let far = i32::from(p[0]) - i32::from(background.0);
+        let far = far
+            .abs()
+            .max((i32::from(p[1]) - i32::from(background.1)).abs());
+        let far = far.max((i32::from(p[2]) - i32::from(background.2)).abs());
+        far > 40
+    };
+    let mut bands: Vec<(f32, f32)> = Vec::new();
+    let mut in_band = false;
+    let (mut left, mut right) = (0i64, 0i64);
+    let inv = 1.0 / ppp;
+    for y in py0..py1 {
+        let mut row_left = i64::MAX;
+        let mut row_right = i64::MIN;
+        for x in px0..px1 {
+            if inked(x, y) {
+                row_left = row_left.min(x);
+                row_right = row_right.max(x);
+            }
+        }
+        if row_left <= row_right {
+            if in_band {
+                left = left.min(row_left);
+                right = right.max(row_right);
+            } else {
+                in_band = true;
+                left = row_left;
+                right = row_right + 1;
+            }
+            right = right.max(row_right + 1);
+        } else if in_band {
+            bands.push((left as f32 * inv, right as f32 * inv));
+            in_band = false;
+        }
+    }
+    if in_band {
+        bands.push((left as f32 * inv, right as f32 * inv));
+    }
+    bands
+}
+
+/// Task P7-51 item 1: on a centred master the typed text's ink is
+/// centred in the block within a pixel or two, at 1x and 2x.
+#[test]
+fn the_field_centres_the_typed_text_in_the_block() {
+    for ppp in [1.0f32, 2.0] {
+        for kind in LAYOUTS {
+            let (app, _) = centred_master_document();
+            let mut rig = placement_rig(app, kind, ppp);
+            edit_text(&mut rig, "MMMM");
+            let block = block_rect(&rig, (2.0, 2.5, 4.0, 3.5));
+            // Park the pointer off the block and render.
+            let park = screen(&rig, 1.0, 5.5);
+            rig.harness().event(egui::Event::PointerMoved(park));
+            rig.run();
+            let image = rig.render();
+            let ink = ink_bbox(&image, block.shrink(3.0), ppp)
+                .unwrap_or_else(|| panic!("{kind:?} at {ppp}x: the typed text draws"));
+            let offset = (ink.center().x - block.center().x).abs();
+            assert!(
+                offset <= 2.0,
+                "{kind:?} at {ppp}x: the typed ink {ink:?} is centred in {block:?} \
+                 (offset {offset})"
+            );
+        }
+    }
+}
+
+/// Task P7-51 item 1: a line that wraps when drawn wraps at the same
+/// word in the field ("MMM MMM" breaks between the words at the 0.5 in
+/// inner width, not at the 1 in block width).
+#[test]
+fn the_field_wraps_where_the_drawn_text_wraps() {
+    for kind in LAYOUTS {
+        let (app, _) = wrap_document();
+        let mut rig = placement_rig(app, kind, 1.0);
+        let shape = rectangle(&rig.shell.borrow().app);
+        let pos = screen(&rig, SHAPE.0, SHAPE.1);
+        double_click_at(&mut rig, pos);
+        assert!(editing(&mut rig), "{kind:?}: the double click edits");
+        let block = block_rect(&rig, (2.5, 2.75, 3.5, 3.25));
+        // The field's wrapped lines while the edit is open.
+        let park = screen(&rig, 1.0, 5.5);
+        rig.harness().event(egui::Event::PointerMoved(park));
+        rig.run();
+        let image = rig.render();
+        let field_bands = ink_bands(&image, block.shrink(2.0), 1.0);
+        // The same text drawn after the unchanged commit.
+        press_key(&mut rig, egui::Key::Escape, egui::Modifiers::NONE);
+        assert!(!editing(&mut rig), "{kind:?}: Escape ends the edit");
+        let park = screen(&rig, 1.0, 5.5);
+        rig.harness().event(egui::Event::PointerMoved(park));
+        rig.run();
+        let image = rig.render();
+        let drawn_bands = ink_bands(&image, block.shrink(2.0), 1.0);
+        assert_eq!(
+            field_bands.len(),
+            2,
+            "{kind:?}: the field wraps into two lines ({field_bands:?})"
+        );
+        assert_eq!(
+            drawn_bands.len(),
+            2,
+            "{kind:?}: the drawn text wraps into two lines ({drawn_bands:?})"
+        );
+        for (field, drawn) in field_bands.iter().zip(drawn_bands.iter()) {
+            assert!(
+                (field.0 - drawn.0).abs() <= 2.0 && (field.1 - drawn.1).abs() <= 2.0,
+                "{kind:?}: the field breaks at the drawn word: \
+                 {field_bands:?} vs {drawn_bands:?}"
+            );
+        }
+        assert_eq!(
+            shape_text(&rig, shape),
+            "MMM MMM",
+            "{kind:?}: the unchanged commit writes nothing"
+        );
+    }
+}
+
+/// Task P7-51 item 1: a shape with `LeftMargin` 0.5 in starts its
+/// field 0.5 in (48 px at 1x) from the block's left edge.
+#[test]
+fn the_field_starts_at_the_left_margin() {
+    for kind in LAYOUTS {
+        let (app, _) = margin_document();
+        let mut rig = placement_rig(app, kind, 1.0);
+        edit_text(&mut rig, "MMMM");
+        let block = block_rect(&rig, (2.0, 2.5, 4.0, 3.5));
+        let park = screen(&rig, 1.0, 5.5);
+        rig.harness().event(egui::Event::PointerMoved(park));
+        rig.run();
+        let image = rig.render();
+        let ink = ink_bbox(&image, block.shrink(3.0), 1.0)
+            .unwrap_or_else(|| panic!("{kind:?}: the typed text draws"));
+        let offset = ink.min.x - block.min.x;
+        assert!(
+            (offset - 48.0).abs() <= 3.0,
+            "{kind:?}: the field starts {offset} px in, 0.5 in is 48 px ({ink:?})"
         );
     }
 }

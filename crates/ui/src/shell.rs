@@ -790,6 +790,7 @@ impl Shell {
             self.draw_context_menus(ui, &mut intents);
             self.show_dialogs(ui, &mut intents);
             self.note_open_menus(ui.ctx());
+            self.finish_frame_flags(ui.ctx());
             return Ok(intents);
         }
 
@@ -806,7 +807,19 @@ impl Shell {
         self.show_dialogs(ui, &mut intents);
         self.record_layout_state();
         self.note_open_menus(ui.ctx());
+        self.finish_frame_flags(ui.ctx());
         Ok(intents)
+    }
+
+    /// The derived frame state refreshed after the widgets took the
+    /// frame's keystrokes (task P7-51 item 2): the pending box's
+    /// emptiness flag is fresh in the frame that types the first
+    /// character, so the title marker and the published changed flag
+    /// (`publish_changed` reads `is_dirty` after `show_in`) read that
+    /// frame's state, not the previous frame's.
+    fn finish_frame_flags(&mut self, ctx: &Context) {
+        self.refresh_pending_text_empty();
+        self.sync_window_title(ctx);
     }
 
     /// Puts the window in and out of full screen when
@@ -1698,10 +1711,28 @@ impl Shell {
             }
             events.insert(0, crate::tools::ToolEvent::Cancel);
         }
-        // Any click with the Text tool first commits the text being
-        // typed (task P7-25 item 9): the commit intents run before the
-        // click's own, so a click inside the object being typed sees
-        // the written text.
+        // A Text-tool press inside the edited shape's text block but
+        // off the field keeps the edit and moves the caret (task
+        // P7-51 item 3: one keep-the-edit area). The press is dropped:
+        // the tool neither commits the text nor opens a box over the
+        // block, and no undo step appears. The area is where the
+        // editor drew last frame.
+        if self.tools.tool == crate::tools::Tool::Text && self.editor.is_active() {
+            events.retain(|event| {
+                let pos = match event {
+                    crate::tools::ToolEvent::PointerDown { pos, .. }
+                    | crate::tools::ToolEvent::PointerUp { pos, .. }
+                    | crate::tools::ToolEvent::DoubleClick { pos } => *pos,
+                    _ => return true,
+                };
+                self.page_to_screen(pos)
+                    .is_none_or(|screen| !self.editor.press_keeps_edit(screen))
+            });
+        }
+        // Any other click with the Text tool first commits the text
+        // being typed (task P7-25 item 9): the commit intents run
+        // before the click's own, so a click inside the object being
+        // typed sees the written text.
         if self.tools.tool == crate::tools::Tool::Text
             && self.editor.is_active()
             && events
@@ -2194,13 +2225,13 @@ impl Shell {
         self.text_box = Some(TrackedBox { session, shape });
     }
 
-    /// Ends the typing interaction of a tracked box whose document,
-    /// shape or undo group went away underneath it (task P7-37 item 5:
-    /// every way the editor can end closes the group).
-    fn sync_text_box(&mut self) {
-        // The pending box's emptiness (task P7-48 item 6): an empty
-        // new text box is not a change, and the moment it carries
-        // typed text it is one again.
+    /// The pending box's emptiness (task P7-48 item 6, task P7-51
+    /// item 2): an empty new text box is not a change, and the moment
+    /// it carries typed text it is one again. The flag is refreshed
+    /// after the editor has taken the frame's keystrokes (the end of
+    /// [`Shell::show_in`] as well as here), so the first typed
+    /// character marks the drawing in its own frame.
+    fn refresh_pending_text_empty(&mut self) {
         let pending_empty = self.text_box.map(|_| self.editor.buffer.is_empty());
         for session in &mut self.app.documents {
             session.pending_text_empty = None;
@@ -2214,6 +2245,13 @@ impl Shell {
         {
             session.pending_text_empty = Some(empty);
         }
+    }
+
+    /// Ends the typing interaction of a tracked box whose document,
+    /// shape or undo group went away underneath it (task P7-37 item 5:
+    /// every way the editor can end closes the group).
+    fn sync_text_box(&mut self) {
+        self.refresh_pending_text_empty();
         let Some(tracked) = self.text_box else {
             return;
         };

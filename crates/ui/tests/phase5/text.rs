@@ -89,7 +89,15 @@ fn typing_into_the_editor_writes_the_shape_text() {
                 .expect("dispatch");
             harness_intents.borrow_mut().extend(produced);
             let mut editor = harness_editor.borrow_mut();
-            let produced = editor.show(ui, EditorOverlay { rect, font: None });
+            let produced = editor.show(
+                ui,
+                EditorOverlay {
+                    rect,
+                    field: rect,
+                    align: egui::Align::LEFT,
+                    font: None,
+                },
+            );
             if !matches!(produced, EditorAction::Pending) {
                 *harness_action.borrow_mut() = produced;
             }
@@ -154,9 +162,15 @@ fn the_text_shortcut_scope_is_active_while_the_editor_is_focused() {
                 .expect("dispatch");
             harness_intents.borrow_mut().extend(produced);
             drop(app);
-            harness_editor
-                .borrow_mut()
-                .show(ui, EditorOverlay { rect, font: None });
+            harness_editor.borrow_mut().show(
+                ui,
+                EditorOverlay {
+                    rect,
+                    field: rect,
+                    align: egui::Align::LEFT,
+                    font: None,
+                },
+            );
         });
     harness.run();
     harness.event(key_event(
@@ -197,9 +211,15 @@ fn escape_commits_and_leaves_the_editor_idle() {
     let mut harness = Harness::builder()
         .with_size(egui::vec2(400.0, 300.0))
         .build_ui(move |ui| {
-            let produced = harness_editor
-                .borrow_mut()
-                .show(ui, EditorOverlay { rect, font: None });
+            let produced = harness_editor.borrow_mut().show(
+                ui,
+                EditorOverlay {
+                    rect,
+                    field: rect,
+                    align: egui::Align::LEFT,
+                    font: None,
+                },
+            );
             if !matches!(produced, EditorAction::Pending) {
                 *harness_action.borrow_mut() = produced;
             }

@@ -60,6 +60,20 @@ pub struct TextEditor {
     /// text-format control click keeps the edit open and the field
     /// takes the keys back the same frame.
     refocus_requested: bool,
+    /// Where the edit drew last (task P7-51 item 3): the block and
+    /// field screen rects of the previous [`TextEditor::show`], the
+    /// shell's Text-tool keep-the-edit area.
+    shown: Option<ShownArea>,
+}
+
+/// Where the edit drew (task P7-51 item 3): the text block's screen
+/// rect and the field's own.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ShownArea {
+    /// The text block's screen rect (the overlay's box).
+    block: egui::Rect,
+    /// The field's screen rect.
+    field: egui::Rect,
 }
 
 impl TextEditor {
@@ -148,6 +162,16 @@ impl TextEditor {
         self.refocus_requested = true;
     }
 
+    /// Whether a press at `screen` lands in the edited text block's
+    /// keep-the-edit area (the block or the field's own rect) (task
+    /// P7-51 item 3): the edit stays and the caret moves to the
+    /// nearest position, so the shell's Text-tool rule drops the press
+    /// instead of committing. Reads where the edit drew last frame.
+    pub fn press_keeps_edit(&self, screen: egui::Pos2) -> bool {
+        self.shown
+            .is_some_and(|shown| shown.block.contains(screen) || shown.field.contains(screen))
+    }
+
     /// The shape's text as the editor started with it (unchanged-buffer
     /// detection): the effective text (task P7-40), so a master's text
     /// on an instance with none of its own is the start state. A stale
@@ -189,6 +213,14 @@ impl TextEditor {
         } else {
             egui::Rect::from_min_size(ui.ctx().viewport_rect().min, egui::vec2(160.0, 40.0))
         };
+        // The field sits where the drawn text sits (task P7-51 item
+        // 1): the block inset by its text margins, aligned like the
+        // first paragraph. A broken inner box falls back to the block.
+        let field = if finite_rect(overlay.field) && overlay.field.width() > 0.0 {
+            overlay.field
+        } else {
+            rect
+        };
         // The field's font matches the drawn text (task P7-41 item 9)
         // and its text sits on the drawn first baseline: the galley
         // starts one measured ascent below it. The drawn family wins
@@ -222,22 +254,32 @@ impl TextEditor {
         // The caret goes to the end of the buffer when the editor
         // opens (task P7-29 item 2).
         let buffer_chars = self.buffer.chars().count();
+        // The frame's press (the caret move of task P7-51 item 3 and
+        // the commit rule below).
+        let press = ui.input(|input| {
+            input
+                .pointer
+                .any_pressed()
+                .then(|| input.pointer.interact_pos())
+                .flatten()
+        });
         let mut commit = false;
         // The field's own rect joins the commit test (task P7-48 item
         // 1: a field that grows with typed lines never commits on a
         // press inside itself).
-        let mut field = None;
-        let field_width = rect.width().max(1.0);
+        let mut field_response = None;
+        let field_width = field.width().max(1.0);
         egui::Area::new(editor_id(self.shape))
             .order(egui::Order::Foreground)
-            .fixed_pos(rect.min + egui::vec2(0.0, baseline_shift))
+            .fixed_pos(egui::pos2(field.min.x, rect.min.y + baseline_shift))
             .show(ui.ctx(), |ui| {
                 ui.set_min_width(field_width);
                 // A new text box's field fills the outlined box
                 // (task P7-26 item 3): a click anywhere inside the box
                 // moves the caret and keeps editing. An existing
-                // shape's edit keeps its one-row field (its click rule
-                // is task P7-25 item 9's commit-first).
+                // shape's edit keeps its one-row field; a press inside
+                // the block but off the field is the same keep-the-edit
+                // area (task P7-51 item 3), handled below.
                 let rows = if self.pending.is_some() {
                     let font = egui::TextStyle::Body.resolve(ui.style());
                     let row = ui.fonts_mut(|fonts| fonts.row_height(&font));
@@ -250,12 +292,15 @@ impl TextEditor {
                 let mut edit = egui::TextEdit::multiline(&mut self.buffer)
                     // The one outline of the edit is the text block's,
                     // painted below (task P7-25 item 9). The margin is
-                    // zero (task P7-41 item 9): the field's text starts
-                    // at the block's box, not inside an inset. The
-                    // wrap width is the block width (task P7-48 item
-                    // 1): the field wraps where the drawn text wraps.
+                    // zero (task P7-41 item 9): the inset lives in the
+                    // field's box (task P7-51 item 1 — the block's
+                    // text margins), and the wrap width is the inner
+                    // width, so the field wraps where the drawn text
+                    // wraps. The typed text aligns like the drawn
+                    // text (the first paragraph's `HorzAlign`).
                     .frame(egui::Frame::NONE)
                     .margin(egui::Margin::ZERO)
+                    .align(egui::Align2::new(overlay.align, egui::Align::TOP))
                     .desired_width(field_width)
                     .desired_rows(rows);
                 if let Some(font) = font.clone() {
@@ -267,23 +312,57 @@ impl TextEditor {
                 // The editor's accessible name (task P7-24: the tests
                 // and screen readers find the field by it).
                 output.response.response = output.response.response.clone().accessible_name("Text");
-                if open_focus {
-                    output.response.request_focus();
-                } else if refocus {
-                    hand_keyboard(ui.ctx(), output.response.id);
-                }
-                if open_focus {
-                    // The caret sits at the end of the text when the
-                    // editor opens (task P7-29 item 2): a stale cursor
-                    // from an earlier edit of the same shape must not
-                    // survive the re-open (egui keeps the field's
-                    // state under its id). A refocus (task P7-41 item
-                    // 1) leaves the caret alone.
+                // A press inside the text block but off the field
+                // (task P7-51 item 3: one keep-the-edit area) moves
+                // the caret to the nearest position and keeps the
+                // edit. A press on a popup over the block belongs to
+                // the popup.
+                let pressed_caret = match press {
+                    Some(pos)
+                        if rect.contains(pos)
+                            && !output.response.rect.contains(pos)
+                            && !other_layer_at(ui.ctx(), pos, self.shape) =>
+                    {
+                        Some(output.galley.cursor_from_pos(
+                            pos - output.galley_pos + egui::vec2(output.galley.rect.left(), 0.0),
+                        ))
+                    }
+                    _ => None,
+                };
+                if let Some(cursor) = pressed_caret {
+                    // The caret moves to the press and the field takes
+                    // the keyboard (task P7-51 item 3).
                     output
                         .state
                         .cursor
-                        .set_char_range(Some(CCursorRange::one(CCursor::new(buffer_chars))));
+                        .set_char_range(Some(CCursorRange::one(cursor)));
                     output.state.store(ui.ctx(), output.response.id);
+                    output.response.request_focus();
+                    // egui surrenders the field's focus one frame
+                    // after a press outside it (the click that moved
+                    // the caret), so the field takes the keys back
+                    // again on the next frame (the refocus of task
+                    // P7-41 item 1).
+                    self.refocus_requested = true;
+                } else {
+                    if open_focus {
+                        output.response.request_focus();
+                    } else if refocus {
+                        hand_keyboard(ui.ctx(), output.response.id);
+                    }
+                    if open_focus {
+                        // The caret sits at the end of the text when the
+                        // editor opens (task P7-29 item 2): a stale cursor
+                        // from an earlier edit of the same shape must not
+                        // survive the re-open (egui keeps the field's
+                        // state under its id). A refocus (task P7-41 item
+                        // 1) leaves the caret alone.
+                        output
+                            .state
+                            .cursor
+                            .set_char_range(Some(CCursorRange::one(CCursor::new(buffer_chars))));
+                        output.state.store(ui.ctx(), output.response.id);
+                    }
                 }
                 // Escape commits (ADR 0044) — except when a popup
                 // or menu is open (task P7-48 item 3): Escape closes
@@ -293,27 +372,25 @@ impl TextEditor {
                 {
                     commit = true;
                 }
-                field = Some((output.response.rect, output.response.id));
+                field_response = Some((output.response.rect, output.response.id));
             });
+        // Where the edit drew this frame (task P7-51 item 3): the
+        // shell's Text-tool rule reads it as its keep-the-edit area.
+        self.shown = field_response.map(|(field, _)| ShownArea { block: rect, field });
         // The commit-on-outside-press rule (ADR 0044, task P7-41 item
         // 1, task P7-48 item 1): a press inside the text block or the
         // field's own rect keeps the edit; a press on text-format UI
         // keeps it too and hands the keyboard back (the caret
         // untouched); any other press outside commits.
-        let commit_on_press = match ui.input(|input| {
-            input
-                .pointer
-                .any_pressed()
-                .then(|| input.pointer.interact_pos())
-                .flatten()
-        }) {
+        let commit_on_press = match press {
             Some(pos)
-                if !rect.contains(pos) && !field.is_some_and(|(field, _)| field.contains(pos)) =>
+                if !rect.contains(pos)
+                    && !field_response.is_some_and(|(field, _)| field.contains(pos)) =>
             {
                 match press_rule(ui.ctx(), self.shape, pos) {
                     PressRule::Commit => true,
                     PressRule::KeepAndRefocus => {
-                        if let Some((_, id)) = field {
+                        if let Some((_, id)) = field_response {
                             hand_keyboard(ui.ctx(), id);
                         }
                         false
@@ -443,6 +520,15 @@ pub fn other_layer_open(ctx: &egui::Context, shape: Option<ShapeId>) -> bool {
     })
 }
 
+/// Whether a press at `pos` lands on a foreground layer other than the
+/// editor's own area (a popup, menu or palette drawn over the block):
+/// the press belongs to that layer, not to the field.
+fn other_layer_at(ctx: &egui::Context, pos: egui::Pos2, shape: Option<ShapeId>) -> bool {
+    let own = editor_id(shape);
+    ctx.layer_id_at(pos)
+        .is_some_and(|layer| layer.order == egui::Order::Foreground && layer.id != own)
+}
+
 /// Hands the keyboard back to the editor's field `id` (task P7-41
 /// item 1) — but only when nothing else holds it (task P7-48 item 8):
 /// a popup's own field keeps its typing.
@@ -476,11 +562,7 @@ enum PressRule {
 /// not one of them: a press on it but off the text block commits, like
 /// any press outside.
 fn press_rule(ctx: &egui::Context, shape: Option<ShapeId>, pos: egui::Pos2) -> PressRule {
-    let own = editor_id(shape);
-    if ctx
-        .layer_id_at(pos)
-        .is_some_and(|layer| layer.order == egui::Order::Foreground && layer.id != own)
-    {
+    if other_layer_at(ctx, pos, shape) {
         return PressRule::KeepAndRefocus;
     }
     let pass = ctx.cumulative_pass_nr();
@@ -541,6 +623,14 @@ fn one_run(buffer: &str, markers: RunMarkers) -> TextContent {
 pub struct EditorOverlay {
     /// The drawn text's screen box: the fill and outline of the edit.
     pub rect: egui::Rect,
+    /// The field's screen box inside [`Self::rect`]: the text block
+    /// inset by the block's text margins (task P7-51 item 1: the field
+    /// sits where the drawn text sits, and wraps at the inner width).
+    pub field: egui::Rect,
+    /// The field's horizontal alignment, the first paragraph's
+    /// `HorzAlign` through the scene (task P7-51 item 1; justified and
+    /// unknown alignments edit left).
+    pub align: egui::Align,
     /// The drawn text's font metrics, or `None` for a plain field over
     /// a box with no drawn text (a pending text box, or a shape whose
     /// text draws no ink).
@@ -591,16 +681,27 @@ pub fn editor_rect(
     let k = 96.0 * zoom;
     // The box is the text block (task P7-48 item 1: the review's M1 —
     // the commit test, the fill and the wrap width follow the block,
-    // not the laid-out glyphs); the font size and the first baseline
-    // come from the drawn first glyph (task P7-41 item 9). The metrics
-    // drop when the text or the shape is turned or flipped (task P7-48
-    // item 7): a tilted or mirrored first baseline is no axis' y, and
-    // egui text edits are axis-aligned.
-    let page = node
-        .text
-        .as_ref()
+    // not the laid-out glyphs); the field sits inside it where the
+    // drawn text sits: inset by the block's text margins and aligned
+    // like the first paragraph (task P7-51 item 1). The font size and
+    // the first baseline come from the drawn first glyph (task P7-41
+    // item 9). The metrics drop when the text or the shape is turned
+    // or flipped (task P7-48 item 7): a tilted or mirrored first
+    // baseline is no axis' y, and egui text edits are axis-aligned.
+    let text = node.text.as_ref();
+    let page = text
         .and_then(|text| text_block_bounds(text, transform))
         .or_else(|| node_bounds(scene, &path).ok())?;
+    let inner = text
+        .and_then(|text| text_inner_bounds(text, transform))
+        .unwrap_or(page);
+    let align = match text.map(|text| text.horz_align) {
+        Some(larrygram_text::Align::Center) => egui::Align::Center,
+        Some(larrygram_text::Align::Right) => egui::Align::RIGHT,
+        // Justified and unknown alignments edit left (task P7-51 item
+        // 1).
+        _ => egui::Align::LEFT,
+    };
     let font = node
         .text
         .as_ref()
@@ -616,19 +717,29 @@ pub fn editor_rect(
                 family,
             })
         });
-    let min = egui::pos2(
-        viewport.min.x + ((pan.x + page.min.x) * k) as f32,
-        viewport.min.y + ((pan.y + scene.height - page.max.y) * k) as f32,
-    );
-    let max = egui::pos2(
-        viewport.min.x + ((pan.x + page.max.x) * k) as f32,
-        viewport.min.y + ((pan.y + scene.height - page.min.y) * k) as f32,
-    );
-    if !min.x.is_finite() || !min.y.is_finite() || !max.x.is_finite() || !max.y.is_finite() {
-        return None;
-    }
+    // One page box to its screen rect: x right, y down (the page y
+    // flips through `scene.height`).
+    let map = |box_: GeoRect| {
+        let min = egui::pos2(
+            viewport.min.x + ((pan.x + box_.min.x) * k) as f32,
+            viewport.min.y + ((pan.y + scene.height - box_.max.y) * k) as f32,
+        );
+        let max = egui::pos2(
+            viewport.min.x + ((pan.x + box_.max.x) * k) as f32,
+            viewport.min.y + ((pan.y + scene.height - box_.min.y) * k) as f32,
+        );
+        if !min.x.is_finite() || !min.y.is_finite() || !max.x.is_finite() || !max.y.is_finite() {
+            None
+        } else {
+            Some(egui::Rect::from_min_max(min, max))
+        }
+    };
+    let rect = map(page)?;
+    let field = map(inner)?;
     Some(EditorOverlay {
-        rect: egui::Rect::from_min_max(min, max),
+        rect,
+        field,
+        align,
         font,
     })
 }
@@ -661,6 +772,8 @@ pub fn pending_editor_rect(
     }
     Some(EditorOverlay {
         rect: egui::Rect::from_min_max(min, max),
+        field: egui::Rect::from_min_max(min, max),
+        align: egui::Align::LEFT,
         font: None,
     })
 }
@@ -757,9 +870,42 @@ fn text_block_bounds(
     text: &larrygram_render::scene::TextNode,
     transform: Transform,
 ) -> Option<GeoRect> {
+    text_box_bounds(text, transform, larrygram_text::Insets::default())
+}
+
+/// The laid-out text's bounds in page inches (task P7-51 item 1): the
+/// block box inset by the block's text margins
+/// ([`larrygram_render::scene::TextNode::margins`]), the same mapping
+/// as [`text_block_bounds`]. Falls back to `None` when the margins eat
+/// the box (the caller keeps the whole block then).
+fn text_inner_bounds(
+    text: &larrygram_render::scene::TextNode,
+    transform: Transform,
+) -> Option<GeoRect> {
+    text_box_bounds(text, transform, text.margins)
+}
+
+/// The bounds of one box of the text block's layout space, in page
+/// inches: the box `(left, top)`..`(width - right, height - bottom)`
+/// for `inset`, turned about the block's centre and placed at the
+/// node's origin (`origin + (x, -y)`), then mapped through the shape
+/// transform (the [`text_block_bounds`] recipe).
+fn text_box_bounds(
+    text: &larrygram_render::scene::TextNode,
+    transform: Transform,
+    inset: larrygram_text::Insets,
+) -> Option<GeoRect> {
     let width = text.block.width;
     let height = text.block.height;
     if !width.is_finite() || !height.is_finite() || width <= 0.0 || height <= 0.0 {
+        return None;
+    }
+    let (left, top) = (inset.left, inset.top);
+    let (right, bottom) = (width - inset.right, height - inset.bottom);
+    if !left.is_finite() || !top.is_finite() || !right.is_finite() || !bottom.is_finite() {
+        return None;
+    }
+    if left < 0.0 || top < 0.0 || right <= left || bottom <= top {
         return None;
     }
     let origin = text.origin;
@@ -772,10 +918,10 @@ fn text_block_bounds(
     }
     let (cx, cy) = (width / 2.0, height / 2.0);
     let corners = [
-        Point::new(0.0, 0.0),
-        Point::new(width, 0.0),
-        Point::new(width, height),
-        Point::new(0.0, height),
+        Point::new(left, top),
+        Point::new(right, top),
+        Point::new(right, bottom),
+        Point::new(left, bottom),
     ];
     let mut bounds: Option<GeoRect> = None;
     for corner in corners {
@@ -1011,6 +1157,8 @@ mod tests {
             layout: Default::default(),
             color: Rgba::opaque(0, 0, 0),
             block: larrygram_geom::Size::new(2.0, 1.0),
+            margins: larrygram_text::Insets::default(),
+            horz_align: larrygram_text::Align::Left,
             origin: Point::new(1.0, 3.0),
         };
         text_node.layout.width = 2.0;
@@ -1101,6 +1249,8 @@ mod tests {
             layout: Default::default(),
             color: Rgba::opaque(0, 0, 0),
             block: larrygram_geom::Size::new(2.0, 1.0),
+            margins: larrygram_text::Insets::default(),
+            horz_align: larrygram_text::Align::Left,
             origin: Point::new(1.0, 3.0),
         };
         text_node.layout.lines.push(larrygram_text::Line {
@@ -1157,6 +1307,8 @@ mod tests {
             layout: Default::default(),
             color: Rgba::opaque(0, 0, 0),
             block: larrygram_geom::Size::new(1.0, 1.0),
+            margins: larrygram_text::Insets::default(),
+            horz_align: larrygram_text::Align::Left,
             origin: Point::new(0.0, 0.0),
         };
         assert_eq!(drawn_font(&empty, Transform::identity()), None);
@@ -1271,6 +1423,8 @@ mod tests {
             layout: Default::default(),
             color: Rgba::opaque(0, 0, 0),
             block: larrygram_geom::Size::new(0.0, 0.0),
+            margins: larrygram_text::Insets::default(),
+            horz_align: larrygram_text::Align::Left,
             origin: Point::new(0.0, 0.0),
         };
         assert_eq!(text_block_bounds(&node, Transform::identity()), None);
@@ -1281,6 +1435,124 @@ mod tests {
         node.layout.rotation = Angle::from_radians(0.0);
         node.origin = Point::new(f64::INFINITY, 0.0);
         assert_eq!(text_block_bounds(&node, Transform::identity()), None);
+    }
+
+    /// Task P7-51 item 1: the field is the block inset by the text
+    /// margins and aligned like the first paragraph (centred and right
+    /// map through; justified and unknown alignments edit left).
+    #[test]
+    fn editor_rect_insets_the_field_and_follows_the_alignment() {
+        let mut scene = Scene::new(8.5, 11.0);
+        let mut node = SceneShape {
+            shape_id: Some(ShapeId { index: 3 }),
+            transform: Transform::identity(),
+            path: Default::default(),
+            fill: None,
+            stroke: None,
+            shadow: None,
+            clip: None,
+            text: Some(font_node()),
+        };
+        let text_node = node.text.as_mut().expect("text");
+        text_node.margins = larrygram_text::Insets {
+            left: 0.5,
+            right: 0.25,
+            top: 0.125,
+            bottom: 0.125,
+        };
+        text_node.horz_align = larrygram_text::Align::Center;
+        scene.nodes = vec![Node::Shape(Box::new(node.clone()))];
+        let viewport = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0));
+        let overlay = editor_rect(
+            &scene,
+            ShapeId { index: 3 },
+            viewport,
+            Point::new(0.0, 0.0),
+            1.0,
+        )
+        .expect("rect");
+        // The block is 2 x 1 in at origin (1, 3): 192 x 96 px at 1x.
+        assert!(
+            (overlay.rect.width() - 2.0 * 96.0).abs() < 0.01,
+            "{:?}",
+            overlay.rect
+        );
+        assert!(
+            (overlay.field.min.x - (overlay.rect.min.x + 0.5 * 96.0)).abs() < 0.01,
+            "{:?}",
+            overlay.field
+        );
+        assert!(
+            (overlay.field.width() - (2.0 - 0.5 - 0.25) * 96.0).abs() < 0.01,
+            "{:?}",
+            overlay.field
+        );
+        assert!(
+            (overlay.field.min.y - (overlay.rect.min.y + 0.125 * 96.0)).abs() < 0.01,
+            "{:?}",
+            overlay.field
+        );
+        assert!(
+            (overlay.field.height() - (1.0 - 0.25) * 96.0).abs() < 0.01,
+            "{:?}",
+            overlay.field
+        );
+        assert_eq!(overlay.align, egui::Align::Center);
+
+        // Right maps through; justified and unknown alignments edit
+        // left (task P7-51 item 1).
+        for (horz, want) in [
+            (larrygram_text::Align::Right, egui::Align::RIGHT),
+            (larrygram_text::Align::Justify, egui::Align::LEFT),
+            (larrygram_text::Align::Left, egui::Align::LEFT),
+        ] {
+            let text_node = node.text.as_mut().expect("text");
+            text_node.horz_align = horz;
+            scene.nodes = vec![Node::Shape(Box::new(node.clone()))];
+            let overlay = editor_rect(
+                &scene,
+                ShapeId { index: 3 },
+                viewport,
+                Point::new(0.0, 0.0),
+                1.0,
+            )
+            .expect("rect");
+            assert_eq!(overlay.align, want, "{horz:?}");
+        }
+    }
+
+    /// Margins that eat the block fall back to the whole block (task
+    /// P7-51 item 1: the field never turns inside out).
+    #[test]
+    fn editor_rect_falls_back_to_the_block_when_the_margins_eat_it() {
+        let mut scene = Scene::new(8.5, 11.0);
+        let mut node = SceneShape {
+            shape_id: Some(ShapeId { index: 3 }),
+            transform: Transform::identity(),
+            path: Default::default(),
+            fill: None,
+            stroke: None,
+            shadow: None,
+            clip: None,
+            text: Some(font_node()),
+        };
+        node.text.as_mut().expect("text").margins = larrygram_text::Insets {
+            left: 0.0,
+            right: 3.0,
+            top: 0.0,
+            bottom: 0.0,
+        };
+        scene.nodes = vec![Node::Shape(Box::new(node))];
+        let viewport = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0));
+        let overlay = editor_rect(
+            &scene,
+            ShapeId { index: 3 },
+            viewport,
+            Point::new(0.0, 0.0),
+            1.0,
+        )
+        .expect("rect");
+        assert_eq!(overlay.field, overlay.rect, "{overlay:?}");
     }
 
     #[test]

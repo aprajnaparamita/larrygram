@@ -23,6 +23,10 @@ larrygram-model = { path = "../model" }
 # because the panes need the typed mapping in their own code).
 larrygram-shapesheet = { path = "../shapesheet" }
 larrygram-render = { path = "../render" }
+# The drawn text's layout types (ADR 0024): the in-place editor reads
+# the block's text margins and alignment from the scene's `TextNode`
+# (task P7-51 item 1) and needs the same types in its own code.
+larrygram-text = { path = "../text" }
 larrygram-ui-spec = { path = "../ui-spec" }
 # The settings slot format (ADR 0032): `Settings` as JSON in the
 # eframe storage key. MIT OR Apache-2.0 (already in the tree).
@@ -72,9 +76,6 @@ proptest = "1"
 # item 3): the test asserts what the file holds, not what the document
 # holds after the fact.
 larrygram-vsdx = { path = "../vsdx" }
-# The bundled faces of the drawn text (task P7-41 item 9): the
-# text-ink unit tests measure real glyph outlines.
-larrygram-text = { path = "../text" }
 # Parses the committed YAML in the tests only (the runtime loader is
 # `larrygram-ui-spec`'s; MIT, the same YAML parser `xtask` uses, ADR
 # 0007): the `contexts.yaml` and layout cross-check (P7-08) and the

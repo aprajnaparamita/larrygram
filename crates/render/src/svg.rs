@@ -1478,6 +1478,8 @@ mod tests {
             },
             color: Rgba::opaque(0, 0, 255),
             block: larrygram_geom::Size::new(1.0, 1.0),
+            margins: larrygram_text::Insets::default(),
+            horz_align: larrygram_text::Align::Left,
             origin: Point::new(1.0, 2.0),
         };
         let shape = Shape {
@@ -1539,6 +1541,8 @@ mod tests {
             },
             color: Rgba::opaque(0, 0, 255),
             block: larrygram_geom::Size::new(1.0, 1.0),
+            margins: larrygram_text::Insets::default(),
+            horz_align: larrygram_text::Align::Left,
             origin: Point::new(1.0, 2.0),
         };
         scene.nodes.push(Node::Shape(Box::new(Shape {
@@ -1608,6 +1612,8 @@ mod tests {
             },
             color: Rgba::opaque(0, 0, 0),
             block: larrygram_geom::Size::new(1.0, 1.0),
+            margins: larrygram_text::Insets::default(),
+            horz_align: larrygram_text::Align::Left,
             origin: Point::new(0.0, 0.0),
         };
         let shape = Shape {
@@ -2063,6 +2069,8 @@ mod tests {
             },
             color: Rgba::opaque(0, 0, 255),
             block: larrygram_geom::Size::new(1.0, 1.0),
+            margins: larrygram_text::Insets::default(),
+            horz_align: larrygram_text::Align::Left,
             origin: Point::new(1.0, 2.0),
         };
         scene.nodes.push(Node::Shape(Box::new(Shape {

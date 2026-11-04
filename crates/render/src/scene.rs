@@ -35,7 +35,7 @@
 
 use larrygram_geom::{Path, Point, Size, Transform};
 use larrygram_model::CellWarning;
-use larrygram_text::{Font, Layout};
+use larrygram_text::{Align, Font, Insets, Layout};
 
 /// A colour with alpha.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -233,6 +233,17 @@ pub struct TextNode {
     /// top-left corner). See the module docs for the full placement
     /// recipe. The block rotation lives on [`Layout::rotation`].
     pub origin: Point,
+    /// The text margins (the `LeftMargin`, `RightMargin`, `TopMargin`
+    /// and `BottomMargin` cells), in inches: the box the laid-out text
+    /// sits in, inset from [`TextNode::block`] (task P7-51 item 1: the
+    /// in-place editor's field follows them, so it cannot disagree
+    /// with the drawn text).
+    pub margins: Insets,
+    /// The first paragraph's horizontal alignment (its `Paragraph`
+    /// row's `HorzAlign`, ADR 0019; task P7-51 item 1): the in-place
+    /// editor's field aligns its typed text like the drawn text
+    /// ([`Align::Justify`] draws justified but edits left).
+    pub horz_align: Align,
 }
 
 /// One shape node: a filled and stroked path with optional text.
@@ -378,6 +389,8 @@ mod tests {
                 },
                 color: Rgba::opaque(255, 255, 255),
                 block: Size::new(1.0, 1.0),
+                margins: larrygram_text::Insets::default(),
+                horz_align: larrygram_text::Align::Left,
                 origin: Point::new(0.1, 0.1),
             }),
         };

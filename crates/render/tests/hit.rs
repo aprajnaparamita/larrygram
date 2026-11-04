@@ -63,6 +63,8 @@ fn outlined(id: Option<ShapeId>, transform: Transform, width: f64, height: f64) 
 fn text_block(origin: Point, width: f64, height: f64) -> TextNode {
     TextNode {
         block: larrygram_geom::Size::new(width, height),
+        margins: larrygram_text::Insets::default(),
+        horz_align: larrygram_text::Align::Left,
         fonts: Vec::new(),
         runs: Vec::new(),
         layout: Layout {
@@ -147,6 +149,48 @@ fn text_blocks_count_as_hit() {
     assert_eq!(hits[0].distance, 0.0);
     let hits = hit_test(&scene, Point::new(1.5, 0.5), &HitOptions::default()).expect("no error");
     assert!(hits.is_empty(), "{hits:?}");
+}
+
+/// Task P7-51 item 4: a text block larger than its laid-out text —
+/// the press hits through the whole block, and the shape's bounds are
+/// the block's (task P7-48's `TextNode::block` change).
+#[test]
+fn a_block_larger_than_its_text_hits_through_the_whole_block() {
+    let mut scene = Scene::new(8.5, 11.0);
+    // A 2 x 1 in block at (0, 0)..(2, 1) in page space whose one line
+    // of text lays out in the top-left corner only (0.2 x 0.15 in).
+    let mut text = text_block(Point::new(0.0, 1.0), 2.0, 1.0);
+    text.layout.width = 0.2;
+    text.layout.height = 0.15;
+    text.layout.lines.push(larrygram_text::Line {
+        glyphs: Vec::new(),
+        baseline: 0.12,
+        width: 0.2,
+        paragraph: 0,
+    });
+    scene.nodes.push(shape_node(
+        Some(ShapeId { index: 5 }),
+        Transform::identity(),
+        Path::new(),
+        false,
+        Some(text),
+    ));
+    // Inside the block, outside the laid-out text: the press hits the
+    // shape through the block.
+    let hits = hit_test(&scene, Point::new(1.5, 0.2), &HitOptions::default()).expect("no error");
+    assert_eq!(
+        shape(&hits),
+        vec![(vec![0], Some(ShapeId { index: 5 }), HitKind::Text)]
+    );
+    // Outside the block: no hit.
+    let hits = hit_test(&scene, Point::new(2.5, 0.2), &HitOptions::default()).expect("no error");
+    assert!(hits.is_empty(), "{hits:?}");
+    // The bounds are the block's, not the laid-out text's.
+    let bounds = node_bounds(&scene, &NodePath::new().child(0)).expect("no error");
+    assert_eq!(
+        bounds,
+        Rect::new(Point::new(0.0, 0.0), Point::new(2.0, 1.0))
+    );
 }
 
 #[test]

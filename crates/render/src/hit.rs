@@ -658,6 +658,8 @@ mod tests {
             },
             color: crate::scene::Rgba::opaque(0, 0, 0),
             block: larrygram_geom::Size::new(2.0, 1.0),
+            margins: larrygram_text::Insets::default(),
+            horz_align: larrygram_text::Align::Left,
             origin: Point::new(1.0, 3.0),
         };
         let quad = text_quad(&text).expect("a laid-out block");
@@ -680,6 +682,8 @@ mod tests {
             },
             color: crate::scene::Rgba::opaque(0, 0, 0),
             block: larrygram_geom::Size::new(1.0, 1.0),
+            margins: larrygram_text::Insets::default(),
+            horz_align: larrygram_text::Align::Left,
             origin: Point::new(0.0, 0.0),
         };
         let moved = TextNode {
@@ -697,6 +701,8 @@ mod tests {
         assert_eq!(text_quad(&turned), None);
         let shrunk = TextNode {
             block: larrygram_geom::Size::new(1.0, 0.0),
+            margins: larrygram_text::Insets::default(),
+            horz_align: larrygram_text::Align::Left,
             ..base
         };
         assert_eq!(text_quad(&shrunk), None);
