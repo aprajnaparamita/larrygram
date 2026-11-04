@@ -223,6 +223,8 @@ fn glyph_node(font: usize, glyph: u16) -> Node {
             layout,
             color: Rgba::opaque(0, 0, 0),
             block: larrygram_geom::Size::new(1.0, 1.0),
+            margins: larrygram_text::Insets::default(),
+            horz_align: larrygram_text::Align::Left,
             origin: Point::new(0.1, 0.1),
         }),
     }))

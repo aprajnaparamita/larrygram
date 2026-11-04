@@ -1288,6 +1288,8 @@ mod tests {
             layout,
             color: Rgba::opaque(0, 0, 0),
             block: larrygram_geom::Size::new(block.width, block.height),
+            margins: larrygram_text::Insets::default(),
+            horz_align: larrygram_text::Align::Left,
             origin: Point::new(1.0, 1.5),
         };
         scene_of(

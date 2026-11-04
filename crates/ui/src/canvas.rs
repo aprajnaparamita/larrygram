@@ -2176,6 +2176,8 @@ mod tests {
             layout: Default::default(),
             color: larrygram_render::Rgba::opaque(0, 0, 0),
             block: larrygram_geom::Size::new(1.0, 1.0),
+            margins: larrygram_text::Insets::default(),
+            horz_align: larrygram_text::Align::Left,
             origin: larrygram_geom::Point::new(0.0, 0.0),
         };
         let shape_node = |id: Option<u32>| {

@@ -1011,6 +1011,8 @@ mod tests {
             layout: Default::default(),
             color: Rgba::opaque(0, 0, 0),
             block: larrygram_geom::Size::new(2.0, 1.0),
+            margins: larrygram_text::Insets::default(),
+            horz_align: larrygram_text::Align::Left,
             origin: Point::new(1.0, 3.0),
         };
         text_node.layout.width = 2.0;
@@ -1101,6 +1103,8 @@ mod tests {
             layout: Default::default(),
             color: Rgba::opaque(0, 0, 0),
             block: larrygram_geom::Size::new(2.0, 1.0),
+            margins: larrygram_text::Insets::default(),
+            horz_align: larrygram_text::Align::Left,
             origin: Point::new(1.0, 3.0),
         };
         text_node.layout.lines.push(larrygram_text::Line {
@@ -1157,6 +1161,8 @@ mod tests {
             layout: Default::default(),
             color: Rgba::opaque(0, 0, 0),
             block: larrygram_geom::Size::new(1.0, 1.0),
+            margins: larrygram_text::Insets::default(),
+            horz_align: larrygram_text::Align::Left,
             origin: Point::new(0.0, 0.0),
         };
         assert_eq!(drawn_font(&empty, Transform::identity()), None);
@@ -1271,6 +1277,8 @@ mod tests {
             layout: Default::default(),
             color: Rgba::opaque(0, 0, 0),
             block: larrygram_geom::Size::new(0.0, 0.0),
+            margins: larrygram_text::Insets::default(),
+            horz_align: larrygram_text::Align::Left,
             origin: Point::new(0.0, 0.0),
         };
         assert_eq!(text_block_bounds(&node, Transform::identity()), None);
