@@ -88,6 +88,17 @@ pub enum OverlayMark {
     /// The glue feedback under the pointer while a connector end is
     /// drawn or dragged (task P7-33 item 3).
     GlueFeedback(GlueFeedback),
+    /// A shape's connection points as markers (task P7-34 items 1 and
+    /// 2): P7-33's marker style for every point, and the selected
+    /// point's own style. The view check shows every shape's points
+    /// (`selected` `None`); the Connection Point tool shows the
+    /// selected shape's points and marks the selected one.
+    ConnectionPoints {
+        /// The points, in page inches.
+        points: Vec<Point>,
+        /// The selected point, in page inches, or `None`.
+        selected: Option<Point>,
+    },
 }
 
 /// The transient marks of one frame (ADR 0042).
@@ -339,6 +350,31 @@ mod tests {
             Some(OverlayMark::GlueFeedback(GlueFeedback { .. }))
         ));
         assert_eq!(GlueFeedback::default().outline, None);
+    }
+
+    /// Task P7-34: the connection-point markers are plain points with
+    /// the selected one's own style slot.
+    #[test]
+    fn connection_point_markers_carry_their_points_and_selection() {
+        let mut overlay = Overlay::new();
+        overlay.marks.push(OverlayMark::ConnectionPoints {
+            points: vec![Point::new(1.0, 1.0), Point::new(2.0, 2.0)],
+            selected: Some(Point::new(2.0, 2.0)),
+        });
+        match overlay.marks.first() {
+            Some(OverlayMark::ConnectionPoints { points, selected }) => {
+                assert_eq!(points.len(), 2);
+                assert_eq!(*selected, Some(Point::new(2.0, 2.0)));
+            }
+            other => panic!("expected connection points, got {other:?}"),
+        }
+        // The view check marks every point and selects none.
+        overlay.marks.clear();
+        overlay.marks.push(OverlayMark::ConnectionPoints {
+            points: vec![Point::new(1.0, 1.0)],
+            selected: None,
+        });
+        assert!(!overlay.is_empty());
     }
 
     #[test]
