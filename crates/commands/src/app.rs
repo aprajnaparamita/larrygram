@@ -479,6 +479,9 @@ pub enum ActiveTool {
     Text,
     /// Move and resize the selected shape's text block.
     TextBlock,
+    /// Add, move and delete the selected shape's connection points
+    /// (task P7-34 item 2).
+    ConnectionPoint,
 }
 
 impl ActiveTool {
@@ -492,6 +495,7 @@ impl ActiveTool {
             ActiveTool::Connector => "Connector",
             ActiveTool::Text => "Text",
             ActiveTool::TextBlock => "Text Block",
+            ActiveTool::ConnectionPoint => "Connection Point",
         }
     }
 }
@@ -519,6 +523,12 @@ pub struct AppCtx {
     /// window-state flag the shell reads each frame: the command sets
     /// it, the shell draws the window accordingly.
     pub full_screen: bool,
+    /// Whether the connection points of every shape show as markers
+    /// (task P7-34 item 1, the `tools.connection.points` /
+    /// `view.connections` checks). Like `full_screen`, it is a
+    /// per-window flag the shell reads each frame: both check ids flip
+    /// this one state.
+    pub show_connection_points: bool,
     /// The Format Painter's recorded source (task P7-21): `Some` while
     /// a copied format waits to be applied. The state is the copy's
     /// origin, never the format itself (the apply form re-reads it).
@@ -552,6 +562,7 @@ impl AppCtx {
             clipboard: Clipboard::new(),
             active_tool: ActiveTool::Pointer,
             full_screen: false,
+            show_connection_points: false,
             format_painter: None,
             editing_text: None,
             undo_suspended: false,

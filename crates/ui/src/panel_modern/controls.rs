@@ -1140,10 +1140,15 @@ fn latched(toggles: &Toggles, app: &larrygram_commands::app::AppCtx, item: &Item
     // the selection gives a state, the display-only set is ignored, so
     // a click on one shape cannot leave the control latched after the
     // selection moves to another (the P7-27 review A5).
-    if let Some(command) = item.command.as_ref().map(|command| command.as_str())
-        && let Some(checked) = crate::checked::text_toggle_checked(app, command)
-    {
-        return checked;
+    if let Some(command) = item.command.as_ref().map(|command| command.as_str()) {
+        if let Some(checked) = crate::checked::text_toggle_checked(app, command) {
+            return checked;
+        }
+        // The connection-points check reads the one per-window state
+        // (task P7-34 item 1: both ids read the same state).
+        if let Some(checked) = crate::checked::connection_points_checked(app, command) {
+            return checked;
+        }
     }
     toggles.contains(item.id.as_str())
 }

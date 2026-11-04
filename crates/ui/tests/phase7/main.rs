@@ -20,6 +20,7 @@
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
 mod combo_fixes;
+mod connection_points;
 mod connector_1d;
 mod connector_ends;
 mod connector_landing;

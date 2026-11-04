@@ -20,6 +20,7 @@
 //! - [`mod@format_painter`] — the Format Painter's canvas mode (task
 //!   P7-24 item 6).
 
+pub mod connection_point;
 pub mod connector;
 pub mod draw;
 pub mod format_painter;
@@ -49,6 +50,8 @@ pub enum Tool {
     Line,
     /// Draw a dynamic connector (ADR 0045).
     Connector,
+    /// Add, move and delete connection points (task P7-34).
+    ConnectionPoint,
     /// Draw a text box (ADR 0044).
     Text,
     /// Move and resize the selected shape's text block (task P7-25).
@@ -142,6 +145,8 @@ pub struct ToolMachine {
     pub(crate) stencil: stencil::State,
     /// The connector tool's drag state (P5-08).
     pub(crate) connector: connector::ConnectorState,
+    /// The connection point tool's state (task P7-34).
+    pub(crate) connection_point: connection_point::State,
     /// The text tool's pending text box (task P7-25 item 9).
     pub(crate) text: text::State,
     /// The text block tool's drag state (task P7-25 item 4).
@@ -170,6 +175,7 @@ impl ToolMachine {
             Tool::Pointer => pointer::handle(self, &event, ctx),
             Tool::Rectangle | Tool::Ellipse | Tool::Line => draw::handle(self, &event, ctx),
             Tool::Connector => connector::handle(self, &event, ctx),
+            Tool::ConnectionPoint => connection_point::handle(self, &event, ctx),
             Tool::Text => text::handle(self, &event, ctx),
             Tool::TextBlock => text_block::handle(self, &event, ctx),
         }
@@ -181,6 +187,7 @@ impl ToolMachine {
     pub fn idle_overlay(&mut self, ctx: &AppCtx) -> Result<Option<Overlay>, UiError> {
         match self.tool {
             Tool::Pointer => pointer::idle_overlay(self, ctx),
+            Tool::ConnectionPoint => connection_point::idle_overlay(self, ctx),
             Tool::TextBlock => text_block::idle_overlay(self, ctx),
             _ => Ok(None),
         }
