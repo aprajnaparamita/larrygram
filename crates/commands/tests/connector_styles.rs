@@ -1372,3 +1372,71 @@ fn a_dynamic_glue_to_an_unresolvable_target_keeps_its_point() {
         .expect("begin");
     assert!(begin.x.is_finite() && begin.y.is_finite(), "{begin:?}");
 }
+
+/// A page-width zoom fit with a stale active page names it (the fit's
+/// stale-page arm).
+#[test]
+fn a_page_width_fit_with_a_stale_page_is_named() {
+    let (mut ctx, registry, _page) = fixture();
+    ctx.active_document_mut().expect("session").active_page = Some(PageId { index: 5 });
+    let error = dispatch(
+        &mut ctx,
+        &registry,
+        "view.zoom.page.width",
+        Args::new().with("width", ArgValue::Number(800.0)),
+    )
+    .expect_err("stale");
+    assert!(error.to_string().contains("no active page"), "{error}");
+}
+
+/// A resize drag from its handles keeps the fixed edge (the resize's
+/// handle arms), including on a flipped shape.
+#[test]
+fn a_resize_from_its_handles_keeps_the_fixed_edge() {
+    for edge in ["west", "north", "south"] {
+        let (mut ctx, registry, page) = fixture();
+        let left = shape(&ctx, page, 1);
+        ctx.selection.shapes = vec![left];
+        ctx.selection.anchor = Some(left);
+        ctx.selection.page = Some(page);
+        dispatch(
+            &mut ctx,
+            &registry,
+            "shape.resize",
+            Args::new()
+                .with("width", ArgValue::Number(4.0))
+                .with("height", ArgValue::Number(2.0))
+                .with("edge", ArgValue::Text(edge.to_owned())),
+        )
+        .expect("resize");
+    }
+    // A flipped shape's resize mirrors the box into the pin's frame
+    // (the flip arm).
+    let (mut ctx, registry, page) = fixture();
+    let left = shape(&ctx, page, 1);
+    {
+        let doc = &mut ctx.active_document_mut().expect("session").document;
+        if let Some(entity) = doc.shape_mut(left) {
+            entity.sheet.cells.push(Cell {
+                name: CellName::new("FlipY"),
+                formula: None,
+                value: Some(CellValue::Bool(true)),
+                unit: larrygram_geom::Unit::Unitsless,
+                preserved: Preserved::new(),
+            });
+        }
+    }
+    ctx.selection.shapes = vec![left];
+    ctx.selection.anchor = Some(left);
+    ctx.selection.page = Some(page);
+    dispatch(
+        &mut ctx,
+        &registry,
+        "shape.resize",
+        Args::new()
+            .with("width", ArgValue::Number(4.0))
+            .with("height", ArgValue::Number(2.0))
+            .with("edge", ArgValue::Text("south".to_owned())),
+    )
+    .expect("resize");
+}
