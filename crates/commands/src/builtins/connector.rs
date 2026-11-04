@@ -861,25 +861,7 @@ pub(crate) fn set_style(
     let (session, page) = active_page(ctx)?;
     let targets: Vec<ShapeId> = {
         let doc = &ctx.active_document().ok_or_else(no_document)?.document;
-        let routed = connector_visio_ids(doc, page).unwrap_or_default();
-        ctx.selection
-            .shapes
-            .iter()
-            .copied()
-            .filter(|shape| doc.page_of(*shape) == Some(page))
-            // The style cells apply to routable 1-D shapes (ADR 0084
-            // rule 1, amended: a line or a 1-D arrow takes none) and
-            // to a legacy record-only connector (a `FromSheet` of a
-            // glue record without endpoint cells).
-            .filter(|shape| {
-                if doc.is_connector(*shape) {
-                    doc.is_routable(*shape)
-                } else {
-                    doc.shape(*shape)
-                        .is_some_and(|entity| routed.contains(&entity.visio_id))
-                }
-            })
-            .collect()
+        style_targets(doc, page, &ctx.selection.shapes)
     };
     let on_page = page_default.unwrap_or(false) || ctx.selection.shapes.is_empty();
     if !on_page && targets.is_empty() {
@@ -951,6 +933,28 @@ pub(crate) fn set_style(
         Vec::new(),
         with_routes(Box::new(edit), routes),
     ))
+}
+
+/// The style targets of a selection (task P7-36 item 3): the selected
+/// shapes the style cells apply to — routable 1-D shapes (ADR 0084
+/// rule 1, amended: a line or a 1-D arrow takes none) and legacy
+/// record-only connectors (a `FromSheet` of a glue record without
+/// endpoint cells).
+pub(crate) fn style_targets(doc: &Document, page: PageId, shapes: &[ShapeId]) -> Vec<ShapeId> {
+    let routed = connector_visio_ids(doc, page).unwrap_or_default();
+    shapes
+        .iter()
+        .copied()
+        .filter(|shape| doc.page_of(*shape) == Some(page))
+        .filter(|shape| {
+            if doc.is_connector(*shape) {
+                doc.is_routable(*shape)
+            } else {
+                doc.shape(*shape)
+                    .is_some_and(|entity| routed.contains(&entity.visio_id))
+            }
+        })
+        .collect()
 }
 
 /// The `connector.style` `style` argument spelling of a [`RouteStyle`]

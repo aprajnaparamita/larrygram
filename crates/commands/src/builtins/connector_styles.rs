@@ -15,7 +15,7 @@
 
 use crate::app::AppCtx;
 use crate::error::CommandError;
-use crate::{ArgValue, Args, Invocation, Outcome};
+use crate::{ArgValue, Args, Enabled, Invocation, Outcome};
 
 use super::connector;
 use super::{CommandTable, has_pages};
@@ -31,49 +31,49 @@ pub(crate) const TABLE: CommandTable = &[
     (
         "connector.right_angle",
         "Right-Angle Connector",
-        has_pages,
+        style_enabled,
         run_right_angle,
     ),
     (
         "connector.straight.lines",
         "Straight Lines",
-        has_pages,
+        style_enabled,
         run_straight,
     ),
     (
         "connector.curved.lines",
         "Curved Lines",
-        has_pages,
+        style_enabled,
         run_curved,
     ),
     (
         "connector.straight",
         "Straight Connector",
-        has_pages,
+        style_enabled,
         run_straight,
     ),
     (
         "connector.curved",
         "Curved Connector",
-        has_pages,
+        style_enabled,
         run_curved,
     ),
     (
         "format.set.dyn.conn.routing.style",
         "Style",
-        has_pages,
+        style_enabled,
         run_right_angle,
     ),
     (
         "format.set.dyn.conn.appearance.straight",
         "Straight",
-        has_pages,
+        style_enabled,
         run_straight,
     ),
     (
         "format.set.dyn.conn.appearance.curved",
         "Curved",
-        has_pages,
+        style_enabled,
         run_curved,
     ),
     (
@@ -191,6 +191,26 @@ pub(crate) const TABLE: CommandTable = &[
         run_line_jumps,
     ),
 ];
+
+/// The style controls' enabled state (task P7-36 item 3): with
+/// nothing selected they set the page default, and with a styleable
+/// connector selected they set its style; any other selection has no
+/// connector to style.
+fn style_enabled(ctx: &AppCtx) -> Enabled {
+    if ctx.selection.shapes.is_empty() {
+        return has_pages(ctx);
+    }
+    let styled = ctx.active_document().is_some_and(|session| {
+        session.active_page.is_some_and(|page| {
+            !connector::style_targets(&session.document, page, &ctx.selection.shapes).is_empty()
+        })
+    });
+    if styled {
+        Enabled::yes()
+    } else {
+        Enabled::no("no connector in the selection to style")
+    }
+}
 
 /// The style controls dispatch `connector.style` with their own style
 /// (task P7-36 item 3): the context-menu items act on the selection,
