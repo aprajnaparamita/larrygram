@@ -93,8 +93,10 @@ const PIN_365: LayoutCounts = LayoutCounts {
 // Fluent id from `format.line` onto `shape.line` (the drawing Line
 // tool). P7-25 adds `shape.set.text_block` (the Text Block tool's
 // drag, one undo step). P7-33 adds `connector.move_end` (the end
-// drag's one undoable move of one connector end).
-const COMMANDS: usize = 1131;
+// drag's one undoable move of one connector end). P7-35 adds
+// `connector.move_segment` (the segment drag's one undoable move of
+// one connector segment).
+const COMMANDS: usize = 1132;
 // 90 rows from the source page; P7-20 adds the four `OWN_SHORTCUTS`
 // bindings (Ctrl+N, Ctrl+O, Ctrl+S, Ctrl+Alt+P); P7-23 adds `Ctrl+,`
 // (the Options dialog, Cmd+, on macOS); P7-42 adds `Ctrl+Q` (the quit
