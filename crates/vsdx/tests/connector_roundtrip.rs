@@ -546,15 +546,17 @@ fn corpus_missing(files: &[PathBuf]) -> bool {
     files.is_empty()
 }
 
+/// Every shape's endpoint state by page position and Visio id, and
+/// every page's records.
+type GlueState = (
+    std::collections::BTreeMap<(usize, i32), Vec<(&'static str, CellState)>>,
+    Vec<Vec<Connect>>,
+);
+
 /// Every shape's endpoint formulas, trigger formulas and cached values
 /// (by page position and Visio id), and every page's records: what a
 /// round trip must not change (task P7-36 item 5).
-fn glue_state(
-    doc: &Document,
-) -> (
-    std::collections::BTreeMap<(usize, i32), Vec<(&'static str, CellState)>>,
-    Vec<Vec<Connect>>,
-) {
+fn glue_state(doc: &Document) -> GlueState {
     use std::collections::BTreeMap;
     let mut endpoints: BTreeMap<(usize, i32), Vec<(&'static str, CellState)>> = BTreeMap::new();
     for (index, page) in doc.pages.iter().enumerate() {
