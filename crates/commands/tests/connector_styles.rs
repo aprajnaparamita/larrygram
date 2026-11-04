@@ -716,6 +716,34 @@ fn a_page_default_skips_a_record_naming_a_gone_shape() {
     );
 }
 
+/// A re-route pass drops the record naming a gone shape and warns
+/// (the pass's gone-connector arm).
+#[test]
+fn a_record_naming_a_gone_shape_is_dropped_with_a_warning() {
+    use larrygram_model::Connect;
+    let (mut ctx, registry, page) = fixture();
+    draw_glued(&mut ctx, &registry, page);
+    {
+        let doc = &mut ctx.active_document_mut().expect("session").document;
+        if let Some(entry) = doc.pages.get_mut(page.index as usize) {
+            let mut record = Connect::new();
+            record.from_sheet = 99;
+            record.from_cell = "BeginX".to_owned();
+            record.from_part = larrygram_model::mutate::VIS_BEGIN;
+            record.to_sheet = 1;
+            record.to_cell = "PinX".to_owned();
+            record.to_part = larrygram_model::mutate::VIS_WHOLE_SHAPE;
+            entry.connects.push(record);
+        }
+    }
+    dispatch(&mut ctx, &registry, "connector.reroute_all", Args::new()).expect("reroute");
+    assert!(
+        ctx.warnings.iter().any(|line| line.contains("is gone")),
+        "{:?}",
+        ctx.warnings
+    );
+}
+
 // ---------------------------------------------------------------------------
 // The glue and draw argument arms (task P7-36 item 3's neighbours)
 // ---------------------------------------------------------------------------
