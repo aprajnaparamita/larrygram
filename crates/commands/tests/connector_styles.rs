@@ -1133,3 +1133,100 @@ fn the_page_style_read_stops_at_a_dangling_style_link() {
     );
     let _ = &registry;
 }
+
+/// The style reads handle an unplaced 1-D shape and a document with
+/// no active page (task P7-36 item 3's read arms).
+#[test]
+fn the_style_reads_handle_an_unplaced_connector_and_no_page() {
+    use larrygram_model::Shape;
+    let (mut ctx, _registry, page) = fixture();
+    let cell = |name: &str, value: f64| Cell {
+        name: CellName::new(name),
+        formula: Some(format!("{value}")),
+        value: Some(CellValue::Number(value)),
+        unit: larrygram_geom::Unit::Inches,
+        preserved: Preserved::new(),
+    };
+    // A routable 1-D shape that is not on any page.
+    let mut one_d = Shape::new(ShapeId { index: 0 }, 8);
+    one_d.sheet.cells = vec![
+        cell("BeginX", 0.0),
+        cell("BeginY", 0.0),
+        cell("EndX", 1.0),
+        cell("EndY", 0.0),
+        cell("Width", 1.0),
+        cell("Height", 0.2),
+        cell("ObjType", 2.0),
+    ];
+    let placed = {
+        let doc = &mut ctx.active_document_mut().expect("session").document;
+        doc.add_shape(one_d)
+    };
+    ctx.selection.shapes = vec![placed];
+    ctx.selection.anchor = Some(placed);
+    assert_eq!(connector_style(&ctx), Some(RouteStyle::RightAngle));
+
+    // With nothing selected and no active page there is no style.
+    ctx.selection.shapes.clear();
+    ctx.selection.anchor = None;
+    ctx.active_document_mut().expect("session").active_page = None;
+    assert_eq!(connector_style(&ctx), None);
+    let _ = page;
+}
+
+/// A 1-D shape whose rows give fewer than two points moves as the
+/// straight line between its ends (the translate fallback).
+#[test]
+fn a_move_of_a_single_row_path_uses_the_ends() {
+    use larrygram_model::{Row, SectionName};
+    let (mut ctx, registry, page) = fixture();
+    draw_glued(&mut ctx, &registry, page);
+    let connector = shape(&ctx, page, 3);
+    {
+        let doc = &mut ctx.active_document_mut().expect("session").document;
+        if let Some(entity) = doc.shape_mut(connector) {
+            for section in &mut entity.sheet.sections {
+                if section.name.as_str() == "Geometry" {
+                    let mut row = Row::new();
+                    row.row_type = Some("MoveTo".to_owned());
+                    row.ix = Some(0);
+                    row.cells = vec![
+                        Cell {
+                            name: CellName::new("X"),
+                            formula: Some("0".to_owned()),
+                            value: Some(CellValue::Number(0.0)),
+                            unit: larrygram_geom::Unit::Inches,
+                            preserved: Preserved::new(),
+                        },
+                        Cell {
+                            name: CellName::new("Y"),
+                            formula: Some("0".to_owned()),
+                            value: Some(CellValue::Number(0.0)),
+                            unit: larrygram_geom::Unit::Inches,
+                            preserved: Preserved::new(),
+                        },
+                    ];
+                    section.rows = vec![row];
+                }
+            }
+        }
+        let _ = SectionName::from_static("Geometry");
+    }
+    ctx.selection.shapes = vec![connector];
+    ctx.selection.anchor = Some(connector);
+    ctx.selection.page = Some(page);
+    dispatch(
+        &mut ctx,
+        &registry,
+        "shape.move",
+        Args::new()
+            .with("dx", ArgValue::Number(1.0))
+            .with("dy", ArgValue::Number(0.0)),
+    )
+    .expect("move");
+    assert_eq!(
+        row_types(doc(&ctx), connector),
+        vec!["MoveTo", "LineTo"],
+        "the move falls back to the straight line between the ends"
+    );
+}

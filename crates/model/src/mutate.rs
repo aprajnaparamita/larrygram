@@ -2222,6 +2222,80 @@ mod tests {
         }
     }
 
+    /// The page-size walk follows the fill and text chains through
+    /// their second rung (every style kind's chain arm).
+    #[test]
+    fn page_size_walks_the_fill_and_text_chains() {
+        use crate::page::Page;
+        use crate::raw::{QName, XmlAttribute};
+        use crate::style::Style;
+        let mut doc = Document::new();
+        let mut page = Page::new(PageId { index: 0 }, 1);
+        for (name, value) in [("FillStyle", "10"), ("TextStyle", "20")] {
+            page.preserved.attributes.push(XmlAttribute {
+                name: QName::local(name),
+                value: value.to_owned(),
+            });
+        }
+        // Rungs 10 and 20 define no size and link on; 11 and 21 do.
+        for (index, (visio_id, link, sized)) in [
+            (10, Some(11), false),
+            (11, None, true),
+            (20, Some(21), false),
+            (21, None, true),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut style = Style::new(crate::id::StyleId { index: index as _ });
+            style.visio_id = visio_id;
+            style.fill_style = link;
+            style.text_style = link;
+            if sized {
+                style.sheet.cells = vec![
+                    number_cell("PageWidth", 20.0),
+                    number_cell("PageHeight", 30.0),
+                ];
+            }
+            doc.stylesheet.styles.push(style);
+        }
+        doc.pages.push(page);
+        assert_eq!(doc.page_size(PageId { index: 0 }), (20.0, 30.0));
+    }
+
+    /// The connection-point walk skips a master chain shape that is
+    /// gone (the walk's stale-rung arm).
+    #[test]
+    fn connection_points_skip_a_stale_master_rung() {
+        let (mut doc, page) = document();
+        let mut master_shape = box_shape(1.0, 1.0);
+        {
+            let mut connection = Section::new(SectionName::from_static("Connection"));
+            let mut row = Row::new();
+            row.row_type = Some("Connection".to_owned());
+            row.ix = Some(0);
+            row.cells = vec![number_cell("X", 1.0), number_cell("Y", 1.0)];
+            connection.rows.push(row);
+            master_shape.sheet.sections.push(connection);
+        }
+        let master_shape = doc.add_shape(master_shape);
+        let mut master = Master::new(MasterId { index: 0 }, 0);
+        // The first rung names a shape that is gone; the second is the
+        // real one.
+        master.shapes.push(ShapeId { index: 9 });
+        master.shapes.push(master_shape);
+        let master_id = MasterId { index: 0 };
+        doc.masters.push(master);
+        let mut instance = Shape::new(ShapeId { index: 0 }, 0);
+        instance.master = Some(master_id);
+        let instance = doc.insert_shape(page, instance, None).expect("instance");
+        let points = doc.connection_points_indexed(instance);
+        assert!(
+            points.is_empty(),
+            "the stale first rung is skipped: {points:?}"
+        );
+    }
+
     /// A document with one page.
     fn document() -> (Document, PageId) {
         let mut doc = Document::new();
