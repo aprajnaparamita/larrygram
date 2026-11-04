@@ -220,6 +220,14 @@ fn the_page_default_writes_the_page_cells() {
         (None, None),
         "the selection is not written"
     );
+    // Nor are the page's cell names written on the selection.
+    let sheet = &doc(&ctx).shape(connector).expect("connector").sheet;
+    for name in ["RouteStyle", "LineRouteExt"] {
+        assert!(
+            sheet.cells.iter().all(|cell| cell.name.as_str() != name),
+            "{name} on the connector"
+        );
+    }
 }
 
 /// A selection of shapes with no connector is refused (task P7-36

@@ -889,7 +889,10 @@ pub(crate) fn set_style(
                 (style_cells::CON_LINE_ROUTE_EXT, ext_value),
             ]
         };
-        for &shape in &targets {
+        // A page default writes the page sheet only: the selection
+        // keeps its own cells.
+        let shapes: &[ShapeId] = if on_page { &[] } else { &targets };
+        for &shape in shapes {
             for (name, value) in cells {
                 let step = CellEdit::new(
                     doc,
