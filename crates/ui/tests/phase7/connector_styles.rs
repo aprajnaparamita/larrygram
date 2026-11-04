@@ -712,7 +712,7 @@ fn the_page_default_makes_a_new_connector_straight(kind: LayoutKind) {
 
     // A newly drawn connector is straight and carries no style cells
     // of its own. Panel Modern draws from the Home tab: the gallery
-    // click above left the ribbon on Design.
+    // click above left the Design tab active.
     if kind == LayoutKind::PanelModern {
         click(&mut rig, Role::Button, "Home");
     }
