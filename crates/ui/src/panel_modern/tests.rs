@@ -1700,6 +1700,49 @@ fn the_file_view_pages_draw_with_live_data() {
     assert!(rig.has("Save As"), "the Save As page draws");
 }
 
+/// Clicking a recent file in the Open page emits `file.open` with the
+/// path argument, so the file opens directly without the Browse dialog
+/// (task P7-52).
+#[test]
+fn a_recent_file_in_the_open_page_opens_directly() {
+    use larrygram_commands::app::{AppCtx, DocumentSession, Settings};
+    use larrygram_model::Document;
+
+    let mut app = AppCtx::new(Settings::default());
+    app.open_document(DocumentSession::new(Document::new(), None));
+    app.settings
+        .recent_files
+        .push(PathBuf::from("/drawings/floor plan.vsdx"));
+    let mut rig = Rig::build_on(
+        Surface::Chrome,
+        SelectionContext::EmptyPage,
+        egui::vec2(2000.0, 600.0),
+        committed(),
+        ListData::new(),
+        app,
+        Resolving::Test(Rc::new(always)),
+    );
+    rig.click(Role::Button, "File");
+    rig.click(Role::Button, "Open");
+    assert!(
+        rig.has("1  floor plan.vsdx"),
+        "the Open page lists the recent files"
+    );
+    // Click the recent file and verify the intent includes the path.
+    rig.clear();
+    rig.click(Role::Button, "1  floor plan.vsdx");
+    let raw = rig.raw_intents();
+    let recent = raw
+        .iter()
+        .find(|intent| intent.command.as_str() == "file.open")
+        .expect("clicking a recent file emits file.open");
+    assert_eq!(
+        recent.invocation.args.path("path"),
+        Some(PathBuf::from("/drawings/floor plan.vsdx").as_path()),
+        "the intent carries the recent file's path"
+    );
+}
+
 /// The tab buttons and the contextual set captions read the same slot
 /// table, so a caption block sits exactly above its tab: the slots run
 /// left to right and a contextual tab comes after the core tabs
