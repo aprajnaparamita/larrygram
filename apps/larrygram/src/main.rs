@@ -343,7 +343,12 @@ impl LarrygramApp {
 
     /// One UI pass: draw the frame and dispatch its intents.
     fn update_ui(&mut self, ui: &mut egui::Ui) {
-        self.open_queued_paths();
+        if self.open_queued_paths() {
+            // A document opened from Finder or the Dock brings the
+            // window to the front (the user's 2026-11-05 pass: the file
+            // opened behind the other apps).
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
         self.run_queued_quit();
         self.publish_changed();
         self.verify_quit_hook();
@@ -424,12 +429,15 @@ impl LarrygramApp {
     ///
     /// The macOS open-documents delegate fills the queue
     /// (`macos_open_urls`); a path that does not open shows the Open
-    /// dialog's status-line error and never a crash.
-    fn open_queued_paths(&mut self) {
+    /// dialog's status-line error and never a crash. Returns whether
+    /// any path was queued (the caller then focuses the window).
+    fn open_queued_paths(&mut self) -> bool {
         let paths = open_documents::QUEUED.take_paths();
-        if !paths.is_empty() {
-            open_documents::dispatch_paths(&mut self.shell, &paths, Source::Ui);
+        if paths.is_empty() {
+            return false;
         }
+        open_documents::dispatch_paths(&mut self.shell, &paths, Source::Ui);
+        true
     }
 
     /// Runs the quit the macOS application menu queued (task P7-42:
@@ -689,10 +697,11 @@ mod tests {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         open_documents::QUEUED.queue_paths([path.clone()]);
-        app.open_queued_paths();
+        assert!(app.open_queued_paths(), "a queued path asks for focus");
         let session = app.shell.app.active_document().expect("the document opens");
         assert_eq!(session.path.as_deref(), Some(path.as_path()));
         assert!(open_documents::QUEUED.take_paths().is_empty());
+        assert!(!app.open_queued_paths(), "an empty queue asks for nothing");
     }
 
     #[test]
