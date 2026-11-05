@@ -633,9 +633,8 @@ mod tests {
         let mut file_view = FileView::new();
         file_view.open();
         file_view.set_page("file_view.open");
-        let outcome = with_ui(|ui| {
-            file_view.show(ui, &view(), &Metrics::default(), &app, &lists, &always)
-        });
+        let outcome =
+            with_ui(|ui| file_view.show(ui, &view(), &Metrics::default(), &app, &lists, &always));
         let (intents, close) = outcome.expect("the page renders");
         assert!(intents.is_empty(), "a draw-only frame dispatches nothing");
         assert!(!close, "the Open page leaves the view open");
