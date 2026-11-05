@@ -236,6 +236,33 @@ pub fn swatch_value(swatch: &Swatch) -> String {
     format!("#{:02X}{:02X}{:02X}", r, g, b)
 }
 
+/// The colours the pickers' "Recent Colors" row draws (task P7-54):
+/// the colours the custom colour dialog applied, most recent first,
+/// at most [`RECENT_LIMIT`]. One list is shared by every role.
+const RECENT_LIMIT: usize = 10;
+
+/// The ui-data key of the shared recent-colours list.
+fn recent_key() -> egui::Id {
+    egui::Id::unique("larrygram_recent_colors")
+}
+
+/// The colours the pickers' "Recent Colors" row draws, most recent
+/// first (task P7-54).
+pub fn recent_colors(ctx: &egui::Context) -> Vec<(u8, u8, u8)> {
+    ctx.data_mut(|data| data.get_persisted::<Vec<(u8, u8, u8)>>(recent_key()))
+        .unwrap_or_default()
+}
+
+/// Remembers `color` in the pickers' "Recent Colors" row (task P7-54):
+/// most recent first, once (a repeat moves the colour to the front).
+pub fn remember_color(ctx: &egui::Context, color: (u8, u8, u8)) {
+    let mut colors = recent_colors(ctx);
+    colors.retain(|entry| *entry != color);
+    colors.insert(0, color);
+    colors.truncate(RECENT_LIMIT);
+    ctx.data_mut(|data| data.insert_persisted(recent_key(), colors));
+}
+
 /// Draws one picker body and pushes the intent of every chosen row
 /// onto `out`. Returns `true` when a choice was made (the host closes
 /// its popup then). `fill` is the fill colour the transparency rows
@@ -338,6 +365,26 @@ impl Role {
             Role::Font => "text.font.color",
             Role::Fill => "format.set.fill.color",
             Role::Line => "format.set.line.color",
+        }
+    }
+
+    /// The command of the "More ... Colors..." row (task P7-54): it
+    /// opens the custom colour dialog for the role.
+    fn custom_command(self) -> &'static str {
+        match self {
+            Role::Font => "format.text_color.custom",
+            Role::Fill => "format.fill_color.custom",
+            Role::Line => "format.line_color.custom",
+        }
+    }
+
+    /// The label of the "More ... Colors..." row (the Panel Classic
+    /// toolbar row it answers, `ui-spec/layouts/panel-classic.yaml`).
+    fn more_label(self) -> &'static str {
+        match self {
+            Role::Font => "More Text Colors...",
+            Role::Fill => "More Fill Colors...",
+            Role::Line => "More Line Colors...",
         }
     }
 }
@@ -475,6 +522,17 @@ fn color_picker(
             chosen = true;
         }
     }
+    // The "Recent Colors" row (task P7-54): the colours the custom
+    // colour dialog applied, most recent first, one shared list for
+    // every role.
+    let recent = recent_colors(ui.ctx());
+    if !recent.is_empty() {
+        ui.separator();
+        ui.label(RichText::new("Recent Colors").weak());
+        if recent_swatches(ui, nav, &recent, role.command(), source, out) {
+            chosen = true;
+        }
+    }
     if role == Role::Fill {
         ui.separator();
         ui.label(RichText::new("Transparency").weak());
@@ -488,6 +546,23 @@ fn color_picker(
                 push(out, "shape.transparency", args, source);
                 chosen = true;
             }
+        }
+    }
+    // The "More ... Colors..." row (task P7-54): the custom colour
+    // dialog for the role (the Panel Modern "More Colors" row uses the
+    // same dialog).
+    ui.separator();
+    {
+        let highlighted = nav.highlighted();
+        let response = row(
+            ui,
+            RichText::new(role.more_label()),
+            role.more_label(),
+            highlighted,
+        );
+        if nav.chosen(highlighted, &response) {
+            push(out, role.custom_command(), Args::new(), source);
+            chosen = true;
         }
     }
     chosen
@@ -643,6 +718,56 @@ fn swatches(
             })
             .inner;
         chosen = chosen || row_chosen;
+    }
+    chosen
+}
+
+/// The "Recent Colors" swatches (task P7-54): one small colour button
+/// per remembered colour, named "Recent #RRGGBB".
+fn recent_swatches(
+    ui: &mut Ui,
+    nav: &mut Nav,
+    colors: &[(u8, u8, u8)],
+    command: &'static str,
+    source: Source,
+    out: &mut Vec<Intent>,
+) -> bool {
+    let mut chosen = false;
+    for row_entries in colors.chunks(5) {
+        for &(r, g, b) in row_entries {
+            let name = format!("Recent #{:02X}{:02X}{:02X}", r, g, b);
+            let highlighted = nav.highlighted();
+            let widget = egui::Button::new("")
+                .fill(Color32::from_rgb(r, g, b))
+                .stroke(egui::Stroke::new(1.0, Color32::from_gray(0x8a)))
+                .min_size(Vec2::new(22.0, 18.0));
+            let response = ui.add(widget);
+            if highlighted {
+                let rect = response.rect.expand(2.0);
+                let fill = crate::theme::color_at(ui.ctx(), "menu.highlight.fill");
+                ui.painter().rect_filled(rect, 2.0, fill);
+            }
+            let response = response
+                .on_hover_text(name.as_str())
+                .accessible_name(name.as_str());
+            if nav.chosen(highlighted, &response) {
+                push(
+                    out,
+                    command,
+                    Args::new()
+                        .with(
+                            "color",
+                            ArgValue::Text(format!("#{:02X}{:02X}{:02X}", r, g, b)),
+                        )
+                        .with(
+                            "value",
+                            ArgValue::Text(format!("#{:02X}{:02X}{:02X}", r, g, b)),
+                        ),
+                    source,
+                );
+                chosen = true;
+            }
+        }
     }
     chosen
 }
@@ -1135,5 +1260,92 @@ mod tests {
         let name = swatch_name(&THEME_COLORS[2]);
         assert_eq!(name, "Accent #1F5BC4");
         assert_eq!(swatch_value(&THEME_COLORS[2]), "#1F5BC4");
+    }
+
+    /// Task P7-54: the "More ... Colors..." row dispatches the role's
+    /// custom command (the custom colour dialog's opener).
+    #[test]
+    fn the_more_colors_row_dispatches_the_custom_command() {
+        for (kind, label, command) in [
+            (
+                PickerKind::FillColor,
+                "More Fill Colors...",
+                "format.fill_color.custom",
+            ),
+            (
+                PickerKind::LineColor,
+                "More Line Colors...",
+                "format.line_color.custom",
+            ),
+            (
+                PickerKind::FontColor,
+                "More Text Colors...",
+                "format.text_color.custom",
+            ),
+        ] {
+            let intents = click(kind, label);
+            assert_eq!(intents.len(), 1, "{label}");
+            assert_eq!(intents[0].command.as_str(), command, "{label}");
+        }
+    }
+
+    /// Task P7-54: the remembered colours draw as "Recent Colors"
+    /// swatches and dispatch the role's colour command with their hex.
+    #[test]
+    fn the_recent_colors_draw_and_dispatch() {
+        let out: Rc<RefCell<Vec<Intent>>> = Rc::new(RefCell::new(Vec::new()));
+        let harness = Harness::builder()
+            .with_size(egui::vec2(240.0, 600.0))
+            .build_ui({
+                let out = Rc::clone(&out);
+                move |ui| {
+                    remember_color(ui.ctx(), (0x3a, 0x7f, 0x2c));
+                    show(
+                        ui,
+                        PickerKind::FillColor,
+                        Source::Test,
+                        egui::Color32::GRAY,
+                        &mut out.borrow_mut(),
+                    );
+                }
+            });
+        let mut harness = harness;
+        harness.run();
+        {
+            let root = harness.root();
+            let node = root
+                .query_all_by_role_and_label(Role::Button, "Recent #3A7F2C")
+                .next()
+                .expect("the recent swatch draws");
+            node.click();
+        }
+        harness.run();
+        let out = out.borrow().clone();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].command.as_str(), "format.set.fill.color");
+        assert_eq!(out[0].invocation.args.text("color"), Some("#3A7F2C"));
+    }
+
+    /// Task P7-54: the recent list is shared, de-duplicated (a repeat
+    /// moves the colour to the front) and capped.
+    #[test]
+    fn the_recent_colors_move_to_the_front_and_stop_at_ten() {
+        let ctx = egui::Context::default();
+        assert!(recent_colors(&ctx).is_empty(), "nothing remembered yet");
+        for green in 0..12u8 {
+            remember_color(&ctx, (0, green, 0));
+        }
+        let colors = recent_colors(&ctx);
+        assert_eq!(colors.len(), 10, "the list is capped");
+        assert_eq!(colors.first(), Some(&(0, 11, 0)), "most recent first");
+        // A repeat moves the colour to the front, without a second row.
+        remember_color(&ctx, (0, 3, 0));
+        let colors = recent_colors(&ctx);
+        assert_eq!(colors.len(), 10);
+        assert_eq!(colors.first(), Some(&(0, 3, 0)));
+        assert_eq!(
+            colors.iter().filter(|entry| **entry == (0, 3, 0)).count(),
+            1
+        );
     }
 }
