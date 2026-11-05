@@ -119,7 +119,9 @@ pub fn idle_overlay(state: &ToolMachine, ctx: &AppCtx) -> Result<Option<Overlay>
 /// - Ctrl on the selected point starts the move drag;
 /// - Ctrl on the shape arms the add gesture (the point lands on
 ///   release, so a drag adds nothing);
-/// - a plain press selects the point under the pointer; off the
+/// - a plain press on a point selects it and starts its move drag (a
+///   click without a drag only selects; the user's 2026-11-05 pass:
+///   a point is dragged directly, as in Visio); off the
 ///   points it selects the shape under the pointer (as the Pointer
 ///   tool's first click does), or clears the selection on empty page.
 fn down(
@@ -154,9 +156,14 @@ fn down(
         return Ok(ToolEffect::new());
     }
     match shape.and_then(|shape| hovered_point(ctx, shape, pos, zoom)) {
-        Some((shape, ix, _)) => {
+        Some((shape, ix, at)) => {
             state.connection_point.selected = Some((shape, ix));
-            state.connection_point.moving = None;
+            state.connection_point.moving = Some(Moving {
+                shape,
+                ix,
+                press: pos,
+                at,
+            });
         }
         None => {
             state.connection_point.selected = None;

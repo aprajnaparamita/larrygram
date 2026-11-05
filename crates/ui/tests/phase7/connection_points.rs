@@ -5,7 +5,7 @@
 //!   and off again;
 //! - the Connection Point tool adds a point with Ctrl+click (cells and
 //!   picture), and Esc returns to the Pointer Tool;
-//! - a connector drawn to the new point follows it when Ctrl+drag
+//! - a connector drawn to the new point follows it when a plain drag
 //!   moves the point (cells and picture);
 //! - the point's context menu sets Outward (cell);
 //! - Delete re-glues the point's end dynamically (formula and record);
@@ -35,7 +35,7 @@ const POINTS: [(f64, f64); 2] = [(2.25, 2.75), (3.75, 2.75)];
 /// Where the tool adds a point (page inches).
 const ADDED: (f64, f64) = (2.5, 2.5);
 
-/// Where the Ctrl+drag moves it (page inches).
+/// Where the drag moves it (page inches).
 const MOVED: (f64, f64) = (2.75, 3.25);
 
 fn cell(name: &str, value: f64) -> Cell {
@@ -137,38 +137,6 @@ fn ctrl_click_at(rig: &mut ShellRig, pos: egui::Pos2) {
             modifiers,
         });
     }
-    rig.run();
-    rig.harness()
-        .event(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
-    rig.run();
-}
-
-/// A Ctrl+drag from `from` to `to`: press on `from`, four moves,
-/// release on `to`, with Command held.
-fn ctrl_drag(rig: &mut ShellRig, from: egui::Pos2, to: egui::Pos2) {
-    let modifiers = egui::Modifiers::COMMAND;
-    rig.harness()
-        .event(egui::Event::ModifiersChanged(modifiers));
-    rig.harness().event(egui::Event::PointerMoved(from));
-    rig.run();
-    rig.harness().event(egui::Event::PointerButton {
-        pos: from,
-        button: egui::PointerButton::Primary,
-        pressed: true,
-        modifiers,
-    });
-    rig.run();
-    for step in 1..=4 {
-        let pos = from + (to - from) * (step as f32 / 4.0);
-        rig.harness().event(egui::Event::PointerMoved(pos));
-        rig.run();
-    }
-    rig.harness().event(egui::Event::PointerButton {
-        pos: to,
-        button: egui::PointerButton::Primary,
-        pressed: false,
-        modifiers,
-    });
     rig.run();
     rig.harness()
         .event(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
@@ -510,14 +478,14 @@ fn a_moved_point_moves_the_connector_end(kind: LayoutKind) {
         );
     }
 
-    // Select the shape again, arm the tool and select the point.
+    // Select the shape again, arm the tool and drag the point straight
+    // away (a plain drag, no Ctrl: the user's 2026-11-05 pass).
     select_shape(&mut rig);
     arm_point_tool(&mut rig, kind);
     let added_at = screen(&rig, ADDED.0, ADDED.1);
-    click_at(&mut rig, added_at);
     let before = rig.render();
     let moved_at = screen(&rig, MOVED.0, MOVED.1);
-    ctrl_drag(&mut rig, added_at, moved_at);
+    drag(&mut rig, added_at, moved_at);
 
     // Cells: the glued end follows the moved point.
     let document = snapshot(&rig);
