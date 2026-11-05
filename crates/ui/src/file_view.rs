@@ -616,6 +616,32 @@ mod tests {
     }
 
     #[test]
+    fn recent_files_in_the_open_page_are_drawn() {
+        use larrygram_commands::app::{AppCtx, DocumentSession, Settings};
+        use larrygram_model::Document;
+
+        use crate::test_util::with_ui;
+        let mut app = AppCtx::new(Settings::default());
+        app.open_document(DocumentSession::new(Document::new(), None));
+        app.settings
+            .recent_files
+            .push(std::path::PathBuf::from("/drawings/a.vsdx"));
+        app.settings
+            .recent_files
+            .push(std::path::PathBuf::from("/drawings/b.vsdx"));
+        let lists = ListData::new();
+        let mut file_view = FileView::new();
+        file_view.open();
+        file_view.set_page("file_view.open");
+        let outcome = with_ui(|ui| {
+            file_view.show(ui, &view(), &Metrics::default(), &app, &lists, &always)
+        });
+        let (intents, close) = outcome.expect("the page renders");
+        assert!(intents.is_empty(), "a draw-only frame dispatches nothing");
+        assert!(!close, "the Open page leaves the view open");
+    }
+
+    #[test]
     fn recent_files_add_the_path_argument() {
         use std::path::PathBuf;
 
