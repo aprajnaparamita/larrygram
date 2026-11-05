@@ -36,6 +36,59 @@ const SHAPE: (f64, f64) = (3.0, 3.0);
 // Fixture: a catalog rectangle with its text, centred in the viewport.
 // ---------------------------------------------------------------------------
 
+/// One command with args, dispatched through the shell.
+fn shell_dispatch(rig: &mut ShellRig, id: &'static str, args: Args) {
+    let command = CommandId::parse(id).expect("id");
+    let intent = larrygram_ui::Intent::new(command, Invocation::new(args, Source::Ui));
+    let mut shell = rig.shell.borrow_mut();
+    shell.dispatch(&[intent]).expect("the command runs");
+}
+
+/// The count of inked pixels in a page rectangle of `image` (the
+/// `text_controls` ink rule: the background is the region's most
+/// common colour).
+fn ink_count(
+    rig: &mut ShellRig,
+    x0: f64,
+    y0: f64,
+    x1: f64,
+    y1: f64,
+    image: &image::RgbaImage,
+) -> usize {
+    let a = screen(rig, x0, y1);
+    let b = screen(rig, x1, y0);
+    let (xmin, xmax) = (a.x.min(b.x).max(0.0) as u32, a.x.max(b.x) as u32);
+    let (ymin, ymax) = (a.y.min(b.y).max(0.0) as u32, a.y.max(b.y) as u32);
+    let mut counts: std::collections::HashMap<(u8, u8, u8), usize> =
+        std::collections::HashMap::new();
+    for y in ymin..ymax.min(image.height()) {
+        for x in xmin..xmax.min(image.width()) {
+            let px = image.get_pixel(x, y);
+            *counts.entry((px[0], px[1], px[2])).or_default() += 1;
+        }
+    }
+    let background = counts
+        .iter()
+        .max_by_key(|(_, count)| *count)
+        .map(|(colour, _)| *colour)
+        .unwrap_or((0, 0, 0));
+    let mut inked = 0;
+    for y in ymin..ymax.min(image.height()) {
+        for x in xmin..xmax.min(image.width()) {
+            let px = image.get_pixel(x, y);
+            let far = i32::from(px[0]) - i32::from(background.0);
+            let far = far
+                .abs()
+                .max((i32::from(px[1]) - i32::from(background.1)).abs());
+            let far = far.max((i32::from(px[2]) - i32::from(background.2)).abs());
+            if far > 40 {
+                inked += 1;
+            }
+        }
+    }
+    inked
+}
+
 /// One command with args, dispatched the way the shell dispatches it.
 #[allow(clippy::expect_used)] // test helper: a failure here is the bug
 fn dispatch(app: &mut AppCtx, id: &'static str, args: Args) {
@@ -746,6 +799,99 @@ fn the_format_shows_in_the_editor_field_while_editing() {
             differ > 0,
             "{kind:?}: the field shows the size before the commit ({differ} px)"
         );
+        press_key(&mut rig, egui::Key::Escape);
+    }
+}
+
+/// A second format over a formatted range refines it (task P7-53):
+/// the range's own row takes the second write, the rest is untouched.
+#[test]
+fn a_second_format_refines_an_already_formatted_range() {
+    for kind in LAYOUTS {
+        let (mut rig, shape) = catalog_rig(kind);
+        let pos = screen(&rig, SHAPE.0, SHAPE.1);
+        double_click_at(&mut rig, pos);
+        let shift = egui::Modifiers {
+            shift: true,
+            ..egui::Modifiers::NONE
+        };
+        press_key_with(&mut rig, egui::Key::ArrowLeft, shift);
+        press_key_with(&mut rig, egui::Key::ArrowLeft, shift);
+        click(&mut rig, Role::Button, "Bold");
+        press_key(&mut rig, egui::Key::Escape);
+        // Select the very last character (inside the bold range) and
+        // unbold it.
+        double_click_at(&mut rig, pos);
+        press_key_with(&mut rig, egui::Key::ArrowLeft, shift);
+        click(&mut rig, Role::Button, "Bold");
+        press_key(&mut rig, egui::Key::Escape);
+        let bold = drawn_bold(&rig, shape);
+        assert_eq!(
+            bold,
+            vec![false, false, true, false],
+            "{kind:?}: the refined range takes the second write ({bold:?})"
+        );
+    }
+}
+
+/// Typing keeps the runs it joins (task P7-53): a typed character at
+/// the start and in the middle joins the run at its position and the
+/// later runs shift.
+#[test]
+fn typing_keeps_the_runs_it_joins() {
+    for kind in LAYOUTS {
+        let (mut rig, shape) = catalog_rig(kind);
+        let pos = screen(&rig, SHAPE.0, SHAPE.1);
+        double_click_at(&mut rig, pos);
+        let shift = egui::Modifiers {
+            shift: true,
+            ..egui::Modifiers::NONE
+        };
+        press_key_with(&mut rig, egui::Key::ArrowLeft, shift);
+        press_key_with(&mut rig, egui::Key::ArrowLeft, shift);
+        click(&mut rig, Role::Button, "Bold");
+        press_key(&mut rig, egui::Key::Escape);
+
+        // Type "x" at the start and "y" in the middle of the plain
+        // run ("xMyM" + the bold "MM" becomes ...).
+        double_click_at(&mut rig, pos);
+        press_key(&mut rig, egui::Key::Home);
+        type_into_editor(&mut rig, "x");
+        press_key_with(&mut rig, egui::Key::ArrowRight, egui::Modifiers::NONE);
+        type_into_editor(&mut rig, "y");
+        press_key(&mut rig, egui::Key::Escape);
+        let bold = drawn_bold(&rig, shape);
+        assert_eq!(
+            bold,
+            vec![false, false, false, false, true, true],
+            "{kind:?}: the typed characters join the plain run ({bold:?})"
+        );
+    }
+}
+
+/// A face the theme did not register falls back to the proportional
+/// font in the field (task P7-53): the field still draws.
+#[test]
+fn an_unregistered_face_falls_back_in_the_field() {
+    for kind in LAYOUTS {
+        let (mut rig, _shape) = catalog_rig(kind);
+        // A family egui knows nothing about.
+        let mut args = larrygram_commands::Args::new();
+        args.set(
+            "value",
+            larrygram_commands::ArgValue::Text("NoSuchFont".to_owned()),
+        );
+        shell_dispatch(&mut rig, "text.font", args);
+        let pos = screen(&rig, SHAPE.0, SHAPE.1);
+        double_click_at(&mut rig, pos);
+        assert!(
+            has(&mut rig, Role::MultilineTextInput, "Text"),
+            "{kind:?}: the editor opens over the unknown family"
+        );
+        let (x, y) = SHAPE;
+        let drawn = rig.render();
+        let ink = ink_count(&mut rig, x - 0.5, y - 0.25, x + 0.5, y + 0.25, &drawn);
+        assert!(ink > 0, "{kind:?}: the field draws at the fallback ({ink})");
         press_key(&mut rig, egui::Key::Escape);
     }
 }

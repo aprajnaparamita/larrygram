@@ -380,3 +380,106 @@ fn the_structured_text_write_keeps_the_run_markers() {
         .unwrap_or_default();
     assert_eq!(markers, vec![0, 4], "one marker per run");
 }
+
+/// A scoped "use default" removes the named rows' entry only (task
+/// P7-53).
+#[test]
+fn a_scoped_use_default_removes_the_named_rows_entry_only() {
+    let (mut ctx, shape) = catalog();
+    let mut args = Args::new();
+    args.set("runs", run_arg(2, None));
+    args.set("color", ArgValue::Text("#1F5BC4".to_owned()));
+    run(&mut ctx, "text.font.color", args).expect("colour");
+    let mut args = Args::new();
+    args.set("runs", run_arg(2, None));
+    run(&mut ctx, "format.text_color.use_default", args).expect("use default");
+    let session = ctx.active_document().expect("session");
+    let entry = session.document.shape(shape).expect("shape");
+    let row = entry
+        .sheet
+        .sections
+        .iter()
+        .find(|s| s.name.as_str() == "Character")
+        .and_then(|block| block.rows.iter().find(|row| row.ix == Some(2)))
+        .expect("the run row");
+    assert!(
+        row.cells.iter().all(|cell| cell.name.as_str() != "Color"),
+        "the colour entry is gone"
+    );
+}
+
+/// A scoped write twice: the second lands on the row it created (the
+/// in-place path and the toggle's existing-row read).
+#[test]
+fn a_scoped_write_twice_toggles_the_row_it_created() {
+    let (mut ctx, shape) = catalog();
+    let mut args = Args::new();
+    args.set("runs", run_arg(4, None));
+    run(&mut ctx, "format.text.bold", args.clone()).expect("bold on");
+    assert_eq!(row_style(&ctx, shape, 4), Some(1.0));
+    run(&mut ctx, "format.text.bold", args).expect("bold off");
+    assert_eq!(row_style(&ctx, shape, 4), Some(0.0), "the second toggles");
+}
+
+/// The `runs_keep` entries parse like `runs` and refuse the same
+/// broken spellings (task P7-53).
+#[test]
+fn a_malformed_runs_keep_argument_is_an_argument_error() {
+    let (mut ctx, _shape) = catalog();
+    for entry in ["x", "1:x", ":3"] {
+        let mut args = Args::new();
+        args.set("runs_keep", ArgValue::List(vec![entry.to_owned()]));
+        run(&mut ctx, "format.text.bold", args).expect_err("a bad kept run is refused");
+    }
+}
+
+/// The structured `shape.set.text` form refuses broken run lists
+/// (task P7-53): never a panic.
+#[test]
+fn the_structured_text_write_refuses_a_broken_run_list() {
+    let (mut ctx, _shape) = catalog();
+    // run_ixs is not a list.
+    let mut args = text("text", "Hi");
+    args.set("run_ixs", ArgValue::Text("0".to_owned()));
+    run(&mut ctx, "shape.set.text", args).expect_err("a non-list is refused");
+    // run_texts is missing.
+    let mut args = text("text", "Hi");
+    args.set("run_ixs", ArgValue::List(vec!["0".to_owned()]));
+    run(&mut ctx, "shape.set.text", args).expect_err("run_texts is required");
+    // run_texts is not a list.
+    let mut args = text("text", "Hi");
+    args.set("run_ixs", ArgValue::List(vec!["0".to_owned()]));
+    args.set("run_texts", ArgValue::Text("Hi".to_owned()));
+    run(&mut ctx, "shape.set.text", args).expect_err("a non-list is refused");
+    // The lengths differ.
+    let mut args = text("text", "Hi");
+    args.set(
+        "run_ixs",
+        ArgValue::List(vec!["0".to_owned(), "1".to_owned()]),
+    );
+    args.set("run_texts", ArgValue::List(vec!["Hi".to_owned()]));
+    run(&mut ctx, "shape.set.text", args).expect_err("the lengths must match");
+    // A bad IX.
+    let mut args = text("text", "Hi");
+    args.set("run_ixs", ArgValue::List(vec!["x".to_owned()]));
+    args.set("run_texts", ArgValue::List(vec!["Hi".to_owned()]));
+    run(&mut ctx, "shape.set.text", args).expect_err("a bad IX is refused");
+    // An all-empty run list writes the empty text.
+    let mut args = text("text", "");
+    args.set("run_ixs", ArgValue::List(vec!["0".to_owned()]));
+    args.set("run_texts", ArgValue::List(vec!["".to_owned()]));
+    run(&mut ctx, "shape.set.text", args).expect("an empty write");
+    let session = ctx.active_document().expect("session");
+    let shape = session
+        .document
+        .shapes
+        .iter()
+        .find(|entry| entry.visio_id == 1)
+        .map(|entry| entry.id)
+        .expect("the fixture shape");
+    let entry = session.document.shape(shape).expect("shape");
+    assert!(
+        entry.text.as_ref().is_none_or(|text| text.parts.is_empty()),
+        "the empty write clears the text"
+    );
+}
