@@ -2473,6 +2473,20 @@ fn retarget(template: &Template, shape: ShapeId) -> Vec<Op> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ensure_run_rows_rejects_a_stale_shape() {
+        let doc = Document::new();
+        let mut doc = doc;
+        let error = ensure_run_rows(
+            &mut doc,
+            ShapeId { index: 99 },
+            "Character",
+            &[RunRow { ix: 0, seed: None }],
+        )
+        .expect_err("a stale shape is refused");
+        let _ = error;
+    }
     use crate::app::{DocumentSession, Settings};
     use crate::{ArgValue, Args, Source};
     use larrygram_model::{Cell, PageId, Preserved, Shape};

@@ -371,6 +371,45 @@ impl Edit for TextEdit {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The structured write re-adds the first-row paragraph and tabs
+    /// markers when the shape has rows of those kinds (task P7-53).
+    #[test]
+    fn structured_run_re_adds_the_paragraph_and_tabs_markers() {
+        use larrygram_model::{
+            Cell, CellName, CellValue, Page, PageId, Row, Section, SectionName, Shape,
+        };
+        let mut document = Document::new();
+        let mut shape = Shape::new(ShapeId { index: 0 }, 1);
+        for section in ["Paragraph", "Tabs"] {
+            let mut block = Section::new(SectionName::from_static(section));
+            let mut row = Row::new();
+            row.ix = Some(0);
+            row.cells = vec![Cell {
+                name: CellName::new("Position"),
+                formula: None,
+                value: Some(CellValue::Number(0.0)),
+                unit: larrygram_geom::Unit::Inches,
+                preserved: Preserved::new(),
+            }];
+            block.rows.push(row);
+            shape.sheet.sections.push(block);
+        }
+        let shape = document.add_shape(shape);
+        let mut page = Page::new(PageId { index: 0 }, 1);
+        page.shapes.push(shape);
+        document.pages.push(page);
+        let parts = structured_run(&document, shape, &[(3, "Hi".to_owned())]);
+        assert_eq!(
+            parts.parts,
+            vec![
+                TextPart::CharRun { ix: 3 },
+                TextPart::ParaRun { ix: 0 },
+                TextPart::TabsRun { ix: 0 },
+                TextPart::Text("Hi".to_owned()),
+            ]
+        );
+    }
     use larrygram_geom::Unit;
     use larrygram_model::{Cell, CellName, CellValue, PageId, Row, Section, SectionName, Shape};
 

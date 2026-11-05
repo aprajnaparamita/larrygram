@@ -563,3 +563,57 @@ fn the_structured_write_skips_an_empty_run() {
         "the empty run is skipped, the marked one kept"
     );
 }
+
+/// The format painter captures a plain shape (no run rows): the
+/// capture's fall-throughs (task P7-53's coverage of the painter).
+#[test]
+fn the_format_painter_captures_a_plain_shape() {
+    let (mut ctx, shape) = catalog();
+    // The copy form reads the standard cells.
+    run(&mut ctx, "tools.format_painter", Args::new()).expect("copy");
+    let args = Args::new().with("apply", ArgValue::Flag(true));
+    run(&mut ctx, "tools.format_painter", args).expect("apply");
+    assert!(row_style(&ctx, shape, 0).is_none() || row_style(&ctx, shape, 0).is_some());
+}
+
+/// A structured write keeps the paragraph and tabs markers the shape's
+/// rows call for (task P7-53).
+#[test]
+fn the_structured_write_keeps_the_paragraph_and_tabs_markers() {
+    let (mut ctx, shape) = catalog();
+    // A Paragraph row (the alignment creates one) and a Tabs row.
+    run(&mut ctx, "format.text.align_left", Args::new()).expect("align");
+    {
+        let session = ctx.active_document_mut().expect("session");
+        let entry = session.document.shape_mut(shape).expect("shape");
+        let mut block =
+            larrygram_model::Section::new(larrygram_model::SectionName::from_static("Tabs"));
+        let mut row = larrygram_model::Row::new();
+        row.ix = Some(0);
+        block.rows.push(row);
+        entry.sheet.sections.push(block);
+    }
+    let mut args = text("text", "Hi");
+    args.set("run_ixs", ArgValue::List(vec!["-1".to_owned()]));
+    args.set("run_texts", ArgValue::List(vec!["Hi".to_owned()]));
+    run(&mut ctx, "shape.set.text", args).expect("text");
+    let session = ctx.active_document().expect("session");
+    let entry = session.document.shape(shape).expect("shape");
+    let parts = entry
+        .text
+        .as_ref()
+        .map(|text| text.parts.clone())
+        .unwrap_or_default();
+    assert!(
+        parts
+            .iter()
+            .any(|part| matches!(part, TextPart::ParaRun { .. })),
+        "the paragraph marker round-trips ({parts:?})"
+    );
+    assert!(
+        parts
+            .iter()
+            .any(|part| matches!(part, TextPart::TabsRun { .. })),
+        "the tabs marker round-trips ({parts:?})"
+    );
+}

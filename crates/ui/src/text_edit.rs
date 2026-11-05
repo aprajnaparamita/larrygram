@@ -1588,6 +1588,167 @@ mod tests {
     }
 
     #[test]
+    fn spans_of_an_empty_text_is_one_unmarked_run() {
+        assert_eq!(
+            spans_of(&TextContent::new()),
+            vec![RunSpan {
+                start: 0,
+                end: 0,
+                ix: None
+            }]
+        );
+    }
+
+    #[test]
+    fn one_run_keeps_the_original_markers() {
+        let written = one_run(
+            "abc",
+            RunMarkers {
+                character: true,
+                paragraph: true,
+                tabs: true,
+            },
+        );
+        assert_eq!(
+            written.parts,
+            vec![
+                TextPart::CharRun { ix: 0 },
+                TextPart::ParaRun { ix: 0 },
+                TextPart::TabsRun { ix: 0 },
+                TextPart::Text("abc".to_owned()),
+            ]
+        );
+    }
+
+    #[test]
+    fn run_text_skips_empty_runs_and_reports_the_empty_text() {
+        let mut editor = TextEditor::new();
+        editor
+            .begin(
+                ShapeId { index: 0 },
+                &text(vec![TextPart::Text("ab".to_owned())]),
+            )
+            .expect("begin");
+        editor.spans = vec![
+            RunSpan {
+                start: 0,
+                end: 0,
+                ix: Some(1),
+            },
+            RunSpan {
+                start: 0,
+                end: 2,
+                ix: Some(1),
+            },
+        ];
+        // The empty run is skipped and the adjacent runs merge.
+        assert_eq!(
+            editor.run_text().parts,
+            vec![TextPart::CharRun { ix: 1 }, TextPart::Text("ab".to_owned())]
+        );
+        // Every run empty: the empty text.
+        editor.spans = vec![
+            RunSpan {
+                start: 0,
+                end: 0,
+                ix: Some(1),
+            },
+            RunSpan {
+                start: 0,
+                end: 0,
+                ix: Some(2),
+            },
+        ];
+        assert_eq!(editor.run_text().parts, Vec::new());
+    }
+
+    #[test]
+    fn split_for_range_refuses_an_empty_range() {
+        let (app, shape) = document_with(Some(text(vec![TextPart::Text("abcd".to_owned())])));
+        let session = app.active_document().expect("session");
+        let mut editor = TextEditor::new();
+        let content = text(vec![TextPart::Text("abcd".to_owned())]);
+        editor.begin(shape, &content).expect("begin");
+        assert_eq!(
+            editor.split_for_range(&session.document, shape, (2, 2)),
+            None,
+            "an empty range is no scope"
+        );
+    }
+
+    #[test]
+    fn split_for_range_splits_a_span_around_the_range() {
+        let (app, shape) = document_with(Some(text(vec![TextPart::Text("abcd".to_owned())])));
+        let session = app.active_document().expect("session");
+        let mut editor = TextEditor::new();
+        let content = text(vec![TextPart::Text("abcd".to_owned())]);
+        editor.begin(shape, &content).expect("begin");
+        let plan = editor
+            .split_for_range(&session.document, shape, (1, 2))
+            .expect("a plan");
+        // The unmarked run is normalised to its kept row and the
+        // range's part gets the written one.
+        assert_eq!(plan.keep, vec![(0, None)]);
+        assert_eq!(plan.write, vec![(1, None)]);
+        assert_eq!(
+            editor.spans,
+            vec![
+                RunSpan {
+                    start: 0,
+                    end: 1,
+                    ix: Some(0)
+                },
+                RunSpan {
+                    start: 1,
+                    end: 2,
+                    ix: Some(1)
+                },
+                RunSpan {
+                    start: 2,
+                    end: 4,
+                    ix: Some(0)
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn split_for_range_writes_a_span_it_fully_covers() {
+        let (app, shape) = document_with(Some(text(vec![
+            TextPart::CharRun { ix: 4 },
+            TextPart::Text("ab".to_owned()),
+            TextPart::CharRun { ix: 5 },
+            TextPart::Text("cd".to_owned()),
+        ])));
+        let session = app.active_document().expect("session");
+        let mut editor = TextEditor::new();
+        let content = text(vec![
+            TextPart::CharRun { ix: 4 },
+            TextPart::Text("ab".to_owned()),
+            TextPart::CharRun { ix: 5 },
+            TextPart::Text("cd".to_owned()),
+        ]);
+        editor.begin(shape, &content).expect("begin");
+        let plan = editor
+            .split_for_range(&session.document, shape, (2, 4))
+            .expect("a plan");
+        // The covered span's own row takes the write in place.
+        assert_eq!(plan.write, vec![(5, None)]);
+        assert!(plan.keep.is_empty());
+    }
+
+    #[test]
+    fn face_family_name_spells_every_face() {
+        assert_eq!(face_family_name("Carlito", false, true), "Carlito Italic");
+        assert_eq!(
+            face_family_name("Calibri", true, true),
+            "Carlito Bold Italic"
+        );
+        assert_eq!(base_family_name("Segoe UI"), "Selawik");
+        assert_eq!(base_family_name(""), "Carlito");
+    }
+
+    #[test]
     fn begin_plain_text_and_finish_a_changed_buffer() {
         let mut editor = TextEditor::new();
         let content = text(vec![
