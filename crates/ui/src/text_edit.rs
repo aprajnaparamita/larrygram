@@ -1134,7 +1134,7 @@ pub fn run_styles(
                 family,
                 bold: style & 1 != 0,
                 italic: style & 2 != 0,
-                size_pt: (size_pt as f64 * f64::from(scale)) as f32,
+                size_pt: (size_pt * f64::from(scale)) as f32,
                 color: egui::Color32::from_rgba_unmultiplied(color.r, color.g, color.b, alpha),
                 underline,
                 strikethrough,
