@@ -1012,7 +1012,7 @@ fn plain_format(ui: &Ui, base: &egui::FontId) -> egui::text::TextFormat {
 fn styled_format(ui: &Ui, style: &RunStyle) -> egui::text::TextFormat {
     let face = face_family_name(&style.family, style.bold, style.italic);
     let named = egui::FontFamily::Name(face.clone().into());
-    let plain = egui::FontFamily::Name(style.family.as_str().into());
+    let plain = egui::FontFamily::Name(base_family_name(&style.family).into());
     let known = ui.fonts(|fonts| fonts.definitions().families.contains_key(&named));
     let (family, skew) = if known {
         (named, false)
@@ -1036,11 +1036,22 @@ fn styled_format(ui: &Ui, style: &RunStyle) -> egui::text::TextFormat {
 
 /// The named family of one face (the [`crate::theme`] convention).
 fn face_family_name(family: &str, bold: bool, italic: bool) -> String {
+    let family = base_family_name(family);
     match (bold, italic) {
         (true, true) => format!("{family} Bold Italic"),
         (true, false) => format!("{family} Bold"),
         (false, true) => format!("{family} Italic"),
         (false, false) => family.to_owned(),
+    }
+}
+
+/// The registered family of a drawn family (the aliases the font
+/// stack resolves, ADR 0024).
+fn base_family_name(family: &str) -> &str {
+    match family {
+        "Calibri" => "Carlito",
+        "Segoe UI" => "Selawik",
+        other => other,
     }
 }
 
