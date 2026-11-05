@@ -12,6 +12,7 @@
 //! the data file knows.
 
 mod arrange;
+mod backgrounds;
 mod clipboard;
 mod connection_points;
 mod connector;
@@ -29,6 +30,8 @@ mod text;
 mod tools;
 mod view;
 
+pub use backgrounds::BackgroundDesign;
+pub use backgrounds::DESIGNS as BACKGROUND_DESIGNS;
 pub use connector::{connector_style, route_style_value, style_from_value};
 pub use connector_segments::connector_reroute_code;
 pub use format::{ARROW_SIZES, LINE_ARROWS, LINE_CAPS, LINE_PATTERNS};

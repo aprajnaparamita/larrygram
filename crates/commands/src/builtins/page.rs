@@ -8,7 +8,7 @@
 //! active page is part of the snapshot and a page switch clears the
 //! selection (ADR 0041).
 
-use larrygram_model::{CellValue, CellWrite, Connect, Page, PageId, Shape, SheetRef};
+use larrygram_model::{CellValue, CellWrite, Connect, Page, PageId, Shape, ShapeId, SheetRef};
 
 use crate::app::{AppCtx, SessionId};
 use crate::clipboard::{ClipboardContent, ClipboardKind};
@@ -18,7 +18,8 @@ use crate::undo::Edit;
 use crate::{ArgValue, Invocation, Outcome, UiRequest};
 
 use super::clipboard::{Placement, paste_content};
-use super::edit::{CellEdit, document_mut, number_literal};
+use super::edit::{CellEdit, StructuralEdit, document_mut, number_literal};
+use super::format::{FormatEdit, color_name, color_write, direct, parse_color};
 use super::view::page_size;
 use super::{CommandTable, edit_outcome, has_document, has_pages, model_error, outcome};
 
@@ -77,6 +78,12 @@ pub(crate) const TABLE: CommandTable = &[
         "Backgrounds",
         has_pages,
         run_set_background,
+    ),
+    (
+        "tools.background.color",
+        "Background Color",
+        can_color_background,
+        run_background_color,
     ),
     (
         "tools.options.page.setup",
@@ -687,50 +694,98 @@ fn background_name(ctx: &AppCtx) -> String {
     name
 }
 
-/// `tools.backgrounds`: assigns the background page named by the
-/// `background` argument to the current page (task P7-20: the
-/// Design-tab Backgrounds gallery's argument form).
+/// `tools.backgrounds`: assigns a background to the current page (task
+/// P7-20: the Design-tab Backgrounds gallery's argument form, task
+/// P7-54: its designs).
 ///
-/// `"none"` (or an empty string) removes the assignment. The named
-/// page must exist and must not be the current page (a page cannot be
-/// its own background). One undo step.
+/// The `background` (or `value`) argument is one of:
+///
+/// - a Backgrounds gallery design ("Solid Tint", "Soft Gradient",
+///   "Light Grid"): create (or reuse) the background page holding
+///   that design and assign it (one undo step);
+/// - `"none"`, `"No Background"` or an empty string: remove the
+///   assignment (one undo step);
+/// - any other text: assign the page with that name, which must not
+///   be the current page (a page cannot be its own background).
+///
+/// With no argument the command reports the current background and
+/// changes nothing (the gallery's face click runs the opener with no
+/// choice).
 fn run_set_background(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError> {
-    let wanted = match inv.args.get("background") {
+    let wanted = match background_argument(inv)? {
+        Some(text) => text,
         None => {
-            return Err(CommandError::NeedsInput(crate::NeededInput::Text {
-                prompt: "background page name, or none".to_owned(),
-                default: Some("none".to_owned()),
-            }));
+            let (_session_id, page) = active_page(ctx)?;
+            let session = ctx.active_document().ok_or_else(super::no_document)?;
+            let label = session
+                .document
+                .page(page)
+                .and_then(|entry| entry.background)
+                .and_then(|background| session.document.page(background))
+                .map(|entry| entry.name.clone())
+                .unwrap_or_else(|| "none".to_owned());
+            return Ok(outcome(format!("Background page: {label}"), Vec::new()));
         }
-        Some(ArgValue::Text(text)) => text.clone(),
-        Some(_) => return Err(CommandError::invalid_args("background must be text")),
     };
+    let wanted = wanted.trim().to_owned();
+    if wanted.is_empty()
+        || wanted.eq_ignore_ascii_case("none")
+        || wanted.eq_ignore_ascii_case("no background")
+    {
+        return set_background_target(ctx, None, "none");
+    }
+    if let Some(design) = super::backgrounds::design_for_label(&wanted) {
+        return apply_design(ctx, design);
+    }
+    let (_session_id, page) = active_page(ctx)?;
+    let session = ctx.active_document().ok_or_else(super::no_document)?;
+    let found = session
+        .document
+        .pages
+        .iter()
+        .find(|entry| entry.name == wanted || entry.name_u == wanted)
+        .map(|entry| entry.id);
+    let Some(found) = found else {
+        return Err(CommandError::failed(format!(
+            "no page named {wanted:?} to use as the background"
+        )));
+    };
+    if found == page {
+        return Err(CommandError::failed(
+            "a page cannot be its own background page",
+        ));
+    }
+    set_background_target(ctx, Some(found), &wanted)
+}
+
+/// The `background` (or `value`/`color`) argument of
+/// [`run_set_background`] and [`run_background_color`], spelled as
+/// text; a present argument of another kind is an argument error, and
+/// `None` is the no-argument form.
+fn background_argument(inv: &Invocation) -> Result<Option<String>, CommandError> {
+    for name in ["background", "value", "color"] {
+        match inv.args.get(name) {
+            None => {}
+            Some(ArgValue::Text(text)) => return Ok(Some(text.clone())),
+            Some(_) => {
+                return Err(CommandError::invalid_args(format!("{name} must be text")));
+            }
+        }
+    }
+    Ok(None)
+}
+
+/// Assigns `target` (or clears it) as the current page's background
+/// page, one undo step (the shared tail of [`run_set_background`]).
+fn set_background_target(
+    ctx: &mut AppCtx,
+    target: Option<PageId>,
+    label: &str,
+) -> Result<Outcome, CommandError> {
     let (session_id, page) = active_page(ctx)?;
     let session = ctx.active_document().ok_or_else(super::no_document)?;
     let old = session.document.pages.clone();
     let old_active = session.active_page;
-    let wanted = wanted.trim().to_owned();
-    let target = if wanted.is_empty() || wanted.eq_ignore_ascii_case("none") {
-        None
-    } else {
-        let found = session
-            .document
-            .pages
-            .iter()
-            .find(|entry| entry.name == wanted || entry.name_u == wanted)
-            .map(|entry| entry.id);
-        let Some(found) = found else {
-            return Err(CommandError::failed(format!(
-                "no page named {wanted:?} to use as the background"
-            )));
-        };
-        if found == page {
-            return Err(CommandError::failed(
-                "a page cannot be its own background page",
-            ));
-        }
-        Some(found)
-    };
     let new_list = {
         let doc = document_mut(ctx, session_id)?;
         if let Some(entity) = doc.pages.iter_mut().find(|entry| entry.id == page) {
@@ -748,10 +803,200 @@ fn run_set_background(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, Com
         old_active,
     );
     let message = match target {
-        Some(_) => format!("Background page: {wanted}"),
+        Some(_) => format!("Background page: {label}"),
         None => "Background page: none".to_owned(),
     };
     Ok(edit_outcome(message, Vec::new(), Box::new(edit)))
+}
+
+/// Applies `design` to the current page (task P7-54): creates (or
+/// reuses) the design's background page and assigns it, one undo
+/// step. A new page — or a reused page that is still empty — gets the
+/// design drawn on it; a reused page that holds shapes keeps them.
+fn apply_design(
+    ctx: &mut AppCtx,
+    design: &super::backgrounds::BackgroundDesign,
+) -> Result<Outcome, CommandError> {
+    let (session_id, page) = active_page(ctx)?;
+    let session = ctx.active_document().ok_or_else(super::no_document)?;
+    let old = session.document.pages.clone();
+    let old_active = session.active_page;
+    let old_background = session
+        .document
+        .page(page)
+        .and_then(|entry| entry.background);
+    let existing = session
+        .document
+        .pages
+        .iter()
+        .find(|entry| entry.name == design.page_name || entry.name_u == design.page_name)
+        .map(|entry| (entry.id, entry.shapes.is_empty()));
+    if let Some((found, _)) = existing
+        && found == page
+    {
+        return Err(CommandError::failed(
+            "a page cannot be its own background page",
+        ));
+    }
+    // The staging closure: create the page when needed, assign it and
+    // draw the design; any failure rolls the page and its link back
+    // (the `insert` shapes' rollback rule).
+    let staged: Result<(PagesEdit, Vec<ShapeId>), CommandError> = (|| {
+        let doc = document_mut(ctx, session_id)?;
+        let (target, draw) = match existing {
+            Some((found, empty)) => (found, empty),
+            None => {
+                let created = doc.add_page(design.page_name).map_err(model_error)?;
+                (created, true)
+            }
+        };
+        if let Some(entity) = doc.pages.iter_mut().find(|entry| entry.id == page) {
+            entity.background = Some(target);
+        }
+        let edit = PagesEdit::new(
+            session_id,
+            "Set background",
+            old.clone(),
+            old_active,
+            doc.pages.clone(),
+            old_active,
+        );
+        let mut drawn = Vec::new();
+        if draw {
+            let size = page_size(doc, target);
+            for shape in super::backgrounds::design_shapes(design, design.default_color, size) {
+                match doc.insert_shape(target, shape, None) {
+                    Ok(id) => drawn.push(id),
+                    Err(error) => {
+                        for id in &drawn {
+                            let _ = doc.detach_shape(*id);
+                        }
+                        return Err(model_error(error));
+                    }
+                }
+            }
+        }
+        Ok((edit, drawn))
+    })();
+    let (edit, drawn) = match staged {
+        Ok(staged) => staged,
+        Err(error) => {
+            // Roll the created page and its link back (the shapes
+            // inserted before a failure leave with the page).
+            if let Ok(doc) = document_mut(ctx, session_id) {
+                if existing.is_none()
+                    && let Some(created) = doc.pages.last().map(|entry| entry.id)
+                {
+                    let _ = doc.delete_page(created);
+                }
+                if let Some(entity) = doc.pages.iter_mut().find(|entry| entry.id == page) {
+                    entity.background = old_background;
+                }
+            }
+            return Err(error);
+        }
+    };
+    // One undo step: the page list and the drawn shapes together
+    // (the `edit.duplicate.page` order: the list first, the shapes
+    // after — undo takes them back in reverse).
+    let mut composite = CompositeEdit::new("Set background");
+    composite.push(Box::new(edit));
+    for id in &drawn {
+        let step = {
+            let doc = document_mut(ctx, session_id)?;
+            StructuralEdit::insertion(doc, session_id, design.name, *id)?
+        };
+        composite.push(Box::new(step));
+    }
+    ctx.touch_session(session_id);
+    Ok(edit_outcome(
+        format!("Background page: {}", design.name),
+        Vec::new(),
+        Box::new(composite),
+    ))
+}
+
+/// `tools.background.color` (task P7-54): the Background Color
+/// submenu colours the design the current page's background page
+/// holds.
+///
+/// The `color` (or `value`) argument is a `#RGB`, `#RRGGBB` or colour
+/// name spelling. Every shape of the design takes its derived colour
+/// (`backgrounds::design_colors`), one undo step.
+fn run_background_color(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError> {
+    let text = background_argument(inv)?.unwrap_or_default();
+    if text.trim().is_empty() {
+        return Err(CommandError::NeedsInput(crate::NeededInput::Text {
+            prompt: "color".to_owned(),
+            default: None,
+        }));
+    }
+    let color = parse_color(&text).ok_or_else(|| {
+        CommandError::invalid_args(format!(
+            "unknown color {text:?}; use #RGB, #RRGGBB or a color name"
+        ))
+    })?;
+    let (session_id, page) = active_page(ctx)?;
+    let session = ctx.active_document().ok_or_else(super::no_document)?;
+    let background = session
+        .document
+        .page(page)
+        .and_then(|entry| entry.background)
+        .ok_or_else(|| CommandError::failed("the page has no background page"))?;
+    let entity = session
+        .document
+        .page(background)
+        .ok_or_else(|| CommandError::failed("the background page is gone"))?;
+    let design = super::backgrounds::design_for_page(&entity.name).ok_or_else(|| {
+        CommandError::failed(format!(
+            "{:?} is not a Backgrounds gallery background",
+            entity.name
+        ))
+    })?;
+    let size = page_size(&session.document, background);
+    let shapes = entity.shapes.clone();
+    let colors = super::backgrounds::design_colors(design, color, size);
+    let ops: Vec<_> = shapes
+        .iter()
+        .zip(colors)
+        .map(|(id, shade)| direct(*id, "FillForegnd", color_write(shade)))
+        .collect();
+    if ops.is_empty() {
+        return Err(CommandError::failed(format!(
+            "{:?} holds no design shapes",
+            entity.name
+        )));
+    }
+    let message = format!("Background color: {}", color_name(color));
+    let mut edit = {
+        let doc = document_mut(ctx, session_id)?;
+        FormatEdit::new(doc, session_id, message.clone(), ops)?
+    };
+    edit.apply(ctx)?;
+    Ok(edit_outcome(message, Vec::new(), Box::new(edit)))
+}
+
+/// Enabled when the current page's background page holds one of the
+/// Backgrounds gallery designs (task P7-54: the Background Color
+/// submenu colours a design, not a user's background page).
+fn can_color_background(ctx: &AppCtx) -> crate::Enabled {
+    let Some(session) = ctx.active_document() else {
+        return crate::Enabled::no("no open document");
+    };
+    let Some(page) = session.active_page else {
+        return crate::Enabled::no("no open page");
+    };
+    let designed = session
+        .document
+        .page(page)
+        .and_then(|entry| entry.background)
+        .and_then(|background| session.document.page(background))
+        .and_then(|entry| super::backgrounds::design_for_page(&entry.name));
+    if designed.is_some() {
+        crate::Enabled::yes()
+    } else {
+        crate::Enabled::no("the page has no Backgrounds gallery background")
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1354,14 +1599,218 @@ mod tests {
         )
         .expect_err("self");
         assert!(error.to_string().contains("own background"), "{error}");
-        let error = run_set_background(&mut ctx, &Invocation::empty(crate::Source::Test))
-            .expect_err("no value");
-        assert!(matches!(error, CommandError::NeedsInput(_)), "{error:?}");
+        // The no-argument form reports the current background and
+        // changes nothing (task P7-54: the gallery's face click).
+        let outcome =
+            run_set_background(&mut ctx, &Invocation::empty(crate::Source::Test)).expect("report");
+        assert_eq!(outcome.message.as_deref(), Some("Background page: none"));
+        assert!(outcome.edit.is_none(), "nothing changed");
         let error = run_set_background(
             &mut ctx,
             &invocation(&[("background", ArgValue::Integer(2))]),
         )
         .expect_err("bad type");
+        assert!(
+            matches!(error, CommandError::InvalidArgs { .. }),
+            "{error:?}"
+        );
+    }
+
+    /// The `FillForegnd` value of one shape (`None` when absent).
+    fn fill_of(ctx: &AppCtx, shape: ShapeId) -> Option<larrygram_model::Color> {
+        let session = ctx.active_document().expect("session");
+        let entry = session.document.shape(shape).expect("shape");
+        entry
+            .sheet
+            .cells
+            .iter()
+            .find(|cell| cell.name.as_str() == "FillForegnd")
+            .and_then(|cell| match cell.value {
+                Some(CellValue::Color(color)) => Some(color),
+                _ => None,
+            })
+    }
+
+    /// A Backgrounds gallery design creates its background page with
+    /// the design drawn on it and assigns it, one undo step — and one
+    /// redo brings both back (task P7-54 goal 2).
+    #[test]
+    fn a_gallery_design_creates_and_assigns_its_background_page() {
+        let mut ctx = one_shape_ctx();
+        let outcome = run_set_background(
+            &mut ctx,
+            &invocation(&[("background", ArgValue::Text("Solid Tint".to_owned()))]),
+        )
+        .expect("apply");
+        assert_eq!(
+            outcome.message.as_deref(),
+            Some("Background page: Solid Tint")
+        );
+        let session = ctx.active_document().expect("session");
+        assert_eq!(session.document.pages.len(), 2);
+        assert_eq!(
+            session.document.pages[0].background,
+            Some(PageId { index: 1 }),
+            "the link records"
+        );
+        assert_eq!(session.document.pages[1].name, "Background Tint");
+        let shapes = session.document.pages[1].shapes.clone();
+        assert_eq!(shapes.len(), 1, "the tint is one rectangle");
+        assert_eq!(
+            fill_of(&ctx, shapes[0]),
+            Some(larrygram_model::Color::new(0xd6, 0xe4, 0xf0)),
+            "the design's default colour draws"
+        );
+
+        // One undo step removes the shapes, the page and the link;
+        // one redo brings them back.
+        let mut edit = outcome.edit.expect("edit");
+        edit.revert(&mut ctx).expect("revert");
+        let session = ctx.active_document().expect("session");
+        assert_eq!(session.document.pages.len(), 1);
+        assert_eq!(session.document.pages[0].background, None);
+        edit.apply(&mut ctx).expect("redo");
+        let session = ctx.active_document().expect("session");
+        assert_eq!(session.document.pages.len(), 2);
+        assert_eq!(
+            session.document.pages[0].background,
+            Some(PageId { index: 1 }),
+            "the redo restores the link"
+        );
+        assert_eq!(session.document.pages[1].shapes.len(), 1, "and the shapes");
+    }
+
+    /// A second application of the same design reuses its background
+    /// page and keeps the drawn design (task P7-54: "creates (or
+    /// reuses)").
+    #[test]
+    fn a_gallery_design_reuses_its_background_page() {
+        let mut ctx = one_shape_ctx();
+        run_set_background(
+            &mut ctx,
+            &invocation(&[("background", ArgValue::Text("Soft Gradient".to_owned()))]),
+        )
+        .expect("apply");
+        let session = ctx.active_document().expect("session");
+        assert_eq!(session.document.pages.len(), 2);
+        assert_eq!(session.document.pages[1].shapes.len(), 24, "24 bands");
+        run_set_background(
+            &mut ctx,
+            &invocation(&[("value", ArgValue::Text("Soft Gradient".to_owned()))]),
+        )
+        .expect("again");
+        let session = ctx.active_document().expect("session");
+        assert_eq!(session.document.pages.len(), 2, "the page is reused");
+        assert_eq!(
+            session.document.pages[1].shapes.len(),
+            24,
+            "the drawn design is kept"
+        );
+        // "No Background" clears the link and keeps the page.
+        run_set_background(
+            &mut ctx,
+            &invocation(&[("background", ArgValue::Text("No Background".to_owned()))]),
+        )
+        .expect("clear");
+        let session = ctx.active_document().expect("session");
+        assert_eq!(session.document.pages.len(), 2);
+        assert_eq!(session.document.pages[0].background, None);
+    }
+
+    /// `tools.background.color` recolours the design in place, one
+    /// undo step (task P7-54: the Background Color submenu).
+    #[test]
+    fn background_color_recolors_the_design() {
+        let mut ctx = one_shape_ctx();
+        run_set_background(
+            &mut ctx,
+            &invocation(&[("background", ArgValue::Text("Solid Tint".to_owned()))]),
+        )
+        .expect("apply");
+        assert!(can_color_background(&ctx).is_enabled());
+        let outcome = run_background_color(
+            &mut ctx,
+            &invocation(&[("color", ArgValue::Text("#FF0000".to_owned()))]),
+        )
+        .expect("recolour");
+        assert_eq!(
+            outcome.message.as_deref(),
+            Some("Background color: #FF0000")
+        );
+        let shapes: Vec<ShapeId> = {
+            let session = ctx.active_document().expect("session");
+            session.document.pages[1].shapes.clone()
+        };
+        assert_eq!(
+            fill_of(&ctx, shapes[0]),
+            Some(larrygram_model::Color::new(0xff, 0x00, 0x00)),
+            "the design takes the new colour"
+        );
+        // One undo restores the design's old colour.
+        let mut edit = outcome.edit.expect("edit");
+        edit.revert(&mut ctx).expect("revert");
+        assert_eq!(
+            fill_of(&ctx, shapes[0]),
+            Some(larrygram_model::Color::new(0xd6, 0xe4, 0xf0)),
+            "undo restores the old colour"
+        );
+    }
+
+    /// `tools.background.color` refuses a page without a background
+    /// and a background page that is not one of the gallery designs
+    /// (task P7-54).
+    #[test]
+    fn background_color_needs_a_gallery_background() {
+        let mut ctx = one_shape_ctx();
+        assert!(!can_color_background(&ctx).is_enabled());
+        let error = run_background_color(
+            &mut ctx,
+            &invocation(&[("color", ArgValue::Text("red".to_owned()))]),
+        )
+        .expect_err("no background");
+        assert!(error.to_string().contains("no background page"), "{error}");
+
+        // A user's own background page is not a design.
+        run_new_background_page(&mut ctx, &Invocation::empty(crate::Source::Test))
+            .expect("background page");
+        run_set_background(
+            &mut ctx,
+            &invocation(&[("background", ArgValue::Text("none".to_owned()))]),
+        )
+        .expect("unlink");
+        // The new page became active; give it "Page-1" as background
+        // again and colour that (a plain page).
+        run_set_background(
+            &mut ctx,
+            &invocation(&[("background", ArgValue::Text("Page-1".to_owned()))]),
+        )
+        .expect("assign");
+        assert!(!can_color_background(&ctx).is_enabled(), "no design");
+        let error = run_background_color(
+            &mut ctx,
+            &invocation(&[("color", ArgValue::Text("red".to_owned()))]),
+        )
+        .expect_err("not a design");
+        assert!(
+            error.to_string().contains("not a Backgrounds gallery"),
+            "{error}"
+        );
+
+        // Argument rules: no colour asks, an unknown colour is an
+        // argument error.
+        run_set_background(
+            &mut ctx,
+            &invocation(&[("background", ArgValue::Text("Solid Tint".to_owned()))]),
+        )
+        .expect("apply the design");
+        let error = run_background_color(&mut ctx, &Invocation::empty(crate::Source::Test))
+            .expect_err("no color");
+        assert!(matches!(error, CommandError::NeedsInput(_)), "{error:?}");
+        let error = run_background_color(
+            &mut ctx,
+            &invocation(&[("value", ArgValue::Text("nope".to_owned()))]),
+        )
+        .expect_err("unknown color");
         assert!(
             matches!(error, CommandError::InvalidArgs { .. }),
             "{error:?}"

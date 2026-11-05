@@ -953,11 +953,13 @@ impl Shell {
     }
 
     /// The run-time lists for the Panel Modern widgets, filled from
-    /// [`LiveLists`] (task P7-09 wiring of the P7-06 providers).
+    /// [`LiveLists`] (task P7-09 wiring of the P7-06 providers; task
+    /// P7-54 adds the Backgrounds gallery and its Background Color
+    /// submenu).
     fn list_data(&self) -> ListData {
         let live = LiveLists;
         let mut lists = ListData::new();
-        for name in ["recent_files", "windows", "pages"] {
+        for name in ["recent_files", "windows", "pages", "backgrounds", "colors"] {
             let entries = live.list(name, &self.app);
             lists.insert(name, entries.into_iter().map(|entry| entry.label).collect());
         }

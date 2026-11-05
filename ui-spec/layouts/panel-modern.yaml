@@ -1200,6 +1200,7 @@ tabs:
         - id: tab.design.backgrounds.backgrounds.background_color.colors
           kind: list
           list: colors
+          command: tools.background.color
     - id: tab.design.backgrounds.borders_and_titles
       kind: dropdown
       label: Borders & Titles

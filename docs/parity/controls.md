@@ -17,6 +17,7 @@ A row listed in `ui-spec/out-of-scope.txt` stays `out-of-scope` even when a comm
 | AlignJustify | toggleButton | AlignJustify | tab/TabHome/GroupParagraph | implemented |
 | AlignLeft | toggleButton | AlignLeft | tab/TabHome/GroupParagraph | implemented |
 | AlignRight | toggleButton | AlignRight | tab/TabHome/GroupParagraph | implemented |
+| BackgroundColor | gallery | BackgroundColor | tab/TabDesignVisio/GroupBackgrounds | implemented |
 | BackgroundPageInsert | button | BackgroundPageInsert | tab/TabInsert/GroupInsertPages | implemented |
 | BackgroundsGallery | gallery | BackgroundsGallery | tab/TabDesignVisio/GroupBackgrounds | implemented |
 | BlankPageInsertMenu | splitButton | BlankPageInsertMenu | tab/TabInsert/GroupInsertPages | implemented |
@@ -103,7 +104,6 @@ A row listed in `ui-spec/out-of-scope.txt` stays `out-of-scope` even when a comm
 | AutomaticResizeAlwaysFitToContents | toggleButton | AutomaticResizeAlwaysFitToContents | tab/TabFormat/GroupContainerSize | stub |
 | AutomaticResizeExpandAsNeeded | toggleButton | AutomaticResizeExpandAsNeeded | tab/TabFormat/GroupContainerSize | stub |
 | AutomaticResizeNone | toggleButton | AutomaticResizeNone | tab/TabFormat/GroupContainerSize | stub |
-| BackgroundColor | gallery | BackgroundColor | tab/TabDesignVisio/GroupBackgrounds | stub |
 | BevelShapeGallery | gallery | BevelShapeGallery | tab/TabHome/GroupShapeStyles | stub |
 | BordersAndTitlesGallery | gallery | BordersAndTitlesGallery | tab/TabDesignVisio/GroupBackgrounds | stub |
 | ButtonCategoryCloudServices | category | ButtonCategoryCloudServices | backstage/TabRecent | stub |
@@ -914,6 +914,7 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | text.font.size.decrease | Font Size Decrease | implemented |
 | text.font.size.increase | Font Size Increase | implemented |
 | text.strike.through | Through | implemented |
+| tools.background.color | Background Color | implemented |
 | tools.backgrounds | Backgrounds | implemented |
 | tools.blank.page.insert | Blank Page Insert | implemented |
 | tools.blank.page.insert.visio | Blank Page Insert Visio | implemented |
@@ -1538,7 +1539,6 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | tools.automatic.resize.always.fit.to.contents | Automatic Resize Always Fit To Contents | stub |
 | tools.automatic.resize.expand.as.needed | Automatic Resize Expand As Needed | stub |
 | tools.automatic.resize.none | Automatic Resize None | stub |
-| tools.background.color | Background Color | stub |
 | tools.bevel.shape | Bevel Shape | stub |
 | tools.bevel_options_3d | 3 D Bevel Options Dialog | stub |
 | tools.borders.and.titles | Borders And Titles | stub |
