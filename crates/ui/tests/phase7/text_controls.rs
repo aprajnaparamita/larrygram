@@ -1681,6 +1681,40 @@ fn a_file_command_over_an_open_edit_commits_it_first() {
     }
 }
 
+/// Save As on a saved drawing asks for the target in both layouts and
+/// re-homes the drawing on the picked file (the user's alpha pass,
+/// 2026-11-05: Panel Modern's Browse… wrote the drawing's own file
+/// with no dialog).
+#[test]
+fn save_as_of_a_saved_drawing_asks_and_saves_where_picked() {
+    for kind in LAYOUTS {
+        let own = temp_target(&format!("own-{kind:?}"));
+        let target = temp_target(&format!("picked-{kind:?}"));
+        let picker = SavePicker::new(target.clone());
+        let saves = picker.saves.clone();
+        let mut rig = shell_rig(kind);
+        rig.shell.borrow_mut().set_picker(Box::new(picker));
+        rig.shell
+            .borrow_mut()
+            .app
+            .active_document_mut()
+            .expect("a document")
+            .path = Some(own.clone());
+        save_as_command(&mut rig, kind);
+        assert_eq!(*saves.borrow(), 1, "{kind:?}: Save As asked for a path");
+        assert!(target.is_file(), "{kind:?}: the picked file was written");
+        assert!(!own.exists(), "{kind:?}: the own file was not written");
+        let title = rig.shell.borrow().title_text();
+        let picked = target
+            .file_name()
+            .expect("a file name")
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(title, picked, "{kind:?}: the title names the picked file");
+        let _ = std::fs::remove_file(&target);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Item 1 (task P7-48, the review's M1): the block is the box. The
 // commit test, the fill and the wrap width use the text block, joined

@@ -707,12 +707,18 @@ fn save_document(
     let own = ctx
         .active_document()
         .and_then(|session| session.path.clone());
+    // Save As always asks for its target, suggesting the document's
+    // own file name: on a saved document it used to write its own
+    // file without a dialog (the user's alpha pass, 2026-11-05).
+    if set_path && arg_path.is_none() {
+        return save_without_path(ctx, own.as_deref().map(|path| save_target(path, kind)));
+    }
     let mapped = arg_path.is_none() && own.as_deref().is_some_and(is_binary);
     let target = arg_path
         .clone()
         .or_else(|| own.as_deref().map(|path| save_target(path, kind)));
     let Some(path) = target else {
-        return save_without_path(ctx);
+        return save_without_path(ctx, None);
     };
     let session = ctx.active_document_mut().ok_or_else(no_document)?;
     let empty = Package::new();
@@ -737,19 +743,20 @@ fn save_document(
     Ok(outcome(format!("Saved {}", path.display()), Vec::new()))
 }
 
-/// The no-target save of a never-saved document on the desktop: the
-/// caller gets [`CommandError::NeedsInput`] and picks a path (ADR
-/// 0036). The suggested name follows the document kind (task P8-09:
+/// The no-target save on the desktop (a never-saved document, or any
+/// Save As): the caller gets [`CommandError::NeedsInput`] and picks a
+/// path (ADR 0036). The suggestion is `own`, the document's own target,
+/// or a name that follows the document kind (task P8-09:
 /// `stencil.vssx`, `template.vstx`, `drawing.vsdx`).
 #[cfg(not(target_arch = "wasm32"))]
-fn save_without_path(ctx: &mut AppCtx) -> Result<Outcome, CommandError> {
+fn save_without_path(ctx: &mut AppCtx, own: Option<PathBuf>) -> Result<Outcome, CommandError> {
     let kind = ctx
         .active_document()
         .map(|session| session.document.kind)
         .unwrap_or_default();
     Err(CommandError::NeedsInput(NeededInput::Path {
         purpose: PathPurpose::SaveFile,
-        suggested: Some(PathBuf::from(default_save_name(kind))),
+        suggested: Some(own.unwrap_or_else(|| PathBuf::from(default_save_name(kind)))),
     }))
 }
 
@@ -757,7 +764,7 @@ fn save_without_path(ctx: &mut AppCtx) -> Result<Outcome, CommandError> {
 /// serialized package goes back in [`Outcome::payload`] and the web
 /// app downloads it (ADR 0036).
 #[cfg(target_arch = "wasm32")]
-fn save_without_path(ctx: &mut AppCtx) -> Result<Outcome, CommandError> {
+fn save_without_path(ctx: &mut AppCtx, _own: Option<PathBuf>) -> Result<Outcome, CommandError> {
     payload_save(ctx)
 }
 
@@ -1916,6 +1923,51 @@ mod tests {
             vec![other.clone(), own],
             "the recent list records the written file first"
         );
+        std::fs::remove_dir_all(&dir).expect("clean up");
+    }
+
+    /// Save As always asks for its target, even on a saved document
+    /// (the user's alpha pass, 2026-11-05: it wrote the document's own
+    /// file without a dialog). The ask suggests the own file, mapped
+    /// out of a read-only binary format, and nothing is written.
+    #[test]
+    fn save_as_of_a_saved_drawing_asks_for_the_target() {
+        let dir = scratch_dir();
+        let own = dir.join("own.vsdx");
+        let mut ctx = AppCtx::new(crate::Settings::default());
+        run_new(&mut ctx, &Invocation::empty(Source::Test)).expect("new");
+        run_save_as(
+            &mut ctx,
+            &Invocation::new(
+                Args::new().with("path", ArgValue::Path(own.clone())),
+                Source::Ui,
+            ),
+        )
+        .expect("save as");
+        let written = std::fs::metadata(&own).expect("saved").modified().ok();
+        let error = run_save_as(&mut ctx, &Invocation::empty(Source::Ui)).expect_err("asks");
+        let CommandError::NeedsInput(NeededInput::Path { purpose, suggested }) = error else {
+            panic!("Save As asks for a path, got {error:?}");
+        };
+        assert_eq!(purpose, PathPurpose::SaveFile);
+        assert_eq!(suggested.as_deref(), Some(own.as_path()));
+        assert_eq!(
+            std::fs::metadata(&own)
+                .expect("still there")
+                .modified()
+                .ok(),
+            written,
+            "the ask writes nothing"
+        );
+
+        // A document opened from a .vsd suggests the .vsdx beside it.
+        let vsd = dir.join("plan.vsd");
+        ctx.open_document(DocumentSession::new(Document::new(), Some(vsd.clone())));
+        let error = run_save_as(&mut ctx, &Invocation::empty(Source::Ui)).expect_err("asks");
+        let CommandError::NeedsInput(NeededInput::Path { suggested, .. }) = error else {
+            panic!("Save As asks for a path, got {error:?}");
+        };
+        assert_eq!(suggested, Some(vsd.with_extension("vsdx")));
         std::fs::remove_dir_all(&dir).expect("clean up");
     }
 
