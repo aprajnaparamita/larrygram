@@ -429,6 +429,18 @@ pub enum UiRequest {
     /// arguments; the dialog collects the line cells and re-dispatches
     /// the command with them).
     ShowLineDialog,
+    /// Show the custom colour dialog (task P7-54:
+    /// `format.fill_color.custom`, `format.line_color.custom` and
+    /// `format.text_color.custom`; the dialog collects one colour and
+    /// the shell re-dispatches the role's colour command with it —
+    /// `format.set.fill.color`, `format.set.line.color` or
+    /// `text.font.color`, the same command the swatches dispatch — as
+    /// one undo step). `target` names the role: `fill`, `line` or
+    /// `text`.
+    ShowColorDialog {
+        /// What the colour applies to (`fill`, `line` or `text`).
+        target: String,
+    },
     /// Show the Format Shape pane (task P7-28: `format.shape.pane`;
     /// the pane edits the fill and line cells field by field and
     /// follows the selection. The command toggles: a second run with

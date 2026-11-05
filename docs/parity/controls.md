@@ -829,9 +829,11 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | file.save | Save | implemented |
 | file.save_as | Save As | implemented |
 | format.fill | Fill | implemented |
+| format.fill_color.custom | More Fill Colors... | implemented |
 | format.fill_color.no_fill | No Fill | implemented |
 | format.fill_color.use_default | Use Default | implemented |
 | format.line | Line | implemented |
+| format.line_color.custom | More Line Colors... | implemented |
 | format.line_color.no_line | No Line | implemented |
 | format.line_color.use_default | Use Default | implemented |
 | format.line_ends.no_line_ends | No Line Ends | implemented |
@@ -861,6 +863,7 @@ An `out-of-scope` row stays out of scope even when a handler resolves: the same 
 | format.text.increase_size | Increase Font Size | implemented |
 | format.text.italic | Italic | implemented |
 | format.text.underline | Underline | implemented |
+| format.text_color.custom | More Text Colors... | implemented |
 | format.text_color.use_default | Use Default | implemented |
 | format.transparency.no_transparency | No Transparency | implemented |
 | help.about | About Larrygram | implemented |
