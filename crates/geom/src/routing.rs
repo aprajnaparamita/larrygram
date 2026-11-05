@@ -575,6 +575,119 @@ fn collapse_collinear(points: &mut Vec<Point>) {
     *points = kept;
 }
 
+/// Moves segment `index` of an axis-aligned `path` to `to` along its
+/// normal (x for a vertical segment, y for a horizontal one),
+/// stretching its neighbours. An end segment gets a new bend so the
+/// path's first and last points stay. Returns the new path; never
+/// panics. A non-axis-aligned segment or an index out of range is
+/// `Error::InvalidArgument`.
+///
+/// The result is axis-aligned, keeps the path's first and last points
+/// and repeats no point (task P7-35 item 2). The moved segment keeps
+/// its extent along its own axis; each neighbour stretches along its
+/// own axis to the moved line. A neighbour that runs **along** the
+/// moved segment cannot stretch, so a short jog connects it to the
+/// moved line instead. A `to` that would land the moved segment on a
+/// point the path already visits (the route would repeat a point) is
+/// `Error::InvalidArgument`: no axis-aligned path with the same ends
+/// exists there.
+pub fn move_segment(path: &[Point], index: usize, to: f64) -> Result<Vec<Point>, Error> {
+    let (Some(&start), Some(&finish)) = (path.get(index), path.get(index.saturating_add(1))) else {
+        return Err(Error::InvalidArgument);
+    };
+    // The moved segment must be axis-aligned with a real extent.
+    let horizontal = if start.y == finish.y && start.x != finish.x {
+        true
+    } else if start.x == finish.x && start.y != finish.y {
+        false
+    } else {
+        return Err(Error::InvalidArgument);
+    };
+    if !to.is_finite() {
+        return Err(Error::InvalidArgument);
+    }
+    let current = if horizontal { start.y } else { start.x };
+    if to == current {
+        return Ok(path.to_vec());
+    }
+    // The moved segment keeps its extent along its own axis and sits
+    // on `to` (a rigid translation along its normal).
+    let moved = |point: Point| {
+        if horizontal {
+            Point::new(point.x, to)
+        } else {
+            Point::new(to, point.y)
+        }
+    };
+    let begin = moved(start);
+    let end = moved(finish);
+    let mut out: Vec<Point> = Vec::with_capacity(path.len().saturating_add(2));
+    if let Some(head) = path.get(..index) {
+        out.extend_from_slice(head);
+    }
+    // The begin side: a perpendicular neighbour stretches (its shared
+    // point slides along it to the moved line); the path's first point
+    // (it is glued) and a neighbour that runs along the moved segment
+    // cannot slide, so the shared point stays and a jog connects it to
+    // the moved line.
+    let previous = index
+        .checked_sub(1)
+        .and_then(|previous| path.get(previous))
+        .copied();
+    if previous.is_none_or(|previous| !perpendicular(previous, start, horizontal)) {
+        out.push(start);
+        out.push(begin);
+    } else {
+        out.push(begin);
+    }
+    out.push(end);
+    // The end side, mirrored: a perpendicular neighbour's shared point
+    // is replaced by `end`, anything else takes the jog.
+    let next = path.get(index.saturating_add(2)).copied();
+    if next.is_none_or(|next| !perpendicular(finish, next, horizontal)) {
+        out.push(finish);
+    }
+    if let Some(tail) = path.get(index.saturating_add(2)..) {
+        out.extend_from_slice(tail);
+    }
+    drop_consecutive(&mut out);
+    // A moved segment landing on a point the path already visits
+    // cannot be both axis-aligned and repeat-free: refuse it.
+    let mut seen: Vec<Point> = Vec::with_capacity(out.len());
+    for (position, point) in out.iter().enumerate() {
+        let edge = position == 0 || position + 1 == out.len();
+        if !edge && seen.contains(point) {
+            return Err(Error::InvalidArgument);
+        }
+        seen.push(*point);
+    }
+    Ok(out)
+}
+
+/// Whether the neighbour segment into `shared` runs across the moved
+/// segment's axis (the normal case: it stretches along its own axis to
+/// the moved line). `horizontal` is the moved segment's orientation.
+fn perpendicular(previous: Point, shared: Point, horizontal: bool) -> bool {
+    if horizontal {
+        previous.x == shared.x && previous.y != shared.y
+    } else {
+        previous.y == shared.y && previous.x != shared.x
+    }
+}
+
+/// Drops consecutive equal points, keeping the first of each run (the
+/// first and the last values always survive: a dropped end repeats its
+/// predecessor's value).
+fn drop_consecutive(points: &mut Vec<Point>) {
+    let mut kept: Vec<Point> = Vec::with_capacity(points.len());
+    for point in points.iter() {
+        if kept.last().is_none_or(|last| !same(*last, *point)) {
+            kept.push(*point);
+        }
+    }
+    *points = kept;
+}
+
 /// Drops any interior point the route already visited (a degenerate
 /// turn can land on an earlier point): no point is repeated. The first
 /// and the last point always stay.

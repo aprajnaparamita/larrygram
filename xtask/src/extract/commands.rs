@@ -710,6 +710,7 @@ pub const OUR_COMMANDS: &[(&str, &str)] = &[
     ("connector.line_jump_style.sides_7", "7 Sides"),
     ("connector.line_jump_style.square", "Square"),
     ("connector.move_end", "Move Connector End"),
+    ("connector.move_segment", "Move Connector Segment"),
     ("connector.point_add", "Add Connection Point"),
     ("connector.point_delete", "Delete Connection Point"),
     ("connector.point_move", "Move Connection Point"),

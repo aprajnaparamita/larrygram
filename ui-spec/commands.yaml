@@ -1405,6 +1405,11 @@
   mapping_confidence: unknown
   visuicmd: null
 - fluent_ids: []
+  id: connector.move_segment
+  label: Move Connector Segment
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
   id: connector.point_add
   label: Add Connection Point
   mapping_confidence: unknown

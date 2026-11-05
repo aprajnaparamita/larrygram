@@ -25,6 +25,7 @@ mod connector_1d;
 mod connector_ends;
 mod connector_landing;
 mod connector_moves;
+mod connector_segments;
 mod connector_styles;
 mod expect;
 mod first_run;

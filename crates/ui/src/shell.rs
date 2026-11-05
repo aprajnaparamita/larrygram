@@ -3516,6 +3516,9 @@ impl panel_classic::CheckedState for ShellChecks {
             // The connection-point menu's type rows (task P7-34 item
             // 3).
             .or_else(|| self.point_type_checked(command))
+            // The reroute rows show the current reroute behaviour
+            // (task P7-35 item 5).
+            .or_else(|| crate::checked::reroute_option_checked(app, command))
     }
 }
 

@@ -95,8 +95,10 @@ const PIN_365: LayoutCounts = LayoutCounts {
 // drag, one undo step). P7-33 adds `connector.move_end` (the end
 // drag's one undoable move of one connector end). P7-34 adds
 // `connector.point_add`, `connector.point_move` and
-// `connector.point_delete` (the connection-point commands).
-const COMMANDS: usize = 1134;
+// `connector.point_delete` (the connection-point commands). P7-35 adds
+// `connector.move_segment` (the segment drag's one undoable move of
+// one connector segment).
+const COMMANDS: usize = 1135;
 // 90 rows from the source page; P7-20 adds the four `OWN_SHORTCUTS`
 // bindings (Ctrl+N, Ctrl+O, Ctrl+S, Ctrl+Alt+P); P7-23 adds `Ctrl+,`
 // (the Options dialog, Cmd+, on macOS); P7-42 adds `Ctrl+Q` (the quit

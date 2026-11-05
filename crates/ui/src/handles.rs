@@ -12,7 +12,7 @@
 use std::collections::BTreeSet;
 
 use larrygram_commands::AppCtx;
-use larrygram_geom::{Angle, Point, Rect, Segment, Transform};
+use larrygram_geom::{Angle, Point, Rect, RouteStyle, Segment, Transform};
 use larrygram_model::{ConnectorEnd, Document, ShapeId};
 use larrygram_render::{
     BuildOptions, EndMark, NodePath, Overlay, OverlayMark, Scene, build_scene,
@@ -55,6 +55,9 @@ pub enum HandleKind {
     Rotate,
     /// Move one end of a selected connector (task P7-33 item 1).
     ConnectorEnd(ConnectorEnd),
+    /// Move one segment of a selected right-angle connector (task
+    /// P7-35 item 1).
+    ConnectorSegment(usize),
 }
 
 /// The screen-pixel hit tolerance of a handle outside the selection
@@ -258,6 +261,90 @@ pub fn end_handle_at(ends: &[EndMark; 2], point: Point, zoom: f64) -> Option<Con
         }
     }
     best.map(|(end, _)| end)
+}
+
+/// The segment handle at `point` (page inches, `zoom` for the
+/// screen-pixel tolerance of [`TOLERANCE_PX`]): the nearest handle
+/// within reach, like [`handle_at`]'s rule.
+pub fn segment_handle_at(segments: &[(usize, Point)], point: Point, zoom: f64) -> Option<usize> {
+    if !finite(point) {
+        return None;
+    }
+    let pixel = inches_per_pixel(zoom);
+    let square = HANDLE_HALF_PX * pixel;
+    let reach = TOLERANCE_PX * pixel;
+    let mut best: Option<(usize, f64)> = None;
+    for (index, at) in segments {
+        let delta = point.sub(*at);
+        let distance = delta.x.hypot(delta.y);
+        let hit = delta.x.abs().max(delta.y.abs()) <= square || distance <= reach;
+        if hit && best.is_none_or(|(_, held)| distance < held) {
+            best = Some((*index, distance));
+        }
+    }
+    best.map(|(index, _)| index)
+}
+
+/// The midpoint handles of a selected right-angle connector (task
+/// P7-35 item 1): one per segment of the drawn route, in page inches.
+/// `None` for any other selection, and for a straight or curved
+/// connector (they show none).
+pub fn segment_handles(
+    ctx: &AppCtx,
+    scene: Option<&Scene>,
+    shapes: &[ShapeId],
+) -> Option<Vec<(usize, Point)>> {
+    let path = segment_path(ctx, scene, shapes)?;
+    Some(
+        path.windows(2)
+            .enumerate()
+            .map(|(index, pair)| {
+                (
+                    index,
+                    Point::new((pair[0].x + pair[1].x) / 2.0, (pair[0].y + pair[1].y) / 2.0),
+                )
+            })
+            .collect(),
+    )
+}
+
+/// The selected connector's drawn route in page inches (task P7-35
+/// item 1): the polyline of one right-angle connector. `None` for any
+/// other selection and for a straight, curved or non-polyline route.
+pub fn segment_path(ctx: &AppCtx, scene: Option<&Scene>, shapes: &[ShapeId]) -> Option<Vec<Point>> {
+    let session = ctx.active_document()?;
+    let connector = *shapes.first()?;
+    if shapes.len() != 1 || !session.document.is_connector(connector) {
+        return None;
+    }
+    if larrygram_commands::builtins::connector_style(ctx) != Some(RouteStyle::RightAngle) {
+        return None;
+    }
+    let built;
+    let scene: &Scene = match scene {
+        Some(scene) => scene,
+        None => {
+            built = scene_for(ctx).ok()?;
+            built.as_ref()?
+        }
+    };
+    let entries = node_entries(scene);
+    let entry = entries.iter().find(|entry| entry.shape == connector)?;
+    let node = scene_shape(scene, entry.path.indices())?;
+    let mut points = Vec::new();
+    for segment in node.path.segments() {
+        match segment {
+            Segment::MoveTo(point) | Segment::LineTo(point) => {
+                let point = entry.transform.apply(*point);
+                if !finite(point) {
+                    return None;
+                }
+                points.push(point);
+            }
+            _ => return None,
+        }
+    }
+    (points.len() >= 2).then_some(points)
 }
 
 /// Whether one connector end is glued (task P7-33 item 1): its

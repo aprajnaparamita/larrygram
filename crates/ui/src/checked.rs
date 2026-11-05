@@ -52,6 +52,22 @@ pub fn connection_points_checked(app: &AppCtx, command: &str) -> Option<bool> {
     }
 }
 
+/// The checked state of the Panel Classic reroute options (task P7-35
+/// item 5): each row shows the selection's `ConFixedCode` value
+/// checked — Reroute Freely 0, Never Reroute 2 and Reroute on
+/// Crossover 3. `None` for every other command and with no connector
+/// selected (the rows are unmarked where they are disabled).
+pub fn reroute_option_checked(app: &AppCtx, command: &str) -> Option<bool> {
+    let wanted = match command {
+        "format.set.dyn.conn.reroute.freely" => 0.0,
+        "format.set.dyn.conn.reroute.never" => 2.0,
+        "format.set.dyn.conn.reroute.on.crossover" => 3.0,
+        _ => return None,
+    };
+    let code = larrygram_commands::builtins::connector_reroute_code(app)?;
+    Some(code == wanted)
+}
+
 /// The checked state of the text toggles (task P7-24 item 10): Bold,
 /// Italic and Underline read the selection anchor's `Character`
 /// `Style` bits (1, 2 and 4) and the alignment rows its `Paragraph`

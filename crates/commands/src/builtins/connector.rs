@@ -2260,6 +2260,26 @@ fn reroute_document(
         if !picks(scope, &changed_visio, &ends, connector, visio_id) {
             continue;
         }
+        // The `ConFixedCode` check (ADR 0084 rule 7, task P7-35 item
+        // 5): Never Reroute keeps the stored route through the scoped
+        // pass; only its ends follow their glue and its end segments
+        // stretch to reach them. Any other value routes fresh (rule 5).
+        if matches!(scope, Scope::Changed(_))
+            && super::connector_segments::never_reroutes(doc, connector)
+            && let Some(kept) =
+                super::connector_segments::kept_route(doc, page, connector, &ends, warnings)
+        {
+            let before = PathRows::capture(doc, connector);
+            kept.apply(doc, connector).map_err(model_error)?;
+            let after = PathRows::capture(doc, connector);
+            entries.push(RouteRows {
+                shape: connector,
+                before,
+                after,
+            });
+            routed = routed.saturating_add(1);
+            continue;
+        }
         routed = routed.saturating_add(route_one(
             doc,
             page,
