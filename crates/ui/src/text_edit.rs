@@ -1046,10 +1046,11 @@ fn face_family_name(family: &str, bold: bool, italic: bool) -> String {
 }
 
 /// The registered family of a drawn family (the aliases the font
-/// stack resolves, ADR 0024).
+/// stack resolves, ADR 0024; the empty family draws as Carlito, the
+/// default stack's first face).
 fn base_family_name(family: &str) -> &str {
     match family {
-        "Calibri" => "Carlito",
+        "" | "Calibri" => "Carlito",
         "Segoe UI" => "Selawik",
         other => other,
     }

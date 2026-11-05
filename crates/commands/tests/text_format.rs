@@ -483,3 +483,83 @@ fn the_structured_text_write_refuses_a_broken_run_list() {
         "the empty write clears the text"
     );
 }
+
+/// The scoped forms of the other character formats (task P7-53):
+/// font, font size, the size ladder and strikethrough.
+#[test]
+fn the_other_character_formats_take_the_scope() {
+    let (mut ctx, shape) = catalog();
+    let mut args = text("value", "Selawik");
+    args.set("runs", run_arg(6, None));
+    run(&mut ctx, "text.font", args).expect("font");
+    let mut args = number("size", 18.0);
+    args.set("runs", run_arg(6, None));
+    run(&mut ctx, "text.font.size", args).expect("size");
+    let mut args = Args::new();
+    args.set("runs", run_arg(6, None));
+    run(&mut ctx, "text.font.size.increase", args.clone()).expect("grow");
+    run(&mut ctx, "tools.strikethrough", args.clone()).expect("strike");
+    run(&mut ctx, "format.text_color.use_default", args).expect("colour default");
+    let session = ctx.active_document().expect("session");
+    let entry = session.document.shape(shape).expect("shape");
+    let row = entry
+        .sheet
+        .sections
+        .iter()
+        .find(|s| s.name.as_str() == "Character")
+        .and_then(|block| block.rows.iter().find(|row| row.ix == Some(6)))
+        .expect("the run row");
+    let cell = |name: &str| {
+        row.cells
+            .iter()
+            .find(|cell| cell.name.as_str() == name)
+            .and_then(|cell| cell.value.clone())
+    };
+    assert_eq!(
+        cell("Font"),
+        Some(larrygram_model::CellValue::Str("Selawik".to_owned())),
+        "the font records"
+    );
+    let size = match cell("Size") {
+        Some(larrygram_model::CellValue::Number(value)) => value,
+        other => panic!("the size records ({other:?})"),
+    };
+    assert!(size > 18.0 / 72.0, "the ladder grew the size ({size})");
+    assert_eq!(
+        cell("Strikethru"),
+        Some(larrygram_model::CellValue::Bool(true)),
+        "the strike records"
+    );
+}
+
+/// A structured write with an empty run among real ones skips the
+/// empty literal and keeps the rest (task P7-53).
+#[test]
+fn the_structured_write_skips_an_empty_run() {
+    let (mut ctx, shape) = catalog();
+    let mut args = text("text", "Hi");
+    args.set(
+        "run_ixs",
+        ArgValue::List(vec!["-1".to_owned(), "7".to_owned()]),
+    );
+    args.set(
+        "run_texts",
+        ArgValue::List(vec!["".to_owned(), "Hi".to_owned()]),
+    );
+    run(&mut ctx, "shape.set.text", args).expect("text");
+    let session = ctx.active_document().expect("session");
+    let entry = session.document.shape(shape).expect("shape");
+    let parts = entry
+        .text
+        .as_ref()
+        .map(|text| text.parts.clone())
+        .unwrap_or_default();
+    assert_eq!(
+        parts,
+        vec![
+            larrygram_model::TextPart::CharRun { ix: 7 },
+            larrygram_model::TextPart::Text("Hi".to_owned())
+        ],
+        "the empty run is skipped, the marked one kept"
+    );
+}

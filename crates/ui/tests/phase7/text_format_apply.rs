@@ -428,10 +428,25 @@ fn text_differ(rig: &ShellRig, before: &image::RgbaImage, after: &image::RgbaIma
     // The text area: the shape box inset by a quarter (the text sits
     // centred in the box).
     let (x, y) = SHAPE;
-    let inset_x = 0.3;
-    let inset_y = 0.25;
-    let a = screen(rig, x - 0.75 + inset_x, y + 0.5 - inset_y);
-    let b = screen(rig, x + 0.75 - inset_x, y - 0.5 + inset_y);
+    text_differ_in(rig, before, after, (x - 0.45, y - 0.25, x + 0.45, y + 0.25))
+}
+
+/// The whole shape box (the field's sized text and decorations reach
+/// the box edges).
+fn field_box() -> (f64, f64, f64, f64) {
+    let (x, y) = SHAPE;
+    (x - 0.75, y - 0.5, x + 0.75, y + 0.5)
+}
+
+/// [`text_differ`] over an explicit page rectangle.
+fn text_differ_in(
+    rig: &ShellRig,
+    before: &image::RgbaImage,
+    after: &image::RgbaImage,
+    bounds: (f64, f64, f64, f64),
+) -> usize {
+    let a = screen(rig, bounds.0, bounds.3);
+    let b = screen(rig, bounds.2, bounds.1);
     let (xmin, xmax) = (a.x.min(b.x).max(0.0) as u32, a.x.max(b.x) as u32);
     let (ymin, ymax) = (a.y.min(b.y).max(0.0) as u32, a.y.max(b.y) as u32);
     let mut differ = 0;
@@ -776,6 +791,13 @@ fn a_range_format_survives_a_later_edit() {
 fn the_format_shows_in_the_editor_field_while_editing() {
     for kind in LAYOUTS {
         let (mut rig, _shape) = catalog_rig(kind);
+        // The caret must not blink into the frame comparisons.
+        for theme in [egui::Theme::Light, egui::Theme::Dark] {
+            rig.harness()
+                .ctx
+                .style_mut_of(theme, |style| style.visuals.text_cursor.blink = false);
+        }
+        rig.run();
         let pos = screen(&rig, SHAPE.0, SHAPE.1);
         double_click_at(&mut rig, pos);
         assert!(
@@ -794,10 +816,41 @@ fn the_format_shows_in_the_editor_field_while_editing() {
         );
         pick_size(&mut rig, kind, "36 pt");
         let sized = rig.render();
-        let differ = text_differ(&rig, &bold, &sized);
+        let differ = text_differ_in(&rig, &bold, &sized, field_box());
         assert!(
             differ > 0,
             "{kind:?}: the field shows the size before the commit ({differ} px)"
+        );
+        // Italic and Underline show too (the face family and the
+        // decoration stroke).
+        click(&mut rig, Role::Button, "Italic");
+        let italic = rig.render();
+        let differ = text_differ_in(&rig, &sized, &italic, field_box());
+        assert!(
+            differ > 0,
+            "{kind:?}: the field shows the italic before the commit ({differ} px)"
+        );
+        click(&mut rig, Role::Button, "Underline");
+        let underlined = rig.render();
+        let differ = text_differ_in(&rig, &italic, &underlined, field_box());
+        assert!(
+            differ > 0,
+            "{kind:?}: the field shows the underline before the commit ({differ} px)"
+        );
+        // An alias family (Segoe UI resolves to Selawik) shows as the
+        // aliased face.
+        let mut args = larrygram_commands::Args::new();
+        args.set(
+            "value",
+            larrygram_commands::ArgValue::Text("Segoe UI".to_owned()),
+        );
+        shell_dispatch(&mut rig, "text.font", args);
+        rig.run();
+        let aliased = rig.render();
+        let differ = text_differ_in(&rig, &underlined, &aliased, field_box());
+        assert!(
+            differ > 0,
+            "{kind:?}: the field shows the aliased family ({differ} px)"
         );
         press_key(&mut rig, egui::Key::Escape);
     }
