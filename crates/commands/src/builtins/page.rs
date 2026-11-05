@@ -838,18 +838,19 @@ fn apply_design(
             "a page cannot be its own background page",
         ));
     }
-    // The staging closure: create the page when needed, assign it and
-    // draw the design; any failure rolls the page and its link back
-    // (the `insert` shapes' rollback rule).
+    // The design page: the existing one, or a new one (a failure to
+    // create it changes nothing).
+    let (target, draw) = match existing {
+        Some((found, empty)) => (found, empty),
+        None => {
+            let doc = document_mut(ctx, session_id)?;
+            (doc.add_page(design.page_name).map_err(model_error)?, true)
+        }
+    };
+    // The staging closure: assign the link and draw the design; any
+    // failure rolls both back (the `insert` shapes' rollback rule).
     let staged: Result<(PagesEdit, Vec<ShapeId>), CommandError> = (|| {
         let doc = document_mut(ctx, session_id)?;
-        let (target, draw) = match existing {
-            Some((found, empty)) => (found, empty),
-            None => {
-                let created = doc.add_page(design.page_name).map_err(model_error)?;
-                (created, true)
-            }
-        };
         if let Some(entity) = doc.pages.iter_mut().find(|entry| entry.id == page) {
             entity.background = Some(target);
         }
@@ -865,15 +866,7 @@ fn apply_design(
         if draw {
             let size = page_size(doc, target);
             for shape in super::backgrounds::design_shapes(design, design.default_color, size) {
-                match doc.insert_shape(target, shape, None) {
-                    Ok(id) => drawn.push(id),
-                    Err(error) => {
-                        for id in &drawn {
-                            let _ = doc.detach_shape(*id);
-                        }
-                        return Err(model_error(error));
-                    }
-                }
+                drawn.push(doc.insert_shape(target, shape, None).map_err(model_error)?);
             }
         }
         Ok((edit, drawn))
@@ -881,18 +874,13 @@ fn apply_design(
     let (edit, drawn) = match staged {
         Ok(staged) => staged,
         Err(error) => {
-            // Roll the created page and its link back (the shapes
-            // inserted before a failure leave with the page).
-            if let Ok(doc) = document_mut(ctx, session_id) {
-                if existing.is_none()
-                    && let Some(created) = doc.pages.last().map(|entry| entry.id)
-                {
-                    let _ = doc.delete_page(created);
-                }
-                if let Some(entity) = doc.pages.iter_mut().find(|entry| entry.id == page) {
-                    entity.background = old_background;
-                }
-            }
+            rollback_design(
+                ctx,
+                session_id,
+                page,
+                existing.is_none().then_some(target),
+                old_background,
+            );
             return Err(error);
         }
     };
@@ -914,6 +902,29 @@ fn apply_design(
         Vec::new(),
         Box::new(composite),
     ))
+}
+
+/// The rollback of a failed [`apply_design`] staging (the `insert`
+/// shapes' rollback rule): the page created for the design leaves
+/// with the shapes drawn on it, and the foreground page's link
+/// returns to what it was. The staging fails only on model limits
+/// (the paths are unreachable in ordinary use), so the restore is
+/// tested on its own.
+fn rollback_design(
+    ctx: &mut AppCtx,
+    session_id: SessionId,
+    page: PageId,
+    created: Option<PageId>,
+    old_background: Option<PageId>,
+) {
+    if let Ok(doc) = document_mut(ctx, session_id) {
+        if let Some(created) = created {
+            let _ = doc.delete_page(created);
+        }
+        if let Some(entity) = doc.pages.iter_mut().find(|entry| entry.id == page) {
+            entity.background = old_background;
+        }
+    }
 }
 
 /// `tools.background.color` (task P7-54): the Background Color
@@ -1815,6 +1826,135 @@ mod tests {
             matches!(error, CommandError::InvalidArgs { .. }),
             "{error:?}"
         );
+    }
+
+    /// A design cannot make the design page its own background, and a
+    /// design page that holds no shapes colours nothing (task P7-54).
+    #[test]
+    fn a_design_page_is_never_its_own_background_and_must_hold_shapes() {
+        let mut ctx = one_shape_ctx();
+        run_set_background(
+            &mut ctx,
+            &invocation(&[("background", ArgValue::Text("Solid Tint".to_owned()))]),
+        )
+        .expect("apply");
+        // The design page becomes active: applying the same design
+        // again would make it its own background.
+        {
+            let session = ctx.active_document_mut().expect("session");
+            session.active_page = Some(PageId { index: 1 });
+        }
+        let error = run_set_background(
+            &mut ctx,
+            &invocation(&[("background", ArgValue::Text("Solid Tint".to_owned()))]),
+        )
+        .expect_err("self");
+        assert!(error.to_string().contains("own background"), "{error}");
+
+        // The design page without shapes colours nothing (the link
+        // from the foreground page still names it).
+        {
+            let session = ctx.active_document_mut().expect("session");
+            session.active_page = Some(PageId { index: 0 });
+            session.document.pages[1].shapes.clear();
+        }
+        let error = run_background_color(
+            &mut ctx,
+            &invocation(&[("color", ArgValue::Text("red".to_owned()))]),
+        )
+        .expect_err("no shapes");
+        assert!(
+            error.to_string().contains("holds no design shapes"),
+            "{error}"
+        );
+    }
+
+    /// `can_color_background` reads the two empty states (task
+    /// P7-54).
+    #[test]
+    fn background_color_needs_a_design_on_the_active_page() {
+        // No document.
+        let ctx = AppCtx::new(crate::app::Settings::default());
+        assert!(!can_color_background(&ctx).is_enabled());
+        // A document with no active page.
+        let mut ctx = one_shape_ctx();
+        {
+            let session = ctx.active_document_mut().expect("session");
+            session.active_page = None;
+        }
+        assert!(!can_color_background(&ctx).is_enabled());
+    }
+
+    /// The rollback of a failed `apply_design` staging: the created
+    /// page leaves with its shapes and the link returns; a reused
+    /// page stays (task P7-54).
+    #[test]
+    fn rollback_design_restores_the_page_and_the_link() {
+        let mut ctx = one_shape_ctx();
+        let session_id = ctx.active_document().expect("session").id;
+        // A created page and a link, as the staging leaves them.
+        let created = {
+            let doc = document_mut(&mut ctx, session_id).expect("document");
+            let created = doc.add_page("Background Tint").expect("page");
+            if let Some(entry) = doc
+                .pages
+                .iter_mut()
+                .find(|entry| entry.id == PageId { index: 0 })
+            {
+                entry.background = Some(created);
+            }
+            created
+        };
+        rollback_design(
+            &mut ctx,
+            session_id,
+            PageId { index: 0 },
+            Some(created),
+            None,
+        );
+        let session = ctx.active_document().expect("session");
+        assert_eq!(session.document.pages.len(), 1, "the created page leaves");
+        assert_eq!(session.document.pages[0].background, None);
+
+        // The reused-page case keeps the page and restores the link.
+        {
+            let doc = document_mut(&mut ctx, session_id).expect("document");
+            let kept = doc.add_page("Background Tint").expect("page");
+            if let Some(entry) = doc
+                .pages
+                .iter_mut()
+                .find(|entry| entry.id == PageId { index: 0 })
+            {
+                entry.background = Some(kept);
+            }
+        }
+        rollback_design(&mut ctx, session_id, PageId { index: 0 }, None, None);
+        let session = ctx.active_document().expect("session");
+        assert_eq!(session.document.pages.len(), 2, "the reused page stays");
+        assert_eq!(session.document.pages[0].background, None);
+    }
+
+    /// `fill_of` reads nothing from a cell that is not a colour (the
+    /// malformed-cell rule).
+    #[test]
+    fn fill_of_ignores_a_non_colour_cell() {
+        let mut ctx = one_shape_ctx();
+        {
+            let session = ctx.active_document_mut().expect("session");
+            let shape = session.document.pages[0].shapes[0];
+            if let Some(entry) = session.document.shape_mut(shape) {
+                entry.sheet.cells.push(larrygram_model::Cell {
+                    name: larrygram_model::CellName::new("FillForegnd"),
+                    formula: Some("1".to_owned()),
+                    value: Some(CellValue::Number(1.0)),
+                    unit: larrygram_geom::Unit::Unitsless,
+                    preserved: larrygram_model::Preserved::new(),
+                });
+            }
+        }
+        let session = ctx.active_document().expect("session");
+        let shape = session.document.pages[0].shapes[0];
+        assert_eq!(fill_of(&ctx, shape), None);
     }
 
     /// `tools.options.page.setup` with no arguments requests the

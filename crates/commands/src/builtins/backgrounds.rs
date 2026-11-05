@@ -103,11 +103,7 @@ fn design_parts(
             let band = height / BANDS as f64;
             (0..BANDS)
                 .map(|index| {
-                    let t = if BANDS > 1 {
-                        index as f64 / (BANDS - 1) as f64
-                    } else {
-                        0.0
-                    };
+                    let t = index as f64 / (BANDS - 1) as f64;
                     let y = height - (index as f64 + 1.0) * band;
                     ((0.0, y, width, band), mix(color, WHITE, t))
                 })

@@ -401,11 +401,12 @@ fn buttons(ui: &mut Ui, state: &mut State) -> Outcome {
 
 #[cfg(test)]
 mod tests {
+    use larrygram_commands::app::{DocumentSession, Settings};
+
     use super::*;
 
     /// An app with one selected rectangle (the `pickers` test rule).
     fn app() -> AppCtx {
-        use larrygram_commands::app::{DocumentSession, Settings};
         let mut app = AppCtx::new(Settings::default());
         let mut document = larrygram_model::Document::new();
         let mut page = larrygram_model::Page::new(larrygram_model::PageId { index: 0 }, 1);
@@ -481,6 +482,59 @@ mod tests {
         // A role with no cell to read opens on black.
         let state = State::from_app(&app(), Target::Text);
         assert_eq!(state.color, (0, 0, 0));
+        // No document and no selection open on black.
+        assert_eq!(
+            State::from_app(&AppCtx::new(Settings::default()), Target::Fill).color,
+            (0, 0, 0)
+        );
+        let mut bare = app();
+        bare.selection.clear();
+        assert_eq!(State::from_app(&bare, Target::Fill).color, (0, 0, 0));
+    }
+
+    /// A hex commit through the field's Enter rule (the field moves
+    /// the colour).
+    #[test]
+    fn enter_in_the_hex_field_commits_the_spelling() {
+        use egui_kittest::{Harness, kittest::Queryable};
+        let state: std::rc::Rc<std::cell::RefCell<State>> = std::rc::Rc::new(
+            std::cell::RefCell::new(State::from_app(&app(), Target::Fill)),
+        );
+        let mut harness = Harness::builder()
+            .with_size(egui::vec2(320.0, 360.0))
+            .build_ui({
+                let state = std::rc::Rc::clone(&state);
+                move |ui| {
+                    let mut guard = state.borrow_mut();
+                    let _ = show(ui, &mut guard);
+                }
+            });
+        harness.run();
+        {
+            let root = harness.root();
+            let hex = root
+                .query_all_by_role_and_label(egui::accesskit::Role::TextInput, "Hex")
+                .next()
+                .expect("the Hex field");
+            hex.click();
+        }
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        harness.run();
+        {
+            let root = harness.root();
+            let hex = root
+                .query_all_by_role_and_label(egui::accesskit::Role::TextInput, "Hex")
+                .next()
+                .expect("the Hex field");
+            hex.type_text("#00FF00");
+        }
+        harness.run();
+        harness.key_press(egui::Key::Enter);
+        harness.run();
+        harness.run();
+        let guard = state.borrow();
+        assert_eq!(guard.color, (0, 0xff, 0x00), "Enter commits the hex field");
+        assert_eq!(guard.error, None);
     }
 
     #[test]
@@ -541,10 +595,6 @@ mod tests {
         for _ in 0..3 {
             harness.run();
         }
-        assert!(
-            outcomes.borrow().contains(&Outcome::Cancel),
-            "Cancel answers: {:?}",
-            outcomes.borrow()
-        );
+        assert!(outcomes.borrow().contains(&Outcome::Cancel));
     }
 }
