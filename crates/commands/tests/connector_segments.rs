@@ -673,3 +673,108 @@ fn reset_connector_with_nothing_to_route_pushes_no_edit() {
     assert!(outcome.edit.is_none(), "a formula-driven connector is kept");
     assert_eq!(undo_len(&ctx), before, "no undo step");
 }
+
+// ---------------------------------------------------------------------------
+// The model read paths the kept route relies on (the coverage ratchet's
+// margin: these branches only ever saw proptest-driven coverage)
+// ---------------------------------------------------------------------------
+
+/// A `Connection` row whose `X` cell holds text: the reader skips the
+/// row without renumbering the ones around it.
+#[test]
+fn a_connection_row_with_a_text_cell_is_skipped() {
+    let mut document = Document::new();
+    let page = document.add_page("Page-1").expect("page");
+    let mut shape = box_shape(1, 3.0, 3.0);
+    if let Some(section) = shape
+        .sheet
+        .sections
+        .iter_mut()
+        .find(|section| section.name.as_str() == "Connection")
+    {
+        for row in &mut section.rows {
+            for cell in &mut row.cells {
+                if cell.name.as_str() == "X" {
+                    cell.value = Some(CellValue::Str("left".to_owned()));
+                }
+            }
+        }
+    }
+    let shape = document.insert_shape(page, shape, None).expect("insert");
+    assert!(
+        document.connection_points_indexed(shape).is_empty(),
+        "a row without numbers yields no point"
+    );
+}
+
+/// The raw diff walks element and non-element children alike (the
+/// paths it reports name every step).
+#[test]
+fn the_raw_diff_walks_every_child_kind() {
+    use larrygram_model::{QName, XmlChild, XmlNode};
+    let leaf = |name: &str, self_closing: bool| XmlNode {
+        name: QName::local(name),
+        attributes: Vec::new(),
+        children: Vec::new(),
+        self_closing,
+    };
+    let tree = |text: &str, second: &str| XmlNode {
+        name: QName::local("root"),
+        attributes: Vec::new(),
+        children: vec![
+            XmlChild::Text(text.to_owned()),
+            XmlChild::Comment("c".to_owned()),
+            XmlChild::ProcessingInstruction {
+                target: "pi".to_owned(),
+                data: "d".to_owned(),
+            },
+            XmlChild::Element(leaf("one", true)),
+            XmlChild::Element(leaf(second, false)),
+            XmlChild::Text(text.to_owned()),
+        ],
+        self_closing: false,
+    };
+    let a = tree("a", "two");
+    let b = tree("b", "three");
+    let differences = larrygram_model::diff(&a, &b).expect("diff");
+    assert!(!differences.is_empty(), "the trees differ");
+    let back = larrygram_model::diff(&b, &a).expect("diff");
+    assert!(!back.is_empty(), "the trees differ both ways");
+}
+
+/// A master instance inherits its connection points; the per-axis
+/// scale read skips a non-numeric size without failing (the read paths
+/// of `Document::connection_points_indexed`).
+#[test]
+fn a_master_instance_inherits_its_connection_points() {
+    use larrygram_model::{Master, MasterId};
+    let mut document = Document::new();
+    let page = document.add_page("Page-1").expect("page");
+    // The master's content: one connection point and a text `Width`
+    // (the scale read skips it).
+    let mut content = Shape::new(ShapeId { index: 0 }, 1);
+    content.sheet.cells = vec![cell("Width", 2.0), {
+        let mut width = cell("Height", 1.0);
+        width.value = Some(CellValue::Str("tall".to_owned()));
+        width
+    }];
+    let mut connection = Section::new(SectionName::from_static("Connection"));
+    let mut row = Row::new();
+    row.row_type = Some("Connection".to_owned());
+    row.ix = Some(0);
+    row.cells = vec![cell("X", 1.0), cell("Y", 1.0)];
+    connection.rows.push(row);
+    content.sheet.sections.push(connection);
+    let content = document.add_shape(content);
+    let mid = document.masters.len();
+    let mut master = Master::new(MasterId { index: mid as u32 }, 1);
+    master.shapes = vec![content];
+    document.masters.push(master);
+    // The instance: no rows of its own, linked to the master.
+    let mut instance = Shape::new(ShapeId { index: 0 }, 2);
+    instance.master = Some(MasterId { index: mid as u32 });
+    let instance = document.insert_shape(page, instance, None).expect("insert");
+    let points = document.connection_points_indexed(instance);
+    assert_eq!(points.len(), 1, "{points:?}");
+    assert_eq!(points[0], (0, Point::new(1.0, 1.0)), "{points:?}");
+}
