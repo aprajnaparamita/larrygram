@@ -1,0 +1,720 @@
+# Panel diff: Office 2016 vs Microsoft 365
+
+Keyed by Fluent control id (ADR 0007 B1). Rows are sorted by (in 2016, in 365, id) so identical sets are obvious.
+
+| id | type | in 2016 | in 365 | path in 2016 | path in 365 |
+|----|------|---------|--------|--------------|-------------|
+| AddOnsMenu | menu | yes | yes | tab/TabView/GroupMacros | tab/TabView/GroupMacros |
+| AlignCenter | toggleButton | yes | yes | tab/TabHome/GroupParagraph | tab/TabHome/GroupParagraph |
+| AlignGallery | gallery | yes | yes | tab/TabHome/GroupArrange | tab/TabHome/GroupArrange |
+| AlignJustify | toggleButton | yes | yes | tab/TabHome/GroupParagraph | tab/TabHome/GroupParagraph |
+| AlignLeft | toggleButton | yes | yes | tab/TabHome/GroupParagraph | tab/TabHome/GroupParagraph |
+| AlignRight | toggleButton | yes | yes | tab/TabHome/GroupParagraph | tab/TabHome/GroupParagraph |
+| AllowThemes | toggleButton | yes | yes | tab/TabHome/GroupShapeStyles | tab/TabHome/GroupShapeStyles |
+| ArcTool | toggleButton | yes | yes | tab/TabDeveloper/GroupShapeDesign | tab/TabDeveloper/GroupShapeDesign |
+| AreaSelect | toggleButton | yes | yes | tab/TabHome/GroupEditing | tab/TabHome/GroupEditing |
+| ArrowsMore | button | yes | yes | tab/TabPictureToolsFormat/GroupPictureStylesVisio | tab/TabPictureToolsFormat/GroupPictureStylesVisio |
+| AutoConnect | checkBox | yes | yes | tab/TabView/GroupVisualAids | tab/TabView/GroupVisualAids |
+| AutoSizePage | toggleButton | yes | yes | tab/TabDesignVisio/GroupPrintPreviewPageSetup | tab/TabDesignVisio/GroupPrintPreviewPageSetup |
+| AutomaticResize | menu | yes | yes | tab/TabFormat/GroupContainerSize | tab/TabFormat/GroupContainerSize |
+| AutomaticResizeAlwaysFitToContents | toggleButton | yes | yes | tab/TabFormat/GroupContainerSize | tab/TabFormat/GroupContainerSize |
+| AutomaticResizeExpandAsNeeded | toggleButton | yes | yes | tab/TabFormat/GroupContainerSize | tab/TabFormat/GroupContainerSize |
+| AutomaticResizeNone | toggleButton | yes | yes | tab/TabFormat/GroupContainerSize | tab/TabFormat/GroupContainerSize |
+| BackgroundColor | gallery | yes | yes | tab/TabDesignVisio/GroupBackgrounds | tab/TabDesignVisio/GroupBackgrounds |
+| BackgroundPageInsert | button | yes | yes | tab/TabInsert/GroupInsertPages | tab/TabInsert/GroupInsertPages |
+| BackgroundsGallery | gallery | yes | yes | tab/TabDesignVisio/GroupBackgrounds | tab/TabDesignVisio/GroupBackgrounds |
+| BevelShapeGallery | gallery | yes | yes | tab/TabHome/GroupShapeStyles | tab/TabHome/GroupShapeStyles |
+| BlankPageInsertMenu | splitButton | yes | yes | tab/TabInsert/GroupInsertPages | tab/TabInsert/GroupInsertPages |
+| BlankPageInsertVisio | button | yes | yes | tab/TabInsert/GroupInsertPages | tab/TabInsert/GroupInsertPages |
+| Bold | toggleButton | yes | yes | tab/TabHome/GroupFont | tab/TabHome/GroupFont |
+| BordersAndTitlesGallery | gallery | yes | yes | tab/TabDesignVisio/GroupBackgrounds | tab/TabDesignVisio/GroupBackgrounds |
+| Bullets | toggleButton | yes | yes | tab/TabHome/GroupParagraph | tab/TabHome/GroupParagraph |
+| ButtonCategoryRecentDocuments | category | yes | yes | backstage/TabRecent | backstage/TabRecent |
+| ButtonOpenBrowse | button | yes | yes | backstage/TabRecent | backstage/TabRecent |
+| ButtonTaskDynamicServiceProvider | task | yes | yes | backstage/TabSave | backstage/TabSave |
+| ButtonTaskRecentDocuments | task | yes | yes | backstage/TabRecent | backstage/TabRecent |
+| CadDrawing | button | yes | yes | tab/TabInsert/GroupInsertIllustrations | tab/TabInsert/GroupInsertIllustrations |
+| CalloutGallery | gallery | yes | yes | tab/TabInsert/GroupDiagramParts | tab/TabInsert/GroupDiagramParts |
+| ChangeCaseDialogClassic | menu | yes | yes | tab/TabHome/GroupFont | tab/TabHome/GroupFont |
+| ChartInsert | button | yes | yes | tab/TabInsert/GroupInsertIllustrations | tab/TabInsert/GroupInsertIllustrations |
+| ClearIconColors | button | yes | yes | tab/TabIconEditor/GroupIconEditClipboard | tab/TabIconEditor/GroupIconEditClipboard |
+| ClipArtInsertDialog | button | yes | yes | tab/TabInsert/GroupInsertIllustrations | tab/TabInsert/GroupInsertIllustrations |
+| ComAddInsDialog | button | yes | yes | tab/TabDeveloper/GroupAddins | tab/TabDeveloper/GroupAddins |
+| CommentingPane | toggleButton | yes | yes | tab/TabReviewWord/GroupComments | tab/TabReviewWord/GroupComments |
+| CommentsPaneSplitButton | toggleButton | yes | yes | tab/TabReviewWord/GroupComments | tab/TabReviewWord/GroupComments |
+| ConnectionPointTool | toggleButton | yes | yes | tab/TabHome/GroupTools | tab/TabHome/GroupTools |
+| ConnectionPoints | checkBox | yes | yes | tab/TabView/GroupVisualAids | tab/TabView/GroupVisualAids |
+| ConnectorCurvedLines | toggleButton | yes | yes | tab/TabDesignVisio/GroupLayoutRouting | tab/TabDesignVisio/GroupLayoutRouting |
+| ConnectorRightAngle | toggleButton | yes | yes | tab/TabDesignVisio/GroupLayoutRouting | tab/TabDesignVisio/GroupLayoutRouting |
+| ConnectorShowLineJumps | toggleButton | yes | yes | tab/TabDesignVisio/GroupLayoutRouting | tab/TabDesignVisio/GroupLayoutRouting |
+| ConnectorStraightLines | toggleButton | yes | yes | tab/TabDesignVisio/GroupLayoutRouting | tab/TabDesignVisio/GroupLayoutRouting |
+| ConnectorTool | toggleButton | yes | yes | tab/TabHome/GroupTools | tab/TabHome/GroupTools |
+| ConnectorsGallery | menu | yes | yes | tab/TabDesignVisio/GroupLayoutRouting | tab/TabDesignVisio/GroupLayoutRouting |
+| ContainerDisband | button | yes | yes | tab/TabFormat/GroupMembership | tab/TabFormat/GroupMembership |
+| ContainerGallery | gallery | yes | yes | tab/TabInsert/GroupDiagramParts | tab/TabInsert/GroupDiagramParts |
+| ContainerHeadingStyles | gallery | yes | yes | tab/TabFormat/GroupContainerStyles | tab/TabFormat/GroupContainerStyles |
+| ContainerLock | toggleButton | yes | yes | tab/TabFormat/GroupMembership | tab/TabFormat/GroupMembership |
+| ContainerMargins | gallery | yes | yes | tab/TabFormat/GroupContainerSize | tab/TabFormat/GroupContainerSize |
+| ContainerStyles | gallery | yes | yes | tab/TabFormat/GroupContainerStyles | tab/TabFormat/GroupContainerStyles |
+| ContextMenuCommentMarker | contextMenu | yes | yes | menu/ContextMenuCommentMarker | menu/ContextMenuCommentMarker |
+| ContextMenuConnectionPoint | contextMenu | yes | yes | menu/ContextMenuConnectionPoint | menu/ContextMenuConnectionPoint |
+| ContextMenuDrawingPage | contextMenu | yes | yes | menu/ContextMenuDrawingPage | menu/ContextMenuDrawingPage |
+| ContextMenuExplorerDocument | contextMenu | yes | yes | menu/ContextMenuExplorerDocument | menu/ContextMenuExplorerDocument |
+| ContextMenuExplorerLayer | contextMenu | yes | yes | menu/ContextMenuExplorerLayer | menu/ContextMenuExplorerLayer |
+| ContextMenuExplorerLayers | contextMenu | yes | yes | menu/ContextMenuExplorerLayers | menu/ContextMenuExplorerLayers |
+| ContextMenuExplorerMaster | contextMenu | yes | yes | menu/ContextMenuExplorerMaster | menu/ContextMenuExplorerMaster |
+| ContextMenuExplorerMasters | contextMenu | yes | yes | menu/ContextMenuExplorerMasters | menu/ContextMenuExplorerMasters |
+| ContextMenuExplorerPage | contextMenu | yes | yes | menu/ContextMenuExplorerPage | menu/ContextMenuExplorerPage |
+| ContextMenuExplorerPages | contextMenu | yes | yes | menu/ContextMenuExplorerPages | menu/ContextMenuExplorerPages |
+| ContextMenuExplorerPatterns | contextMenu | yes | yes | menu/ContextMenuExplorerPatterns | menu/ContextMenuExplorerPatterns |
+| ContextMenuExplorerShape | contextMenu | yes | yes | menu/ContextMenuExplorerShape | menu/ContextMenuExplorerShape |
+| ContextMenuExplorerShapes | contextMenu | yes | yes | menu/ContextMenuExplorerShapes | menu/ContextMenuExplorerShapes |
+| ContextMenuExplorerStyle | contextMenu | yes | yes | menu/ContextMenuExplorerStyle | menu/ContextMenuExplorerStyle |
+| ContextMenuExplorerStyles | contextMenu | yes | yes | menu/ContextMenuExplorerStyles | menu/ContextMenuExplorerStyles |
+| ContextMenuFullScreen | contextMenu | yes | yes | menu/ContextMenuFullScreen | menu/ContextMenuFullScreen |
+| ContextMenuMaster | contextMenu | yes | yes | menu/ContextMenuMaster | menu/ContextMenuMaster |
+| ContextMenuMasterExplorerDocument | contextMenu | yes | yes | menu/ContextMenuMasterExplorerDocument | menu/ContextMenuMasterExplorerDocument |
+| ContextMenuMasterExplorerMaster | contextMenu | yes | yes | menu/ContextMenuMasterExplorerMaster | menu/ContextMenuMasterExplorerMaster |
+| ContextMenuOleObject | contextMenu | yes | yes | menu/ContextMenuOleObject | menu/ContextMenuOleObject |
+| ContextMenuPageNavigation | contextMenu | yes | yes | menu/ContextMenuPageNavigation | menu/ContextMenuPageNavigation |
+| ContextMenuPageTab | contextMenu | yes | yes | menu/ContextMenuPageTab | menu/ContextMenuPageTab |
+| ContextMenuShape | contextMenu | yes | yes | menu/ContextMenuShape | menu/ContextMenuShape |
+| ContextMenuShape1D | contextMenu | yes | yes | menu/ContextMenuShape1D | menu/ContextMenuShape1D |
+| ContextMenuShapeSheet | contextMenu | yes | yes | menu/ContextMenuShapeSheet | menu/ContextMenuShapeSheet |
+| ContextMenuSpelling | contextMenu | yes | yes | menu/ContextMenuSpelling | menu/ContextMenuSpelling |
+| ContextMenuText | contextMenu | yes | yes | menu/ContextMenuText | menu/ContextMenuText |
+| ContextMenuTextDrag | contextMenu | yes | yes | menu/ContextMenuTextDrag | menu/ContextMenuTextDrag |
+| ContextMenuWindowDrawingExplorer | contextMenu | yes | yes | menu/ContextMenuWindowDrawingExplorer | menu/ContextMenuWindowDrawingExplorer |
+| ContextMenuWindowExternalData | contextMenu | yes | yes | menu/ContextMenuWindowExternalData | menu/ContextMenuWindowExternalData |
+| ContextMenuWindowExternalDataItem | contextMenu | yes | yes | menu/ContextMenuWindowExternalDataItem | menu/ContextMenuWindowExternalDataItem |
+| ContextMenuWindowExternalDataTab | contextMenu | yes | yes | menu/ContextMenuWindowExternalDataTab | menu/ContextMenuWindowExternalDataTab |
+| ContextMenuWindowFormulaTracing | contextMenu | yes | yes | menu/ContextMenuWindowFormulaTracing | menu/ContextMenuWindowFormulaTracing |
+| ContextMenuWindowIssues | contextMenu | yes | yes | menu/ContextMenuWindowIssues | menu/ContextMenuWindowIssues |
+| ContextMenuWindowIssuesItem | contextMenu | yes | yes | menu/ContextMenuWindowIssuesItem | menu/ContextMenuWindowIssuesItem |
+| ContextMenuWindowMasterExplorer | contextMenu | yes | yes | menu/ContextMenuWindowMasterExplorer | menu/ContextMenuWindowMasterExplorer |
+| ContextMenuWindowPanZoom | contextMenu | yes | yes | menu/ContextMenuWindowPanZoom | menu/ContextMenuWindowPanZoom |
+| ContextMenuWindowShapeData | contextMenu | yes | yes | menu/ContextMenuWindowShapeData | menu/ContextMenuWindowShapeData |
+| ContextMenuWindowShapes | contextMenu | yes | yes | menu/ContextMenuWindowShapes | menu/ContextMenuWindowShapes |
+| ContextMenuWindowShapesMoreShapes | contextMenu | yes | yes | menu/ContextMenuWindowShapesMoreShapes | menu/ContextMenuWindowShapesMoreShapes |
+| ContextMenuWindowShapesStencil | contextMenu | yes | yes | menu/ContextMenuWindowShapesStencil | menu/ContextMenuWindowShapesStencil |
+| ContextMenuWindowSizePosition | contextMenu | yes | yes | menu/ContextMenuWindowSizePosition | menu/ContextMenuWindowSizePosition |
+| ContextMenuWindowStyleExplorer | contextMenu | yes | yes | menu/ContextMenuWindowStyleExplorer | menu/ContextMenuWindowStyleExplorer |
+| ControlProperties | button | yes | yes | tab/TabDeveloper/GroupControls | tab/TabDeveloper/GroupControls |
+| ControlsGallery | gallery | yes | yes | tab/TabDeveloper/GroupControls | tab/TabDeveloper/GroupControls |
+| Copy | button | yes | yes | tab/TabIconEditor/GroupIconEditClipboard | tab/TabIconEditor/GroupIconEditClipboard |
+| CreateStageViewDiagram | button | yes | yes | tab/TabProcess/GroupSharepointWorkflow | tab/TabProcess/GroupSharepointWorkflow |
+| CreateWorkflowDiagram | button | yes | yes | tab/TabProcess/GroupSharepointWorkflow | tab/TabProcess/GroupSharepointWorkflow |
+| CropTool | toggleButton | yes | yes | tab/TabPictureToolsFormat/GroupPictureToolArrange | tab/TabPictureToolsFormat/GroupPictureToolArrange |
+| Cut | button | yes | yes | tab/TabIconEditor/GroupIconEditClipboard | tab/TabIconEditor/GroupIconEditClipboard |
+| DataAutomaticallyLink | button | yes | yes | tab/TabData/GroupAdvancedDataLinking | tab/TabData/GroupAdvancedDataLinking |
+| DataGraphicApplyAfterLinkingData | toggleButton | yes | yes | tab/TabData/GroupAdvancedDataLinking | tab/TabData/GroupAdvancedDataLinking |
+| DataGraphicCalloutsGallery | gallery | yes | yes | tab/TabData/GroupDataGraphics | tab/TabData/GroupDataGraphics |
+| DataGraphicCreateNew | button | yes | yes | tab/TabData/GroupAdvancedDataLinking | tab/TabData/GroupAdvancedDataLinking |
+| DataGraphicEdit | button | yes | yes | tab/TabData/GroupAdvancedDataLinking | tab/TabData/GroupAdvancedDataLinking |
+| DataGraphicPosition | gallery | yes | yes | tab/TabData/GroupDataGraphics | tab/TabData/GroupDataGraphics |
+| DataGraphicPositionHorizontal | gallery | yes | yes | tab/TabData/GroupDataGraphics | tab/TabData/GroupDataGraphics |
+| DataGraphicPositionVertical | gallery | yes | yes | tab/TabData/GroupDataGraphics | tab/TabData/GroupDataGraphics |
+| DataGraphicsConfigure | button | yes | yes | tab/TabData/GroupDataGraphics | tab/TabData/GroupDataGraphics |
+| DataGraphicsGalleryVisio | gallery | yes | yes | tab/TabData/GroupAdvancedDataLinking | tab/TabData/GroupAdvancedDataLinking |
+| DataLinkDataToShapes | button | yes | yes | tab/TabData/GroupExternalData | tab/TabData/GroupExternalData |
+| DataOptionsPane | checkBox | yes | yes | tab/TabData/GroupDataShowHide | tab/TabData/GroupDataShowHide |
+| DataRefreshAllDialog | button | yes | yes | tab/TabData/GroupExternalData | tab/TabData/GroupExternalData |
+| DataRefreshDialog | button | yes | yes | tab/TabData/GroupExternalData | tab/TabData/GroupExternalData |
+| DesignMode | toggleButton | yes | yes | tab/TabDeveloper/GroupControls | tab/TabDeveloper/GroupControls |
+| DeveloperDrawingTools | splitButton | yes | yes | tab/TabDeveloper/GroupShapeDesign | tab/TabDeveloper/GroupShapeDesign |
+| DiagramCheck | button | yes | yes | tab/TabProcess/GroupDiagramValidation | tab/TabProcess/GroupDiagramValidation |
+| DiagramCheckMenu | splitButton | yes | yes | tab/TabProcess/GroupDiagramValidation | tab/TabProcess/GroupDiagramValidation |
+| DocumentStencil | checkBox | yes | yes | tab/TabDeveloper/GroupShowHideDeveloperVisio | tab/TabDeveloper/GroupShowHideDeveloperVisio |
+| DrawingExplorer | checkBox | yes | yes | tab/TabDeveloper/GroupShowHideDeveloperVisio | tab/TabDeveloper/GroupShowHideDeveloperVisio |
+| DrawingPage | button | yes | yes | tab/TabStencil/GroupStencilView | tab/TabStencil/GroupStencilView |
+| DrawingToolsMenu | splitButton | yes | yes | tab/TabHome/GroupTools | tab/TabHome/GroupTools |
+| DuplicateThisPage | button | yes | yes | tab/TabInsert/GroupInsertPages | tab/TabInsert/GroupInsertPages |
+| DynamicGrid | checkBox | yes | yes | tab/TabView/GroupVisualAids | tab/TabView/GroupVisualAids |
+| EditIcon | button | yes | yes | tab/TabStencil/GroupStencilMasterShape | tab/TabStencil/GroupStencilMasterShape |
+| EditMaster | button | yes | yes | tab/TabStencil/GroupStencilMasterShape | tab/TabStencil/GroupStencilMasterShape |
+| EllipseTool | toggleButton | yes | yes | tab/TabDeveloper/GroupShapeDesign | tab/TabDeveloper/GroupShapeDesign |
+| EmbellishmentGallery | gallery | yes | yes | tab/TabDesignVisio/GroupThemeVariants | tab/TabDesignVisio/GroupThemeVariants |
+| EventMonitor | button | yes | yes | tab/TabDeveloper/GroupSdkTools | tab/TabDeveloper/GroupSdkTools |
+| ExternalDataWindow | checkBox | yes | yes | tab/TabData/GroupDataShowHide | tab/TabData/GroupDataShowHide |
+| FieldInsert | button | yes | yes | tab/TabInsert/GroupTextBoxText | tab/TabInsert/GroupTextBoxText |
+| FileNewDefault | button | yes | yes | qat | qat |
+| FileOpenUsingBackstage | button | yes | yes | qat | qat |
+| FilePrintQuick | button | yes | yes | qat | qat |
+| FileSave | button | yes | yes | qat | qat |
+| FileSaveAsPdfOrXps | task | yes | yes | backstage/TabPublish | backstage/TabPublish |
+| FileSendAsAttachment | button | yes | yes | qat | qat |
+| FileTypes | category | yes | yes | backstage/TabPublish | backstage/TabPublish |
+| FileVersionHistory | group | yes | yes | backstage/TabInfo | backstage/TabInfo |
+| FillColorGallery | gallery | yes | yes | tab/TabHome/GroupShapeStyles | tab/TabHome/GroupShapeStyles |
+| FillDialog | button | yes | yes | tab/TabHome/GroupShapeStyles | tab/TabHome/GroupShapeStyles |
+| FindDialog | button | yes | yes | tab/TabHome/GroupEditing | tab/TabHome/GroupEditing |
+| FindMenu | menu | yes | yes | tab/TabHome/GroupEditing | tab/TabHome/GroupEditing |
+| FitToContents | button | yes | yes | tab/TabFormat/GroupContainerSize | tab/TabFormat/GroupContainerSize |
+| Font | comboBox | yes | yes | tab/TabHome/GroupFont | tab/TabHome/GroupFont |
+| FontColorGallery | gallery | yes | yes | tab/TabHome/GroupFont | tab/TabHome/GroupFont |
+| FontDialogVisio | buttonDialogBoxLauncher | yes | yes | tab/TabHome/GroupFont | tab/TabHome/GroupFont |
+| FontSize | comboBox | yes | yes | tab/TabHome/GroupFont | tab/TabHome/GroupFont |
+| FontSizeDecrease | button | yes | yes | tab/TabHome/GroupFont | tab/TabHome/GroupFont |
+| FontSizeIncrease | button | yes | yes | tab/TabHome/GroupFont | tab/TabHome/GroupFont |
+| FormatPainter | control | yes | yes | tab/TabHome/GroupClipboard | tab/TabHome/GroupClipboard |
+| FreeformTool | toggleButton | yes | yes | tab/TabDeveloper/GroupShapeDesign | tab/TabDeveloper/GroupShapeDesign |
+| GlowsMoreOptions | button | yes | yes | tab/TabHome/GroupShapeStyles | tab/TabHome/GroupShapeStyles |
+| GroupARMPreview | group | yes | yes | backstage/TabInfo | backstage/TabInfo |
+| GroupAboutOfficeProducts | group | yes | yes | backstage/TabHelp | backstage/TabHelp |
+| GroupAddInsCustomToolbars | group | yes | yes | tab/TabAddIns/GroupAddInsCustomToolbars | tab/TabAddIns/GroupAddInsCustomToolbars |
+| GroupAddInsMenuCommands | group | yes | yes | tab/TabAddIns/GroupAddInsMenuCommands | tab/TabAddIns/GroupAddInsMenuCommands |
+| GroupAddInsToolbarCommands | group | yes | yes | tab/TabAddIns/GroupAddInsToolbarCommands | tab/TabAddIns/GroupAddInsToolbarCommands |
+| GroupAddLocation | group | yes | yes | backstage/TabSave | backstage/TabSave |
+| GroupAddins | group | yes | yes | tab/TabDeveloper/GroupAddins | tab/TabDeveloper/GroupAddins |
+| GroupAdvancedDataLinking | group | yes | yes | tab/TabData/GroupAdvancedDataLinking | tab/TabData/GroupAdvancedDataLinking |
+| GroupAllAuthors | group | yes | yes | backstage/TabInfo | backstage/TabInfo |
+| GroupArrange | group | yes | yes | tab/TabHome/GroupArrange | tab/TabHome/GroupArrange |
+| GroupBackgrounds | group | yes | yes | tab/TabDesignVisio/GroupBackgrounds | tab/TabDesignVisio/GroupBackgrounds |
+| GroupBackstageIdentity | group | yes | yes | backstage/TabHelp | backstage/TabHelp |
+| GroupBackstageSignIn | group | yes | yes | backstage/TabHelp | backstage/TabHelp |
+| GroupBackstageSignInDisabled | group | yes | yes | backstage/TabHelp | backstage/TabHelp |
+| GroupCachedOfflineMergeable | group | yes | yes | backstage/TabInfo | backstage/TabInfo |
+| GroupCheckInCheckOut | group | yes | yes | backstage/TabInfo | backstage/TabInfo |
+| GroupClickToRunUpdateStatus | group | yes | yes | backstage/TabHelp | backstage/TabHelp |
+| GroupClipboard | group | yes | yes | tab/TabHome/GroupClipboard | tab/TabHome/GroupClipboard |
+| GroupCode | group | yes | yes | tab/TabDeveloper/GroupCode | tab/TabDeveloper/GroupCode |
+| GroupComments | group | yes | yes | tab/TabReviewWord/GroupComments | tab/TabReviewWord/GroupComments |
+| GroupContainerSize | group | yes | yes | tab/TabFormat/GroupContainerSize | tab/TabFormat/GroupContainerSize |
+| GroupContainerStyles | group | yes | yes | tab/TabFormat/GroupContainerStyles | tab/TabFormat/GroupContainerStyles |
+| GroupControls | group | yes | yes | tab/TabDeveloper/GroupControls | tab/TabDeveloper/GroupControls |
+| GroupCreatePdfOrXpsDocument | group | yes | yes | backstage/TabPublish | backstage/TabPublish |
+| GroupDataGraphics | group | yes | yes | tab/TabData/GroupDataGraphics | tab/TabData/GroupDataGraphics |
+| GroupDataShowHide | group | yes | yes | tab/TabData/GroupDataShowHide | tab/TabData/GroupDataShowHide |
+| GroupDeprecatedAddon | group | yes | yes | backstage/TabInfo | backstage/TabInfo |
+| GroupDiagramParts | group | yes | yes | tab/TabInsert/GroupDiagramParts | tab/TabInsert/GroupDiagramParts |
+| GroupDiagramValidation | group | yes | yes | tab/TabProcess/GroupDiagramValidation | tab/TabProcess/GroupDiagramValidation |
+| GroupDisplayData | group | yes | yes | tab/TabData/GroupDisplayData | tab/TabData/GroupDisplayData |
+| GroupDocumentViewsVisio | group | yes | yes | tab/TabView/GroupDocumentViewsVisio | tab/TabView/GroupDocumentViewsVisio |
+| GroupDynamicServiceProvider | group | yes | yes | backstage/TabSave | backstage/TabSave |
+| GroupEditing | group | yes | yes | tab/TabHome/GroupEditing | tab/TabHome/GroupEditing |
+| GroupExternalData | group | yes | yes | tab/TabData/GroupExternalData | tab/TabData/GroupExternalData |
+| GroupFileConvert | group | yes | yes | backstage/TabInfo | backstage/TabInfo |
+| GroupFileProperties | group | yes | yes | backstage/TabInfo | backstage/TabInfo |
+| GroupFont | group | yes | yes | tab/TabHome/GroupFont | tab/TabHome/GroupFont |
+| GroupGettingStartedOpenMRUPlacesOrNavSlab | group | yes | yes | backstage/TabRecent | backstage/TabRecent |
+| GroupGettingStartedSaveAsMRUPlacesOrNavSlab | group | yes | yes | backstage/TabSave | backstage/TabSave |
+| GroupIconEditClipboard | group | yes | yes | tab/TabIconEditor/GroupIconEditClipboard | tab/TabIconEditor/GroupIconEditClipboard |
+| GroupIconEditClose | group | yes | yes | tab/TabIconEditor/GroupIconEditClose | tab/TabIconEditor/GroupIconEditClose |
+| GroupIconEditPaint | group | yes | yes | tab/TabIconEditor/GroupIconEditPaint | tab/TabIconEditor/GroupIconEditPaint |
+| GroupIconEditSelect | group | yes | yes | tab/TabIconEditor/GroupIconEditSelect | tab/TabIconEditor/GroupIconEditSelect |
+| GroupInkClose | group | yes | yes | tab/TabInkToolsPens/GroupInkClose | tab/TabInkToolsPens/GroupInkClose |
+| GroupInkConvert | group | yes | yes | tab/TabInkToolsPens/GroupInkConvert | tab/TabInkToolsPens/GroupInkConvert |
+| GroupInkCreate | group | yes | yes | tab/TabInkToolsPens/GroupInkCreate | tab/TabInkToolsPens/GroupInkCreate |
+| GroupInkPens | group | yes | yes | tab/TabInkToolsPens/GroupInkPens | tab/TabInkToolsPens/GroupInkPens |
+| GroupInkTools | group | yes | yes | tab/TabInkToolsPens/GroupInkTools | tab/TabInkToolsPens/GroupInkTools |
+| GroupInsertIllustrations | group | yes | yes | tab/TabInsert/GroupInsertIllustrations | tab/TabInsert/GroupInsertIllustrations |
+| GroupInsertLinks | group | yes | yes | tab/TabInsert/GroupInsertLinks | tab/TabInsert/GroupInsertLinks |
+| GroupInsertPages | group | yes | yes | tab/TabInsert/GroupInsertPages | tab/TabInsert/GroupInsertPages |
+| GroupItemPermissions | group | yes | yes | backstage/TabInfo | backstage/TabInfo |
+| GroupLanguage | group | yes | yes | tab/TabReviewWord/GroupLanguage | tab/TabReviewWord/GroupLanguage |
+| GroupLayoutRouting | group | yes | yes | tab/TabDesignVisio/GroupLayoutRouting | tab/TabDesignVisio/GroupLayoutRouting |
+| GroupMacros | group | yes | yes | tab/TabView/GroupMacros | tab/TabView/GroupMacros |
+| GroupMembership | group | yes | yes | tab/TabFormat/GroupMembership | tab/TabFormat/GroupMembership |
+| GroupNewStencil | group | yes | yes | tab/TabDeveloper/GroupNewStencil | tab/TabDeveloper/GroupNewStencil |
+| GroupOfficeBranding | group | yes | yes | backstage/TabHelp | backstage/TabHelp |
+| GroupOfficeStart | group | yes | yes | backstage/TabOfficeStart | backstage/TabOfficeStart |
+| GroupOpenPlaces | taskFormGroup | yes | yes | backstage/TabRecent | backstage/TabRecent |
+| GroupOrgChartArrange | group | yes | yes | tab/TabOrgChart/GroupOrgChartArrange | tab/TabOrgChart/GroupOrgChartArrange |
+| GroupOrgChartLayout | group | yes | yes | tab/TabOrgChart/GroupOrgChartLayout | tab/TabOrgChart/GroupOrgChartLayout |
+| GroupOrgChartOrganizationData | group | yes | yes | tab/TabOrgChart/GroupOrgChartOrganizationData | tab/TabOrgChart/GroupOrgChartOrganizationData |
+| GroupOrgChartPicture | group | yes | yes | tab/TabOrgChart/GroupOrgChartPicture | tab/TabOrgChart/GroupOrgChartPicture |
+| GroupOrgChartShapes | group | yes | yes | tab/TabOrgChart/GroupOrgChartShapes | tab/TabOrgChart/GroupOrgChartShapes |
+| GroupOrgChartSpacing | labelControl | yes | yes | tab/TabOrgChart/GroupOrgChartArrange | tab/TabOrgChart/GroupOrgChartArrange |
+| GroupParagraph | group | yes | yes | tab/TabHome/GroupParagraph | tab/TabHome/GroupParagraph |
+| GroupPictureStylesVisio | group | yes | yes | tab/TabPictureToolsFormat/GroupPictureStylesVisio | tab/TabPictureToolsFormat/GroupPictureStylesVisio |
+| GroupPictureToolAdjust | group | yes | yes | tab/TabPictureToolsFormat/GroupPictureToolAdjust | tab/TabPictureToolsFormat/GroupPictureToolAdjust |
+| GroupPictureToolArrange | group | yes | yes | tab/TabPictureToolsFormat/GroupPictureToolArrange | tab/TabPictureToolsFormat/GroupPictureToolArrange |
+| GroupPrintPreview | group | yes | yes | backstage/TabPrint | backstage/TabPrint |
+| GroupPrintPreviewPageSetup | group | yes | yes | tab/TabDesignVisio/GroupPrintPreviewPageSetup | tab/TabDesignVisio/GroupPrintPreviewPageSetup |
+| GroupPrintProtectedView | group | yes | yes | backstage/TabPrint | backstage/TabPrint |
+| GroupPrintSettings | group | yes | yes | backstage/TabPrint | backstage/TabPrint |
+| GroupProofing | group | yes | yes | tab/TabReviewWord/GroupProofing | tab/TabReviewWord/GroupProofing |
+| GroupReadOnly | group | yes | yes | backstage/TabInfo | backstage/TabInfo |
+| GroupReadOnlyCached | group | yes | yes | backstage/TabInfo | backstage/TabInfo |
+| GroupReadOnlyCachedMergeable | group | yes | yes | backstage/TabInfo | backstage/TabInfo |
+| GroupReadOnlyCheckOutRequired | group | yes | yes | backstage/TabInfo | backstage/TabInfo |
+| GroupReadOnlyOffline | group | yes | yes | backstage/TabInfo | backstage/TabInfo |
+| GroupReadOnlyServer | group | yes | yes | backstage/TabInfo | backstage/TabInfo |
+| GroupRecentDocuments | group | yes | yes | backstage/TabRecent | backstage/TabRecent |
+| GroupRecentPlaces | group | yes | yes | backstage/TabRecent | backstage/TabRecent |
+| GroupReports | group | yes | yes | tab/TabReviewWord/GroupReports | tab/TabReviewWord/GroupReports |
+| GroupSdkTools | group | yes | yes | tab/TabDeveloper/GroupSdkTools | tab/TabDeveloper/GroupSdkTools |
+| GroupSecurityWarning | group | yes | yes | backstage/TabInfo | backstage/TabInfo |
+| GroupSendAsAttachment | group | yes | yes | backstage/TabShare | backstage/TabShare |
+| GroupSendAsLink | group | yes | yes | backstage/TabShare | backstage/TabShare |
+| GroupSendAsPdf | group | yes | yes | backstage/TabShare | backstage/TabShare |
+| GroupSendAsXps | group | yes | yes | backstage/TabShare | backstage/TabShare |
+| GroupShapeDesign | group | yes | yes | tab/TabDeveloper/GroupShapeDesign | tab/TabDeveloper/GroupShapeDesign |
+| GroupShapeSheetEditing | group | yes | yes | tab/TabShapeSheetDesign/GroupShapeSheetEditing | tab/TabShapeSheetDesign/GroupShapeSheetEditing |
+| GroupShapeSheetFormulaTracing | group | yes | yes | tab/TabShapeSheetDesign/GroupShapeSheetFormulaTracing | tab/TabShapeSheetDesign/GroupShapeSheetFormulaTracing |
+| GroupShapeSheetRows | group | yes | yes | tab/TabShapeSheetDesign/GroupShapeSheetRows | tab/TabShapeSheetDesign/GroupShapeSheetRows |
+| GroupShapeSheetSections | group | yes | yes | tab/TabShapeSheetDesign/GroupShapeSheetSections | tab/TabShapeSheetDesign/GroupShapeSheetSections |
+| GroupShapeSheetView | group | yes | yes | tab/TabShapeSheetDesign/GroupShapeSheetView | tab/TabShapeSheetDesign/GroupShapeSheetView |
+| GroupShapeStyles | group | yes | yes | tab/TabHome/GroupShapeStyles | tab/TabHome/GroupShapeStyles |
+| GroupShare | taskFormGroup | yes | yes | backstage/TabShare | backstage/TabShare |
+| GroupShareWithPeople | group | yes | yes | backstage/TabShare | backstage/TabShare |
+| GroupSharepointWorkflow | group | yes | yes | tab/TabProcess/GroupSharepointWorkflow | tab/TabProcess/GroupSharepointWorkflow |
+| GroupShowHideDeveloperVisio | group | yes | yes | tab/TabDeveloper/GroupShowHideDeveloperVisio | tab/TabDeveloper/GroupShowHideDeveloperVisio |
+| GroupStencil | group | yes | yes | tab/TabStencil/GroupStencil | tab/TabStencil/GroupStencil |
+| GroupStencilClose | group | yes | yes | tab/TabStencil/GroupStencilClose | tab/TabStencil/GroupStencilClose |
+| GroupStencilMasterShape | group | yes | yes | tab/TabStencil/GroupStencilMasterShape | tab/TabStencil/GroupStencilMasterShape |
+| GroupStencilView | group | yes | yes | tab/TabStencil/GroupStencilView | tab/TabStencil/GroupStencilView |
+| GroupStencilWindow | group | yes | yes | tab/TabStencil/GroupStencilWindow | tab/TabStencil/GroupStencilWindow |
+| GroupSubProcess | group | yes | yes | tab/TabProcess/GroupSubProcess | tab/TabProcess/GroupSubProcess |
+| GroupTextBoxText | group | yes | yes | tab/TabInsert/GroupTextBoxText | tab/TabInsert/GroupTextBoxText |
+| GroupThemeVariants | group | yes | yes | tab/TabDesignVisio/GroupThemeVariants | tab/TabDesignVisio/GroupThemeVariants |
+| GroupThemesVisio | group | yes | yes | tab/TabDesignVisio/GroupThemesVisio | tab/TabDesignVisio/GroupThemesVisio |
+| GroupThemesVisioLegacy | group | yes | yes | tab/TabDesignVisio/GroupThemesVisioLegacy | tab/TabDesignVisio/GroupThemesVisioLegacy |
+| GroupThumbnail | group | yes | yes | backstage/TabInfo | backstage/TabInfo |
+| GroupTools | group | yes | yes | tab/TabHome/GroupTools | tab/TabHome/GroupTools |
+| GroupUpdatesAvailable | group | yes | yes | backstage/TabInfo | backstage/TabInfo |
+| GroupUploadErrors | group | yes | yes | backstage/TabInfo | backstage/TabInfo |
+| GroupViewDirection | group | yes | yes | tab/TabView/GroupViewDirection | tab/TabView/GroupViewDirection |
+| GroupViewShowHide | group | yes | yes | tab/TabView/GroupViewShowHide | tab/TabView/GroupViewShowHide |
+| GroupVisualAids | group | yes | yes | tab/TabView/GroupVisualAids | tab/TabView/GroupVisualAids |
+| GroupWindow | group | yes | yes | tab/TabView/GroupWindow | tab/TabView/GroupWindow |
+| GroupZoom | group | yes | yes | tab/TabView/GroupZoom | tab/TabView/GroupZoom |
+| HyperlinkInsert | button | yes | yes | tab/TabShapeSheetDesign/GroupShapeSheetEditing | tab/TabShapeSheetDesign/GroupShapeSheetEditing |
+| IconBucketTool | button | yes | yes | tab/TabIconEditor/GroupIconEditPaint | tab/TabIconEditor/GroupIconEditPaint |
+| IconEditClose | button | yes | yes | tab/TabIconEditor/GroupIconEditClose | tab/TabIconEditor/GroupIconEditClose |
+| IconPencilTool | button | yes | yes | tab/TabIconEditor/GroupIconEditPaint | tab/TabIconEditor/GroupIconEditPaint |
+| IconSelectArea | button | yes | yes | tab/TabIconEditor/GroupIconEditSelect | tab/TabIconEditor/GroupIconEditSelect |
+| IconSelectLasso | button | yes | yes | tab/TabIconEditor/GroupIconEditSelect | tab/TabIconEditor/GroupIconEditSelect |
+| IconsAndDetails | toggleButton | yes | yes | tab/TabStencil/GroupStencilView | tab/TabStencil/GroupStencilView |
+| IconsAndNames | toggleButton | yes | yes | tab/TabStencil/GroupStencilView | tab/TabStencil/GroupStencilView |
+| IconsOnly | toggleButton | yes | yes | tab/TabStencil/GroupStencilView | tab/TabStencil/GroupStencilView |
+| IgnoreRule | button | yes | yes | tab/TabProcess/GroupDiagramValidation | tab/TabProcess/GroupDiagramValidation |
+| IgnoreThisIssue | button | yes | yes | tab/TabProcess/GroupDiagramValidation | tab/TabProcess/GroupDiagramValidation |
+| IgnoreThisIssueMenu | splitButton | yes | yes | tab/TabProcess/GroupDiagramValidation | tab/TabProcess/GroupDiagramValidation |
+| IndentDecreaseWord | button | yes | yes | tab/TabHome/GroupParagraph | tab/TabHome/GroupParagraph |
+| IndentIncreaseWord | button | yes | yes | tab/TabHome/GroupParagraph | tab/TabHome/GroupParagraph |
+| InkAutoCreateShapes | checkBox | yes | yes | tab/TabInkToolsPens/GroupInkCreate | tab/TabInkToolsPens/GroupInkCreate |
+| InkBallpointPen | toggleButton | yes | yes | tab/TabInkToolsPens/GroupInkTools | tab/TabInkToolsPens/GroupInkTools |
+| InkColorPicker | gallery | yes | yes | tab/TabInkToolsPens/GroupInkPens | tab/TabInkToolsPens/GroupInkPens |
+| InkCovertToGeometry | button | yes | yes | tab/TabInkToolsPens/GroupInkConvert | tab/TabInkToolsPens/GroupInkConvert |
+| InkCovertToTextVisio | button | yes | yes | tab/TabInkToolsPens/GroupInkConvert | tab/TabInkToolsPens/GroupInkConvert |
+| InkEraser | toggleButton | yes | yes | tab/TabInkToolsPens/GroupInkTools | tab/TabInkToolsPens/GroupInkTools |
+| InkHighlighter | toggleButton | yes | yes | tab/TabInkToolsPens/GroupInkTools | tab/TabInkToolsPens/GroupInkTools |
+| InkShapeClose | button | yes | yes | tab/TabInkToolsPens/GroupInkCreate | tab/TabInkToolsPens/GroupInkCreate |
+| InkTool | button | yes | yes | tab/TabReviewWord/GroupComments | tab/TabReviewWord/GroupComments |
+| InkToolsClose | button | yes | yes | tab/TabInkToolsPens/GroupInkClose | tab/TabInkToolsPens/GroupInkClose |
+| IssuesWindow | checkBox | yes | yes | tab/TabProcess/GroupDiagramValidation | tab/TabProcess/GroupDiagramValidation |
+| Italic | toggleButton | yes | yes | tab/TabHome/GroupFont | tab/TabHome/GroupFont |
+| LanguageCommands | menu | yes | yes | tab/TabReviewWord/GroupLanguage | tab/TabReviewWord/GroupLanguage |
+| LanguagePreferences | button | yes | yes | tab/TabReviewWord/GroupLanguage | tab/TabReviewWord/GroupLanguage |
+| LassoSelectVisio | toggleButton | yes | yes | tab/TabHome/GroupEditing | tab/TabDrawInk/GroupWrite |
+| LayerDialog | button | yes | yes | tab/TabHome/GroupEditing | tab/TabHome/GroupEditing |
+| LayerPropertiesDialog | button | yes | yes | tab/TabHome/GroupEditing | tab/TabHome/GroupEditing |
+| LayersMenu | menu | yes | yes | tab/TabHome/GroupEditing | tab/TabHome/GroupEditing |
+| LayoutApplyToShapeStyle | toggleButton | yes | yes | tab/TabOrgChart/GroupOrgChartShapes | tab/TabOrgChart/GroupOrgChartShapes |
+| LayoutMoreOptions | button | yes | yes | tab/TabDesignVisio/GroupLayoutRouting | tab/TabDesignVisio/GroupLayoutRouting |
+| LeftButtonIconColor | gallery | yes | yes | tab/TabIconEditor/GroupIconEditPaint | tab/TabIconEditor/GroupIconEditPaint |
+| LeftButtonIconTransparent | button | yes | yes | tab/TabIconEditor/GroupIconEditPaint | tab/TabIconEditor/GroupIconEditPaint |
+| LegendInsertGallery | gallery | yes | yes | tab/TabData/GroupDisplayData | tab/TabData/GroupDisplayData |
+| LineArrowsGallery | gallery | yes | yes | tab/TabPictureToolsFormat/GroupPictureStylesVisio | tab/TabPictureToolsFormat/GroupPictureStylesVisio |
+| LineColorGallery | gallery | yes | yes | tab/TabPictureToolsFormat/GroupPictureStylesVisio | tab/TabPictureToolsFormat/GroupPictureStylesVisio |
+| LineDialog | button | yes | yes | tab/TabPictureToolsFormat/GroupPictureStylesVisio | tab/TabPictureToolsFormat/GroupPictureStylesVisio |
+| LinePatternGallery | gallery | yes | yes | tab/TabPictureToolsFormat/GroupPictureStylesVisio | tab/TabPictureToolsFormat/GroupPictureStylesVisio |
+| LineStylesDialog | button | yes | yes | tab/TabPictureToolsFormat/GroupPictureStylesVisio | tab/TabPictureToolsFormat/GroupPictureStylesVisio |
+| LineTool | toggleButton | yes | yes | tab/TabDeveloper/GroupShapeDesign | tab/TabDeveloper/GroupShapeDesign |
+| LineWeightGallery | gallery | yes | yes | tab/TabPictureToolsFormat/GroupPictureStylesVisio | tab/TabPictureToolsFormat/GroupPictureStylesVisio |
+| LoadingServicesGroup | group | yes | yes | backstage/TabSave | backstage/TabSave |
+| MacroPlay | button | yes | yes | tab/TabDeveloper/GroupCode | tab/TabDeveloper/GroupCode |
+| MacroRecord | button | yes | yes | tab/TabDeveloper/GroupCode | tab/TabDeveloper/GroupCode |
+| MacroRecorderPause | button | yes | yes | tab/TabDeveloper/GroupCode | tab/TabDeveloper/GroupCode |
+| MacroSecurity | button | yes | yes | tab/TabDeveloper/GroupCode | tab/TabDeveloper/GroupCode |
+| ManageServices | group | yes | yes | backstage/TabHelp | backstage/TabHelp |
+| MasterExplorer | checkBox | yes | yes | tab/TabDeveloper/GroupShowHideDeveloperVisio | tab/TabDeveloper/GroupShowHideDeveloperVisio |
+| MasterProperties | button | yes | yes | tab/TabStencil/GroupStencilMasterShape | tab/TabStencil/GroupStencilMasterShape |
+| MoreDataGraphics | button | yes | yes | tab/TabData/GroupDataGraphics | tab/TabData/GroupDataGraphics |
+| MorePageSizes | button | yes | yes | tab/TabDesignVisio/GroupPrintPreviewPageSetup | tab/TabDesignVisio/GroupPrintPreviewPageSetup |
+| Move | labelControl | yes | yes | tab/TabOrgChart/GroupOrgChartArrange | tab/TabOrgChart/GroupOrgChartArrange |
+| NamesOnly | toggleButton | yes | yes | tab/TabStencil/GroupStencilView | tab/TabStencil/GroupStencilView |
+| NamesUnderIcons | toggleButton | yes | yes | tab/TabStencil/GroupStencilView | tab/TabStencil/GroupStencilView |
+| NewBlankStencil | button | yes | yes | tab/TabStencil/GroupStencil | tab/TabStencil/GroupStencil |
+| NewBlankStencilMetric | button | yes | yes | tab/TabStencil/GroupStencil | tab/TabStencil/GroupStencil |
+| NewBlankStencilUS | button | yes | yes | tab/TabStencil/GroupStencil | tab/TabStencil/GroupStencil |
+| NewMaster | button | yes | yes | tab/TabStencil/GroupStencilMasterShape | tab/TabStencil/GroupStencilMasterShape |
+| ObjectBringForward | button | yes | yes | tab/TabPictureToolsFormat/GroupPictureToolArrange | tab/TabPictureToolsFormat/GroupPictureToolArrange |
+| ObjectBringToFront | button | yes | yes | tab/TabPictureToolsFormat/GroupPictureToolArrange | tab/TabPictureToolsFormat/GroupPictureToolArrange |
+| ObjectBringToFrontMenu | splitButton | yes | yes | tab/TabPictureToolsFormat/GroupPictureToolArrange | tab/TabPictureToolsFormat/GroupPictureToolArrange |
+| ObjectEffectGlowGallery | gallery | yes | yes | tab/TabHome/GroupShapeStyles | tab/TabHome/GroupShapeStyles |
+| ObjectEffectShadowGallery | gallery | yes | yes | tab/TabHome/GroupShapeStyles | tab/TabHome/GroupShapeStyles |
+| ObjectEffectSoftEdgesGallery | gallery | yes | yes | tab/TabHome/GroupShapeStyles | tab/TabHome/GroupShapeStyles |
+| ObjectFormatDialog | buttonDialogBoxLauncher | yes | yes | tab/TabHome/GroupShapeStyles | tab/TabHome/GroupShapeStyles |
+| ObjectRotateGallery | gallery | yes | yes | tab/TabPictureToolsFormat/GroupPictureToolArrange | tab/TabPictureToolsFormat/GroupPictureToolArrange |
+| ObjectSendBackward | button | yes | yes | tab/TabPictureToolsFormat/GroupPictureToolArrange | tab/TabPictureToolsFormat/GroupPictureToolArrange |
+| ObjectSendToBack | button | yes | yes | tab/TabPictureToolsFormat/GroupPictureToolArrange | tab/TabPictureToolsFormat/GroupPictureToolArrange |
+| ObjectSendToBackMenu | splitButton | yes | yes | tab/TabPictureToolsFormat/GroupPictureToolArrange | tab/TabPictureToolsFormat/GroupPictureToolArrange |
+| ObjectsAddToGroup | button | yes | yes | tab/TabDeveloper/GroupShapeDesign | tab/TabDeveloper/GroupShapeDesign |
+| ObjectsConvertToGroup | button | yes | yes | tab/TabDeveloper/GroupShapeDesign | tab/TabDeveloper/GroupShapeDesign |
+| ObjectsGroup | button | yes | yes | tab/TabDeveloper/GroupShapeDesign | tab/TabDeveloper/GroupShapeDesign |
+| ObjectsGroupMenu | menu | yes | yes | tab/TabDeveloper/GroupShapeDesign | tab/TabDeveloper/GroupShapeDesign |
+| ObjectsRemoveFromGroup | button | yes | yes | tab/TabDeveloper/GroupShapeDesign | tab/TabDeveloper/GroupShapeDesign |
+| ObjectsUngroup | button | yes | yes | tab/TabDeveloper/GroupShapeDesign | tab/TabDeveloper/GroupShapeDesign |
+| OleObjectctInsert | button | yes | yes | tab/TabInsert/GroupTextBoxText | tab/TabInsert/GroupTextBoxText |
+| OpenStencil | button | yes | yes | tab/TabStencil/GroupStencil | tab/TabStencil/GroupStencil |
+| OperationsMenu | menu | yes | yes | tab/TabDeveloper/GroupShapeDesign | tab/TabDeveloper/GroupShapeDesign |
+| OrgChartArrangeSubordinates | buttonDialogBoxLauncher | yes | yes | tab/TabOrgChart/GroupOrgChartLayout | tab/TabOrgChart/GroupOrgChartLayout |
+| OrgChartChangeStyle | gallery | yes | yes | tab/TabOrgChart/GroupOrgChartShapes | tab/TabOrgChart/GroupOrgChartShapes |
+| OrgChartCopyCreate | toggleButton | yes | yes | tab/TabOrgChart/GroupOrgChartLayout | tab/TabOrgChart/GroupOrgChartLayout |
+| OrgChartDataCompare | button | yes | yes | tab/TabOrgChart/GroupOrgChartOrganizationData | tab/TabOrgChart/GroupOrgChartOrganizationData |
+| OrgChartDataExport | button | yes | yes | tab/TabOrgChart/GroupOrgChartOrganizationData | tab/TabOrgChart/GroupOrgChartOrganizationData |
+| OrgChartDataImport | button | yes | yes | tab/TabOrgChart/GroupOrgChartOrganizationData | tab/TabOrgChart/GroupOrgChartOrganizationData |
+| OrgChartDataOptionsDisplay | buttonDialogBoxLauncher | yes | yes | tab/TabOrgChart/GroupOrgChartShapes | tab/TabOrgChart/GroupOrgChartShapes |
+| OrgChartFitToPage | button | yes | yes | tab/TabOrgChart/GroupOrgChartLayout | tab/TabOrgChart/GroupOrgChartLayout |
+| OrgChartIncreaseHeight | button | yes | yes | tab/TabOrgChart/GroupOrgChartShapes | tab/TabOrgChart/GroupOrgChartShapes |
+| OrgChartIncreaseWidth | button | yes | yes | tab/TabOrgChart/GroupOrgChartShapes | tab/TabOrgChart/GroupOrgChartShapes |
+| OrgChartLayoutGallery | gallery | yes | yes | tab/TabOrgChart/GroupOrgChartLayout | tab/TabOrgChart/GroupOrgChartLayout |
+| OrgChartLayoutSpacingChange | buttonDialogBoxLauncher | yes | yes | tab/TabOrgChart/GroupOrgChartArrange | tab/TabOrgChart/GroupOrgChartArrange |
+| OrgChartPictureChange | button | yes | yes | tab/TabOrgChart/GroupOrgChartPicture | tab/TabOrgChart/GroupOrgChartPicture |
+| OrgChartPictureDelete | button | yes | yes | tab/TabOrgChart/GroupOrgChartPicture | tab/TabOrgChart/GroupOrgChartPicture |
+| OrgChartPictureHide | button | yes | yes | tab/TabOrgChart/GroupOrgChartPicture | tab/TabOrgChart/GroupOrgChartPicture |
+| OrgChartPictureInsert | splitButton | yes | yes | tab/TabOrgChart/GroupOrgChartPicture | tab/TabOrgChart/GroupOrgChartPicture |
+| OrgChartPictureInsertMultiple | button | yes | yes | tab/TabOrgChart/GroupOrgChartPicture | tab/TabOrgChart/GroupOrgChartPicture |
+| OrgChartPictureInsertOne | button | yes | yes | tab/TabOrgChart/GroupOrgChartPicture | tab/TabOrgChart/GroupOrgChartPicture |
+| OrgChartPositionTypeChange | button | yes | yes | tab/TabOrgChart/GroupOrgChartShapes | tab/TabOrgChart/GroupOrgChartShapes |
+| OrgChartReduceHeight | button | yes | yes | tab/TabOrgChart/GroupOrgChartShapes | tab/TabOrgChart/GroupOrgChartShapes |
+| OrgChartReduceWidth | button | yes | yes | tab/TabOrgChart/GroupOrgChartShapes | tab/TabOrgChart/GroupOrgChartShapes |
+| OrgChartRelayout | button | yes | yes | tab/TabOrgChart/GroupOrgChartLayout | tab/TabOrgChart/GroupOrgChartLayout |
+| OrgChartReportMoveCloser | button | yes | yes | tab/TabOrgChart/GroupOrgChartArrange | tab/TabOrgChart/GroupOrgChartArrange |
+| OrgChartReportMoveFurther | button | yes | yes | tab/TabOrgChart/GroupOrgChartArrange | tab/TabOrgChart/GroupOrgChartArrange |
+| OrgChartReportMoveLeft | button | yes | yes | tab/TabOrgChart/GroupOrgChartArrange | tab/TabOrgChart/GroupOrgChartArrange |
+| OrgChartReportMoveRight | button | yes | yes | tab/TabOrgChart/GroupOrgChartArrange | tab/TabOrgChart/GroupOrgChartArrange |
+| OrgChartShapeHeight | labelControl | yes | yes | tab/TabOrgChart/GroupOrgChartShapes | tab/TabOrgChart/GroupOrgChartShapes |
+| OrgChartShapeWidth | labelControl | yes | yes | tab/TabOrgChart/GroupOrgChartShapes | tab/TabOrgChart/GroupOrgChartShapes |
+| OrgChartSubordinatesExpand | toggleButton | yes | yes | tab/TabOrgChart/GroupOrgChartLayout | tab/TabOrgChart/GroupOrgChartLayout |
+| OrgChartSubordinatesShowHide | button | yes | yes | tab/TabOrgChart/GroupOrgChartArrange | tab/TabOrgChart/GroupOrgChartArrange |
+| OrgChartSynchronize | splitButton | yes | yes | tab/TabOrgChart/GroupOrgChartLayout | tab/TabOrgChart/GroupOrgChartLayout |
+| PageFitToDrawing | button | yes | yes | tab/TabDesignVisio/GroupPrintPreviewPageSetup | tab/TabDesignVisio/GroupPrintPreviewPageSetup |
+| PageOrientation | gallery | yes | yes | tab/TabDesignVisio/GroupPrintPreviewPageSetup | tab/TabDesignVisio/GroupPrintPreviewPageSetup |
+| PageRelayoutGallery | gallery | yes | yes | tab/TabDesignVisio/GroupLayoutRouting | tab/TabDesignVisio/GroupLayoutRouting |
+| PageSetupDialogVisio | buttonDialogBoxLauncher | yes | yes | tab/TabDesignVisio/GroupPrintPreviewPageSetup | tab/TabDesignVisio/GroupPrintPreviewPageSetup |
+| PageSetupLayoutAndRoutingDialog | buttonDialogBoxLauncher | yes | yes | tab/TabDesignVisio/GroupLayoutRouting | tab/TabDesignVisio/GroupLayoutRouting |
+| PageSetupPageDialog | buttonDialogBoxLauncher | yes | yes | tab/TabDesignVisio/GroupBackgrounds | tab/TabDesignVisio/GroupBackgrounds |
+| PageSize | gallery | yes | yes | tab/TabDesignVisio/GroupPrintPreviewPageSetup | tab/TabDesignVisio/GroupPrintPreviewPageSetup |
+| PanAndZoomWindow | toggleButton | yes | yes | tab/TabView/GroupViewShowHide | tab/TabView/GroupViewShowHide |
+| ParagraphDialogVisio | buttonDialogBoxLauncher | yes | yes | tab/TabHome/GroupParagraph | tab/TabHome/GroupParagraph |
+| Paste | button | yes | yes | tab/TabIconEditor/GroupIconEditClipboard | tab/TabIconEditor/GroupIconEditClipboard |
+| PasteAsHyperlink | button | yes | yes | tab/TabHome/GroupClipboard | tab/TabHome/GroupClipboard |
+| PasteDuplicate | button | yes | yes | tab/TabHome/GroupClipboard | tab/TabHome/GroupClipboard |
+| PasteMenu | splitButton | yes | yes | tab/TabHome/GroupClipboard | tab/TabHome/GroupClipboard |
+| PasteSpecialDialog | button | yes | yes | tab/TabHome/GroupClipboard | tab/TabHome/GroupClipboard |
+| PenPressure | toggleButton | yes | yes | tab/TabInkToolsPens/GroupInkPens | tab/TabInkToolsPens/GroupInkPens |
+| PencilTool | toggleButton | yes | yes | tab/TabDeveloper/GroupShapeDesign | tab/TabDeveloper/GroupShapeDesign |
+| PersistentEvents | button | yes | yes | tab/TabDeveloper/GroupSdkTools | tab/TabDeveloper/GroupSdkTools |
+| Personalization | group | yes | yes | backstage/TabHelp | backstage/TabHelp |
+| PictureAutoBalance | button | yes | yes | tab/TabPictureToolsFormat/GroupPictureToolAdjust | tab/TabPictureToolsFormat/GroupPictureToolAdjust |
+| PictureBrightnessGallery | gallery | yes | yes | tab/TabPictureToolsFormat/GroupPictureToolAdjust | tab/TabPictureToolsFormat/GroupPictureToolAdjust |
+| PictureCompress | button | yes | yes | tab/TabPictureToolsFormat/GroupPictureToolAdjust | tab/TabPictureToolsFormat/GroupPictureToolAdjust |
+| PictureContrastGallery | gallery | yes | yes | tab/TabPictureToolsFormat/GroupPictureToolAdjust | tab/TabPictureToolsFormat/GroupPictureToolAdjust |
+| PictureCorrectionsDialog | button | yes | yes | tab/TabPictureToolsFormat/GroupPictureToolAdjust | tab/TabPictureToolsFormat/GroupPictureToolAdjust |
+| PictureFormatDialogVisio | buttonDialogBoxLauncher | yes | yes | tab/TabPictureToolsFormat/GroupPictureToolAdjust | tab/TabPictureToolsFormat/GroupPictureToolAdjust |
+| PictureInsertFromFile | button | yes | yes | tab/TabInsert/GroupInsertIllustrations | tab/TabInsert/GroupInsertIllustrations |
+| PointerModeOptions | gallery | yes | yes | qat | qat |
+| PointerTool | toggleButton | yes | yes | tab/TabInkToolsPens/GroupInkTools | tab/TabInkToolsPens/GroupInkTools |
+| PositionMenu | gallery | yes | yes | tab/TabHome/GroupArrange | tab/TabHome/GroupArrange |
+| PrintShapeSheet | button | yes | yes | tab/TabDeveloper/GroupSdkTools | tab/TabDeveloper/GroupSdkTools |
+| PublishGroup | taskFormGroup | yes | yes | backstage/TabPublish | backstage/TabPublish |
+| PublishOptions | group | yes | yes | backstage/TabInfo | backstage/TabInfo |
+| QuickConnectorTool | toggleButton | yes | yes | tab/TabInsert/GroupDiagramParts | tab/TabInsert/GroupDiagramParts |
+| QuickDataLinkDataToShapes | button | yes | yes | tab/TabData/GroupExternalData | tab/TabData/GroupExternalData |
+| RecorderResume | button | yes | yes | tab/TabDeveloper/GroupCode | tab/TabDeveloper/GroupCode |
+| RecorderStopVisio | button | yes | yes | tab/TabDeveloper/GroupCode | tab/TabDeveloper/GroupCode |
+| RectangleTool | toggleButton | yes | yes | tab/TabDeveloper/GroupShapeDesign | tab/TabDeveloper/GroupShapeDesign |
+| RedoOrRepeat | button | yes | yes | qat | qat |
+| ReflectionGallery | gallery | yes | yes | tab/TabHome/GroupShapeStyles | tab/TabHome/GroupShapeStyles |
+| ReflectionsMoreOptions | button | yes | yes | tab/TabHome/GroupShapeStyles | tab/TabHome/GroupShapeStyles |
+| RefreshMenu | splitButton | yes | yes | tab/TabData/GroupExternalData | tab/TabData/GroupExternalData |
+| RemoveTheme | button | yes | yes | tab/TabHome/GroupShapeStyles | tab/TabHome/GroupShapeStyles |
+| ReplaceDialog | button | yes | yes | tab/TabHome/GroupEditing | tab/TabHome/GroupEditing |
+| ReplaceShape | gallery | yes | yes | tab/TabHome/GroupEditing | tab/TabHome/GroupEditing |
+| ResearchPane | toggleButton | yes | yes | tab/TabReviewWord/GroupProofing | tab/TabReviewWord/GroupProofing |
+| ReviewNewComment | button | yes | yes | tab/TabReviewWord/GroupComments | tab/TabReviewWord/GroupComments |
+| RightButtonIconColor | gallery | yes | yes | tab/TabIconEditor/GroupIconEditPaint | tab/TabIconEditor/GroupIconEditPaint |
+| RightButtonIconTransparent | button | yes | yes | tab/TabIconEditor/GroupIconEditPaint | tab/TabIconEditor/GroupIconEditPaint |
+| RotateDiagram | gallery | yes | yes | tab/TabHome/GroupArrange | tab/TabHome/GroupArrange |
+| RulerAndGridDialog | buttonDialogBoxLauncher | yes | yes | tab/TabView/GroupViewShowHide | tab/TabView/GroupViewShowHide |
+| RulesImportFrom | gallery | yes | yes | tab/TabProcess/GroupDiagramValidation | tab/TabProcess/GroupDiagramValidation |
+| RulesToCheck | menu | yes | yes | tab/TabProcess/GroupDiagramValidation | tab/TabProcess/GroupDiagramValidation |
+| Save | category | yes | yes | backstage/TabSave | backstage/TabSave |
+| SaveDrawing | group | yes | yes | backstage/TabPublish | backstage/TabPublish |
+| SaveGroup | taskFormGroup | yes | yes | backstage/TabSave | backstage/TabSave |
+| ScreenTip | button | yes | yes | tab/TabInsert/GroupTextBoxText | tab/TabInsert/GroupTextBoxText |
+| SelectAll | button | yes | yes | tab/TabIconEditor/GroupIconEditSelect | tab/TabIconEditor/GroupIconEditSelect |
+| SelectByTypeDialog | button | yes | yes | tab/TabHome/GroupEditing | tab/TabHome/GroupEditing |
+| SelectContents | button | yes | yes | tab/TabFormat/GroupMembership | tab/TabFormat/GroupMembership |
+| SelectMenu | menu | yes | yes | tab/TabHome/GroupEditing | tab/TabHome/GroupEditing |
+| SendUsingEmail | task | yes | yes | backstage/TabShare | backstage/TabShare |
+| SetLanguage | button | yes | yes | tab/TabReviewWord/GroupLanguage | tab/TabReviewWord/GroupLanguage |
+| ShadowOptionsDialog | button | yes | yes | tab/TabHome/GroupShapeStyles | tab/TabHome/GroupShapeStyles |
+| ShapeBehavior | button | yes | yes | tab/TabDeveloper/GroupShapeDesign | tab/TabDeveloper/GroupShapeDesign |
+| ShapeData | button | yes | yes | tab/TabShapeSheetDesign/GroupShapeSheetEditing | tab/TabShapeSheetDesign/GroupShapeSheetEditing |
+| ShapeDataWindow | checkBox | yes | yes | tab/TabData/GroupDataShowHide | tab/TabData/GroupDataShowHide |
+| ShapeDataWindowShowHide | toggleButton | yes | yes | tab/TabView/GroupViewShowHide | tab/TabView/GroupViewShowHide |
+| ShapeEffectsMenu | menu | yes | yes | tab/TabHome/GroupShapeStyles | tab/TabHome/GroupShapeStyles |
+| ShapeName | button | yes | yes | tab/TabDeveloper/GroupShapeDesign | tab/TabDeveloper/GroupShapeDesign |
+| ShapeProtection | button | yes | yes | tab/TabDeveloper/GroupShapeDesign | tab/TabDeveloper/GroupShapeDesign |
+| ShapeReports | button | yes | yes | tab/TabReviewWord/GroupReports | tab/TabReviewWord/GroupReports |
+| ShapeSheetDeleteRow | button | yes | yes | tab/TabShapeSheetDesign/GroupShapeSheetRows | tab/TabShapeSheetDesign/GroupShapeSheetRows |
+| ShapeSheetDeleteSection | button | yes | yes | tab/TabShapeSheetDesign/GroupShapeSheetSections | tab/TabShapeSheetDesign/GroupShapeSheetSections |
+| ShapeSheetEditFormula | button | yes | yes | tab/TabShapeSheetDesign/GroupShapeSheetEditing | tab/TabShapeSheetDesign/GroupShapeSheetEditing |
+| ShapeSheetInsertRow | button | yes | yes | tab/TabShapeSheetDesign/GroupShapeSheetRows | tab/TabShapeSheetDesign/GroupShapeSheetRows |
+| ShapeSheetInsertSection | button | yes | yes | tab/TabShapeSheetDesign/GroupShapeSheetSections | tab/TabShapeSheetDesign/GroupShapeSheetSections |
+| ShapeSheetShapeAction | button | yes | yes | tab/TabShapeSheetDesign/GroupShapeSheetEditing | tab/TabShapeSheetDesign/GroupShapeSheetEditing |
+| ShapeSheetShowFormulas | toggleButton | yes | yes | tab/TabShapeSheetDesign/GroupShapeSheetView | tab/TabShapeSheetDesign/GroupShapeSheetView |
+| ShapeSheetShowSections | button | yes | yes | tab/TabShapeSheetDesign/GroupShapeSheetView | tab/TabShapeSheetDesign/GroupShapeSheetView |
+| ShapeSheetShowValues | toggleButton | yes | yes | tab/TabShapeSheetDesign/GroupShapeSheetView | tab/TabShapeSheetDesign/GroupShapeSheetView |
+| ShapeStylesGallery | gallery | yes | yes | tab/TabHome/GroupShapeStyles | tab/TabHome/GroupShapeStyles |
+| ShapesObjectCombine | button | yes | yes | tab/TabDeveloper/GroupShapeDesign | tab/TabDeveloper/GroupShapeDesign |
+| ShapesObjectFragment | button | yes | yes | tab/TabDeveloper/GroupShapeDesign | tab/TabDeveloper/GroupShapeDesign |
+| ShapesObjectIntersect | button | yes | yes | tab/TabDeveloper/GroupShapeDesign | tab/TabDeveloper/GroupShapeDesign |
+| ShapesObjectJoin | button | yes | yes | tab/TabDeveloper/GroupShapeDesign | tab/TabDeveloper/GroupShapeDesign |
+| ShapesObjectOffset | button | yes | yes | tab/TabDeveloper/GroupShapeDesign | tab/TabDeveloper/GroupShapeDesign |
+| ShapesObjectSubtract | button | yes | yes | tab/TabDeveloper/GroupShapeDesign | tab/TabDeveloper/GroupShapeDesign |
+| ShapesObjectTrim | button | yes | yes | tab/TabDeveloper/GroupShapeDesign | tab/TabDeveloper/GroupShapeDesign |
+| ShapesObjectUnion | button | yes | yes | tab/TabDeveloper/GroupShapeDesign | tab/TabDeveloper/GroupShapeDesign |
+| ShapesObjectUpdateAlignmentBox | button | yes | yes | tab/TabDeveloper/GroupShapeDesign | tab/TabDeveloper/GroupShapeDesign |
+| ShapesRotateGallery | gallery | yes | yes | tab/TabHome/GroupArrange | tab/TabHome/GroupArrange |
+| ShapesWindow | toggleButton | yes | yes | tab/TabView/GroupViewShowHide | tab/TabView/GroupViewShowHide |
+| Share | category | yes | yes | backstage/TabShare | backstage/TabShare |
+| SharePointWorkflowExport | button | yes | yes | tab/TabProcess/GroupSharepointWorkflow | tab/TabProcess/GroupSharepointWorkflow |
+| SharePointWorkflowImport | button | yes | yes | tab/TabProcess/GroupSharepointWorkflow | tab/TabProcess/GroupSharepointWorkflow |
+| ShareWithPeople | task | yes | yes | backstage/TabShare | backstage/TabShare |
+| ShowCommentsMenu | splitButton | yes | yes | tab/TabReviewWord/GroupComments | tab/TabReviewWord/GroupComments |
+| ShowFormulaTracingWindow | toggleButton | yes | yes | tab/TabShapeSheetDesign/GroupShapeSheetFormulaTracing | tab/TabShapeSheetDesign/GroupShapeSheetFormulaTracing |
+| ShowGrid | checkBox | yes | yes | tab/TabView/GroupViewShowHide | tab/TabView/GroupViewShowHide |
+| ShowGuides | checkBox | yes | yes | tab/TabView/GroupViewShowHide | tab/TabView/GroupViewShowHide |
+| ShowIgnoredIssues | toggleButton | yes | yes | tab/TabProcess/GroupDiagramValidation | tab/TabProcess/GroupDiagramValidation |
+| ShowPageBreaks | checkBox | yes | yes | tab/TabView/GroupViewShowHide | tab/TabView/GroupViewShowHide |
+| ShowRulerVisio | checkBox | yes | yes | tab/TabView/GroupViewShowHide | tab/TabView/GroupViewShowHide |
+| ShowShapeSheet | splitButton | yes | yes | tab/TabDeveloper/GroupShapeDesign | tab/TabDeveloper/GroupShapeDesign |
+| ShowShapeSheetDocument | toggleButton | yes | yes | tab/TabDeveloper/GroupShapeDesign | tab/TabDeveloper/GroupShapeDesign |
+| ShowShapeSheetPage | toggleButton | yes | yes | tab/TabDeveloper/GroupShapeDesign | tab/TabDeveloper/GroupShapeDesign |
+| ShowShapeSheetShape | toggleButton | yes | yes | tab/TabDeveloper/GroupShapeDesign | tab/TabDeveloper/GroupShapeDesign |
+| ShowTags | toggleButton | yes | yes | tab/TabReviewWord/GroupComments | tab/TabReviewWord/GroupComments |
+| SizeAndPositionWindow | toggleButton | yes | yes | tab/TabView/GroupViewShowHide | tab/TabView/GroupViewShowHide |
+| SkyDriveUpsellGroup | group | yes | yes | backstage/TabSave | backstage/TabSave |
+| SnapAndGlueDialog | buttonDialogBoxLauncher | yes | yes | tab/TabView/GroupVisualAids | tab/TabView/GroupVisualAids |
+| SoftEdgesMoreOptions | button | yes | yes | tab/TabHome/GroupShapeStyles | tab/TabHome/GroupShapeStyles |
+| Spelling | button | yes | yes | qat | qat |
+| StencilClose | button | yes | yes | tab/TabStencil/GroupStencilClose | tab/TabStencil/GroupStencilClose |
+| StencilExplorer | toggleButton | yes | yes | tab/TabStencil/GroupStencilView | tab/TabStencil/GroupStencilView |
+| StopIgnoringRule | button | yes | yes | tab/TabProcess/GroupDiagramValidation | tab/TabProcess/GroupDiagramValidation |
+| StopIgnoringThisIssue | button | yes | yes | tab/TabProcess/GroupDiagramValidation | tab/TabProcess/GroupDiagramValidation |
+| Strikethrough | toggleButton | yes | yes | tab/TabHome/GroupFont | tab/TabHome/GroupFont |
+| StyleExplorer | checkBox | yes | yes | tab/TabShapeSheetDesign/GroupShapeSheetView | tab/TabShapeSheetDesign/GroupShapeSheetView |
+| SubprocessBrowseToOtherDocument | button | yes | yes | tab/TabProcess/GroupSubProcess | tab/TabProcess/GroupSubProcess |
+| SubprocessCreateFromSelection | button | yes | yes | tab/TabProcess/GroupSubProcess | tab/TabProcess/GroupSubProcess |
+| SubprocessCreateNew | button | yes | yes | tab/TabProcess/GroupSubProcess | tab/TabProcess/GroupSubProcess |
+| SubprocessEditLink | button | yes | yes | tab/TabProcess/GroupSubProcess | tab/TabProcess/GroupSubProcess |
+| SubprocessLinkToExisting | gallery | yes | yes | tab/TabProcess/GroupSubProcess | tab/TabProcess/GroupSubProcess |
+| SymbolInsertGallery | gallery | yes | yes | tab/TabInsert/GroupTextBoxText | tab/TabInsert/GroupTextBoxText |
+| SymbolsDialog | button | yes | yes | tab/TabInsert/GroupTextBoxText | tab/TabInsert/GroupTextBoxText |
+| TabAddIns | tab | yes | yes | tab/TabAddIns | tab/TabAddIns |
+| TabData | tab | yes | yes | tab/TabData | tab/TabData |
+| TabDesignVisio | tab | yes | yes | tab/TabDesignVisio | tab/TabDesignVisio |
+| TabDeveloper | tab | yes | yes | tab/TabDeveloper | tab/TabDeveloper |
+| TabFormat | tab | yes | yes | tab/TabFormat | tab/TabFormat |
+| TabHelp | tab | yes | yes | backstage/TabHelp | backstage/TabHelp |
+| TabHome | tab | yes | yes | tab/TabHome | tab/TabHome |
+| TabIconEditor | tab | yes | yes | tab/TabIconEditor | tab/TabIconEditor |
+| TabInfo | tab | yes | yes | backstage/TabInfo | backstage/TabInfo |
+| TabInkToolsPens | tab | yes | yes | tab/TabInkToolsPens | tab/TabInkToolsPens |
+| TabInsert | tab | yes | yes | tab/TabInsert | tab/TabInsert |
+| TabOfficeStart | tab | yes | yes | backstage/TabOfficeStart | backstage/TabOfficeStart |
+| TabOrgChart | tab | yes | yes | tab/TabOrgChart | tab/TabOrgChart |
+| TabPictureToolsFormat | tab | yes | yes | tab/TabPictureToolsFormat | tab/TabPictureToolsFormat |
+| TabPrint | tab | yes | yes | backstage/TabPrint | backstage/TabPrint |
+| TabProcess | tab | yes | yes | tab/TabProcess | tab/TabProcess |
+| TabPublish | tab | yes | yes | backstage/TabPublish | backstage/TabPublish |
+| TabRecent | tab | yes | yes | backstage/TabRecent | backstage/TabRecent |
+| TabReviewWord | tab | yes | yes | tab/TabReviewWord | tab/TabReviewWord |
+| TabSave | tab | yes | yes | backstage/TabSave | backstage/TabSave |
+| TabShapeSheetDesign | tab | yes | yes | tab/TabShapeSheetDesign | tab/TabShapeSheetDesign |
+| TabShare | tab | yes | yes | backstage/TabShare | backstage/TabShare |
+| TabStencil | tab | yes | yes | tab/TabStencil | tab/TabStencil |
+| TabView | tab | yes | yes | tab/TabView | tab/TabView |
+| TaskPanesMenuVisio | menu | yes | yes | tab/TabView/GroupViewShowHide | tab/TabView/GroupViewShowHide |
+| TextAlignBottom | toggleButton | yes | yes | tab/TabHome/GroupParagraph | tab/TabHome/GroupParagraph |
+| TextAlignMiddle | toggleButton | yes | yes | tab/TabHome/GroupParagraph | tab/TabHome/GroupParagraph |
+| TextAlignTop | toggleButton | yes | yes | tab/TabHome/GroupParagraph | tab/TabHome/GroupParagraph |
+| TextAllCaps | toggleButton | yes | yes | tab/TabHome/GroupFont | tab/TabHome/GroupFont |
+| TextBlockTool | toggleButton | yes | yes | tab/TabHome/GroupTools | tab/TabHome/GroupTools |
+| TextBoxInsertHorizontal | toggleButton | yes | yes | tab/TabInsert/GroupTextBoxText | tab/TabInsert/GroupTextBoxText |
+| TextBoxInsertMenu | splitButton | yes | yes | tab/TabInsert/GroupTextBoxText | tab/TabInsert/GroupTextBoxText |
+| TextBoxInsertVertical | toggleButton | yes | yes | tab/TabInsert/GroupTextBoxText | tab/TabInsert/GroupTextBoxText |
+| TextDirectionLeftToRight | toggleButton | yes | yes | tab/TabHome/GroupParagraph | tab/TabHome/GroupParagraph |
+| TextDirectionRightToLeft | toggleButton | yes | yes | tab/TabHome/GroupParagraph | tab/TabHome/GroupParagraph |
+| TextDirectionVertical | button | yes | yes | tab/TabHome/GroupParagraph | tab/TabHome/GroupParagraph |
+| TextInitialCaps | toggleButton | yes | yes | tab/TabHome/GroupFont | tab/TabHome/GroupFont |
+| TextNormalCase | toggleButton | yes | yes | tab/TabHome/GroupFont | tab/TabHome/GroupFont |
+| TextRotate90Degrees | button | yes | yes | tab/TabHome/GroupParagraph | tab/TabHome/GroupParagraph |
+| TextSmallCaps | toggleButton | yes | yes | tab/TabHome/GroupFont | tab/TabHome/GroupFont |
+| TextTool | toggleButton | yes | yes | tab/TabHome/GroupTools | tab/TabHome/GroupTools |
+| ThemeApplyToNewShapes | toggleButton | yes | yes | tab/TabDesignVisio/GroupThemesVisio | tab/TabDesignVisio/GroupThemesVisio |
+| ThemeColorsCreateNewVisio | button | yes | yes | tab/TabDesignVisio/GroupThemeVariants | tab/TabDesignVisio/GroupThemeVariants |
+| ThemeColorsGalleryVisio | gallery | yes | yes | tab/TabDesignVisio/GroupThemeVariants | tab/TabDesignVisio/GroupThemeVariants |
+| ThemeConnectorsGallery | gallery | yes | yes | tab/TabDesignVisio/GroupThemeVariants | tab/TabDesignVisio/GroupThemeVariants |
+| ThemeEffectsGalleryVisio | gallery | yes | yes | tab/TabDesignVisio/GroupThemeVariants | tab/TabDesignVisio/GroupThemeVariants |
+| ThemeVariantsGallery | gallery | yes | yes | tab/TabDesignVisio/GroupThemeVariants | tab/TabDesignVisio/GroupThemeVariants |
+| ThemesGalleryVisio | gallery | yes | yes | tab/TabDesignVisio/GroupThemesVisio | tab/TabDesignVisio/GroupThemesVisio |
+| ThemesGalleryVisioLegacy | gallery | yes | yes | tab/TabDesignVisio/GroupThemesVisioLegacy | tab/TabDesignVisio/GroupThemesVisioLegacy |
+| Theming | group | yes | yes | backstage/TabHelp | backstage/TabHelp |
+| Thesaurus | button | yes | yes | tab/TabReviewWord/GroupProofing | tab/TabReviewWord/GroupProofing |
+| TraceBack | button | yes | yes | tab/TabShapeSheetDesign/GroupShapeSheetFormulaTracing | tab/TabShapeSheetDesign/GroupShapeSheetFormulaTracing |
+| TraceDependentCells | toggleButton | yes | yes | tab/TabShapeSheetDesign/GroupShapeSheetFormulaTracing | tab/TabShapeSheetDesign/GroupShapeSheetFormulaTracing |
+| TraceForward | button | yes | yes | tab/TabShapeSheetDesign/GroupShapeSheetFormulaTracing | tab/TabShapeSheetDesign/GroupShapeSheetFormulaTracing |
+| TracePrecedentCells | toggleButton | yes | yes | tab/TabShapeSheetDesign/GroupShapeSheetFormulaTracing | tab/TabShapeSheetDesign/GroupShapeSheetFormulaTracing |
+| Translate | button | yes | yes | tab/TabReviewWord/GroupLanguage | tab/TabReviewWord/GroupLanguage |
+| Underline | toggleButton | yes | yes | tab/TabHome/GroupFont | tab/TabHome/GroupFont |
+| Undo | gallery | yes | yes | qat | qat |
+| UpdateIcon | button | yes | yes | tab/TabStencil/GroupStencilMasterShape | tab/TabStencil/GroupStencilMasterShape |
+| UpgradeDocument | button | yes | yes | backstage/TabInfo | backstage/TabInfo |
+| UsagePermissions | button | yes | yes | backstage/TabInfo | backstage/TabInfo |
+| ViewDirectionLeftToRight | toggleButton | yes | yes | tab/TabView/GroupViewDirection | tab/TabView/GroupViewDirection |
+| ViewDirectionMenu | menu | yes | yes | tab/TabView/GroupViewDirection | tab/TabView/GroupViewDirection |
+| ViewDirectionRightToLeft | toggleButton | yes | yes | tab/TabView/GroupViewDirection | tab/TabView/GroupViewDirection |
+| ViewFullScreenView | toggleButton | yes | yes | tab/TabView/GroupDocumentViewsVisio | tab/TabView/GroupDocumentViewsVisio |
+| ViewVisualBasicCode | button | yes | yes | tab/TabDeveloper/GroupControls | tab/TabDeveloper/GroupControls |
+| VisualBasic | button | yes | yes | tab/TabDeveloper/GroupCode | tab/TabDeveloper/GroupCode |
+| WindowMoreWindowsDialog | toggleButton | yes | yes | tab/TabStencil/GroupStencilWindow | tab/TabStencil/GroupStencilWindow |
+| WindowNew | button | yes | yes | tab/TabView/GroupWindow | tab/TabView/GroupWindow |
+| WindowSwitchWindowsMenuWord | menu | yes | yes | tab/TabStencil/GroupStencilWindow | tab/TabStencil/GroupStencilWindow |
+| WindowsArrangeAll | button | yes | yes | tab/TabView/GroupWindow | tab/TabView/GroupWindow |
+| WindowsCascade | button | yes | yes | tab/TabView/GroupWindow | tab/TabView/GroupWindow |
+| ZoomDialog | button | yes | yes | tab/TabView/GroupZoom | tab/TabView/GroupZoom |
+| ZoomFitToWindowVisio | button | yes | yes | tab/TabView/GroupZoom | tab/TabView/GroupZoom |
+| ZoomPageWidthVisio | button | yes | yes | tab/TabView/GroupZoom | tab/TabView/GroupZoom |
+| _3DBevelOptionsDialog | button | yes | yes | tab/TabHome/GroupShapeStyles | tab/TabHome/GroupShapeStyles |
+| _3DRotationGallery | gallery | yes | yes | tab/TabHome/GroupShapeStyles | tab/TabHome/GroupShapeStyles |
+| _3DRotationOptionsDialog | button | yes | yes | tab/TabHome/GroupShapeStyles | tab/TabHome/GroupShapeStyles |
+| GroupCompatChecker | group | yes | no | backstage/TabInfo |  |
+| GroupReduceFileSize | group | yes | no | backstage/TabInfo |  |
+| GroupRemoveHiddenInformation | group | yes | no | backstage/TabInfo |  |
+| OutlineWeightGallery | gallery | yes | no | tab/TabInkToolsPens/GroupInkPens |  |
+| AccessibilityChecker | button | no | yes |  | tab/TabReviewWord/GroupAccessibility |
+| AllowPersonallyIdentifiableInformation | control | no | yes |  | backstage/TabInfo |
+| AppGuardTrustPromotion | button | no | yes |  | backstage/TabSave |
+| AttachDataSource | button | no | yes |  | tab/TabData/GroupCreateFromData |
+| ButtonCategoryCloudServices | category | no | yes |  | backstage/TabRecent |
+| ButtonCategoryLocalServices | category | no | yes |  | backstage/TabRecent |
+| ButtonGroupCloudServices | control | no | yes |  | backstage/TabRecent |
+| ButtonGroupItemSaveCloudServices | control | no | yes |  | backstage/TabSave |
+| ButtonGroupItemSaveLocalServices | control | no | yes |  | backstage/TabSave |
+| ButtonGroupLocalServices | control | no | yes |  | backstage/TabRecent |
+| ButtonGroupRecentDocuments | control | no | yes |  | backstage/TabRecent |
+| ButtonGroupsSave | control | no | yes |  | backstage/TabSave |
+| ButtonTaskFixItHub | task | no | yes |  | backstage/TabRecent |
+| ButtonTaskSharedWithMe | task | no | yes |  | backstage/TabRecent |
+| CloudFixItHub | group | no | yes |  | backstage/TabRecent |
+| CloudSkyDriveUpsellGroup | group | no | yes |  | backstage/TabSave |
+| ContactUs | button | no | yes |  | tab/HelpTab/GroupHelpAndSupport |
+| CreatePPT | task | no | yes |  | backstage/TabPublish |
+| CreateWord | task | no | yes |  | backstage/TabPublish |
+| DVExportVtpx | button | no | yes |  | tab/TabDVDesign/GroupExportDVDiagram |
+| DVOpenDataSource | button | no | yes |  | tab/TabDVDesign/GroupSourceDataDVDiagram |
+| DVRelinkDataSource | button | no | yes |  | tab/TabDVDesign/GroupSourceDataDVDiagram |
+| DiagramNavigationPane | toggleButton | no | yes |  | tab/TabView/GroupViewShowHide |
+| DrawConvertInkToGeometry | button | no | yes |  | tab/TabDrawInk/GroupDrawCreate |
+| DrawConvertVisioInkToText | button | no | yes |  | tab/TabDrawInk/GroupDrawConvert |
+| DrawSelectTool | toggleButton | no | yes |  | tab/TabDrawInk/GroupWrite |
+| FingerPaintingMode | toggleButton | no | yes |  | tab/TabDrawInk/GroupWrite |
+| FixItHub | group | no | yes |  | backstage/TabRecent |
+| FlyoutAnchorInsertPictures | menu | no | yes |  | tab/TabInsert/GroupInsertIllustrations |
+| GroupAccessibility | group | no | yes |  | tab/TabReviewWord/GroupAccessibility |
+| GroupAddLocationLocal | group | no | yes |  | backstage/TabSave |
+| GroupBackstagePrivacy | group | no | yes |  | backstage/TabHelp |
+| GroupCloudGettingStartedOpenMRUPlacesOrNavSlab | group | no | yes |  | backstage/TabRecent |
+| GroupCreateFromData | group | no | yes |  | tab/TabData/GroupCreateFromData |
+| GroupDrawConvert | group | no | yes |  | tab/TabDrawInk/GroupDrawConvert |
+| GroupDrawCreate | group | no | yes |  | tab/TabDrawInk/GroupDrawCreate |
+| GroupDynamicSaveCloudServiceProvider | group | no | yes |  | backstage/TabSave |
+| GroupDynamicSaveLocalServiceProvider | group | no | yes |  | backstage/TabSave |
+| GroupDynamicSavePinnableCloudServiceProvider | group | no | yes |  | backstage/TabSave |
+| GroupExportDVDiagram | group | no | yes |  | tab/TabDVDesign/GroupExportDVDiagram |
+| GroupFlow | group | no | yes |  | tab/TabProcess/GroupFlow |
+| GroupGettingStartedSaveAsMRUCloudPlacesOrNavSlab | group | no | yes |  | backstage/TabSave |
+| GroupGettingStartedSaveAsMRULocalPlacesOrNavSlab | group | no | yes |  | backstage/TabSave |
+| GroupHelpAndSupport | group | no | yes |  | tab/HelpTab/GroupHelpAndSupport |
+| GroupInsights | group | no | yes |  | tab/TabReviewWord/GroupInsights |
+| GroupLocalGettingStartedOpenMRUPlacesOrNavSlab | group | no | yes |  | backstage/TabRecent |
+| GroupModernOpenPlaces | group | no | yes |  | backstage/TabRecent |
+| GroupOfficeInsider | group | no | yes |  | backstage/TabHelp |
+| GroupOfficeInsiderAbout | button | no | yes |  | backstage/TabHelp |
+| GroupOfficeInsiderChannel | button | no | yes |  | backstage/TabHelp |
+| GroupOfficeInsiderHelp | button | no | yes |  | backstage/TabHelp |
+| GroupOfficeInsiderRegistration | button | no | yes |  | backstage/TabHelp |
+| GroupOfficeSendFrown | group | no | yes |  | backstage/TabOfficeFeedback |
+| GroupOfficeSendSmile | group | no | yes |  | backstage/TabOfficeFeedback |
+| GroupOfficeSendSuggestion | group | no | yes |  | backstage/TabOfficeFeedback |
+| GroupPens | group | no | yes |  | tab/TabDrawInk/GroupPens |
+| GroupPinnableCloudSaveAsAccessibility | group | no | yes |  | backstage/TabSave |
+| GroupPinnableGettingStartedSaveAsMRUCloudPlacesOrNav | group | no | yes |  | backstage/TabSave |
+| GroupPrepareForSharing | group | no | yes |  | backstage/TabInfo |
+| GroupRecentCloudPlaces | group | no | yes |  | backstage/TabRecent |
+| GroupRecentDocumentsNew | group | no | yes |  | backstage/TabRecent |
+| GroupRecentLocalPlaces | group | no | yes |  | backstage/TabRecent |
+| GroupRecentPinnableCloudPlaces | group | no | yes |  | backstage/TabRecent |
+| GroupRefreshUpdate | group | no | yes |  | tab/TabDVDesign/GroupRefreshUpdate |
+| GroupSecurityInformation | group | no | yes |  | backstage/TabInfo |
+| GroupSendUsingEmail | group | no | yes |  | backstage/TabShare |
+| GroupSharedWithMeDocuments | group | no | yes |  | backstage/TabRecent |
+| GroupSharedWithMeDocumentsNew | group | no | yes |  | backstage/TabRecent |
+| GroupSourceDataDVDiagram | group | no | yes |  | tab/TabDVDesign/GroupSourceDataDVDiagram |
+| GroupUpdateChannel | group | no | yes |  | backstage/TabHelp |
+| GroupVisioExport | group | no | yes |  | tab/TabView/GroupVisioExport |
+| GroupWhatsNewInOfficeProducts | group | no | yes |  | backstage/TabHelp |
+| GroupWrite | group | no | yes |  | tab/TabDrawInk/GroupWrite |
+| Help | button | no | yes |  | tab/HelpTab/GroupHelpAndSupport |
+| HelpTab | tab | no | yes |  | tab/HelpTab |
+| HomePageSlabCreateNew | group | no | yes |  | backstage/PlaceTabHome |
+| HomePlaceRecommendedDocuments | group | no | yes |  | backstage/PlaceTabHome |
+| IconInsertFromFile | button | no | yes |  | tab/TabInsert/GroupInsertIllustrations |
+| ImportFlowAsVisioBPMNDiagram | button | no | yes |  | tab/TabProcess/GroupFlow |
+| InsertM365Picture | button | no | yes |  | tab/TabInsert/GroupInsertIllustrations |
+| Insights | button | no | yes |  | tab/TabReviewWord/GroupInsights |
+| LegacyMode | toggleButton | no | yes |  | tab/TabView/GroupDocumentViewsVisio |
+| LineThickness | gallery | no | yes |  | tab/TabInkToolsPens/GroupInkPens |
+| LoadingCloudServicesGroup | group | no | yes |  | backstage/TabSave |
+| LocalSave | category | no | yes |  | backstage/TabSave |
+| ManagePrivacy | button | no | yes |  | backstage/TabHelp |
+| ModernSaveGroup | group | no | yes |  | backstage/TabSave |
+| OfficeFeedbackHelpTab | button | no | yes |  | tab/HelpTab/GroupHelpAndSupport |
+| OfficeFeedbackIcon | button | no | yes |  | tab/HelpTab/GroupHelpAndSupport |
+| PenAddFavorite | button | no | yes |  | tab/TabDrawInk/GroupPens |
+| PensGallery | gallery | no | yes |  | tab/TabDrawInk/GroupPens |
+| PinnableGroupCloudGettingStartedOpenMRUPlacesOrNavSlab | group | no | yes |  | backstage/TabRecent |
+| PlaceTabHome | tab | no | yes |  | backstage/PlaceTabHome |
+| PrepareVisioDiagramForExportToFlow | button | no | yes |  | tab/TabProcess/GroupFlow |
+| RefreshDiagram | button | no | yes |  | tab/TabDVDesign/GroupRefreshUpdate |
+| SaveCloudServices | category | no | yes |  | backstage/TabSave |
+| ShowTraining | button | no | yes |  | tab/HelpTab/GroupHelpAndSupport |
+| SlabCloudSaveAsAccessibility | group | no | yes |  | backstage/TabSave |
+| SlabCreatePPT | group | no | yes |  | backstage/TabPublish |
+| SlabCreateWord | group | no | yes |  | backstage/TabPublish |
+| SlabLocalSaveAsAccessibility | group | no | yes |  | backstage/TabSave |
+| SlabSaveAsAccessibility | group | no | yes |  | backstage/TabSave |
+| SmartSpace | button | no | yes |  | tab/TabData/GroupDataGraphics |
+| TabDVDesign | tab | no | yes |  | tab/TabDVDesign |
+| TabDrawInk | tab | no | yes |  | tab/TabDrawInk |
+| TabOfficeFeedback | tab | no | yes |  | backstage/TabOfficeFeedback |
+| ToggleVisioFlowPlaceholders | toggleButton | no | yes |  | tab/TabProcess/GroupFlow |
+| UpdateChannel | button | no | yes |  | backstage/TabHelp |
+| VisioToPowerPoint | toggleButton | no | yes |  | tab/TabView/GroupVisioExport |
+| VisioToWord | toggleButton | no | yes |  | tab/TabProcess/GroupVisioExport |
+| WhatsNewRecentUpdates | button | no | yes |  | tab/HelpTab/GroupHelpAndSupport |
+| WritebackVisioDiagramToExcelSource | button | no | yes |  | tab/TabDVDesign/GroupRefreshUpdate |
+
+## Summary
+
+- Total control count in 2016: **594**
+- Total control count in 365: **702**
+- In both: **590**
+- Only in 2016: **4**
+- Only in 365: **112**

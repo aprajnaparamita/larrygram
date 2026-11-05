@@ -900,9 +900,10 @@ fn ensure_run_row(
 
 /// The seed of a new run row (task P7-53): the effective values of the
 /// run it splits, as local literals. The names are the cells the
-/// renderer reads for a run (`run_style` in `crates/render`); a value
-/// the lookup cannot resolve is not seeded and keeps resolving through
-/// the inheritance chain.
+/// renderer reads for a run (`run_style` in `crates/render`); the
+/// lookup resolves every one of them (a missing or unreadable cell
+/// reads as its default, ADR 0059), so the new row keeps the run's
+/// look exactly.
 fn seed_writes(
     doc: &Document,
     shape: ShapeId,
@@ -915,24 +916,42 @@ fn seed_writes(
     };
     let sheet = SheetRef::Shape(shape);
     let mut reader = CellReader::new(doc);
-    let mut out = Vec::new();
-    if let Ok(family) = reader.row_text(sheet, section, row, &CellName::new("Font")) {
-        out.push(("Font", text_write(&family)));
-    }
-    for cell in ["Size", "Style", "ColorTrans"] {
-        if let Ok(value) = reader.row_number(sheet, section, row, &CellName::new(cell)) {
-            out.push((cell, num(value)));
-        }
-    }
-    for cell in ["Strikethru", "DblUnderline", "DoubleStrikethrough"] {
-        if let Ok(value) = reader.row_boolean(sheet, section, row, &CellName::new(cell)) {
-            out.push((cell, bool_write(value)));
-        }
-    }
-    if let Ok(color) = reader.row_color(sheet, section, row, &CellName::new("Color")) {
-        out.push(("Color", color_write(color)));
-    }
-    out
+    let family = reader
+        .row_text(sheet, section, row, &CellName::new("Font"))
+        .unwrap_or_default();
+    let number = |reader: &mut CellReader<'_>, cell: &str| {
+        reader
+            .row_number(sheet, section, row, &CellName::new(cell))
+            .unwrap_or(0.0)
+    };
+    let boolean = |reader: &mut CellReader<'_>, cell: &str| {
+        reader
+            .row_boolean(sheet, section, row, &CellName::new(cell))
+            .unwrap_or(false)
+    };
+    vec![
+        ("Font", text_write(&family)),
+        ("Size", num(number(&mut reader, "Size"))),
+        ("Style", num(number(&mut reader, "Style"))),
+        ("ColorTrans", num(number(&mut reader, "ColorTrans"))),
+        ("Strikethru", bool_write(boolean(&mut reader, "Strikethru"))),
+        (
+            "DblUnderline",
+            bool_write(boolean(&mut reader, "DblUnderline")),
+        ),
+        (
+            "DoubleStrikethrough",
+            bool_write(boolean(&mut reader, "DoubleStrikethrough")),
+        ),
+        (
+            "Color",
+            color_write(
+                reader
+                    .row_color(sheet, section, row, &CellName::new("Color"))
+                    .unwrap_or(larrygram_model::Color::new(0, 0, 0)),
+            ),
+        ),
+    ]
 }
 
 // ---------------------------------------------------------------------------
@@ -2461,6 +2480,53 @@ fn retarget(template: &Template, shape: ShapeId) -> Vec<Op> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn seed_writes_skips_the_cells_it_cannot_read() {
+        use larrygram_model::{Cell, CellValue, Preserved, Row, Section, Shape};
+        let mut document = Document::new();
+        let mut shape = Shape::new(ShapeId { index: 0 }, 1);
+        let mut block = Section::new(SectionName::from_static("Character"));
+        let mut row = Row::new();
+        row.ix = Some(0);
+        for name in ["Size", "Style", "ColorTrans", "Strikethru"] {
+            row.cells.push(Cell {
+                name: CellName::new(name),
+                formula: None,
+                value: Some(CellValue::Str("junk".to_owned())),
+                unit: larrygram_geom::Unit::Inches,
+                preserved: Preserved::new(),
+            });
+        }
+        row.cells.push(Cell {
+            name: CellName::new("Color"),
+            formula: None,
+            value: Some(CellValue::Str("junk".to_owned())),
+            unit: larrygram_geom::Unit::Inches,
+            preserved: Preserved::new(),
+        });
+        block.rows.push(row);
+        shape.sheet.sections.push(block);
+        let shape = document.add_shape(shape);
+        let writes = seed_writes(&document, shape, "Character", Some(0));
+        // The junk cells resolve to their defaults (ADR 0059): the
+        // seed covers every cell and never panics.
+        assert_eq!(writes.len(), 8, "{writes:?}");
+        assert_eq!(writes[0].0, "Font");
+    }
+
+    #[test]
+    fn next_row_ix_counts_the_claimed_ixs() {
+        let mut block = Section::new(SectionName::from_static("Character"));
+        let mut first = Row::new();
+        first.ix = Some(4);
+        let second = Row::new();
+        block.rows.push(first);
+        block.rows.push(second);
+        assert_eq!(next_row_ix(&block), 5);
+        let empty = Section::new(SectionName::from_static("Character"));
+        assert_eq!(next_row_ix(&empty), 0);
+    }
 
     #[test]
     fn ensure_run_rows_rejects_a_stale_shape() {

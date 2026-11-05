@@ -661,3 +661,50 @@ fn the_format_painter_skips_cells_it_cannot_read() {
     let args = Args::new().with("apply", ArgValue::Flag(true));
     run(&mut ctx, "tools.format_painter", args).expect("apply");
 }
+
+/// A scoped "use default" leaves the rows it does not name alone
+/// (task P7-53).
+#[test]
+fn a_scoped_use_default_leaves_the_other_rows_alone() {
+    let (mut ctx, shape) = catalog();
+    // Two runs, both coloured.
+    for ix in [2, 3] {
+        let mut args = Args::new();
+        args.set("runs", run_arg(ix, None));
+        args.set("color", ArgValue::Text("#1F5BC4".to_owned()));
+        run(&mut ctx, "text.font.color", args).expect("colour");
+    }
+    // The default removes the entry from run 2 only.
+    let mut args = Args::new();
+    args.set("runs", run_arg(2, None));
+    run(&mut ctx, "format.text_color.use_default", args).expect("use default");
+    let session = ctx.active_document().expect("session");
+    let entry = session.document.shape(shape).expect("shape");
+    let colour = |ix: i32| {
+        entry
+            .sheet
+            .sections
+            .iter()
+            .find(|s| s.name.as_str() == "Character")
+            .and_then(|block| block.rows.iter().find(|row| row.ix == Some(ix)))
+            .map(|row| row.cells.iter().any(|cell| cell.name.as_str() == "Color"))
+    };
+    assert_eq!(colour(2), Some(false), "run 2 lost its entry");
+    assert_eq!(colour(3), Some(true), "run 3 keeps its entry");
+}
+
+/// The line-end command takes one end at a time and the line dialog's
+/// `rounding` is optional (the arguments' fall-throughs).
+#[test]
+fn the_line_commands_take_their_options_one_at_a_time() {
+    let (mut ctx, _shape) = catalog();
+    let mut args = Args::new();
+    args.set("begin", ArgValue::Number(1.0));
+    run(&mut ctx, "format.set.line.ends", args).expect("begin only");
+    let mut args = Args::new();
+    args.set("end", ArgValue::Number(2.0));
+    run(&mut ctx, "format.set.line.ends", args).expect("end only");
+    let mut args = Args::new();
+    args.set("color", ArgValue::Text("red".to_owned()));
+    run(&mut ctx, "format.line", args).expect("the line dialog without rounding");
+}
