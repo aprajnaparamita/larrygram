@@ -666,6 +666,57 @@ pub(crate) fn edge_midpoints(width: f64, height: f64) -> Vec<(f64, f64)> {
     ]
 }
 
+/// The four connection points of a polygon master on its outline:
+/// from the box centre, the outline's farthest crossing straight down,
+/// right, up and left (bottom, right, top, left, like
+/// [`edge_midpoints`]). For a rectangle these are the edge midpoints;
+/// for a triangle or a parallelogram the side points sit on the
+/// slanted sides, not on the box. Points that coincide (a right
+/// triangle's hypotenuse passes through the centre) are kept once.
+pub(crate) fn outline_midpoints(
+    vertices: &[(f64, f64)],
+    width: f64,
+    height: f64,
+) -> Vec<(f64, f64)> {
+    let (cx, cy) = (width * 0.5, height * 0.5);
+    let mut out: Vec<(f64, f64)> = Vec::with_capacity(4);
+    for (dx, dy) in [(0.0, -1.0), (1.0, 0.0), (0.0, 1.0), (-1.0, 0.0)] {
+        let mut farthest: Option<f64> = None;
+        for (index, &(ax, ay)) in vertices.iter().enumerate() {
+            let Some(&(bx, by)) = vertices.get((index + 1) % vertices.len()) else {
+                continue;
+            };
+            // Solve centre + t * dir = a + u * (b - a), t >= 0, u in 0..=1.
+            let (ex, ey) = (bx - ax, by - ay);
+            let denom = dx * ey - dy * ex;
+            if denom.abs() < 1e-12 {
+                continue;
+            }
+            let (wx, wy) = (ax - cx, ay - cy);
+            let t = (wx * ey - wy * ex) / denom;
+            let u = (wx * dy - wy * dx) / denom;
+            if t >= -1e-12 && (-1e-12..=1.0 + 1e-12).contains(&u) {
+                farthest = Some(farthest.map_or(t, |best: f64| best.max(t)));
+            }
+        }
+        if let Some(t) = farthest {
+            // Clamped to the box: a vertex computed through `cos`/`sin`
+            // can sit an ulp outside it.
+            let point = (
+                (cx + t.max(0.0) * dx).clamp(0.0, width),
+                (cy + t.max(0.0) * dy).clamp(0.0, height),
+            );
+            if !out
+                .iter()
+                .any(|seen| (seen.0 - point.0).abs() < 1e-9 && (seen.1 - point.1).abs() < 1e-9)
+            {
+                out.push(point);
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -716,6 +767,60 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Every connection point of a master whose geometry is all
+    /// straight lines lies on that outline (the user's 2026-11-05
+    /// pass: a connector to a triangle stopped short at its box).
+    #[test]
+    fn polygon_connection_points_lie_on_the_outline() {
+        for stencil in catalog() {
+            for master in &stencil.masters {
+                let mut vertices = Vec::new();
+                let straight = master.geometry.iter().all(|row| match row {
+                    GeometryRow::MoveTo { x, y } | GeometryRow::LineTo { x, y } => {
+                        vertices.push((*x, *y));
+                        true
+                    }
+                    _ => false,
+                });
+                if !straight || master.connector_1d || vertices.len() < 3 {
+                    continue;
+                }
+                for &(px, py) in &master.connection_points {
+                    let on_edge = vertices.windows(2).any(|edge| {
+                        let ((ax, ay), (bx, by)) = (edge[0], edge[1]);
+                        let (ex, ey) = (bx - ax, by - ay);
+                        let length = (ex * ex + ey * ey).sqrt();
+                        let cross = ((px - ax) * ey - (py - ay) * ex).abs() / length;
+                        let along = ((px - ax) * ex + (py - ay) * ey) / (length * length);
+                        cross < 1e-9 && (-1e-9..=1.0 + 1e-9).contains(&along)
+                    });
+                    assert!(
+                        on_edge,
+                        "{}: ({px}, {py}) is off the outline",
+                        master.name_u
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn outline_midpoints_put_a_triangles_sides_on_its_sides() {
+        let points = outline_midpoints(&[(0.0, 0.0), (1.2, 0.0), (0.6, 1.0)], 1.2, 1.0);
+        let close =
+            |a: (f64, f64), b: (f64, f64)| (a.0 - b.0).abs() < 1e-9 && (a.1 - b.1).abs() < 1e-9;
+        assert_eq!(points.len(), 4);
+        assert!(close(points[0], (0.6, 0.0)), "{points:?}");
+        assert!(close(points[1], (0.9, 0.5)), "{points:?}");
+        assert!(close(points[2], (0.6, 1.0)), "{points:?}");
+        assert!(close(points[3], (0.3, 0.5)), "{points:?}");
+        // A right triangle's hypotenuse runs through the centre: three
+        // points.
+        let right = outline_midpoints(&[(0.0, 0.0), (1.2, 0.0), (0.0, 1.0)], 1.2, 1.0);
+        assert_eq!(right.len(), 3, "{right:?}");
+        assert!(outline_midpoints(&[], 1.0, 1.0).is_empty());
     }
 
     #[test]

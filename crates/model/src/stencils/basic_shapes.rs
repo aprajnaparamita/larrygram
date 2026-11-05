@@ -7,7 +7,7 @@
 
 use super::{
     FillDefaults, GeometryRow, LineDefaults, MasterDef, closed_polygon, edge_midpoints,
-    regular_polygon, rounded_rect, star_points,
+    outline_midpoints, regular_polygon, rounded_rect, star_points,
 };
 
 /// A master with our default line (ADR 0023) and two Shape Data rows.
@@ -49,7 +49,7 @@ pub(super) fn masters() -> Vec<MasterDef> {
             1.0,
             closed_polygon(&[(0.0, 0.0), (1.5, 0.0), (1.5, 1.0), (0.0, 1.0)]),
             filled,
-            edge_midpoints(1.5, 1.0),
+            outline_midpoints(&[(0.0, 0.0), (1.5, 0.0), (1.5, 1.0), (0.0, 1.0)], 1.5, 1.0),
         ),
         master(
             "RoundedRectangle",
@@ -80,7 +80,7 @@ pub(super) fn masters() -> Vec<MasterDef> {
             1.0,
             closed_polygon(&[(0.0, 0.0), (1.2, 0.0), (0.6, 1.0)]),
             filled,
-            edge_midpoints(1.2, 1.0),
+            outline_midpoints(&[(0.0, 0.0), (1.2, 0.0), (0.6, 1.0)], 1.2, 1.0),
         ),
         master(
             "RightTriangle",
@@ -89,7 +89,7 @@ pub(super) fn masters() -> Vec<MasterDef> {
             1.0,
             closed_polygon(&[(0.0, 0.0), (1.2, 0.0), (0.0, 1.0)]),
             filled,
-            edge_midpoints(1.2, 1.0),
+            outline_midpoints(&[(0.0, 0.0), (1.2, 0.0), (0.0, 1.0)], 1.2, 1.0),
         ),
         master(
             "Diamond",
@@ -98,7 +98,7 @@ pub(super) fn masters() -> Vec<MasterDef> {
             1.0,
             closed_polygon(&[(0.6, 0.0), (1.2, 0.5), (0.6, 1.0), (0.0, 0.5)]),
             filled,
-            edge_midpoints(1.2, 1.0),
+            outline_midpoints(&[(0.6, 0.0), (1.2, 0.5), (0.6, 1.0), (0.0, 0.5)], 1.2, 1.0),
         ),
         master(
             "Pentagon",
@@ -107,7 +107,11 @@ pub(super) fn masters() -> Vec<MasterDef> {
             1.2,
             closed_polygon(&regular_polygon(5, 1.2, 1.2, std::f64::consts::FRAC_PI_2)),
             filled,
-            edge_midpoints(1.2, 1.2),
+            outline_midpoints(
+                &regular_polygon(5, 1.2, 1.2, std::f64::consts::FRAC_PI_2),
+                1.2,
+                1.2,
+            ),
         ),
         master(
             "Hexagon",
@@ -116,7 +120,7 @@ pub(super) fn masters() -> Vec<MasterDef> {
             1.2,
             closed_polygon(&regular_polygon(6, 1.2, 1.2, 0.0)),
             filled,
-            edge_midpoints(1.2, 1.2),
+            outline_midpoints(&regular_polygon(6, 1.2, 1.2, 0.0), 1.2, 1.2),
         ),
         master(
             "Octagon",
@@ -125,7 +129,11 @@ pub(super) fn masters() -> Vec<MasterDef> {
             1.2,
             closed_polygon(&regular_polygon(8, 1.2, 1.2, std::f64::consts::FRAC_PI_8)),
             filled,
-            edge_midpoints(1.2, 1.2),
+            outline_midpoints(
+                &regular_polygon(8, 1.2, 1.2, std::f64::consts::FRAC_PI_8),
+                1.2,
+                1.2,
+            ),
         ),
         master(
             "Star5",
@@ -140,7 +148,11 @@ pub(super) fn masters() -> Vec<MasterDef> {
                 std::f64::consts::FRAC_PI_2,
             )),
             filled,
-            edge_midpoints(1.2, 1.2),
+            outline_midpoints(
+                &star_points(5, 1.2, 1.2, 0.382, std::f64::consts::FRAC_PI_2),
+                1.2,
+                1.2,
+            ),
         ),
         master(
             "Arc",
@@ -156,7 +168,8 @@ pub(super) fn masters() -> Vec<MasterDef> {
                 },
             ],
             stroked,
-            edge_midpoints(1.2, 0.6),
+            // The arc's two ends and its apex.
+            vec![(0.0, 0.0), (1.2, 0.0), (0.6, 0.6)],
         ),
         master(
             "Line",

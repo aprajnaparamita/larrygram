@@ -13,7 +13,7 @@ use crate::cell::Cell;
 
 use super::{
     FillDefaults, GeometryRow, LineDefaults, MasterDef, closed_polygon, edge_midpoints,
-    formula_cell, number_cell, rounded_rect,
+    formula_cell, number_cell, outline_midpoints, rounded_rect,
 };
 
 /// A master with our default line (ADR 0023) and two Shape Data rows.
@@ -92,7 +92,11 @@ pub(super) fn masters() -> Vec<MasterDef> {
             0.75,
             closed_polygon(&[(0.0, 0.0), (1.5, 0.0), (1.5, 0.75), (0.0, 0.75)]),
             filled,
-            edge_midpoints(1.5, 0.75),
+            outline_midpoints(
+                &[(0.0, 0.0), (1.5, 0.0), (1.5, 0.75), (0.0, 0.75)],
+                1.5,
+                0.75,
+            ),
         ),
         master(
             "AlternateProcess",
@@ -110,7 +114,11 @@ pub(super) fn masters() -> Vec<MasterDef> {
             0.9,
             closed_polygon(&[(0.6, 0.0), (1.2, 0.45), (0.6, 0.9), (0.0, 0.45)]),
             filled,
-            edge_midpoints(1.2, 0.9),
+            outline_midpoints(
+                &[(0.6, 0.0), (1.2, 0.45), (0.6, 0.9), (0.0, 0.45)],
+                1.2,
+                0.9,
+            ),
         ),
         master(
             "Terminator",
@@ -128,7 +136,11 @@ pub(super) fn masters() -> Vec<MasterDef> {
             0.75,
             closed_polygon(&[(0.3, 0.0), (1.5, 0.0), (1.2, 0.75), (0.0, 0.75)]),
             filled,
-            edge_midpoints(1.5, 0.75),
+            outline_midpoints(
+                &[(0.3, 0.0), (1.5, 0.0), (1.2, 0.75), (0.0, 0.75)],
+                1.5,
+                0.75,
+            ),
         ),
         master(
             "Document",
@@ -152,7 +164,8 @@ pub(super) fn masters() -> Vec<MasterDef> {
                 GeometryRow::LineTo { x: 0.0, y: 0.2 },
             ],
             filled,
-            edge_midpoints(1.5, 0.8),
+            // The bottom point sits where the two wave arcs meet.
+            vec![(0.75, 0.2), (1.5, 0.4), (0.75, 0.8), (0.0, 0.4)],
         ),
         master(
             "ManualOperation",
@@ -161,7 +174,11 @@ pub(super) fn masters() -> Vec<MasterDef> {
             0.75,
             closed_polygon(&[(0.3, 0.0), (1.2, 0.0), (1.5, 0.75), (0.0, 0.75)]),
             filled,
-            edge_midpoints(1.5, 0.75),
+            outline_midpoints(
+                &[(0.3, 0.0), (1.2, 0.0), (1.5, 0.75), (0.0, 0.75)],
+                1.5,
+                0.75,
+            ),
         ),
         master(
             "Preparation",
@@ -177,7 +194,18 @@ pub(super) fn masters() -> Vec<MasterDef> {
                 (0.0, 0.375),
             ]),
             filled,
-            edge_midpoints(1.5, 0.75),
+            outline_midpoints(
+                &[
+                    (0.3, 0.0),
+                    (1.2, 0.0),
+                    (1.5, 0.375),
+                    (1.2, 0.75),
+                    (0.3, 0.75),
+                    (0.0, 0.375),
+                ],
+                1.5,
+                0.75,
+            ),
         ),
         {
             // The 1-D connector (ADR 0084 rule 1): endpoint cells and
