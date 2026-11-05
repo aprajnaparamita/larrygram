@@ -19,7 +19,11 @@ fn registry() -> larrygram_commands::Registry {
 }
 
 /// One command with args.
-fn run(ctx: &mut AppCtx, id: &str, args: Args) -> Result<Outcome, larrygram_commands::CommandError> {
+fn run(
+    ctx: &mut AppCtx,
+    id: &str,
+    args: Args,
+) -> Result<Outcome, larrygram_commands::CommandError> {
     dispatch(ctx, &registry(), id, args)
 }
 
@@ -153,10 +157,7 @@ fn a_format_writes_a_local_row_and_never_the_master() {
         Some(1.0),
         "the write lands on the instance's own Character row"
     );
-    assert!(
-        master_style(&ctx).is_none(),
-        "the master is never edited"
-    );
+    assert!(master_style(&ctx).is_none(), "the master is never edited");
 }
 
 /// A format changes the drawn text: the scene shows the bold face and
@@ -194,10 +195,18 @@ fn a_formatted_shape_keeps_its_format_through_save_and_reopen() {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("the temp dir");
     let path = dir.join("formatted.vsdx");
-    run(&mut ctx, "file.save_as", Args::new().with("path", ArgValue::Path(path.clone())))
-        .expect("save as");
-    run(&mut ctx, "file.open", Args::new().with("path", ArgValue::Path(path.clone())))
-        .expect("open");
+    run(
+        &mut ctx,
+        "file.save_as",
+        Args::new().with("path", ArgValue::Path(path.clone())),
+    )
+    .expect("save as");
+    run(
+        &mut ctx,
+        "file.open",
+        Args::new().with("path", ArgValue::Path(path.clone())),
+    )
+    .expect("open");
 
     // The reopened shape keeps its text and its rows, and the drawn
     // text keeps the format.
@@ -235,7 +244,10 @@ fn a_formatted_shape_keeps_its_format_through_save_and_reopen() {
         "the bold bit round-trips"
     );
     let size = row_number(&ctx, reopened, "Character", "Size", 0).expect("the Size cell");
-    assert!((size - 24.0 / 72.0).abs() < 1.0e-9, "the size round-trips ({size})");
+    assert!(
+        (size - 24.0 / 72.0).abs() < 1.0e-9,
+        "the size round-trips ({size})"
+    );
     assert_eq!(
         row_number(&ctx, reopened, "Paragraph", "HorzAlign", 0),
         Some(0.0),

@@ -60,14 +60,8 @@ fn catalog_rig(kind: LayoutKind) -> (ShellRig, ShapeId) {
         "master",
         larrygram_commands::ArgValue::Text("Rectangle".to_owned()),
     );
-    args.set(
-        "x",
-        larrygram_commands::ArgValue::Number(SHAPE.0),
-    );
-    args.set(
-        "y",
-        larrygram_commands::ArgValue::Number(SHAPE.1),
-    );
+    args.set("x", larrygram_commands::ArgValue::Number(SHAPE.0));
+    args.set("y", larrygram_commands::ArgValue::Number(SHAPE.1));
     dispatch(&mut app, "insert.shape", args);
     let shape = {
         let session = app.active_document().expect("session");
@@ -174,11 +168,123 @@ fn press_key(rig: &mut ShellRig, key: egui::Key) {
     rig.run();
 }
 
+/// Presses one key with modifiers (the range-selection keys).
+fn press_key_with(rig: &mut ShellRig, key: egui::Key, modifiers: egui::Modifiers) {
+    rig.harness().event(egui::Event::Key {
+        key,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers,
+    });
+    rig.run();
+    rig.harness().event(egui::Event::Key {
+        key,
+        physical_key: None,
+        pressed: false,
+        repeat: false,
+        modifiers,
+    });
+    rig.run();
+}
+
+/// Whether every glyph of `shape`'s drawn text is bold: one flag per
+/// glyph, in text order (the picture's runs, task P7-53).
+fn drawn_bold(rig: &ShellRig, shape: ShapeId) -> Vec<bool> {
+    let shell = rig.shell.borrow();
+    let session = shell.app.active_document().expect("session");
+    let page = session.active_page.expect("page");
+    let scene = larrygram_render::build_scene(
+        &session.document,
+        page,
+        &larrygram_render::BuildOptions::default(),
+    )
+    .expect("scene");
+    let mut stack: Vec<&larrygram_render::scene::Node> = scene.nodes.iter().collect();
+    while let Some(node) = stack.pop() {
+        match node {
+            larrygram_render::scene::Node::Shape(body) => {
+                if body.shape_id == Some(shape)
+                    && let Some(text) = body.text.as_ref()
+                {
+                    return text
+                        .layout
+                        .lines
+                        .iter()
+                        .flat_map(|line| line.glyphs.iter())
+                        .map(|glyph| text.fonts[glyph.font].bold())
+                        .collect();
+                }
+            }
+            larrygram_render::scene::Node::Group(group) => {
+                stack.extend(group.children.iter());
+            }
+            _ => {}
+        }
+    }
+    panic!("no text node");
+}
+
+/// The `Character` rows of `shape` as `(IX, Style)` pairs, in row
+/// order.
+fn character_rows(rig: &ShellRig, shape: ShapeId) -> Vec<(Option<i32>, Option<f64>)> {
+    let shell = rig.shell.borrow();
+    let session = shell.app.active_document().expect("session");
+    let shape = session.document.shape(shape).expect("shape");
+    shape
+        .sheet
+        .sections
+        .iter()
+        .find(|s| s.name.as_str() == "Character")
+        .map(|block| {
+            block
+                .rows
+                .iter()
+                .map(|row| {
+                    let style = row
+                        .cells
+                        .iter()
+                        .find(|cell| cell.name.as_str() == "Style")
+                        .and_then(|cell| match cell.value {
+                            Some(CellValue::Number(value)) => Some(value),
+                            _ => None,
+                        });
+                    (row.ix, style)
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The `Character` run markers of `shape`'s text, in order.
+fn run_markers(rig: &ShellRig, shape: ShapeId) -> Vec<u32> {
+    let shell = rig.shell.borrow();
+    let session = shell.app.active_document().expect("session");
+    session
+        .document
+        .shape(shape)
+        .expect("shape")
+        .text
+        .clone()
+        .map(|text| {
+            text.parts
+                .iter()
+                .filter_map(|part| match part {
+                    larrygram_model::TextPart::CharRun { ix } => Some(*ix),
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// Whether the current frame draws a widget named `name`.
 fn has(rig: &mut ShellRig, role: Role, name: &str) -> bool {
     rig.run();
     let root = rig.harness().root();
-    root.query_all_by_role_and_label(role, name).next().is_some()
+    root.query_all_by_role_and_label(role, name)
+        .next()
+        .is_some()
 }
 
 /// Types `text` into the in-place editor's field.
@@ -197,15 +303,21 @@ fn type_into_editor(rig: &mut ShellRig, text: &str) {
 fn shape_text(rig: &ShellRig, shape: ShapeId) -> Option<String> {
     let shell = rig.shell.borrow();
     let session = shell.app.active_document().expect("session");
-    session.document.shape(shape).expect("shape").text.clone().map(|text| {
-        text.parts
-            .iter()
-            .filter_map(|part| match part {
-                larrygram_model::TextPart::Text(part) => Some(part.as_str()),
-                _ => None,
-            })
-            .collect()
-    })
+    session
+        .document
+        .shape(shape)
+        .expect("shape")
+        .text
+        .clone()
+        .map(|text| {
+            text.parts
+                .iter()
+                .filter_map(|part| match part {
+                    larrygram_model::TextPart::Text(part) => Some(part.as_str()),
+                    _ => None,
+                })
+                .collect()
+        })
 }
 
 /// The number of one `section` row cell of `shape` (row 0).
@@ -437,7 +549,10 @@ fn a_font_size_changes_the_whole_text() {
         |rig, kind| pick_size(rig, kind, "36 pt"),
         |rig, shape| {
             let size = row_number(rig, shape, "Character", "Size").expect("the Size cell");
-            assert!((size - 0.5).abs() < 1.0e-9, "36 pt records as 0.5 in ({size})");
+            assert!(
+                (size - 0.5).abs() < 1.0e-9,
+                "36 pt records as 0.5 in ({size})"
+            );
         },
     );
 }
@@ -445,17 +560,13 @@ fn a_font_size_changes_the_whole_text() {
 /// A text colour changes the whole text (the accent swatch).
 #[test]
 fn a_text_colour_changes_the_whole_text() {
-    one_format_changes_the_whole_text(
-        "text colour",
-        pick_colour,
-        |rig, shape| {
-            assert_eq!(
-                row_color(rig, shape, "Character", "Color"),
-                Some((0x1F, 0x5B, 0xC4)),
-                "the swatch records the run colour"
-            );
-        },
-    );
+    one_format_changes_the_whole_text("text colour", pick_colour, |rig, shape| {
+        assert_eq!(
+            row_color(rig, shape, "Character", "Color"),
+            Some((0x1F, 0x5B, 0xC4)),
+            "the swatch records the run colour"
+        );
+    });
 }
 
 /// Align Left changes the whole text (the catalog master draws its
@@ -469,4 +580,138 @@ fn align_left_changes_the_whole_text() {
             assert_eq!(row_number(rig, shape, "Paragraph", "HorzAlign"), Some(0.0));
         },
     );
+}
+
+// ---------------------------------------------------------------------------
+// Item 2: text being edited.
+// ---------------------------------------------------------------------------
+
+/// With no text selected a format applies to the whole text (the
+/// simple rule for the alpha, task P7-53 item 2): a bare caret in the
+/// editor, one format click, and every glyph draws at it after the
+/// commit.
+#[test]
+fn a_format_at_a_bare_caret_applies_to_the_whole_text() {
+    for kind in LAYOUTS {
+        let (mut rig, shape) = catalog_rig(kind);
+        let pos = screen(&rig, SHAPE.0, SHAPE.1);
+        double_click_at(&mut rig, pos);
+        assert!(
+            has(&mut rig, Role::MultilineTextInput, "Text"),
+            "{kind:?}: the double click opens the editor"
+        );
+        // The caret is a bare caret (no selection) at the end.
+        let plain = rig.render();
+        click(&mut rig, Role::Button, "Bold");
+        press_key(&mut rig, egui::Key::Escape);
+        assert!(
+            drawn_bold(&rig, shape).iter().all(|bold| *bold),
+            "{kind:?}: every glyph is bold after the commit"
+        );
+        let after = rig.render();
+        let differ = text_differ(&rig, &plain, &after);
+        assert!(
+            differ > 0,
+            "{kind:?}: the bold picture differs from the plain text ({differ} px)"
+        );
+    }
+}
+
+/// With a range selected the format applies to that range only, and
+/// the commit keeps it (task P7-53 item 2): the range's glyphs draw at
+/// the format, the rest stays plain, and the written text carries one
+/// run marker per run.
+#[test]
+fn a_format_with_a_range_selected_applies_to_the_range_only() {
+    for kind in LAYOUTS {
+        let (mut rig, shape) = catalog_rig(kind);
+        let pos = screen(&rig, SHAPE.0, SHAPE.1);
+        double_click_at(&mut rig, pos);
+        assert!(
+            has(&mut rig, Role::MultilineTextInput, "Text"),
+            "{kind:?}: the double click opens the editor"
+        );
+        // Select the last two characters ("MMMM" with the caret at the
+        // end): Shift+Left twice.
+        let shift = egui::Modifiers {
+            shift: true,
+            ..egui::Modifiers::NONE
+        };
+        press_key_with(&mut rig, egui::Key::ArrowLeft, shift);
+        press_key_with(&mut rig, egui::Key::ArrowLeft, shift);
+        let plain = rig.render();
+        click(&mut rig, Role::Button, "Bold");
+        press_key(&mut rig, egui::Key::Escape);
+
+        // The drawn text: the range's glyphs bold, the rest plain.
+        let bold = drawn_bold(&rig, shape);
+        assert_eq!(
+            bold,
+            vec![false, false, true, true],
+            "{kind:?}: only the selected range is bold ({bold:?})"
+        );
+        let after = rig.render();
+        let differ = text_differ(&rig, &plain, &after);
+        assert!(
+            differ > 0,
+            "{kind:?}: the bold range differs in the picture ({differ} px)"
+        );
+
+        // The commit keeps it: one run marker per run and one local
+        // row per run (the bold run's row carries the Style bit).
+        let markers = run_markers(&rig, shape);
+        assert_eq!(
+            markers.len(),
+            2,
+            "{kind:?}: the commit keeps the run markers ({markers:?})"
+        );
+        let rows = character_rows(&rig, shape);
+        assert_eq!(rows.len(), 2, "{kind:?}: one row per run ({rows:?})");
+        let styles: Vec<Option<f64>> = rows.iter().map(|(_, style)| *style).collect();
+        assert!(
+            styles.contains(&Some(1.0)),
+            "{kind:?}: the range's row is bold ({styles:?})"
+        );
+        assert!(
+            styles.contains(&Some(0.0)),
+            "{kind:?}: the rest's row stays plain ({styles:?})"
+        );
+
+        // One undo step for the format click.
+        assert!(
+            undo_labels(&rig).iter().any(|label| label == "Bold"),
+            "{kind:?}: the format is one undo step"
+        );
+    }
+}
+
+/// A range format survives a later edit of the same text (task P7-53
+/// item 2: "the commit keeps it"): typing beside the range and
+/// committing again keeps both runs.
+#[test]
+fn a_range_format_survives_a_later_edit() {
+    for kind in LAYOUTS {
+        let (mut rig, shape) = catalog_rig(kind);
+        let pos = screen(&rig, SHAPE.0, SHAPE.1);
+        double_click_at(&mut rig, pos);
+        let shift = egui::Modifiers {
+            shift: true,
+            ..egui::Modifiers::NONE
+        };
+        press_key_with(&mut rig, egui::Key::ArrowLeft, shift);
+        press_key_with(&mut rig, egui::Key::ArrowLeft, shift);
+        click(&mut rig, Role::Button, "Bold");
+        press_key(&mut rig, egui::Key::Escape);
+
+        // Edit again: append "!" and commit.
+        double_click_at(&mut rig, pos);
+        type_into_editor(&mut rig, "!");
+        press_key(&mut rig, egui::Key::Escape);
+        let bold = drawn_bold(&rig, shape);
+        assert_eq!(
+            bold,
+            vec![false, false, true, true, true],
+            "{kind:?}: the typed text joins the run at the caret ({bold:?})"
+        );
+    }
 }

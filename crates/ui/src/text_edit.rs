@@ -24,6 +24,32 @@ use larrygram_render::{Scene, node_bounds};
 
 use crate::UiError;
 
+/// One run of the edited text (task P7-53): the buffer range and the
+/// `Character` row `IX` that formats it. `None` names the run at row
+/// position 0 — a text written without run markers reads it there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RunSpan {
+    /// The run's first character of the buffer.
+    start: usize,
+    /// One past the run's last character.
+    end: usize,
+    /// The `IX` of the `Character` row that formats the run.
+    ix: Option<i32>,
+}
+
+/// The run rows one range format writes (task P7-53): the plan the
+/// format command's `runs` and `runs_keep` arguments spell, each entry
+/// a `(target IX, seed IX)` pair (`None` seeds from the run at row
+/// position 0).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RunPlan {
+    /// The rows the write lands on.
+    pub write: Vec<(i32, Option<i32>)>,
+    /// The rows the split run's other parts use (created and seeded,
+    /// never written).
+    pub keep: Vec<(i32, Option<i32>)>,
+}
+
 /// The first-row markers a buffer keeps when it is written back ADR 0044.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct RunMarkers {
@@ -53,6 +79,18 @@ pub struct TextEditor {
     original: String,
     /// The run marker kinds of the original text (collapse rule).
     markers: RunMarkers,
+    /// The run structure of the original text (task P7-53): a range
+    /// format changes it, and the commit writes the text even when the
+    /// buffer itself is unchanged.
+    original_runs: Vec<Option<i32>>,
+    /// The runs of the edited text over `synced` (task P7-53).
+    spans: Vec<RunSpan>,
+    /// The buffer the spans map over; typing remaps them (task P7-53).
+    synced: String,
+    /// The field's selected character range of this frame (task P7-53):
+    /// `None` when the caret is a bare caret (a format applies to the
+    /// whole text then).
+    selection: Option<(usize, usize)>,
     /// Whether the text field still needs focus on its first frame.
     focus_requested: bool,
     /// Whether the field re-requests the keyboard focus on its next
@@ -112,6 +150,10 @@ impl TextEditor {
                 .iter()
                 .any(|part| matches!(part, TextPart::TabsRun { .. })),
         };
+        self.spans = spans_of(text);
+        self.original_runs = self.spans.iter().map(|span| span.ix).collect();
+        self.synced = self.buffer.clone();
+        self.selection = None;
         self.focus_requested = true;
         Ok(())
     }
@@ -133,7 +175,9 @@ impl TextEditor {
     }
 
     /// Finishes the edit and returns the text to write (one run, ADR
-    /// 0044), or `None` when the buffer is unchanged.
+    /// 0044, or the run structure the range formats built — task
+    /// P7-53: the commit keeps it), or `None` when the buffer is
+    /// unchanged.
     ///
     /// The editor always returns to idle, including on the unchanged and
     /// empty-buffer cases.
@@ -143,15 +187,250 @@ impl TextEditor {
                 "no text edit is active",
             )));
         }
-        let changed = self.buffer != self.original;
-        let text = one_run(&self.buffer, self.markers);
+        self.sync_spans();
+        let runs: Vec<Option<i32>> = self.spans.iter().map(|span| span.ix).collect();
+        let changed = self.buffer != self.original || runs != self.original_runs;
+        let text = self.run_text();
         *self = Self::new();
         if changed { Ok(Some(text)) } else { Ok(None) }
+    }
+
+    /// The buffer's run structure (task P7-53): one unmarked run keeps
+    /// the one-run rule (ADR 0044), a structured text carries a
+    /// `Character` run marker per formatted run. The paragraph and tabs
+    /// markers do not appear here: the structured write re-adds the
+    /// first-row ones (`shape.set.text`).
+    fn run_text(&self) -> TextContent {
+        if self.spans.len() <= 1 && self.spans.first().is_none_or(|span| span.ix.is_none()) {
+            return one_run(&self.buffer, self.markers);
+        }
+        let chars: Vec<char> = self.buffer.chars().collect();
+        let mut parts = Vec::new();
+        let mut last_ix: Option<Option<i32>> = None;
+        for span in &self.spans {
+            if span.start >= span.end || span.end > chars.len() {
+                continue;
+            }
+            let literal: String = chars[span.start..span.end].iter().collect();
+            // Adjacent runs of the same row are one run.
+            match parts.last_mut() {
+                Some(TextPart::Text(previous)) if last_ix == Some(span.ix) => {
+                    previous.push_str(&literal);
+                    continue;
+                }
+                _ => {}
+            }
+            if let Some(ix) = span.ix {
+                parts.push(TextPart::CharRun {
+                    ix: u32::try_from(ix).unwrap_or(0),
+                });
+            }
+            last_ix = Some(span.ix);
+            parts.push(TextPart::Text(literal));
+        }
+        if parts.is_empty() {
+            return TextContent::new();
+        }
+        TextContent { parts }
+    }
+
+    /// Remaps the runs over the buffer as typed (task P7-53): the edit
+    /// region joins the run at its start, the runs beyond it shift.
+    fn sync_spans(&mut self) {
+        if self.synced == self.buffer {
+            return;
+        }
+        let old: Vec<char> = self.synced.chars().collect();
+        let new: Vec<char> = self.buffer.chars().collect();
+        let mut prefix = 0;
+        while prefix < old.len() && prefix < new.len() && old[prefix] == new[prefix] {
+            prefix += 1;
+        }
+        let mut suffix = 0;
+        while prefix + suffix < old.len()
+            && prefix + suffix < new.len()
+            && old[old.len() - 1 - suffix] == new[new.len() - 1 - suffix]
+        {
+            suffix += 1;
+        }
+        // The edit replaced the old middle `prefix..old.len() - suffix`
+        // with the new middle `prefix..new.len() - suffix`.
+        let old_tail = old.len() - suffix;
+        let new_tail = new.len() - suffix;
+        let delta = new.len() as isize - old.len() as isize;
+        let shift = |at: usize| ((at as isize).saturating_add(delta).max(0)) as usize;
+        // The run the typed text joins: the run at the edit's start.
+        let joined = self
+            .spans
+            .iter()
+            .find(|span| span.start <= prefix && prefix < span.end)
+            .or_else(|| self.spans.iter().rev().find(|span| span.start <= prefix))
+            .map(|span| span.ix)
+            .unwrap_or(None);
+        let mut out: Vec<RunSpan> = Vec::new();
+        for span in &self.spans {
+            let before = span.end.min(prefix);
+            if span.start < before {
+                out.push(RunSpan {
+                    start: span.start,
+                    end: before,
+                    ix: span.ix,
+                });
+            }
+            let after = span.start.max(old_tail);
+            if after < span.end {
+                out.push(RunSpan {
+                    start: shift(after),
+                    end: shift(span.end),
+                    ix: span.ix,
+                });
+            }
+        }
+        if prefix < new_tail {
+            out.push(RunSpan {
+                start: prefix,
+                end: new_tail,
+                ix: joined,
+            });
+        }
+        out.sort_by_key(|span| span.start);
+        self.spans = out;
+        self.synced = self.buffer.clone();
+    }
+
+    /// Splits the runs at the selected range (task P7-53): the range's
+    /// parts get their own `Character` rows (the format writes them),
+    /// the parts outside it keep their runs (the rows a split run's
+    /// other parts use come back in [`RunPlan::keep`]). `None` when
+    /// the range is empty — a format applies to the whole text then.
+    pub fn split_for_range(
+        &mut self,
+        document: &larrygram_model::Document,
+        shape: ShapeId,
+        range: (usize, usize),
+    ) -> Option<RunPlan> {
+        self.sync_spans();
+        let length = self.buffer.chars().count();
+        let start = range.0.min(range.1).min(length);
+        let end = range.0.max(range.1).min(length);
+        if start >= end {
+            return None;
+        }
+        // The pieces every run breaks into, the range's covered or not.
+        #[derive(Clone, Copy)]
+        struct Piece {
+            start: usize,
+            end: usize,
+            ix: Option<i32>,
+            covered: bool,
+        }
+        let mut pieces: Vec<Piece> = Vec::new();
+        for span in &self.spans {
+            if span.end <= start || span.start >= end {
+                pieces.push(Piece {
+                    start: span.start,
+                    end: span.end,
+                    ix: span.ix,
+                    covered: false,
+                });
+                continue;
+            }
+            if span.start < start {
+                pieces.push(Piece {
+                    start: span.start,
+                    end: start,
+                    ix: span.ix,
+                    covered: false,
+                });
+            }
+            pieces.push(Piece {
+                start: span.start.max(start),
+                end: span.end.min(end),
+                ix: span.ix,
+                covered: true,
+            });
+            if span.end > end {
+                pieces.push(Piece {
+                    start: end,
+                    end: span.end,
+                    ix: span.ix,
+                    covered: false,
+                });
+            }
+        }
+        let used_outside = |ix: Option<i32>| {
+            ix.is_some() && pieces.iter().any(|piece| !piece.covered && piece.ix == ix)
+        };
+        let mut plan = RunPlan::default();
+        let mut next = fresh_ix(document, shape, &self.spans);
+        let mut base: Option<i32> = None;
+        let mut spans: Vec<RunSpan> = Vec::new();
+        for piece in pieces.iter().copied() {
+            if !piece.covered {
+                match piece.ix {
+                    // An unmarked run keeps reading row position 0 up
+                    // front; behind another run's marker it needs its
+                    // own row (the same values, seeded).
+                    None => {
+                        let base = *base.get_or_insert_with(|| {
+                            let ix = next;
+                            next = next.saturating_add(1).max(0);
+                            ix
+                        });
+                        if !plan.keep.iter().any(|(target, _)| *target == base) {
+                            plan.keep.push((base, None));
+                        }
+                        spans.push(RunSpan {
+                            start: piece.start,
+                            end: piece.end,
+                            ix: Some(base),
+                        });
+                    }
+                    Some(ix) => spans.push(RunSpan {
+                        start: piece.start,
+                        end: piece.end,
+                        ix: Some(ix),
+                    }),
+                }
+            } else if piece.ix.is_some() && !used_outside(piece.ix) {
+                // The row is the range's alone: the write lands on it.
+                let ix = piece.ix.unwrap_or(0);
+                if !plan.write.iter().any(|(target, _)| *target == ix) {
+                    plan.write.push((ix, None));
+                }
+                spans.push(RunSpan {
+                    start: piece.start,
+                    end: piece.end,
+                    ix: Some(ix),
+                });
+            } else {
+                // A shared row (or an unmarked run): the range's part
+                // gets its own row, seeded from the run it splits.
+                let fresh = next;
+                next = next.saturating_add(1).max(0);
+                plan.write.push((fresh, piece.ix));
+                spans.push(RunSpan {
+                    start: piece.start,
+                    end: piece.end,
+                    ix: Some(fresh),
+                });
+            }
+        }
+        spans.sort_by_key(|span| span.start);
+        self.spans = spans;
+        Some(plan)
     }
 
     /// Abandons the edit without writing anything.
     pub fn cancel(&mut self) {
         *self = Self::new();
+    }
+
+    /// The field's selected character range of the last frame (task
+    /// P7-53): `None` at a bare caret, where a format applies to the
+    /// whole text.
+    pub fn selected_range(&self) -> Option<(usize, usize)> {
+        self.selection
     }
 
     /// Re-requests the keyboard focus with the caret where it is (task
@@ -309,6 +588,31 @@ impl TextEditor {
                     edit = edit.font(font);
                 }
                 let mut output = edit.hint_text("Text").show(ui);
+                // The frame's selected range (task P7-53): a format
+                // applies to it, or to the whole text at a bare caret.
+                let range = output.state.cursor.char_range().and_then(|range| {
+                    let start = range.primary.index.0.min(range.secondary.index.0);
+                    let end = range.primary.index.0.max(range.secondary.index.0);
+                    (start < end).then_some((start, end))
+                });
+                if let Some(range) = range {
+                    self.selection = Some(range);
+                } else if output.response.has_focus() {
+                    // The field's own bare caret: the range is gone.
+                    self.selection = None;
+                } else if let Some((start, end)) = self.selection {
+                    // egui collapses a selection to its primary caret
+                    // on the frames the field loses the keyboard (a
+                    // format control click keeps the edit but takes
+                    // the keys back, task P7-41): the range sticks
+                    // here and the field re-shows it (task P7-53).
+                    output.state.cursor.set_char_range(Some(CCursorRange {
+                        primary: CCursor::new(end),
+                        secondary: CCursor::new(start),
+                        h_pos: None,
+                    }));
+                    output.state.clone().store(ui.ctx(), output.response.id);
+                }
                 // The editor's accessible name (task P7-24: the tests
                 // and screen readers find the field by it).
                 output.response.response = output.response.response.clone().accessible_name("Text");
@@ -593,6 +897,64 @@ fn plain_text(text: &TextContent) -> String {
         }
     }
     buffer
+}
+
+/// The runs of a text (task P7-53): the literal parts over their
+/// buffer ranges, each carrying the `Character` run marker that names
+/// its row (`None` before the first marker).
+fn spans_of(text: &TextContent) -> Vec<RunSpan> {
+    let mut spans: Vec<RunSpan> = Vec::new();
+    let mut offset = 0;
+    let mut ix: Option<i32> = None;
+    for part in &text.parts {
+        match part {
+            TextPart::Text(literal) => {
+                let end = offset + literal.chars().count();
+                match spans.last_mut() {
+                    Some(last) if last.ix == ix && last.end == offset => last.end = end,
+                    _ => spans.push(RunSpan {
+                        start: offset,
+                        end,
+                        ix,
+                    }),
+                }
+                offset = end;
+            }
+            TextPart::CharRun { ix: row } => ix = Some(i32::try_from(*row).unwrap_or(0)),
+            _ => {}
+        }
+    }
+    if spans.is_empty() {
+        spans.push(RunSpan {
+            start: 0,
+            end: 0,
+            ix: None,
+        });
+    }
+    spans
+}
+
+/// The `IX` a new run row takes (task P7-53): one past every `IX` the
+/// shape's `Character` rows and the editor's runs already claim.
+fn fresh_ix(document: &larrygram_model::Document, shape: ShapeId, spans: &[RunSpan]) -> i32 {
+    let mut largest = -1;
+    if let Some(entry) = document.shape(shape) {
+        for block in &entry.sheet.sections {
+            if block.name.as_str() == "Character" {
+                for row in &block.rows {
+                    if let Some(ix) = row.ix {
+                        largest = largest.max(ix);
+                    }
+                }
+            }
+        }
+    }
+    for span in spans {
+        if let Some(ix) = span.ix {
+            largest = largest.max(ix);
+        }
+    }
+    largest.saturating_add(1).max(0)
 }
 
 /// The one-run content ADR 0044 writes: the first-row markers the
@@ -996,12 +1358,14 @@ mod tests {
         assert_eq!(editor.buffer, "abc");
         editor.buffer.push('!');
         let written = editor.finish().expect("finish").expect("changed");
+        // Task P7-53: the commit keeps the run structure (the run's
+        // `Character` row), it no longer collapses to the first row's
+        // markers. The paragraph and tabs first-row markers return in
+        // the structured write (`shape.set.text`).
         assert_eq!(
             written.parts,
             vec![
-                TextPart::CharRun { ix: 0 },
-                TextPart::ParaRun { ix: 0 },
-                TextPart::TabsRun { ix: 0 },
+                TextPart::CharRun { ix: 3 },
                 TextPart::Text("abc!".to_owned()),
             ]
         );
