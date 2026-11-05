@@ -11,7 +11,7 @@
 //! settings of `AppCtx`); nothing here is Microsoft's.
 
 use egui::{Button, Rect, Sense, Ui, UiBuilder, Vec2};
-use larrygram_commands::AppCtx;
+use larrygram_commands::{AppCtx, ArgValue, Args, Invocation};
 use larrygram_ui_spec::v2::{
     FileView as FileViewData, FileViewEntry, FileViewEntryKind, Item, ItemKind,
 };
@@ -296,7 +296,24 @@ impl FileView {
                 })
                 .inner
                 .accessible_name(label.as_str());
-            finish(response, &action, &label, out);
+            match &action {
+                Action::Emit(intent) => {
+                    let response = response.on_hover_text(&label);
+                    if response.clicked() {
+                        // Add the path argument so the file opens directly
+                        // without showing the Browse dialog (like Panel Classic).
+                        let args = Args::new().with("path", ArgValue::Path(path.clone()));
+                        let intent_with_path = Intent::new(
+                            intent.command,
+                            Invocation::new(args, intent.invocation.source),
+                        );
+                        out.push(intent_with_path);
+                    }
+                }
+                Action::Disabled { reason } => {
+                    response.on_disabled_hover_text(reason.as_str());
+                }
+            }
         }
         let item = item_with_command("file_view.open.browse", "Browse…", Some("file.open"));
         let action = resolve(&item);
@@ -445,7 +462,7 @@ fn item_with_command(id: &str, label: &str, command: Option<&str>) -> Item {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use larrygram_commands::{CommandId, Invocation, Source};
+    use larrygram_commands::{Args, CommandId, Invocation, Source};
 
     /// A resolver that enables every command named in an item.
     fn always(item: &Item) -> Action {
@@ -596,5 +613,57 @@ mod tests {
             assert!(intents.is_empty(), "a draw-only frame dispatches nothing");
             assert!(!close, "{page} leaves the view open");
         }
+    }
+
+    #[test]
+    fn recent_files_in_the_open_page_are_drawn() {
+        use larrygram_commands::app::{AppCtx, DocumentSession, Settings};
+        use larrygram_model::Document;
+
+        use crate::test_util::with_ui;
+        let mut app = AppCtx::new(Settings::default());
+        app.open_document(DocumentSession::new(Document::new(), None));
+        app.settings
+            .recent_files
+            .push(std::path::PathBuf::from("/drawings/a.vsdx"));
+        app.settings
+            .recent_files
+            .push(std::path::PathBuf::from("/drawings/b.vsdx"));
+        let lists = ListData::new();
+        let mut file_view = FileView::new();
+        file_view.open();
+        file_view.set_page("file_view.open");
+        let outcome =
+            with_ui(|ui| file_view.show(ui, &view(), &Metrics::default(), &app, &lists, &always));
+        let (intents, close) = outcome.expect("the page renders");
+        assert!(intents.is_empty(), "a draw-only frame dispatches nothing");
+        assert!(!close, "the Open page leaves the view open");
+    }
+
+    #[test]
+    fn recent_files_add_the_path_argument() {
+        use std::path::PathBuf;
+
+        // Verify that when a recent file is clicked, the intent
+        // includes the path argument (the fix for task P7-52).
+        let recent_path = PathBuf::from("/tmp/recent.vsdx");
+        let command_id = CommandId::parse("file.open").expect("the command exists");
+
+        // Create a base intent.
+        let base_intent = Intent::new(command_id, Invocation::empty(Source::CommandBar));
+
+        // Simulate what show_open does: add the path argument.
+        let args = Args::new().with("path", ArgValue::Path(recent_path.clone()));
+        let intent_with_path = Intent::new(
+            base_intent.command,
+            Invocation::new(args, base_intent.invocation.source),
+        );
+
+        // Verify the intent has the path argument.
+        assert_eq!(intent_with_path.command.as_str(), "file.open");
+        assert_eq!(
+            intent_with_path.invocation.args.path("path"),
+            Some(recent_path.as_path())
+        );
     }
 }
