@@ -350,6 +350,12 @@ pub struct Shell {
     /// The Line dialog (task P7-28): `Some` while it is open; it
     /// re-dispatches `format.line` with its fields.
     line_dialog: Option<crate::format_dialogs::LineForm>,
+    /// The custom colour dialog (task P7-54): `Some` while it is open.
+    /// Its body is `color_dialog::show`; OK re-dispatches the role's
+    /// colour command (`format.set.fill.color` and friends, the same
+    /// command the swatches dispatch) and joins the picker's Recent
+    /// Colors.
+    color_dialog: Option<crate::color_dialog::State>,
     /// The Format Shape pane (task P7-28): `Some` while it is open;
     /// its fields apply as they change and it follows the selection.
     format_shape: Option<panes::FormatShape>,
@@ -431,6 +437,7 @@ impl Shell {
             page_setup: None,
             fill_dialog: None,
             line_dialog: None,
+            color_dialog: None,
             format_shape: None,
             wizard: None,
             welcome_pending,
@@ -946,11 +953,13 @@ impl Shell {
     }
 
     /// The run-time lists for the Panel Modern widgets, filled from
-    /// [`LiveLists`] (task P7-09 wiring of the P7-06 providers).
+    /// [`LiveLists`] (task P7-09 wiring of the P7-06 providers; task
+    /// P7-54 adds the Backgrounds gallery and its Background Color
+    /// submenu).
     fn list_data(&self) -> ListData {
         let live = LiveLists;
         let mut lists = ListData::new();
-        for name in ["recent_files", "windows", "pages"] {
+        for name in ["recent_files", "windows", "pages", "backgrounds", "colors"] {
             let entries = live.list(name, &self.app);
             lists.insert(name, entries.into_iter().map(|entry| entry.label).collect());
         }
@@ -2614,6 +2623,46 @@ impl Shell {
             Some(crate::format_dialogs::Outcome::Cancel) => self.line_dialog = None,
             Some(crate::format_dialogs::Outcome::None) | None => {}
         }
+        // The custom colour dialog (task P7-54): one dialog for the
+        // fill, line and text roles. OK re-dispatches the role's
+        // colour command with the chosen colour (the same command the
+        // swatches dispatch, one undo step) and the colour joins the
+        // picker's Recent Colors; Cancel changes nothing.
+        let color_outcome = if let Some(state) = &mut self.color_dialog {
+            let mut open = true;
+            let mut outcome = crate::color_dialog::Outcome::None;
+            egui::Window::new(state.target.title())
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                .open(&mut open)
+                .show(ui.ctx(), |ui| {
+                    outcome = crate::color_dialog::show(ui, state);
+                });
+            if open {
+                Some(outcome)
+            } else {
+                Some(crate::color_dialog::Outcome::Cancel)
+            }
+        } else {
+            None
+        };
+        match color_outcome {
+            Some(crate::color_dialog::Outcome::Ok(color)) => {
+                if let Some(state) = self.color_dialog.take() {
+                    crate::pickers::remember_color(ui.ctx(), color);
+                    let hex = format!("#{:02X}{:02X}{:02X}", color.0, color.1, color.2);
+                    let args = larrygram_commands::Args::new()
+                        .with("color", ArgValue::Text(hex.clone()))
+                        .with("value", ArgValue::Text(hex));
+                    if let Some(intent) = format_intent(state.target.command(), args) {
+                        intents.push(intent);
+                    }
+                }
+            }
+            Some(crate::color_dialog::Outcome::Cancel) => self.color_dialog = None,
+            Some(crate::color_dialog::Outcome::None) | None => {}
+        }
         // The Format Shape pane (task P7-28 goal 3): a tool window
         // whose Fill and Line sections apply as the user changes a
         // field, and which follows the selection.
@@ -3044,6 +3093,7 @@ impl Shell {
             || self.page_setup.is_some()
             || self.fill_dialog.is_some()
             || self.line_dialog.is_some()
+            || self.color_dialog.is_some()
             || self.about_open
             || self.walk.is_some())
     }
@@ -3341,6 +3391,18 @@ impl Shell {
             }
             Some(UiRequest::ShowLineDialog) => {
                 self.line_dialog = Some(crate::format_dialogs::LineForm::from_app(&self.app));
+            }
+            // The custom colour dialog (task P7-54): one dialog for
+            // the fill, line and text roles, opened on the role's
+            // resolved current colour.
+            Some(UiRequest::ShowColorDialog { target }) => {
+                match crate::color_dialog::Target::parse(target) {
+                    Some(role) => {
+                        self.color_dialog =
+                            Some(crate::color_dialog::State::from_app(&self.app, role));
+                    }
+                    None => self.note_error(format!("unknown color dialog target {target:?}")),
+                }
             }
             Some(UiRequest::ShowFormatShape) => {
                 // The pane toggles (a second `format.shape.pane` run

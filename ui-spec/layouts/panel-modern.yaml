@@ -1182,7 +1182,7 @@ tabs:
     fluent: GroupBackgrounds
     controls:
     - id: tab.design.backgrounds.backgrounds
-      kind: dropdown
+      kind: gallery
       label: Backgrounds
       command: tools.backgrounds
       fluent: BackgroundsGallery
@@ -1200,6 +1200,7 @@ tabs:
         - id: tab.design.backgrounds.backgrounds.background_color.colors
           kind: list
           list: colors
+          command: tools.background.color
     - id: tab.design.backgrounds.borders_and_titles
       kind: dropdown
       label: Borders & Titles

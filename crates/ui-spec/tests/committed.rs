@@ -97,8 +97,10 @@ const PIN_365: LayoutCounts = LayoutCounts {
 // `connector.point_add`, `connector.point_move` and
 // `connector.point_delete` (the connection-point commands). P7-35 adds
 // `connector.move_segment` (the segment drag's one undoable move of
-// one connector segment).
-const COMMANDS: usize = 1135;
+// one connector segment). P7-54 adds `format.fill_color.custom`,
+// `format.line_color.custom` and `format.text_color.custom` (the
+// custom colour dialog's openers).
+const COMMANDS: usize = 1138;
 // 90 rows from the source page; P7-20 adds the four `OWN_SHORTCUTS`
 // bindings (Ctrl+N, Ctrl+O, Ctrl+S, Ctrl+Alt+P); P7-23 adds `Ctrl+,`
 // (the Options dialog, Cmd+, on macOS); P7-42 adds `Ctrl+Q` (the quit

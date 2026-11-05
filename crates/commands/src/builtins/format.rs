@@ -172,6 +172,12 @@ pub(crate) const TEXT_TABLE: CommandTable = &[
         run_font_color_default,
     ),
     (
+        "format.text_color.custom",
+        "More Text Colors...",
+        can_format_text,
+        run_text_color_custom,
+    ),
+    (
         "format.text.align_left",
         "Align Text Left",
         can_format_text,
@@ -316,6 +322,21 @@ pub(crate) const TABLE: CommandTable = &[
         "Format Shape",
         super::has_document,
         run_shape_pane,
+    ),
+    // Task P7-54: the custom colour dialog's two openers (the
+    // colour pickers' "More ... Colors..." rows); the text one is a
+    // text-format command beside `text.font.color` below.
+    (
+        "format.fill_color.custom",
+        "More Fill Colors...",
+        can_format,
+        run_fill_color_custom,
+    ),
+    (
+        "format.line_color.custom",
+        "More Line Colors...",
+        can_format,
+        run_line_color_custom,
     ),
 ];
 
@@ -1917,6 +1938,44 @@ fn run_line(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError>
     })
 }
 
+/// `format.fill_color.custom`, `format.line_color.custom` and
+/// `format.text_color.custom` (task P7-54): request the custom colour
+/// dialog for one role (`UiRequest::ShowColorDialog`) and change
+/// nothing. The dialog's OK re-dispatches the role's colour command
+/// with the chosen colour (`format.set.fill.color`,
+/// `format.set.line.color` or `text.font.color` — the same command the
+/// swatches dispatch), one undo step. The arguments are ignored: the
+/// dialog collects the colour.
+fn run_fill_color_custom(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError> {
+    color_custom(ctx, inv, "fill", "More Fill Colors")
+}
+
+/// The line role's opener ([`run_fill_color_custom`]).
+fn run_line_color_custom(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError> {
+    color_custom(ctx, inv, "line", "More Line Colors")
+}
+
+/// The text role's opener ([`run_fill_color_custom`]).
+fn run_text_color_custom(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError> {
+    color_custom(ctx, inv, "text", "More Text Colors")
+}
+
+/// The shared opener body (task P7-54).
+fn color_custom(
+    _ctx: &mut AppCtx,
+    _inv: &Invocation,
+    target: &'static str,
+    message: &'static str,
+) -> Result<Outcome, CommandError> {
+    Ok(Outcome {
+        message: Some(message.to_owned()),
+        ui_request: Some(UiRequest::ShowColorDialog {
+            target: target.to_owned(),
+        }),
+        ..Outcome::default()
+    })
+}
+
 /// `format.shape.pane` (task P7-28): requests the Format Shape pane
 /// (`UiRequest::ShowFormatShape`) and changes nothing; the request
 /// toggles the pane (a second run closes it). The pane edits the same
@@ -3056,6 +3115,28 @@ mod tests {
         let error =
             run_line_pattern(&mut ctx, &Invocation::empty(Source::Test)).expect_err("no pattern");
         assert!(error.to_string().contains("line pattern"), "{error}");
+    }
+
+    /// Task P7-54: the three openers request the custom colour dialog
+    /// for their role and change nothing.
+    #[test]
+    fn the_custom_colour_commands_request_the_dialog() {
+        let (mut ctx, _session, _shape) = session();
+        for (run, target) in [
+            (run_fill_color_custom as crate::builtins::RunFn, "fill"),
+            (run_line_color_custom as crate::builtins::RunFn, "line"),
+            (run_text_color_custom as crate::builtins::RunFn, "text"),
+        ] {
+            let outcome = run(&mut ctx, &Invocation::empty(Source::Test)).expect("request");
+            assert_eq!(
+                outcome.ui_request,
+                Some(UiRequest::ShowColorDialog {
+                    target: target.to_owned()
+                }),
+                "{target} requests the dialog"
+            );
+            assert!(outcome.edit.is_none(), "{target} changes nothing");
+        }
     }
 
     #[test]

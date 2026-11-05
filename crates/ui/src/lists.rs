@@ -87,7 +87,8 @@ pub trait ListProvider {
 }
 
 /// The run-time lists that come from the application state (task
-/// P7-06): `recent_files`, `windows` and `pages`.
+/// P7-06): `recent_files`, `windows` and `pages`, plus the Backgrounds
+/// gallery and its Background Color submenu (task P7-54).
 ///
 /// Every other name answers empty (the provider trait's default).
 /// Window and page entries carry the target name in their `args` but
@@ -102,6 +103,8 @@ impl ListProvider for LiveLists {
             "recent_files" => recent_files(app),
             "windows" => windows(app),
             "pages" => pages(app),
+            "backgrounds" => backgrounds(app),
+            "colors" => background_colors(),
             _ => Vec::new(),
         }
     }
@@ -160,6 +163,70 @@ fn pages(app: &AppCtx) -> Vec<ListEntry> {
             ListEntry::new(name.clone()).with_command_args_target("page", &name)
         })
         .collect()
+}
+
+/// The Design > Backgrounds gallery (task P7-54): "No Background" and
+/// one row per design (`builtins::BACKGROUND_DESIGNS`), each
+/// dispatching `tools.backgrounds` with its label. The row the active
+/// page uses is checked.
+fn backgrounds(app: &AppCtx) -> Vec<ListEntry> {
+    let Ok(command) = CommandId::parse("tools.backgrounds") else {
+        return Vec::new();
+    };
+    let Some(session) = app.active_document() else {
+        return Vec::new();
+    };
+    let Some(page) = session.active_page else {
+        return Vec::new();
+    };
+    let linked = session
+        .document
+        .page(page)
+        .and_then(|entry| entry.background);
+    let linked_name = linked
+        .and_then(|background| session.document.page(background))
+        .map(|entry| entry.name.clone())
+        .unwrap_or_default();
+    let mut out = vec![
+        ListEntry::new("No Background")
+            .with_command(
+                command,
+                Args::new().with("background", ArgValue::Text("none".to_owned())),
+            )
+            .checked(linked.is_none()),
+    ];
+    for design in larrygram_commands::builtins::BACKGROUND_DESIGNS {
+        out.push(
+            ListEntry::new(design.name)
+                .with_command(
+                    command,
+                    Args::new().with("background", ArgValue::Text(design.name.to_owned())),
+                )
+                .checked(linked_name == design.page_name),
+        );
+    }
+    out
+}
+
+/// The Background Color submenu's colours (task P7-54): the standard
+/// colour names the colour commands parse, each dispatching
+/// `tools.background.color` with the name.
+fn background_colors() -> Vec<ListEntry> {
+    let Ok(command) = CommandId::parse("tools.background.color") else {
+        return Vec::new();
+    };
+    [
+        "Black", "White", "Red", "Green", "Blue", "Yellow", "Orange", "Purple", "Gray", "Brown",
+        "Pink",
+    ]
+    .into_iter()
+    .map(|name| {
+        ListEntry::new(name).with_command(
+            command,
+            Args::new().with("color", ArgValue::Text(name.to_owned())),
+        )
+    })
+    .collect()
 }
 
 impl ListEntry {
@@ -269,5 +336,59 @@ mod tests {
         assert!(entry.checked);
         assert_eq!(entry.access, Some('t'));
         assert!(entry.command.is_none());
+    }
+
+    /// Task P7-54: the Backgrounds gallery lists "No Background" and
+    /// the designs, each dispatching `tools.backgrounds` with its
+    /// label.
+    #[test]
+    fn backgrounds_list_the_clearing_row_and_the_designs() {
+        let entries = LiveLists.list("backgrounds", &app());
+        let labels: Vec<&str> = entries.iter().map(|entry| entry.label.as_str()).collect();
+        assert_eq!(
+            labels,
+            vec!["No Background", "Solid Tint", "Soft Gradient", "Light Grid"]
+        );
+        assert!(entries[0].checked, "no background is checked by default");
+        assert_eq!(
+            entries[1].command.as_ref().map(|id| id.as_str()),
+            Some("tools.backgrounds")
+        );
+        assert_eq!(entries[1].args.text("background"), Some("Solid Tint"));
+        // No document, no rows.
+        assert!(
+            LiveLists
+                .list("backgrounds", &AppCtx::new(Settings::default()))
+                .is_empty()
+        );
+    }
+
+    /// Task P7-54: the row the active page uses is checked.
+    #[test]
+    fn backgrounds_check_the_applied_design() {
+        let mut app = app();
+        {
+            let session = app.active_document_mut().expect("session");
+            let second = session.document.add_page("Background Tint").expect("page");
+            session.document.pages[0].background = Some(second);
+        }
+        let entries = LiveLists.list("backgrounds", &app);
+        assert!(!entries[0].checked, "the link is set");
+        assert_eq!(entries[1].label, "Solid Tint");
+        assert!(entries[1].checked, "the applied design is checked");
+    }
+
+    /// Task P7-54: the Background Color submenu lists the standard
+    /// colour names, each dispatching `tools.background.color`.
+    #[test]
+    fn background_colors_are_the_standard_colour_names() {
+        let entries = LiveLists.list("colors", &app());
+        assert_eq!(entries.len(), 11);
+        assert_eq!(entries[0].label, "Black");
+        assert_eq!(
+            entries[0].command.as_ref().map(|id| id.as_str()),
+            Some("tools.background.color")
+        );
+        assert_eq!(entries[0].args.text("color"), Some("Black"));
     }
 }

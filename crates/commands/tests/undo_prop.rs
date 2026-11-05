@@ -759,6 +759,53 @@ fn run_set_background(ctx: &mut AppCtx, registry: &Registry, id: &'static str, _
     try_dispatch(ctx, registry, id, args);
 }
 
+/// `tools.background.color` (task P7-54): a hex colour from the pick,
+/// over the design background [`prep_design_background`] gives the
+/// page.
+fn run_background_color(ctx: &mut AppCtx, registry: &Registry, id: &'static str, pick: u32) {
+    prep_design_background(ctx, registry);
+    let mut args = numbers(&[]);
+    let shade = 32 * (1 + pick % 7);
+    args.set("color", ArgValue::Text(format!("#{shade:02X}1010")));
+    try_dispatch(ctx, registry, id, args);
+}
+
+/// The prep of `tools.background.color` (task P7-54): the active page
+/// gets the "Solid Tint" design as its background when it has no
+/// Backgrounds gallery design yet. One staged dispatch (the [`PREP`]
+/// seam): its undo step is the prep's, not the command's.
+fn prep_design_background(ctx: &mut AppCtx, registry: &Registry) {
+    let designed = ctx.active_document().is_some_and(|session| {
+        session
+            .active_page
+            .and_then(|page| session.document.page(page))
+            .and_then(|entry| entry.background)
+            .and_then(|background| session.document.page(background))
+            .is_some_and(|entry| {
+                larrygram_commands::builtins::BACKGROUND_DESIGNS
+                    .iter()
+                    .any(|design| design.page_name == entry.name)
+            })
+    });
+    if designed {
+        return;
+    }
+    let mut args = numbers(&[]);
+    args.set("background", ArgValue::Text("Solid Tint".to_owned()));
+    try_dispatch(ctx, registry, "tools.backgrounds", args);
+}
+
+/// One prep dispatch of [`PREP`].
+type PrepFn = fn(&mut AppCtx, &Registry);
+
+/// The prep dispatches some cases stage before their own one edit
+/// (task P7-54: `tools.background.color` colours a design, so its
+/// case first gives the page one). The prep's undo step does not count
+/// against "one command, one edit" (ADR 0040 rule 1); the run
+/// functions call their prep themselves too, and a satisfied prep is
+/// a no-op.
+const PREP: &[(&str, PrepFn)] = &[("tools.background.color", prep_design_background)];
+
 /// `format.set.page.orientation` (task P7-20): always `landscape`, so
 /// the run swaps the seed page's sides and pushes its one edit (the
 /// pick cannot vary the value: `portrait` is a no-op on the portrait
@@ -1784,6 +1831,10 @@ const CASES: &[Case] = &[
         run: run_set_background,
     },
     Case {
+        id: "tools.background.color",
+        run: run_background_color,
+    },
+    Case {
         id: "tools.options.page.setup",
         run: run_page_size,
     },
@@ -1827,6 +1878,18 @@ const NON_EDITING: &[(&str, &str)] = &[
     (
         "format.shape.pane",
         "opens the Format Shape pane (UiRequest::ShowFormatShape, task P7-28)",
+    ),
+    (
+        "format.fill_color.custom",
+        "opens the custom colour dialog (UiRequest::ShowColorDialog, task P7-54)",
+    ),
+    (
+        "format.line_color.custom",
+        "opens the custom colour dialog (UiRequest::ShowColorDialog, task P7-54)",
+    ),
+    (
+        "format.text_color.custom",
+        "opens the custom colour dialog (UiRequest::ShowColorDialog, task P7-54)",
     ),
     ("file.new", "replaces the active document, no undo (P4-02)"),
     (
@@ -2077,12 +2140,17 @@ fn every_implemented_id_is_classified() {
 }
 
 /// Every case pushes exactly one undo step over the seed (ADR 0040
-/// rule 1: one command, one edit).
+/// rule 1: one command, one edit). A case whose prep stages a
+/// dispatch ([`PREP`]) has that step taken before the measurement:
+/// the prep's own undo step is not the command's.
 #[test]
 fn every_case_produces_exactly_one_edit_on_the_seed() {
     for case in CASES {
         for pick in 0..3 {
             let (mut ctx, registry, _page) = fixture();
+            if let Some((_, prep)) = PREP.iter().find(|(id, _)| *id == case.id) {
+                prep(&mut ctx, &registry);
+            }
             let before = undo_len(&ctx);
             (case.run)(&mut ctx, &registry, case.id, pick);
             assert_eq!(

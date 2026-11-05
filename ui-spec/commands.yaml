@@ -2643,6 +2643,11 @@
   mapping_confidence: unknown
   visuicmd: visCmdFormatFill
 - fluent_ids: []
+  id: format.fill_color.custom
+  label: More Fill Colors...
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
   id: format.fill_color.no_fill
   label: No Fill
   mapping_confidence: unknown
@@ -2667,6 +2672,11 @@
   label: Line
   mapping_confidence: unknown
   visuicmd: visCmdFormatLine
+- fluent_ids: []
+  id: format.line_color.custom
+  label: More Line Colors...
+  mapping_confidence: unknown
+  visuicmd: null
 - fluent_ids: []
   id: format.line_color.no_line
   label: No Line
@@ -2862,6 +2872,11 @@
     - Underline
   id: format.text.underline
   label: Underline
+  mapping_confidence: unknown
+  visuicmd: null
+- fluent_ids: []
+  id: format.text_color.custom
+  label: More Text Colors...
   mapping_confidence: unknown
   visuicmd: null
 - fluent_ids: []

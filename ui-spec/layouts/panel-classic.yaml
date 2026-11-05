@@ -3356,7 +3356,7 @@ toolbars:
     - id: toolbar.formatting.text_color.more_text_colors
       kind: button
       label: More Text Colors...
-      command: text.font.color
+      command: format.text_color.custom
       display: text
   - id: toolbar.formatting.line_color
     kind: split
@@ -3404,7 +3404,7 @@ toolbars:
     - id: toolbar.formatting.line_color.more_line_colors
       kind: button
       label: More Line Colors...
-      command: format.line
+      command: format.line_color.custom
       display: text
   - id: toolbar.formatting.fill_color
     kind: split
@@ -3452,7 +3452,7 @@ toolbars:
     - id: toolbar.formatting.fill_color.more_fill_colors
       kind: button
       label: More Fill Colors...
-      command: format.fill
+      command: format.fill_color.custom
       display: text
   - id: toolbar.formatting.theme
     kind: button
