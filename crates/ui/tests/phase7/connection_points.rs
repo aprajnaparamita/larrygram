@@ -653,6 +653,59 @@ fn the_deleted_point_re_glues_the_end_dynamically(kind: LayoutKind) {
     assert_eq!(record.to_part, 100);
 }
 
+/// The user's 2026-11-05 pass: with a connector selected, switching to
+/// the Connection Point tool keeps the selection visible, a click on a
+/// shape selects it (its points draw), and a click on empty page clears
+/// the selection.
+fn the_tool_selects_the_shape_it_works_on(kind: LayoutKind) {
+    let mut rig = rig(kind);
+    draw_connector(&mut rig, kind, (6.0, 5.0), (8.0, 5.0));
+    let (connector, _) = drawn_connector(&rig);
+    let at = screen(&rig, 7.0, 5.0);
+    click_at(&mut rig, at);
+    assert_eq!(
+        rig.shell.borrow().app.selection.shapes,
+        vec![connector],
+        "{kind:?}: the connector is selected"
+    );
+    arm_point_tool(&mut rig, kind);
+    assert_eq!(
+        rig.shell.borrow().app.selection.shapes,
+        vec![connector],
+        "{kind:?}: the tool keeps the selection"
+    );
+    let with_connector = rig.render();
+
+    // A click on the shape selects it, and its points draw.
+    let at = screen(&rig, A.0, A.1);
+    click_at(&mut rig, at);
+    rig.run();
+    assert_eq!(
+        rig.shell.borrow().app.selection.shapes,
+        vec![ShapeId { index: 0 }],
+        "{kind:?}: the click selects the shape"
+    );
+    let with_shape = rig.render();
+    assert!(
+        changed_near(&with_connector, &with_shape, &rig, POINTS[0], 6.0),
+        "{kind:?}: the shape's points draw"
+    );
+
+    // A click on empty page clears the selection.
+    let at = screen(&rig, 6.0, 1.0);
+    click_at(&mut rig, at);
+    rig.run();
+    assert!(
+        rig.shell.borrow().app.selection.shapes.is_empty(),
+        "{kind:?}: the empty click clears the selection"
+    );
+    assert_eq!(
+        rig.shell.borrow().app.active_tool,
+        ActiveTool::ConnectionPoint,
+        "{kind:?}: the tool stays on"
+    );
+}
+
 #[test]
 fn the_view_check_shows_and_hides_the_markers_in_panel_modern() {
     the_view_check_shows_and_hides_the_markers(LayoutKind::PanelModern);
@@ -701,4 +754,14 @@ fn the_deleted_point_re_glues_the_end_dynamically_in_panel_modern() {
 #[test]
 fn the_deleted_point_re_glues_the_end_dynamically_in_panel_classic() {
     the_deleted_point_re_glues_the_end_dynamically(LayoutKind::PanelClassic);
+}
+
+#[test]
+fn the_tool_selects_the_shape_it_works_on_in_panel_modern() {
+    the_tool_selects_the_shape_it_works_on(LayoutKind::PanelModern);
+}
+
+#[test]
+fn the_tool_selects_the_shape_it_works_on_in_panel_classic() {
+    the_tool_selects_the_shape_it_works_on(LayoutKind::PanelClassic);
 }

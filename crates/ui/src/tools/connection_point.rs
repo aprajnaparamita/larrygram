@@ -119,8 +119,9 @@ pub fn idle_overlay(state: &ToolMachine, ctx: &AppCtx) -> Result<Option<Overlay>
 /// - Ctrl on the selected point starts the move drag;
 /// - Ctrl on the shape arms the add gesture (the point lands on
 ///   release, so a drag adds nothing);
-/// - a plain press selects the point under the pointer, or clears the
-///   selection.
+/// - a plain press selects the point under the pointer; off the
+///   points it selects the shape under the pointer (as the Pointer
+///   tool's first click does), or clears the selection on empty page.
 fn down(
     state: &mut ToolMachine,
     ctx: &AppCtx,
@@ -160,9 +161,55 @@ fn down(
         None => {
             state.connection_point.selected = None;
             state.connection_point.moving = None;
+            // The tool picks the shape it works on with a plain click
+            // (the user's 2026-11-05 pass: no shape could be selected
+            // while the tool was on).
+            let under = shape_under(ctx, pos, zoom);
+            if under != shape || (under.is_none() && !ctx.selection.shapes.is_empty()) {
+                let mut effect = overlay_effect(state, ctx)?;
+                effect.intents.push(select_intent(ctx, under)?);
+                return Ok(effect);
+            }
         }
     }
     overlay_effect(state, ctx)
+}
+
+/// The top-level shape under `pos` (page inches): the topmost hit,
+/// lifted to its top-level group like the Pointer tool's first click.
+fn shape_under(ctx: &AppCtx, pos: Point, zoom: f64) -> Option<ShapeId> {
+    let session = ctx.active_document()?;
+    let scene = scene_for(ctx).ok().flatten()?;
+    let tolerance = TOLERANCE_PX / (zoom.max(f64::MIN_POSITIVE) * POINTS_PER_INCH);
+    let hits = hit_test(&scene, pos, &HitOptions::new(tolerance)).ok()?;
+    let mut shape = hits.iter().find_map(|hit| hit.shape_id)?;
+    // Bounded: a malformed parent chain cannot loop.
+    for _ in 0..64 {
+        match session.document.shape(shape)?.parent {
+            Some(parent) => shape = parent,
+            None => break,
+        }
+    }
+    Some(shape)
+}
+
+/// The `edit.select` intent that makes `shape` the selection, or
+/// clears it for `None`.
+fn select_intent(ctx: &AppCtx, shape: Option<ShapeId>) -> Result<crate::Intent, UiError> {
+    let ids = shape
+        .and_then(|shape| ctx.active_document()?.document.shape(shape))
+        .map(|entry| vec![entry.visio_id.to_string()])
+        .unwrap_or_default();
+    let command = CommandId::parse("edit.select").map_err(|error| {
+        UiError::Command(larrygram_commands::CommandError::failed(error.to_string()))
+    })?;
+    let args = Args::new()
+        .with("shapes", ArgValue::List(ids))
+        .with("mode", ArgValue::Text("replace".to_owned()));
+    Ok(crate::Intent::new(
+        command,
+        Invocation::new(args, Source::Ui),
+    ))
 }
 
 /// One move: the move drag follows the pointer.
@@ -208,7 +255,9 @@ fn up(state: &mut ToolMachine, ctx: &AppCtx, pos: Point) -> Result<ToolEffect, U
 /// The tool's marker overlay: the selected shape's points and the
 /// selected point's own style (task P7-34 item 2).
 fn overlay(state: &ToolMachine, ctx: &AppCtx) -> Result<Overlay, UiError> {
-    let mut overlay = Overlay::new();
+    // The selection shows as it does under the Pointer tool, so the
+    // shape the tool works on is visible (a connector has no points).
+    let mut overlay = crate::handles::selection_overlay(ctx, None, &ctx.selection.shapes)?;
     let Some(shape) = target_shape(ctx) else {
         return Ok(overlay);
     };
@@ -667,7 +716,9 @@ mod tests {
             &ctx,
         )
         .expect("no error");
-        match effect.overlay.marks.first() {
+        // The selection's own marks come first; the points last.
+        assert!(effect.overlay.marks.len() > 1, "{:?}", effect.overlay.marks);
+        match effect.overlay.marks.last() {
             Some(OverlayMark::ConnectionPoints { points, selected }) => {
                 assert_eq!(points.len(), 2);
                 assert_eq!(*selected, Some(Point::new(2.25, 2.75)));
