@@ -262,9 +262,7 @@ fn up(state: &mut ToolMachine, ctx: &AppCtx, pos: Point) -> Result<ToolEffect, U
 /// The tool's marker overlay: the selected shape's points and the
 /// selected point's own style (task P7-34 item 2).
 fn overlay(state: &ToolMachine, ctx: &AppCtx) -> Result<Overlay, UiError> {
-    // The selection shows as it does under the Pointer tool, so the
-    // shape the tool works on is visible (a connector has no points).
-    let mut overlay = crate::handles::selection_overlay(ctx, None, &ctx.selection.shapes)?;
+    let mut overlay = selection_outlines(ctx, &ctx.selection.shapes)?;
     let Some(shape) = target_shape(ctx) else {
         return Ok(overlay);
     };
@@ -287,6 +285,28 @@ fn overlay(state: &ToolMachine, ctx: &AppCtx) -> Result<Overlay, UiError> {
         points: points.into_iter().map(|(_, at)| at).collect(),
         selected,
     });
+    Ok(overlay)
+}
+
+/// The selection as outlines only, so the shape the tool works on is
+/// visible (a connector has no points). No handles draw: this tool
+/// drags points, not the Pointer tool's handles (the user's
+/// 2026-11-05 pass: the side handles hid the points at the edge
+/// midpoints, and a connector's end and segment handles invited drags
+/// that did nothing).
+fn selection_outlines(ctx: &AppCtx, shapes: &[ShapeId]) -> Result<Overlay, UiError> {
+    let Some(scene) = scene_for(ctx)? else {
+        return Ok(Overlay::new());
+    };
+    let paths = crate::handles::paths_for_shapes(&scene, ctx, shapes)?;
+    if paths.is_empty() {
+        return Ok(Overlay::new());
+    }
+    let mut overlay = larrygram_render::build_selection_overlay(&scene, &paths)
+        .map_err(crate::handles::render_error)?;
+    overlay
+        .marks
+        .retain(|mark| matches!(mark, OverlayMark::SelectionOutline { .. }));
     Ok(overlay)
 }
 
@@ -723,8 +743,25 @@ mod tests {
             &ctx,
         )
         .expect("no error");
-        // The selection's own marks come first; the points last.
-        assert!(effect.overlay.marks.len() > 1, "{:?}", effect.overlay.marks);
+        // The selection's outline comes first and the points last; no
+        // handle draws (the points at the edge midpoints stay visible).
+        assert!(
+            matches!(
+                effect.overlay.marks.first(),
+                Some(OverlayMark::SelectionOutline { .. })
+            ),
+            "{:?}",
+            effect.overlay.marks
+        );
+        assert!(
+            !effect
+                .overlay
+                .marks
+                .iter()
+                .any(|mark| matches!(mark, OverlayMark::Handles { .. })),
+            "no handles: {:?}",
+            effect.overlay.marks
+        );
         match effect.overlay.marks.last() {
             Some(OverlayMark::ConnectionPoints { points, selected }) => {
                 assert_eq!(points.len(), 2);
