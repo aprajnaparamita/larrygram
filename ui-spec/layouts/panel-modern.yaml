@@ -1182,7 +1182,7 @@ tabs:
     fluent: GroupBackgrounds
     controls:
     - id: tab.design.backgrounds.backgrounds
-      kind: dropdown
+      kind: gallery
       label: Backgrounds
       command: tools.backgrounds
       fluent: BackgroundsGallery
