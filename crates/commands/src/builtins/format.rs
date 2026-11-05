@@ -788,18 +788,13 @@ fn ensure_rows(
         .iter_mut()
         .find(|entry| entry.name.as_str() == section)
     else {
-        entity
-            .sheet
-            .sections
-            .push(Section::new(SectionName::from_static(section)));
-        let Some(created) = entity.sheet.sections.last_mut() else {
-            return Err(CommandError::failed("the text section could not be added"));
-        };
+        let mut created = Section::new(SectionName::from_static(section));
         let mut row = Row::new();
         // A text run marker names its row by `IX` (ADR 0019 decision
         // 5), so the created row carries the `IX` the markers use.
         row.ix = Some(0);
         created.rows.push(row);
+        entity.sheet.sections.push(created);
         return Ok(vec![RowTarget {
             position: Some(0),
             ix: Some(0),
@@ -866,31 +861,24 @@ fn ensure_run_row(
                 shape.index
             )));
         };
-        let block = entity
+        let mut row = Row::new();
+        row.ix = Some(wanted.ix);
+        match entity
             .sheet
             .sections
             .iter_mut()
-            .find(|entry| entry.name.as_str() == section);
-        match block {
-            Some(block) if block.rows.iter().any(|row| row.ix == Some(wanted.ix)) => {
-                return Ok(());
-            }
+            .find(|entry| entry.name.as_str() == section)
+        {
             Some(block) => {
-                let mut row = Row::new();
-                row.ix = Some(wanted.ix);
+                if block.rows.iter().any(|row| row.ix == Some(wanted.ix)) {
+                    return Ok(());
+                }
                 block.rows.push(row);
             }
             None => {
-                entity
-                    .sheet
-                    .sections
-                    .push(Section::new(SectionName::from_static(section)));
-                let Some(created) = entity.sheet.sections.last_mut() else {
-                    return Err(CommandError::failed("the text section could not be added"));
-                };
-                let mut row = Row::new();
-                row.ix = Some(wanted.ix);
+                let mut created = Section::new(SectionName::from_static(section));
                 created.rows.push(row);
+                entity.sheet.sections.push(created);
             }
         }
     }

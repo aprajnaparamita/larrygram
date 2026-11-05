@@ -617,3 +617,47 @@ fn the_structured_write_keeps_the_paragraph_and_tabs_markers() {
         "the tabs marker round-trips ({parts:?})"
     );
 }
+
+/// The format painter's capture falls through the cells a junk-typed
+/// value cannot answer (task P7-53: the reads never panic).
+#[test]
+fn the_format_painter_skips_cells_it_cannot_read() {
+    let (mut ctx, shape) = catalog();
+    // Junk values: every number and colour read fails and falls
+    // through.
+    {
+        let session = ctx.active_document_mut().expect("session");
+        let entry = session.document.shape_mut(shape).expect("shape");
+        for name in [
+            "Size",
+            "Style",
+            "VerticalAlign",
+            "FillPattern",
+            "FillForegndTrans",
+            "LineWeight",
+            "LinePattern",
+            "BeginArrow",
+            "EndArrow",
+        ] {
+            entry.sheet.cells.push(larrygram_model::Cell {
+                name: larrygram_model::CellName::new(name),
+                formula: Some("\"junk\"".to_owned()),
+                value: Some(larrygram_model::CellValue::Str("junk".to_owned())),
+                unit: larrygram_geom::Unit::Inches,
+                preserved: larrygram_model::Preserved::new(),
+            });
+        }
+        for name in ["Color", "FillForegnd", "LineColor"] {
+            entry.sheet.cells.push(larrygram_model::Cell {
+                name: larrygram_model::CellName::new(name),
+                formula: Some("\"junk\"".to_owned()),
+                value: Some(larrygram_model::CellValue::Str("junk".to_owned())),
+                unit: larrygram_geom::Unit::Inches,
+                preserved: larrygram_model::Preserved::new(),
+            });
+        }
+    }
+    run(&mut ctx, "tools.format_painter", Args::new()).expect("copy");
+    let args = Args::new().with("apply", ArgValue::Flag(true));
+    run(&mut ctx, "tools.format_painter", args).expect("apply");
+}
