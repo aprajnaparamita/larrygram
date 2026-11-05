@@ -1,0 +1,684 @@
+<title>Larrygram Alpha Checks</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600&display=swap">
+<style>
+:root {
+  --bg: #f8f9fb;
+  --fg: #1a1d24;
+  --muted: #6b7085;
+  --accent: #2c6fbb;
+  --card-bg: #ffffff;
+  --border: #e0e3eb;
+  --input-bg: #f0f2f6;
+  --input-border: #d0d3dc;
+  --danger-fg: #c53030;
+  --danger-border: #e53e3e;
+  --danger-hover: #fff5f5;
+  --focus-ring: rgba(44, 111, 187, 0.3);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #181b22;
+    --fg: #e4e6ed;
+    --muted: #8b8fa2;
+    --accent: #5b9cf5;
+    --card-bg: #1f222b;
+    --border: #2e3240;
+    --input-bg: #252833;
+    --input-border: #363a4a;
+    --danger-fg: #fc8181;
+    --danger-border: #e53e3e;
+    --danger-hover: #2d1b1b;
+    --focus-ring: rgba(91, 156, 245, 0.3);
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #181b22;
+  --fg: #e4e6ed;
+  --muted: #8b8fa2;
+  --accent: #5b9cf5;
+  --card-bg: #1f222b;
+  --border: #2e3240;
+  --input-bg: #252833;
+  --input-border: #363a4a;
+  --danger-fg: #fc8181;
+  --danger-border: #e53e3e;
+  --danger-hover: #2d1b1b;
+  --focus-ring: rgba(91, 156, 245, 0.3);
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Outfit", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.wrapper {
+  max-width: 860px;
+  margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 24px;
+  min-height: 100vh;
+}
+
+.header {
+  padding-bottom: 24px;
+  margin-bottom: 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+.title {
+  margin: 0 0 8px 0;
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.build-info {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.progress-line {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.section {
+  margin-bottom: 32px;
+}
+
+.section:last-child {
+  margin-bottom: 0;
+}
+
+.section-title {
+  margin: 0 0 12px 0;
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--fg);
+}
+
+.section-progress {
+  margin: 0 0 12px 0;
+  font-size: 13px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.row {
+  padding: 12px 16px;
+  margin-bottom: 8px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.row:last-child {
+  margin-bottom: 0;
+}
+
+.row-text {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.row-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: center;
+}
+
+.box-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.box-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--fg);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.box-label input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.note-input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--fg);
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 4px;
+  outline: none;
+  max-width: 300px;
+}
+
+.note-input::placeholder {
+  color: var(--muted);
+}
+
+.note-input:focus {
+  border-color: var(--accent);
+}
+
+.actions {
+  padding-top: 24px;
+  margin-top: 24px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.action-btn {
+  padding: 10px 18px;
+  font-size: 14px;
+  font-family: inherit;
+  font-weight: 500;
+  color: var(--fg);
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  outline: none;
+  white-space: nowrap;
+}
+
+.action-btn:hover {
+  background: var(--input-bg);
+}
+
+.action-btn:focus-visible {
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.action-btn.danger {
+  color: var(--danger-fg);
+  border-color: var(--danger-border);
+}
+
+.action-btn.danger:hover {
+  background: var(--danger-hover);
+}
+
+.action-btn.danger:focus-visible {
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.fallback-textarea {
+  width: 100%;
+  margin-top: 12px;
+  padding: 12px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--fg);
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 6px;
+  outline: none;
+  resize: vertical;
+  min-height: 120px;
+}
+
+.fallback-textarea:focus {
+  border-color: var(--accent);
+}
+
+.status {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+@media (max-width: 500px) {
+  .row-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .note-input {
+    max-width: 100%;
+  }
+}
+</style>
+
+<div class="wrapper">
+  <header class="header">
+    <h1 class="title">Larrygram Alpha Checks</h1>
+    <p class="build-info">Build 9aa72d0 · 5 Nov 2026 · macOS</p>
+    <p class="progress-line" id="overall-progress">0 of 58 checks passed</p>
+  </header>
+
+  <main id="checks-container"></main>
+
+  <div class="actions">
+    <button class="action-btn" id="copy-btn">Copy results</button>
+    <button class="action-btn danger" id="clear-btn">Clear all</button>
+  </div>
+  <div class="status" id="status"></div>
+  <textarea class="fallback-textarea" id="fallback-text" style="display: none;" readonly></textarea>
+</div>
+
+<script>
+(function() {
+  'use strict';
+
+  const STORAGE_KEY = 'larrygram-alpha-checks-v1';
+
+  const sections = [
+    {
+      id: 'install',
+      title: 'Install and launch',
+      rows: [
+        { id: 'install-1', boxes: ['Pass'], text: 'Open the .dmg and drag Larrygram to Applications. The first launch needs right-click > Open (the app is not notarized).' },
+        { id: 'install-2', boxes: ['Pass'], text: 'The Dock icon is the blue diagram on a white rounded square.' },
+        { id: 'install-3', boxes: ['Pass'], text: 'The welcome wizard appears on first launch, lets you pick a layout, and does not appear again on the next launch.' },
+        { id: 'install-4', boxes: ['Pass'], text: 'Switching between Panel Modern and Panel Classic redraws the window in the other layout.' }
+      ]
+    },
+    {
+      id: 'files',
+      title: 'Files',
+      rows: [
+        { id: 'files-1', boxes: ['Modern', 'Classic'], text: 'New drawing, add a few shapes, Save As .vsdx, close, reopen: everything comes back.' },
+        { id: 'files-2', boxes: ['Pass'], text: 'A .vsdx made in Visio opens and looks recognisably right.' },
+        { id: 'files-3', boxes: ['Pass'], text: 'A binary .vsd opens (read-only import); saving offers .vsdx.' },
+        { id: 'files-4', boxes: ['Pass'], text: 'Double-clicking a .vsdx in Finder opens it in Larrygram.' },
+        { id: 'files-5', boxes: ['Pass'], text: 'Quitting with unsaved changes asks to save; Save, Don\'t Save and Cancel each do what they say.' }
+      ]
+    },
+    {
+      id: 'shapes',
+      title: 'Shapes',
+      rows: [
+        { id: 'shapes-1', boxes: ['Modern', 'Classic'], text: 'Drag shapes from Basic Shapes and Basic Flowchart onto the page.' },
+        { id: 'shapes-2', boxes: ['Modern', 'Classic'], text: 'Select, move, resize from the handles, and rotate with the rotate handle.' },
+        { id: 'shapes-3', boxes: ['Pass'], text: 'Arrow keys nudge the selection; Shift+arrow nudges by one pixel.' },
+        { id: 'shapes-4', boxes: ['Modern', 'Classic'], text: 'Copy, paste, duplicate and delete.' },
+        { id: 'shapes-5', boxes: ['Modern', 'Classic'], text: 'Group and ungroup; a group moves as one shape.' },
+        { id: 'shapes-6', boxes: ['Modern', 'Classic'], text: 'Undo (⌘Z) and redo (⇧⌘Z) each of the above; the Undo list names the steps.' }
+      ]
+    },
+    {
+      id: 'text',
+      title: 'Text',
+      rows: [
+        { id: 'text-1', boxes: ['Modern', 'Classic'], text: 'Double-click a shape, type, click away: the text stays, centred in the shape.' },
+        { id: 'text-2', boxes: ['Modern', 'Classic'], text: 'The Text tool draws a text box you can type into.' },
+        { id: 'text-3', boxes: ['Modern', 'Classic'], text: 'Bold, italic, underline, font size and alignment change the selected text.' }
+      ]
+    },
+    {
+      id: 'formatting',
+      title: 'Formatting',
+      rows: [
+        { id: 'formatting-1', boxes: ['Modern', 'Classic'], text: 'Fill colour, line colour, line weight, dash pattern and arrowheads apply to the selection.' },
+        { id: 'formatting-2', boxes: ['Modern', 'Classic'], text: 'Format Painter copies one shape\'s format onto another.' }
+      ]
+    },
+    {
+      id: 'connectors',
+      title: 'Connectors',
+      rows: [
+        { id: 'connectors-1', boxes: ['Modern', 'Classic'], text: 'Connector tool: drag from inside one shape to inside another. The ends attach to the facing sides, on the outline (try a triangle, a diamond and a star).' },
+        { id: 'connectors-2', boxes: ['Modern', 'Classic'], text: 'Drag a connector end onto a connection point: the point highlights and the end attaches there.' },
+        { id: 'connectors-3', boxes: ['Modern', 'Classic'], text: 'Move a glued shape: the connector follows and re-routes.' },
+        { id: 'connectors-4', boxes: ['Modern', 'Classic'], text: 'Drag a connector end off a shape (it detaches), then onto another shape (it attaches).' },
+        { id: 'connectors-5', boxes: ['Modern', 'Classic'], text: 'Right angle, Straight and Curved styles from the context menu or Design > Connectors.' },
+        { id: 'connectors-6', boxes: ['Pass'], text: 'On a right-angle connector, drag a segment\'s midpoint handle; right-click > Reset Connector (Panel Classic) restores a fresh route.' },
+        { id: 'connectors-7', boxes: ['Pass'], text: 'Never Reroute (Panel Classic, Layout & Routing): moving a glued shape keeps the connector\'s bends.' },
+        { id: 'connectors-8', boxes: ['Pass'], text: 'Save and reopen a drawing with connectors: moving a shape afterwards still moves its connectors.' }
+      ]
+    },
+    {
+      id: 'connpts',
+      title: 'Connection points',
+      rows: [
+        { id: 'connpts-1', boxes: ['Modern', 'Classic'], text: 'View > Connection Points shows every shape\'s points, and turns them off again.' },
+        { id: 'connpts-2', boxes: ['Modern', 'Classic'], text: 'Connection Point Tool: click a shape to select it (outline and points show); drag a point to move it, and a connector glued to it follows.' },
+        { id: 'connpts-3', boxes: ['Modern', 'Classic'], text: '⌘-click on the selected shape adds a point; select a point and press Delete to remove it.' },
+        { id: 'connpts-4', boxes: ['Modern', 'Classic'], text: 'Right-click a point to set Inward, Outward or Inward & Outward.' }
+      ]
+    },
+    {
+      id: 'view',
+      title: 'View and pages',
+      rows: [
+        { id: 'view-1', boxes: ['Modern', 'Classic'], text: 'Zoom in, zoom out and Fit to Window; scroll and pan around the page.' },
+        { id: 'view-2', boxes: ['Modern', 'Classic'], text: 'Add, rename, switch between and delete pages.' },
+        { id: 'view-3', boxes: ['Pass'], text: 'The Shapes window search finds a shape by name.' },
+        { id: 'view-4', boxes: ['Pass'], text: 'Help > About shows the version and Larry\'s photo.' }
+      ]
+    }
+  ];
+
+  let state = {};
+  let clearTimeoutId = null;
+
+  function loadState() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        state = JSON.parse(raw);
+      }
+    } catch (e) {
+      console.warn('Failed to load state:', e);
+      state = {};
+    }
+  }
+
+  function saveState() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch (e) {
+      console.warn('Failed to save state:', e);
+    }
+  }
+
+  function getBoxState(rowId, boxLabel) {
+    const key = rowId + '-' + boxLabel.toLowerCase().replace(/\s+/g, '-');
+    return !!state[key];
+  }
+
+  function setBoxState(rowId, boxLabel, value) {
+    const key = rowId + '-' + boxLabel.toLowerCase().replace(/\s+/g, '-');
+    state[key] = value;
+    saveState();
+  }
+
+  function getNoteState(rowId) {
+    const key = rowId + '-note';
+    return state[key] || '';
+  }
+
+  function setNoteState(rowId, value) {
+    const key = rowId + '-note';
+    state[key] = value;
+    saveState();
+  }
+
+  function countChecked(row) {
+    let count = 0;
+    for (const box of row.boxes) {
+      if (getBoxState(row.id, box)) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  function countTotalBoxes(rows) {
+    let total = 0;
+    for (const row of rows) {
+      total += row.boxes.length;
+    }
+    return total;
+  }
+
+  function countCheckedBoxes(rows) {
+    let checked = 0;
+    for (const row of rows) {
+      checked += countChecked(row);
+    }
+    return checked;
+  }
+
+  function updateProgress() {
+    const totalRows = sections.reduce((sum, s) => sum + s.rows.length, 0);
+    const totalBoxes = countTotalBoxes(sections.flatMap(s => s.rows));
+    const checkedBoxes = countCheckedBoxes(sections.flatMap(s => s.rows));
+
+    document.getElementById('overall-progress').textContent =
+      checkedBoxes + ' of ' + totalBoxes + ' checks passed';
+
+    for (const section of sections) {
+      const total = countTotalBoxes(section.rows);
+      const checked = countCheckedBoxes(section.rows);
+      const el = document.getElementById('progress-' + section.id);
+      if (el) {
+        el.textContent = checked + ' of ' + total + ' passed';
+      }
+    }
+  }
+
+  function renderRow(sectionId, row) {
+    const div = document.createElement('div');
+    div.className = 'row';
+
+    const text = document.createElement('p');
+    text.className = 'row-text';
+    text.textContent = row.text;
+    div.appendChild(text);
+
+    const controls = document.createElement('div');
+    controls.className = 'row-controls';
+
+    const boxGroup = document.createElement('div');
+    boxGroup.className = 'box-group';
+
+    for (const boxLabel of row.boxes) {
+      const label = document.createElement('label');
+      label.className = 'box-label';
+
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.id = row.id + '-' + boxLabel.toLowerCase().replace(/\s+/g, '-');
+      input.checked = getBoxState(row.id, boxLabel);
+      input.addEventListener('change', function() {
+        setBoxState(row.id, boxLabel, this.checked);
+        updateProgress();
+      });
+
+      label.appendChild(input);
+      label.appendChild(document.createTextNode(boxLabel));
+      boxGroup.appendChild(label);
+    }
+
+    controls.appendChild(boxGroup);
+
+    const noteInput = document.createElement('input');
+    noteInput.type = 'text';
+    noteInput.className = 'note-input';
+    noteInput.id = row.id + '-note';
+    noteInput.placeholder = 'Note (optional)';
+    noteInput.value = getNoteState(row.id);
+    noteInput.addEventListener('input', function() {
+      setNoteState(row.id, this.value);
+    });
+    controls.appendChild(noteInput);
+
+    div.appendChild(controls);
+
+    return div;
+  }
+
+  function renderSection(section) {
+    const div = document.createElement('section');
+    div.className = 'section';
+
+    const title = document.createElement('h2');
+    title.className = 'section-title';
+    title.textContent = section.title;
+    div.appendChild(title);
+
+    const progress = document.createElement('p');
+    progress.className = 'section-progress';
+    progress.id = 'progress-' + section.id;
+    progress.textContent = '0 of 0 passed';
+    div.appendChild(progress);
+
+    for (const row of section.rows) {
+      div.appendChild(renderRow(section.id, row));
+    }
+
+    return div;
+  }
+
+  function render() {
+    const container = document.getElementById('checks-container');
+    container.innerHTML = '';
+
+    for (const section of sections) {
+      container.appendChild(renderSection(section));
+    }
+
+    updateProgress();
+  }
+
+  function copyResults() {
+    const totalBoxes = countTotalBoxes(sections.flatMap(s => s.rows));
+    const checkedBoxes = countCheckedBoxes(sections.flatMap(s => s.rows));
+
+    let lines = [];
+    lines.push(checkedBoxes + ' of ' + totalBoxes + ' checks passed');
+    lines.push('');
+
+    for (const section of sections) {
+      lines.push(section.title);
+      const total = countTotalBoxes(section.rows);
+      const checked = countCheckedBoxes(section.rows);
+      lines.push('(' + checked + ' of ' + total + ')');
+      lines.push('');
+
+      for (const row of section.rows) {
+        let rowStr = '';
+        for (const box of row.boxes) {
+          const isChecked = getBoxState(row.id, box);
+          rowStr += (isChecked ? '[x]' : '[ ]') + ' ' + box + ' ';
+        }
+        rowStr += row.text;
+
+        const note = getNoteState(row.id);
+        if (note) {
+          rowStr += ' — ' + note;
+        }
+
+        lines.push(rowStr);
+      }
+
+      lines.push('');
+    }
+
+    const text = lines.join('\n');
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(
+        function() {
+          setStatus('Copied');
+        },
+        function(err) {
+          console.warn('Clipboard failed:', err);
+          showFallback(text);
+        }
+      );
+    } else {
+      showFallback(text);
+    }
+  }
+
+  function showFallback(text) {
+    const textarea = document.getElementById('fallback-text');
+    textarea.value = text;
+    textarea.style.display = 'block';
+    textarea.select();
+    setStatus('Select the text below and copy it');
+  }
+
+  function setStatus(message) {
+    const statusEl = document.getElementById('status');
+    statusEl.textContent = message;
+    setTimeout(function() {
+      statusEl.textContent = '';
+    }, 3000);
+  }
+
+  function clearAll() {
+    const btn = document.getElementById('clear-btn');
+
+    if (btn.textContent === 'Clear all') {
+      btn.textContent = 'Click again to clear';
+
+      if (clearTimeoutId !== null) {
+        clearTimeout(clearTimeoutId);
+      }
+
+      clearTimeoutId = setTimeout(function() {
+        btn.textContent = 'Clear all';
+        clearTimeoutId = null;
+      }, 4000);
+
+      return;
+    }
+
+    if (clearTimeoutId !== null) {
+      clearTimeout(clearTimeoutId);
+      clearTimeoutId = null;
+    }
+
+    state = {};
+    saveState();
+
+    const inputs = document.querySelectorAll('input[type="checkbox"]');
+    for (const input of inputs) {
+      input.checked = false;
+    }
+
+    const noteInputs = document.querySelectorAll('.note-input');
+    for (const input of noteInputs) {
+      input.value = '';
+    }
+
+    btn.textContent = 'Clear all';
+    updateProgress();
+    setStatus('All cleared');
+  }
+
+  function init() {
+    loadState();
+    render();
+
+    document.getElementById('copy-btn').addEventListener('click', copyResults);
+    document.getElementById('clear-btn').addEventListener('click', clearAll);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
+</script>
