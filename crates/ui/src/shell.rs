@@ -722,13 +722,13 @@ impl Shell {
             // the shortcut table nudges shapes with them (task P7-19).
             self.shapes.handle_keys(ui.ctx());
         }
-        // The connector unglue step of the arrow keys (task P7-33
-        // item 5): with connectors selected an arrow key unglues both
-        // ends of each and nudges them in one `shape.move` edit (ADR
-        // 0084 rule 1: a move unglues each end whose target does not
-        // move with it). Ordinary shapes keep today's arrow behaviour.
+        // The arrow keys nudge the selection in one `shape.move` edit
+        // (task P7-33 item 5; shapes too since the user's 2026-11-05
+        // pass). A selected connector's ends unglue (ADR 0084 rule 1:
+        // a move unglues each end whose target does not move with it),
+        // and connectors glued to a nudged shape follow it.
         if let Some(delta) = self.arrow_nudge_delta(ui) {
-            self.nudge_connectors(delta);
+            self.nudge_selection(delta);
         }
         // F2 and a typed character start editing the selected shape's
         // text (task P7-25 item 8).
@@ -3049,23 +3049,17 @@ impl Shell {
     }
 
     /// The nudge delta of this frame's arrow presses (task P7-33 item
-    /// 5), `None` when the arrows are not the connector unglue step:
-    /// the page does not hold the keys ([`Self::page_has_keys`]), no
-    /// connector is selected, or no plain or Shift arrow was pressed. The pressed arrows are consumed (removed from the
-    /// input) when the step runs, so the shortcut table's
-    /// `arrange.nudge` stub does not fire beside it.
+    /// 5), `None` when the arrows do not nudge: the page does not hold
+    /// the keys ([`Self::page_has_keys`]), nothing is selected, or no
+    /// plain or Shift arrow was pressed. The pressed arrows are
+    /// consumed (removed from the input) when the step runs, so the
+    /// shortcut table's `arrange.nudge` stub does not fire beside it.
     fn arrow_nudge_delta(&self, ui: &Ui) -> Option<(f64, f64)> {
         if !self.page_has_keys(ui) || ui.ctx().text_edit_focused() {
             return None;
         }
         let session = self.app.active_document()?;
-        if !self
-            .app
-            .selection
-            .shapes
-            .iter()
-            .any(|shape| session.document.is_connector(*shape))
-        {
+        if self.app.selection.shapes.is_empty() {
             return None;
         }
         let zoom = if session.view.zoom.is_finite() && session.view.zoom > 0.0 {
@@ -3121,41 +3115,19 @@ impl Shell {
         fired.then_some(delta)
     }
 
-    /// Runs the connector unglue step's one `shape.move` over the
-    /// selected connectors (task P7-33 item 5). The command moves the
-    /// selection, so the step runs it over the connectors alone and
-    /// restores the selection after: the ordinary shapes of a mixed
-    /// selection keep today's arrow behaviour.
-    fn nudge_connectors(&mut self, delta: (f64, f64)) {
-        let Some(session) = self.app.active_document() else {
-            return;
-        };
-        let connectors: Vec<ShapeId> = self
-            .app
-            .selection
-            .shapes
-            .iter()
-            .copied()
-            .filter(|shape| session.document.is_connector(*shape))
-            .collect();
-        if connectors.is_empty() {
-            return;
-        }
+    /// Nudges the selection by `delta` inches in one `shape.move` edit
+    /// (the arrow keys).
+    fn nudge_selection(&mut self, delta: (f64, f64)) {
         let args = larrygram_commands::Args::new()
             .with("dx", ArgValue::Number(delta.0))
             .with("dy", ArgValue::Number(delta.1));
         let Ok(command) = CommandId::parse("shape.move") else {
             return;
         };
-        let saved_shapes = std::mem::replace(&mut self.app.selection.shapes, connectors);
-        let saved_anchor = self.app.selection.anchor;
-        self.app.selection.anchor = saved_shapes.last().copied();
         let intent = Intent::new(command, Invocation::new(args, Source::Shortcut));
         if let Err(error) = self.dispatch(&[intent]) {
             self.note_error(error.to_string());
         }
-        self.app.selection.shapes = saved_shapes;
-        self.app.selection.anchor = saved_anchor;
     }
 
     /// Dispatches one intent, answering a `NeedsInput` from an

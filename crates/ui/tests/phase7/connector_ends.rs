@@ -759,9 +759,10 @@ fn an_arrow_key_unglues_both_ends_and_nudges_in_one_step(kind: LayoutKind) {
     );
 }
 
-/// Ordinary shapes keep today's arrow behaviour: the connector unglue
-/// step never touches them (task P7-33 item 5).
-fn the_arrow_step_leaves_ordinary_shapes_alone(kind: LayoutKind) {
+/// The arrow keys nudge an ordinary shape too (the user's 2026-11-05
+/// pass: they did nothing): a plain arrow by the nudge step, Shift by
+/// one screen pixel, each one undoable step.
+fn an_arrow_key_nudges_a_shape(kind: LayoutKind) {
     let mut rig = rig(kind, false);
     let at = screen(&rig, A.0, A.1);
     click_at(&mut rig, at);
@@ -772,23 +773,38 @@ fn the_arrow_step_leaves_ordinary_shapes_alone(kind: LayoutKind) {
             "the click selects shape A"
         );
     }
-    let before = snapshot(&rig);
+    let shape = ShapeId { index: 0 };
+    let x = number(&snapshot(&rig), shape, "PinX");
     press_key(&mut rig, egui::Key::ArrowRight, egui::Modifiers::NONE);
-    assert_eq!(
-        snapshot(&rig),
-        before,
-        "ordinary shapes keep today's arrow behaviour"
+    let nudged = number(&snapshot(&rig), shape, "PinX");
+    assert!(
+        (nudged - (x + larrygram_ui::shell::NUDGE_IN)).abs() < 1.0e-9,
+        "{kind:?}: the arrow nudges the shape: {x} -> {nudged}"
+    );
+    press_key(&mut rig, egui::Key::ArrowUp, egui::Modifiers::SHIFT);
+    let y = number(&snapshot(&rig), shape, "PinY");
+    let y0 = A.1;
+    assert!(
+        (y - (y0 + 1.0 / 96.0)).abs() < 1.0e-6,
+        "{kind:?}: Shift+arrow nudges one pixel: {y0} -> {y}"
+    );
+    // Each nudge is one undo step.
+    rig.dispatch("edit.undo");
+    rig.dispatch("edit.undo");
+    assert!(
+        (number(&snapshot(&rig), shape, "PinX") - x).abs() < 1.0e-9,
+        "{kind:?}: two undos restore the shape"
     );
 }
 
 #[test]
-fn the_arrow_step_leaves_ordinary_shapes_alone_in_panel_modern() {
-    the_arrow_step_leaves_ordinary_shapes_alone(LayoutKind::PanelModern);
+fn an_arrow_key_nudges_a_shape_in_panel_modern() {
+    an_arrow_key_nudges_a_shape(LayoutKind::PanelModern);
 }
 
 #[test]
-fn the_arrow_step_leaves_ordinary_shapes_alone_in_panel_classic() {
-    the_arrow_step_leaves_ordinary_shapes_alone(LayoutKind::PanelClassic);
+fn an_arrow_key_nudges_a_shape_in_panel_classic() {
+    an_arrow_key_nudges_a_shape(LayoutKind::PanelClassic);
 }
 
 #[test]
