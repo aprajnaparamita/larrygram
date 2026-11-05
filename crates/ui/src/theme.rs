@@ -117,7 +117,9 @@ pub fn metric_field(theme: &Theme, token: &str, field: &str) -> f64 {
     }
 }
 
-/// Builds the egui font list with Selawik as the proportional UI font.
+/// Builds the egui font list with Selawik as the proportional UI font
+/// and the drawn faces as named families (task P7-53: the text editor
+/// field shows each run's face).
 fn font_definitions() -> FontDefinitions {
     let mut definitions = FontDefinitions::default();
     let faces = [
@@ -129,6 +131,24 @@ fn font_definitions() -> FontDefinitions {
         definitions
             .font_data
             .insert(name.to_owned(), Arc::new(FontData::from_static(bytes)));
+    }
+    // The bundled faces the drawn text uses (their OFL licenses are in
+    // `crates/text/fonts`): one named family per face, so the editor
+    // field can show a run's bold and italic (task P7-53).
+    for (family, sources) in [
+        ("Carlito", larrygram_text::CARLITO),
+        ("Selawik", larrygram_text::SELAWIK),
+    ] {
+        for source in sources {
+            definitions.font_data.insert(
+                source.name.to_owned(),
+                Arc::new(FontData::from_static(source.bytes)),
+            );
+            let face = face_family(family, source.name);
+            definitions
+                .families
+                .insert(FontFamily::Name(face.into()), vec![source.name.to_owned()]);
+        }
     }
 
     let mut proportional = vec![
@@ -154,6 +174,21 @@ fn font_definitions() -> FontDefinitions {
         );
     }
     definitions
+}
+
+/// The named family of one bundled face (task P7-53): `Carlito`,
+/// `Carlito Bold`, `Carlito Italic`, `Carlito Bold Italic` and the
+/// `Selawik` equivalents.
+fn face_family(family: &str, file: &str) -> String {
+    match file {
+        "Carlito-Bold.ttf" | "selawkb.ttf" => format!("{family} Bold"),
+        "Carlito-Italic.ttf" => format!("{family} Italic"),
+        "Carlito-BoldItalic.ttf" => format!("{family} Bold Italic"),
+        "selawkl.ttf" => format!("{family} Light"),
+        "selawksl.ttf" => format!("{family} Semilight"),
+        "selawksb.ttf" => format!("{family} Semibold"),
+        _ => family.to_owned(),
+    }
 }
 
 /// The egui family for a theme font family.

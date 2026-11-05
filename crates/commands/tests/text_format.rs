@@ -262,3 +262,121 @@ fn a_formatted_shape_keeps_its_format_through_save_and_reopen() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// ---------------------------------------------------------------------------
+// The range scope (task P7-53 item 2), at the commands level.
+// ---------------------------------------------------------------------------
+
+/// One run row entry for the `runs`/`runs_keep` arguments.
+fn run_arg(target: i32, seed: Option<i32>) -> ArgValue {
+    let entry = match seed {
+        Some(seed) => format!("{target}:{seed}"),
+        None => format!("{target}:~"),
+    };
+    ArgValue::List(vec![entry])
+}
+
+/// The `Style` of the `Character` row with `IX` `ix`.
+fn row_style(ctx: &AppCtx, shape: ShapeId, ix: i32) -> Option<f64> {
+    let session = ctx.active_document().expect("session");
+    let shape = session.document.shape(shape).expect("shape");
+    shape
+        .sheet
+        .sections
+        .iter()
+        .find(|s| s.name.as_str() == "Character")
+        .and_then(|block| block.rows.iter().find(|row| row.ix == Some(ix)))
+        .and_then(|row| row.cells.iter().find(|cell| cell.name.as_str() == "Style"))
+        .and_then(|cell| match cell.value {
+            Some(larrygram_model::CellValue::Number(value)) => Some(value),
+            _ => None,
+        })
+}
+
+/// A scoped write lands on the named runs only: the kept run is
+/// created plain, the other rows are untouched (task P7-53).
+#[test]
+fn a_scoped_write_lands_on_the_named_runs_only() {
+    let (mut ctx, shape) = catalog();
+    let mut args = Args::new();
+    args.set("runs", run_arg(5, None));
+    args.set("runs_keep", run_arg(3, None));
+    run(&mut ctx, "format.text.bold", args).expect("bold");
+    assert_eq!(
+        row_style(&ctx, shape, 5),
+        Some(1.0),
+        "the named run is bold"
+    );
+    assert_eq!(
+        row_style(&ctx, shape, 3),
+        Some(0.0),
+        "the kept run is created plain"
+    );
+    assert_eq!(row_style(&ctx, shape, 0), None, "no other row appears");
+}
+
+/// A scoped toggle reads the run it seeds from (the fresh row keeps
+/// the split run's style bit).
+#[test]
+fn a_scoped_toggle_reads_the_run_it_seeds() {
+    let (mut ctx, shape) = catalog();
+    // Make run 0 bold first (the whole text).
+    run(&mut ctx, "format.text.bold", Args::new()).expect("bold");
+    assert_eq!(row_style(&ctx, shape, 0), Some(1.0));
+    // A fresh run seeded from it toggles the bit off (it inherits
+    // bold, so the toggle unbolds it).
+    let mut args = Args::new();
+    args.set("runs", run_arg(2, Some(0)));
+    run(&mut ctx, "format.text.bold", args).expect("bold");
+    assert_eq!(row_style(&ctx, shape, 2), Some(0.0), "the seed's bit flips");
+}
+
+/// A malformed `runs` argument is an argument error, never a panic
+/// (task P7-53).
+#[test]
+fn a_malformed_runs_argument_is_an_argument_error() {
+    let (mut ctx, _shape) = catalog();
+    for entry in ["", "x", "1:x", ":3", "1,2"] {
+        let mut args = Args::new();
+        args.set("runs", ArgValue::List(vec![entry.to_owned()]));
+        let error =
+            run(&mut ctx, "format.text.bold", args).expect_err("a bad run entry is refused");
+        let _ = error;
+    }
+    let mut args = Args::new();
+    args.set("runs", ArgValue::Text("5".to_owned()));
+    run(&mut ctx, "format.text.bold", args).expect_err("a non-list is refused");
+}
+
+/// The structured `shape.set.text` form keeps the run markers (task
+/// P7-53: the commit keeps the range formats).
+#[test]
+fn the_structured_text_write_keeps_the_run_markers() {
+    let (mut ctx, shape) = catalog();
+    let mut args = text("text", "Hi!");
+    args.set(
+        "run_ixs",
+        ArgValue::List(vec!["0".to_owned(), "4".to_owned()]),
+    );
+    args.set(
+        "run_texts",
+        ArgValue::List(vec!["Hi".to_owned(), "!".to_owned()]),
+    );
+    run(&mut ctx, "shape.set.text", args).expect("text");
+    let session = ctx.active_document().expect("session");
+    let entry = session.document.shape(shape).expect("shape");
+    let markers: Vec<u32> = entry
+        .text
+        .as_ref()
+        .map(|text| {
+            text.parts
+                .iter()
+                .filter_map(|part| match part {
+                    TextPart::CharRun { ix } => Some(*ix),
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    assert_eq!(markers, vec![0, 4], "one marker per run");
+}

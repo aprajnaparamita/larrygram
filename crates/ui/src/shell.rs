@@ -2156,6 +2156,19 @@ impl Shell {
                 self.cancel_text_box();
                 return;
             };
+            // The field shows each run's format (task P7-53).
+            if let Some(shape) = self.editor.shape {
+                // The field's points follow the drawn text's (task
+                // P7-41 item 9): inches at the canvas scale.
+                let scale = (96.0 * session.view.zoom / 72.0) as f32;
+                let styles = crate::text_edit::run_styles(
+                    &session.document,
+                    shape,
+                    &self.editor.runs(),
+                    scale,
+                );
+                self.editor.set_styles(styles);
+            }
             canvas::show_text_editor(ui, session, rect, &mut self.editor)
         };
         match action {

@@ -715,3 +715,37 @@ fn a_range_format_survives_a_later_edit() {
         );
     }
 }
+
+/// The format shows in the editor field while the text is being
+/// edited (task P7-53 item 2): the field itself redraws at the
+/// format before anything is committed.
+#[test]
+fn the_format_shows_in_the_editor_field_while_editing() {
+    for kind in LAYOUTS {
+        let (mut rig, _shape) = catalog_rig(kind);
+        let pos = screen(&rig, SHAPE.0, SHAPE.1);
+        double_click_at(&mut rig, pos);
+        assert!(
+            has(&mut rig, Role::MultilineTextInput, "Text"),
+            "{kind:?}: the double click opens the editor"
+        );
+        // A bare caret: the format applies to the whole text and the
+        // whole field redraws (no selection highlight in the way).
+        let plain = rig.render();
+        click(&mut rig, Role::Button, "Bold");
+        let bold = rig.render();
+        let differ = text_differ(&rig, &plain, &bold);
+        assert!(
+            differ > 0,
+            "{kind:?}: the field shows the bold before the commit ({differ} px)"
+        );
+        pick_size(&mut rig, kind, "36 pt");
+        let sized = rig.render();
+        let differ = text_differ(&rig, &bold, &sized);
+        assert!(
+            differ > 0,
+            "{kind:?}: the field shows the size before the commit ({differ} px)"
+        );
+        press_key(&mut rig, egui::Key::Escape);
+    }
+}

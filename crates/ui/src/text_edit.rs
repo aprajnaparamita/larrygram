@@ -37,6 +37,30 @@ struct RunSpan {
     ix: Option<i32>,
 }
 
+/// The drawn format of one edited run (task P7-53): what the editor
+/// field shows for it while the text is being edited.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RunStyle {
+    /// The run's first character of the buffer.
+    pub start: usize,
+    /// One past the run's last character.
+    pub end: usize,
+    /// The face's family name (`Carlito`, ...).
+    pub family: String,
+    /// Bold.
+    pub bold: bool,
+    /// Italic.
+    pub italic: bool,
+    /// The size in points.
+    pub size_pt: f32,
+    /// The colour.
+    pub color: egui::Color32,
+    /// Underlined.
+    pub underline: bool,
+    /// Struck through.
+    pub strikethrough: bool,
+}
+
 /// The run rows one range format writes (task P7-53): the plan the
 /// format command's `runs` and `runs_keep` arguments spell, each entry
 /// a `(target IX, seed IX)` pair (`None` seeds from the run at row
@@ -91,6 +115,8 @@ pub struct TextEditor {
     /// `None` when the caret is a bare caret (a format applies to the
     /// whole text then).
     selection: Option<(usize, usize)>,
+    /// The drawn format of every run (task P7-53): the field shows it.
+    styles: Vec<RunStyle>,
     /// Whether the text field still needs focus on its first frame.
     focus_requested: bool,
     /// Whether the field re-requests the keyboard focus on its next
@@ -433,6 +459,21 @@ impl TextEditor {
         self.selection
     }
 
+    /// The runs of the edited text, `(start, end, row IX)` per run
+    /// (task P7-53): the caller reads their drawn format.
+    pub fn runs(&self) -> Vec<(usize, usize, Option<i32>)> {
+        self.spans
+            .iter()
+            .map(|span| (span.start, span.end, span.ix))
+            .collect()
+    }
+
+    /// Sets the drawn format of every run (task P7-53): the field
+    /// shows it while the text is being edited.
+    pub fn set_styles(&mut self, styles: Vec<RunStyle>) {
+        self.styles = styles;
+    }
+
     /// Re-requests the keyboard focus with the caret where it is (task
     /// P7-41 item 1): after a text-format control click the field
     /// takes the keys back without losing the typed text or the
@@ -586,6 +627,61 @@ impl TextEditor {
                     // The font size matches the drawn text (task
                     // P7-41 item 9).
                     edit = edit.font(font);
+                }
+                // The field shows each run's format (task P7-53): a
+                // rich layout over the plain buffer.
+                let styles = &self.styles;
+                let base = font
+                    .clone()
+                    .unwrap_or_else(|| egui::FontId::new(12.0, egui::FontFamily::Proportional));
+                let halign = overlay.align;
+                let mut layouter =
+                    move |ui: &Ui, buffer: &dyn egui::text_edit::TextBuffer, wrap_width: f32| {
+                        let text = buffer.as_str();
+                        let mut job = egui::text::LayoutJob::default();
+                        job.wrap.max_width = wrap_width;
+                        job.halign = halign;
+                        // egui's own field layouter spells it this
+                        // way (`default_layouter`): break on `\n`,
+                        // keep the trailing whitespace and give every
+                        // section the field's line height, so the
+                        // field geometry is unchanged.
+                        job.break_on_newline = true;
+                        job.keep_trailing_whitespace = true;
+                        let line_height = ui.fonts_mut(|fonts| fonts.row_height(&base))
+                            + ui.spacing().extra_text_line_spacing;
+                        for section in &mut job.sections {
+                            section.format.line_height = Some(line_height);
+                        }
+                        // The runs name characters; slices need bytes.
+                        let mut bounds = Vec::with_capacity(text.len().saturating_add(1));
+                        for (byte, _) in text.char_indices() {
+                            bounds.push(byte);
+                        }
+                        bounds.push(text.len());
+                        let byte = |at: usize| bounds.get(at).copied().unwrap_or(text.len());
+                        let mut cursor = 0;
+                        for style in styles {
+                            let start = byte(style.start);
+                            let end = byte(style.end);
+                            if start > cursor {
+                                job.append(&text[cursor..start], 0.0, plain_format(ui, &base));
+                            }
+                            if end > start {
+                                job.append(&text[start..end], 0.0, styled_format(ui, style));
+                                cursor = end;
+                            }
+                        }
+                        if cursor < text.len() {
+                            job.append(&text[cursor..], 0.0, plain_format(ui, &base));
+                        }
+                        for section in &mut job.sections {
+                            section.format.line_height = Some(line_height);
+                        }
+                        ui.fonts_mut(|fonts| fonts.layout_job(job))
+                    };
+                if !self.styles.is_empty() {
+                    edit = edit.layouter(&mut layouter);
                 }
                 let mut output = edit.hint_text("Text").show(ui);
                 // The frame's selected range (task P7-53): a format
@@ -897,6 +993,143 @@ fn plain_text(text: &TextContent) -> String {
         }
     }
     buffer
+}
+
+/// The field's plain format (task P7-53): the drawn font in the UI
+/// text colour.
+fn plain_format(ui: &Ui, base: &egui::FontId) -> egui::text::TextFormat {
+    egui::text::TextFormat {
+        font_id: base.clone(),
+        color: ui.visuals().text_color(),
+        ..Default::default()
+    }
+}
+
+/// The field's format of one run (task P7-53): its face, size, colour
+/// and decorations. The named face families live in [`crate::theme`];
+/// a family the theme did not register falls back to the proportional
+/// font, with a synthetic italic.
+fn styled_format(ui: &Ui, style: &RunStyle) -> egui::text::TextFormat {
+    let face = face_family_name(&style.family, style.bold, style.italic);
+    let named = egui::FontFamily::Name(face.clone().into());
+    let plain = egui::FontFamily::Name(style.family.as_str().into());
+    let known = ui.fonts(|fonts| fonts.definitions().families.contains_key(&named));
+    let (family, skew) = if known {
+        (named, false)
+    } else {
+        let known = ui.fonts(|fonts| fonts.definitions().families.contains_key(&plain));
+        if known {
+            (plain, style.italic)
+        } else {
+            (egui::FontFamily::Proportional, style.italic)
+        }
+    };
+    egui::text::TextFormat {
+        font_id: egui::FontId::new(style.size_pt, family),
+        color: style.color,
+        italics: skew,
+        underline: underline_stroke(style.underline, style.color),
+        strikethrough: underline_stroke(style.strikethrough, style.color),
+        ..Default::default()
+    }
+}
+
+/// The named family of one face (the [`crate::theme`] convention).
+fn face_family_name(family: &str, bold: bool, italic: bool) -> String {
+    match (bold, italic) {
+        (true, true) => format!("{family} Bold Italic"),
+        (true, false) => format!("{family} Bold"),
+        (false, true) => format!("{family} Italic"),
+        (false, false) => family.to_owned(),
+    }
+}
+
+/// The underline stroke of a run (`Stroke::NONE` when not drawn).
+fn underline_stroke(drawn: bool, color: egui::Color32) -> egui::Stroke {
+    if drawn {
+        egui::Stroke::new(1.0, color)
+    } else {
+        egui::Stroke::NONE
+    }
+}
+
+/// The drawn format of the edited runs (task P7-53): each run's
+/// `Character` row values, read the way the renderer reads them
+/// (`run_style` in `crates/render`), for the editor field to show
+/// while the text is being edited.
+pub fn run_styles(
+    document: &larrygram_model::Document,
+    shape: ShapeId,
+    runs: &[(usize, usize, Option<i32>)],
+    scale: f32,
+) -> Vec<RunStyle> {
+    use larrygram_model::{CellName, CellReader, RowTarget, SheetRef};
+    let sheet = SheetRef::Shape(shape);
+    let fallback_family = document
+        .themes
+        .first()
+        .and_then(|theme| theme.fonts.as_ref())
+        .map(|fonts| fonts.minor_latin.clone())
+        .unwrap_or_default();
+    runs.iter()
+        .map(|(start, end, ix)| {
+            let row = match ix {
+                Some(ix) => RowTarget::by_ix(*ix),
+                None => RowTarget::at(0),
+            };
+            let mut reader = CellReader::new(document);
+            let family = reader
+                .row_text(sheet, "Character", row, &CellName::new("Font"))
+                .unwrap_or_default();
+            let family = if family.is_empty() {
+                fallback_family.clone()
+            } else {
+                family
+            };
+            let size_in = reader
+                .row_number(sheet, "Character", row, &CellName::new("Size"))
+                .unwrap_or(0.0);
+            let size_pt = if size_in > 0.0 { size_in * 72.0 } else { 12.0 };
+            let style = reader
+                .row_number(sheet, "Character", row, &CellName::new("Style"))
+                .unwrap_or(0.0)
+                .round() as i64;
+            let underline = style & 4 != 0
+                || reader
+                    .row_boolean(sheet, "Character", row, &CellName::new("DblUnderline"))
+                    .unwrap_or(false);
+            let strikethrough = reader
+                .row_boolean(sheet, "Character", row, &CellName::new("Strikethru"))
+                .unwrap_or(false)
+                || reader
+                    .row_boolean(
+                        sheet,
+                        "Character",
+                        row,
+                        &CellName::new("DoubleStrikethrough"),
+                    )
+                    .unwrap_or(false);
+            let color = reader
+                .row_color(sheet, "Character", row, &CellName::new("Color"))
+                .unwrap_or(larrygram_model::Color::new(0, 0, 0));
+            let trans = reader
+                .row_number(sheet, "Character", row, &CellName::new("ColorTrans"))
+                .unwrap_or(0.0)
+                .clamp(0.0, 1.0);
+            let alpha = (255.0 * (1.0 - trans)).round().clamp(0.0, 255.0) as u8;
+            RunStyle {
+                start: *start,
+                end: *end,
+                family,
+                bold: style & 1 != 0,
+                italic: style & 2 != 0,
+                size_pt: (size_pt as f64 * f64::from(scale)) as f32,
+                color: egui::Color32::from_rgba_unmultiplied(color.r, color.g, color.b, alpha),
+                underline,
+                strikethrough,
+            }
+        })
+        .collect()
 }
 
 /// The runs of a text (task P7-53): the literal parts over their
