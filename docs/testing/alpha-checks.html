@@ -393,7 +393,8 @@ body {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
-        state = JSON.parse(raw);
+        const parsed = JSON.parse(raw);
+        state = parsed && typeof parsed === 'object' ? parsed : {};
       }
     } catch (e) {
       console.warn('Failed to load state:', e);

@@ -115,7 +115,7 @@ Phase 8: binary `.vsd`, `.vss` and `.vst` import, read-only, in `crates/vsd-bina
 | [R10](tasks/R10.md) | implementer | R9 | boundary | merged with R9 (target dir from cargo metadata, tester steps, tag/version check, Linux install steps, tar times, no release cache) | `c2c835d` |
 | [R11](tasks/R11.md) | implementer | R9, R10 | boundary | merged at `6158ca3` with R12; hand-off gate green at `59834ed` | — |
 | [R12](tasks/R12.md) | implementer | R11 | boundary | merged with R11 at `6158ca3` (the build id fixed at build time and set by `cargo xtask dist`; Windows build tools only on Windows) | — |
-| [R13](tasks/R13.md) | implementer | — | boundary | ready (the alpha manual test checklist page, `docs/testing/alpha-checks.html`; the master publishes it for the user's pass) | — |
+| [R13](tasks/R13.md) | implementer | — | boundary | merged (the alpha manual test checklist page, `docs/testing/alpha-checks.html`, published for the user's pass) | `6faf981` |
 
 ## Phase 9 task board
 
