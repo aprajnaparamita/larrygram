@@ -74,6 +74,7 @@ Phase 7: Panel and Classic layouts, the Larrygram rename and the welcome wizard.
 | [P7-52](tasks/P7-52.md) | implementer | — | I | merged (a recent file opens directly; the Save As fix is on main: `file.save_as` with no path always asks, it used to re-save a saved drawing silently) | 2b98103 |
 | [P7-53](tasks/P7-53.md) | implementer | — | I | ready (text formatting reaches a shape's text, selected or being edited; user pass 2026-11-05) | — |
 | [P7-54](tasks/P7-54.md) | implementer | — | I | merged (custom colour dialog in both layouts; the Backgrounds gallery with Solid Tint, Soft Gradient and Light Grid; Background Color) | 22c84bb |
+| [P7-55](tasks/P7-55.md) | test-engineer | — | I | ready (tests only: commands back to >= 98.4%, ui back to >= 97.0%; the full check at bc08d72 measured 98.3% and 96.9%) | — |
 | [P7-42](tasks/P7-42.md) | implementer | P7-37 | I | merged with P7-46 (one derived dirty rule; close and quit ask Save / Don't Save / Cancel; Cmd/Ctrl+Q, the close button and the macOS app-menu Quit take one walk; the title marker; hand-off gate green at `3ff85e9`) | `2c0468a` |
 | [P7-46](tasks/P7-46.md) | implementer | P7-42 | I | merged with P7-42 (NSTerminateNow with nothing changed, NSTerminateLater answered by the walk; a quit during Close is kept; serial hook tests; no quit on the web) | `2c0468a` |
 | [P7-47](tasks/P7-47.md) | implementer | P7-42, P7-46 | I | merged (an untitled save adopts the picked path and records it as recent; hand-off gate green at `3a6b148`) | `6d6fce8` |
