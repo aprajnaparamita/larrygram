@@ -37,26 +37,14 @@ larrygram-ui-spec = { path = "../../crates/ui-spec" }
 # tree through egui_extras).
 resvg = { version = "0.45.1", default-features = false }
 
-# The Windows icon resource (task R11 goal 3, task R12 goal 4): the
-# build script rasterises the brand `app-icon.svg` into a `.ico` (with
-# the same resvg 0.45.1 the app rasterises its window icon with) and
-# embeds it with winresource. Both are build-host tools: for
-# build-dependencies the cfg is the build host, so they compile only
-# on a Windows host and every other host skips the step and compiles
-# nothing extra. winresource is MIT and resvg MIT OR Apache-2.0
+# The Windows icon resource (task R11 goal 3): the build script
+# rasterises the brand `app-icon.svg` into a `.ico` (with the same
+# resvg 0.45.1 the app rasterises its window icon with) and embeds it
+# with winresource when the target is Windows. They are build-host
+# tools on every host since task R14 (ADR 0085): a Mac cross-builds
+# the Windows package. winresource is MIT and resvg MIT OR Apache-2.0
 # (checked by cargo deny).
-#
-# Task R14: when cross-building for Windows from macOS, the build
-# script also needs resvg and winresource on the non-Windows host,
-# so they are unconditional build-dependencies. The cross-build
-# `embed_windows_icon_cross` function uses both.
-[target.'cfg(windows)'.build-dependencies]
-resvg = { version = "0.45.1", default-features = false }
-winresource = "0.1"
-
-# Task R14: cross-build icon embedding on non-Windows hosts. These
-# are the same crates as the Windows-host block above.
-[target.'cfg(not(windows))'.build-dependencies]
+[build-dependencies]
 resvg = { version = "0.45.1", default-features = false }
 winresource = "0.1"
 
