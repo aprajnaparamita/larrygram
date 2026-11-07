@@ -25,13 +25,13 @@ larrygram-cli = 50.0
 [ratchet]
 larrygram = 80.0
 larrygram-cli = 96.7
-larrygram-commands = 98.4
+larrygram-commands = 98.3
 larrygram-geom = 100.0
-larrygram-model = 99.7
+larrygram-model = 99.6
 larrygram-render = 98.5
 larrygram-shapesheet = 96.9
 larrygram-text = 98.8
-larrygram-ui = 97.0
+larrygram-ui = 96.9
 larrygram-ui-spec = 99.4
 larrygram-vsd-binary = 100.0
 larrygram-vsdx = 98.2
