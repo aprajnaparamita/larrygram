@@ -45,7 +45,18 @@ resvg = { version = "0.45.1", default-features = false }
 # on a Windows host and every other host skips the step and compiles
 # nothing extra. winresource is MIT and resvg MIT OR Apache-2.0
 # (checked by cargo deny).
+#
+# Task R14: when cross-building for Windows from macOS, the build
+# script also needs resvg and winresource on the non-Windows host,
+# so they are unconditional build-dependencies. The cross-build
+# `embed_windows_icon_cross` function uses both.
 [target.'cfg(windows)'.build-dependencies]
+resvg = { version = "0.45.1", default-features = false }
+winresource = "0.1"
+
+# Task R14: cross-build icon embedding on non-Windows hosts. These
+# are the same crates as the Windows-host block above.
+[target.'cfg(not(windows))'.build-dependencies]
 resvg = { version = "0.45.1", default-features = false }
 winresource = "0.1"
 

@@ -26,6 +26,7 @@
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::{
@@ -315,7 +316,8 @@ fn read_tar_gz(path: &Path) -> Result<Vec<ReadEntry>> {
 /// `.tar.gz`. Returns the package path. `os` and `arch` are the
 /// host's `std::env::consts` values (see [`check_host`]);
 /// `source_date_epoch` is the `SOURCE_DATE_EPOCH` value, if any (see
-/// [`archive_mtime`]). The tests pass their own and use a fake
+/// [`archive_mtime`]); `cross` requests a cross-build from a macOS
+/// host (task R14). The tests pass their own and use a fake
 /// [`Sys`], so the whole pipeline runs on hand-built inputs (task R9
 /// tests).
 pub fn dist_linux(
@@ -324,8 +326,12 @@ pub fn dist_linux(
     os: &str,
     arch: &str,
     source_date_epoch: Option<&str>,
+    cross: bool,
 ) -> Result<PathBuf> {
-    check_host(super::Platform::Linux, os, arch)?;
+    check_host(super::Platform::Linux, os, arch, cross)?;
+    if cross {
+        super::check_cross_tools(super::Platform::Linux)?;
+    }
     let mtime = archive_mtime(source_date_epoch, SystemTime::now())?;
     let root = &layout.root;
     let dist = &layout.dist;
@@ -334,8 +340,9 @@ pub fn dist_linux(
     let version = version_from_root(root)?;
     println!("dist linux: building Larrygram {version} for {TARGET}");
 
-    // 1. The release binaries: the shared build step (task R12 goal 2).
-    super::build_release(sys, TARGET)?;
+    // 1. The release binaries: the shared build step (task R12 goal 2),
+    //    or the zigbuild cross-build (task R14 goal 1).
+    super::build_release_with(sys, &mut Command::new("git"), TARGET, cross)?;
     for binary in BINARIES {
         let built = layout.binary(TARGET, binary);
         if !built.is_file() {
@@ -489,7 +496,7 @@ mod tests {
         let tmp = workspace();
         let layout = Layout::under(tmp.path());
         let mut sys = FakeSys::new(&layout.release_dir(TARGET), &["larrygram", "larrygram-cli"]);
-        let package = dist_linux(&mut sys, &layout, "linux", "x86_64", Some("1700000000")).unwrap();
+        let package = dist_linux(&mut sys, &layout, "linux", "x86_64", Some("1700000000"), false).unwrap();
 
         assert_eq!(
             package,
@@ -569,7 +576,7 @@ mod tests {
         let layout = Layout::under(tmp.path());
         let mut sys = FakeSys::new(&layout.release_dir(TARGET), &["larrygram", "larrygram-cli"]);
         let before = archive_mtime(None, SystemTime::now()).unwrap();
-        let package = dist_linux(&mut sys, &layout, "linux", "x86_64", None).unwrap();
+        let package = dist_linux(&mut sys, &layout, "linux", "x86_64", None, false).unwrap();
         for entry in read_tar_gz(&package).unwrap() {
             assert!(entry.mtime >= before, "{} at {}", entry.name, entry.mtime);
         }
@@ -602,7 +609,7 @@ mod tests {
         let tmp = workspace();
         let layout = Layout::under(tmp.path());
         let mut sys = FakeSys::new(&layout.release_dir(TARGET), &["larrygram", "larrygram-cli"]);
-        let err = dist_linux(&mut sys, &layout, "linux", "x86_64", Some("soon")).unwrap_err();
+        let err = dist_linux(&mut sys, &layout, "linux", "x86_64", Some("soon"), false).unwrap_err();
         assert!(err.contains("SOURCE_DATE_EPOCH"), "{err}");
         assert!(sys.calls.is_empty(), "{:?}", sys.calls);
     }
@@ -629,7 +636,7 @@ mod tests {
         let tmp = workspace();
         let layout = Layout::under(tmp.path());
         let mut sys = FakeSys::new(&layout.release_dir(TARGET), &["larrygram"]);
-        let err = dist_linux(&mut sys, &layout, "macos", "aarch64", None).unwrap_err();
+        let err = dist_linux(&mut sys, &layout, "macos", "aarch64", None, false).unwrap_err();
         assert!(err.contains("64-bit x86 Linux only"), "{err}");
         assert!(sys.calls.is_empty(), "{:?}", sys.calls);
     }
@@ -640,7 +647,7 @@ mod tests {
         let tmp = workspace();
         let layout = Layout::under(tmp.path());
         let mut sys = FakeSys::new(&layout.release_dir(TARGET), &["larrygram"]);
-        let err = dist_linux(&mut sys, &layout, "linux", "x86_64", None).unwrap_err();
+        let err = dist_linux(&mut sys, &layout, "linux", "x86_64", None, false).unwrap_err();
         assert!(err.contains("cargo built no release binary"), "{err}");
         assert!(err.contains("larrygram-cli"), "{err}");
     }
@@ -652,7 +659,7 @@ mod tests {
         std::fs::remove_file(tmp.join(DESKTOP_FILE)).unwrap();
         let layout = Layout::under(tmp.path());
         let mut sys = FakeSys::new(&layout.release_dir(TARGET), &["larrygram", "larrygram-cli"]);
-        let err = dist_linux(&mut sys, &layout, "linux", "x86_64", None).unwrap_err();
+        let err = dist_linux(&mut sys, &layout, "linux", "x86_64", None, false).unwrap_err();
         assert!(err.contains("cannot read"), "{err}");
     }
 
@@ -680,5 +687,17 @@ mod tests {
         let tmp = TempDir::new("dist-tar-missing");
         let err = read_tar_gz(&tmp.join("nope.tar.gz")).unwrap_err();
         assert!(err.contains("cannot open"), "{err}");
+    }
+
+    /// The cross-build pipeline checks the host and tools (task R14).
+    #[test]
+    fn dist_linux_cross_checks_host_and_tools() {
+        let tmp = workspace();
+        let layout = Layout::under(tmp.path());
+        let mut sys = FakeSys::new(&layout.release_dir(TARGET), &["larrygram"]);
+        // macOS ARM + --cross is allowed.
+        let err = dist_linux(&mut sys, &layout, "windows", "x86_64", None, true).unwrap_err();
+        assert!(err.contains("only"), "{err}");
+        assert!(sys.calls.is_empty(), "{:?}", sys.calls);
     }
 }

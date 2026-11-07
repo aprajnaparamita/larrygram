@@ -21,6 +21,7 @@
 //! it with a fake runner.
 
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use super::{
     BINARIES, Layout, Sys, WINDOWS_TARGET, check_host, licence_files, package_dir_name,
@@ -127,11 +128,21 @@ fn read_zip(path: &Path) -> Result<Vec<(String, Vec<u8>)>> {
 
 /// The whole build through `sys`: release binaries and the `.zip`.
 /// Returns the package path. `os` and `arch` are the host's
-/// `std::env::consts` values (see [`check_host`]); the tests pass
-/// their own and use a fake [`Sys`], so the whole pipeline runs on
+/// `std::env::consts` values (see [`check_host`]); `cross` requests
+/// a cross-build from a macOS host (task R14). The tests pass their
+/// own and use a fake [`Sys`], so the whole pipeline runs on
 /// hand-built inputs (task R9 tests).
-pub fn dist_windows(sys: &mut dyn Sys, layout: &Layout, os: &str, arch: &str) -> Result<PathBuf> {
-    check_host(super::Platform::Windows, os, arch)?;
+pub fn dist_windows(
+    sys: &mut dyn Sys,
+    layout: &Layout,
+    os: &str,
+    arch: &str,
+    cross: bool,
+) -> Result<PathBuf> {
+    check_host(super::Platform::Windows, os, arch, cross)?;
+    if cross {
+        super::check_cross_tools(super::Platform::Windows)?;
+    }
     let root = &layout.root;
     let dist = &layout.dist;
     std::fs::create_dir_all(dist).map_err(|e| format!("cannot create {}: {e}", dist.display()))?;
@@ -139,8 +150,13 @@ pub fn dist_windows(sys: &mut dyn Sys, layout: &Layout, os: &str, arch: &str) ->
     let version = version_from_root(root)?;
     println!("dist windows: building Larrygram {version} for {TARGET}");
 
-    // 1. The release binaries: the shared build step (task R12 goal 2).
-    super::build_release(sys, TARGET)?;
+    // 1. The release binaries: the shared build step (task R12 goal 2),
+    //    or the xwin cross-build (task R14 goal 2).
+    if cross {
+        super::build_release_xwin(sys, &mut Command::new("git"), TARGET)?;
+    } else {
+        super::build_release(sys, TARGET)?;
+    }
     let mut binaries = Vec::new();
     for name in binary_names() {
         let built = layout.binary(TARGET, &name);
@@ -219,7 +235,7 @@ mod tests {
         let layout = Layout::under(tmp.path());
         let bin_dir = layout.release_dir(TARGET);
         let mut sys = FakeSys::new(&bin_dir, &["larrygram.exe", "larrygram-cli.exe"]);
-        let package = dist_windows(&mut sys, &layout, "windows", "x86_64").unwrap();
+        let package = dist_windows(&mut sys, &layout, "windows", "x86_64", false).unwrap();
 
         assert_eq!(
             package,
@@ -262,7 +278,7 @@ mod tests {
         let tmp = workspace();
         let layout = Layout::under(tmp.path());
         let mut sys = FakeSys::new(&layout.release_dir(TARGET), &["larrygram.exe"]);
-        let err = dist_windows(&mut sys, &layout, "linux", "x86_64").unwrap_err();
+        let err = dist_windows(&mut sys, &layout, "linux", "x86_64", false).unwrap_err();
         assert!(err.contains("64-bit Windows only"), "{err}");
         assert!(sys.calls.is_empty(), "{:?}", sys.calls);
     }
@@ -274,7 +290,7 @@ mod tests {
         let layout = Layout::under(tmp.path());
         // The fake writes the two exes; the pipeline must still find them.
         let mut sys = FakeSys::new(&layout.release_dir(TARGET), &["larrygram.exe"]);
-        let err = dist_windows(&mut sys, &layout, "windows", "x86_64").unwrap_err();
+        let err = dist_windows(&mut sys, &layout, "windows", "x86_64", false).unwrap_err();
         assert!(err.contains("cargo built no release binary"), "{err}");
         assert!(err.contains("larrygram-cli.exe"), "{err}");
     }
@@ -293,7 +309,7 @@ mod tests {
             &layout.release_dir(TARGET),
             &["larrygram.exe", "larrygram-cli.exe"],
         );
-        let err = dist_windows(&mut sys, &layout, "windows", "x86_64").unwrap_err();
+        let err = dist_windows(&mut sys, &layout, "windows", "x86_64", false).unwrap_err();
         assert!(err.contains("cannot read"), "{err}");
     }
 
@@ -312,5 +328,17 @@ mod tests {
         let tmp = TempDir::new("dist-zip-missing");
         let err = read_zip(&tmp.join("nope.zip")).unwrap_err();
         assert!(err.contains("cannot open"), "{err}");
+    }
+
+    /// The cross-build pipeline checks the host and tools (task R14).
+    #[test]
+    fn dist_windows_cross_checks_host_and_tools() {
+        let tmp = workspace();
+        let layout = Layout::under(tmp.path());
+        let mut sys = FakeSys::new(&layout.release_dir(TARGET), &["larrygram.exe"]);
+        // macOS ARM + --cross is allowed.
+        let err = dist_windows(&mut sys, &layout, "linux", "x86_64", true).unwrap_err();
+        assert!(err.contains("only"), "{err}");
+        assert!(sys.calls.is_empty(), "{:?}", sys.calls);
     }
 }

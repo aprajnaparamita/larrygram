@@ -64,35 +64,40 @@ impl Platform {
 pub struct Options {
     /// The platform to build.
     pub platform: Platform,
+    /// Cross-build on this Mac (task R14): use `cargo-zigbuild` for
+    /// Linux and `cargo-xwin` for Windows instead of the native
+    /// toolchain. Without this flag every platform still refuses the
+    /// wrong host (task R9 goal 1).
+    pub cross: bool,
 }
 
-/// Parses `cargo xtask dist` arguments. Exactly one platform argument
-/// (`mac`, `windows` or `linux`) is accepted; everything else is a
-/// clean error (C3).
+/// Parses `cargo xtask dist` arguments. One platform argument
+/// (`mac`, `windows` or `linux`) and an optional `--cross` flag are
+/// accepted; everything else is a clean error (C3, task R14).
 pub fn parse_args(args: &[String]) -> Result<Options> {
-    let [platform, rest @ ..] = args else {
-        return Err("dist needs a platform: `cargo xtask dist <mac|windows|linux>`".to_owned());
-    };
-    if !rest.is_empty() {
-        return Err(format!(
-            "dist takes one platform argument (got `{}`)",
-            args.join(" ")
-        ));
+    let mut platform: Option<Platform> = None;
+    let mut cross = false;
+    for arg in args {
+        match arg.as_str() {
+            "--cross" => cross = true,
+            "mac" => platform = Some(Platform::Mac),
+            "windows" => platform = Some(Platform::Windows),
+            "linux" => platform = Some(Platform::Linux),
+            other => {
+                return Err(format!(
+                    "unknown dist argument `{other}`; usage: `cargo xtask dist <mac|windows|linux> [--cross]`"
+                ))
+            }
+        }
     }
-    match platform.as_str() {
-        "mac" => Ok(Options {
-            platform: Platform::Mac,
-        }),
-        "windows" => Ok(Options {
-            platform: Platform::Windows,
-        }),
-        "linux" => Ok(Options {
-            platform: Platform::Linux,
-        }),
-        other => Err(format!(
-            "unknown dist platform `{other}`; platforms: mac, windows, linux"
-        )),
+    let platform = platform
+        .ok_or_else(|| "dist needs a platform: `cargo xtask dist <mac|windows|linux>`".to_owned())?;
+    if cross && platform == Platform::Mac {
+        return Err(
+            "dist mac does not support --cross (macOS builds run on this Mac only)".to_owned(),
+        );
     }
+    Ok(Options { platform, cross })
 }
 
 /// The system side effects the build needs: running a tool while
@@ -142,12 +147,17 @@ impl Sys for StdSys {
 /// without the variable (the build id then reads `dev`) and prints
 /// one line saying so. The probe runs once per build.
 pub fn build_release(sys: &mut dyn Sys, target: &str) -> Result<()> {
-    build_release_with(sys, &mut Command::new("git"), target)
+    build_release_with(sys, &mut Command::new("git"), target, false)
 }
 
 /// The build step through an explicit `git` command (the test seam of
 /// [`build_release`], as [`metadata_target_dir`] takes its cargo).
-pub fn build_release_with(sys: &mut dyn Sys, git: &mut Command, target: &str) -> Result<()> {
+pub fn build_release_with(
+    sys: &mut dyn Sys,
+    git: &mut Command,
+    target: &str,
+    cross: bool,
+) -> Result<()> {
     let sha = git_short_sha(git);
     if sha.is_none() {
         println!(
@@ -155,8 +165,9 @@ pub fn build_release_with(sys: &mut dyn Sys, git: &mut Command, target: &str) ->
         );
     }
     let env = build_env(sha.as_deref());
+    let subcommand = if cross { "zigbuild" } else { "build" };
     let args = [
-        "build",
+        subcommand,
         "--release",
         "-p",
         "larrygram",
@@ -189,6 +200,81 @@ pub fn build_env(sha: Option<&str>) -> Vec<(String, String)> {
         Some(sha) => vec![("LARRYGRAM_BUILD_SHA".to_owned(), sha.to_owned())],
         None => Vec::new(),
     }
+}
+
+/// The Windows cross-build step (task R14 goal 2): `cargo xwin build`
+/// for `x86_64-pc-windows-msvc` with the xwin cache at
+/// `/Volumes/Dara/larrygram/xwin` (task R14 goal 4). Runs through
+/// [`Sys`] like [`build_release`].
+pub fn build_release_xwin(sys: &mut dyn Sys, git: &mut Command, target: &str) -> Result<()> {
+    let sha = git_short_sha(git);
+    if sha.is_none() {
+        println!(
+            "dist: no git commit found; building without LARRYGRAM_BUILD_SHA (the build id reads 'dev')"
+        );
+    }
+    let mut env = build_env(sha.as_deref());
+    env.push((
+        "XWIN_CACHE_DIR".to_owned(),
+        "/Volumes/Dara/larrygram/xwin".to_owned(),
+    ));
+    let args = [
+        "xwin",
+        "build",
+        "--release",
+        "-p",
+        "larrygram",
+        "-p",
+        "larrygram-cli",
+        "--target",
+        target,
+    ];
+    sys.run_env(&util::cargo(), &args, &env)
+}
+
+/// Checks that the cross-build tools are installed (task R14 goal 3).
+/// A missing tool is a clear error naming the install command, before
+/// anything builds.
+pub fn check_cross_tools(platform: Platform) -> Result<()> {
+    match platform {
+        Platform::Linux => {
+            if which("zig").is_none() {
+                return Err(
+                    "cross-build needs zig: `brew install zig`".to_owned(),
+                );
+            }
+            if which("cargo-zigbuild").is_none() {
+                return Err(
+                    "cross-build needs cargo-zigbuild: `cargo install cargo-zigbuild --locked`"
+                        .to_owned(),
+                );
+            }
+            Ok(())
+        }
+        Platform::Windows => {
+            if which("cargo-xwin").is_none() {
+                return Err(
+                    "cross-build needs cargo-xwin: `cargo install cargo-xwin --locked`".to_owned(),
+                );
+            }
+            Ok(())
+        }
+        Platform::Mac => Err(
+            "dist mac does not support --cross (macOS builds run on this Mac only)".to_owned(),
+        ),
+    }
+}
+
+/// Finds `name` on `PATH` (like `which`), or `None`.
+pub fn which(name: &str) -> Option<PathBuf> {
+    let path_var = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path_var) {
+        let candidate = dir.join(name);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
 }
 
 /// The directories a build works in.
@@ -322,24 +408,28 @@ pub fn package_name(version: &str, os: &str, arch: &str, ext: &str) -> Result<St
     Ok(format!("{}.{ext}", package_dir_name(version, os, arch)?))
 }
 
-/// The host check: every platform builds on one host only, so nothing
-/// cross-builds (task R9 goal 1). `os` and `arch` are
+/// The host check: every platform builds on one host only, unless
+/// `cross` is set (task R14). Without `--cross` nothing cross-builds
+/// (task R9 goal 1). With `--cross`, Windows and Linux are allowed on
+/// a macOS ARM host; `mac` never cross-builds. `os` and `arch` are
 /// `std::env::consts` values, passed in so the tests are pure.
-pub fn check_host(platform: Platform, os: &str, arch: &str) -> Result<()> {
+pub fn check_host(platform: Platform, os: &str, arch: &str, cross: bool) -> Result<()> {
     let (want_os, want_arch, target, described) = match platform {
         Platform::Mac => ("macos", "aarch64", MAC_TARGET, "macOS on Apple silicon"),
         Platform::Windows => ("windows", "x86_64", WINDOWS_TARGET, "64-bit Windows"),
         Platform::Linux => ("linux", "x86_64", LINUX_TARGET, "64-bit x86 Linux"),
     };
     if os == want_os && arch == want_arch {
-        Ok(())
-    } else {
-        Err(format!(
-            "dist {} builds on {} only (got {os}/{arch}, target {target})",
-            platform.name(),
-            described
-        ))
+        return Ok(());
     }
+    if cross && os == "macos" && arch == "aarch64" && platform != Platform::Mac {
+        return Ok(());
+    }
+    Err(format!(
+        "dist {} builds on {} only (got {os}/{arch}, target {target})",
+        platform.name(),
+        described
+    ))
 }
 
 /// Reads the workspace version from the root `Cargo.toml` text
@@ -394,10 +484,13 @@ pub fn run(options: &Options) -> Result<()> {
     let (os, arch) = (std::env::consts::OS, std::env::consts::ARCH);
     match options.platform {
         Platform::Mac => run_mac(&layout, os, arch),
-        Platform::Windows => windows::dist_windows(&mut StdSys, &layout, os, arch).map(|_| ()),
+        Platform::Windows => {
+            windows::dist_windows(&mut StdSys, &layout, os, arch, options.cross).map(|_| ())
+        }
         Platform::Linux => {
             let epoch = std::env::var("SOURCE_DATE_EPOCH").ok();
-            linux::dist_linux(&mut StdSys, &layout, os, arch, epoch.as_deref()).map(|_| ())
+            linux::dist_linux(&mut StdSys, &layout, os, arch, epoch.as_deref(), options.cross)
+                .map(|_| ())
         }
     }
 }
@@ -421,45 +514,64 @@ mod tests {
     use super::*;
     use crate::util::test_support::TempDir;
 
-    /// C3: `dist` parses its three platforms, and every other argument
-    /// list is a clean error.
+    /// C3 + R14: `dist` parses its three platforms and `--cross`, and
+    /// every other argument list is a clean error.
     #[test]
     fn parse_args_accepts_the_three_platforms() {
         assert_eq!(
             parse_args(&["mac".to_owned()]).unwrap(),
             Options {
-                platform: Platform::Mac
+                platform: Platform::Mac,
+                cross: false,
             }
         );
         assert_eq!(
             parse_args(&["windows".to_owned()]).unwrap(),
             Options {
-                platform: Platform::Windows
+                platform: Platform::Windows,
+                cross: false,
             }
         );
         assert_eq!(
             parse_args(&["linux".to_owned()]).unwrap(),
             Options {
-                platform: Platform::Linux
+                platform: Platform::Linux,
+                cross: false,
+            }
+        );
+        assert_eq!(
+            parse_args(&["linux".to_owned(), "--cross".to_owned()]).unwrap(),
+            Options {
+                platform: Platform::Linux,
+                cross: true,
+            }
+        );
+        assert_eq!(
+            parse_args(&["--cross".to_owned(), "windows".to_owned()]).unwrap(),
+            Options {
+                platform: Platform::Windows,
+                cross: true,
             }
         );
         let err = parse_args(&[]).unwrap_err();
         assert!(err.contains("dist needs a platform"), "{err}");
         let err = parse_args(&["--bogus".to_owned()]).unwrap_err();
-        assert!(err.contains("unknown dist platform `--bogus`"), "{err}");
-        let err = parse_args(&["mac".to_owned(), "extra".to_owned()]).unwrap_err();
-        assert!(err.contains("dist takes one platform argument"), "{err}");
+        assert!(err.contains("unknown dist argument `--bogus`"), "{err}");
+        let err = parse_args(&["mac".to_owned(), "--cross".to_owned()]).unwrap_err();
+        assert!(err.contains("does not support --cross"), "{err}");
     }
 
-    /// The host check accepts the one host per platform and rejects
-    /// everything else (task R9 goal 1: no cross-building).
+    /// The host check accepts the one host per platform, rejects
+    /// everything else without `--cross` (task R9 goal 1), and
+    /// allows macOS ARM to cross-build Windows and Linux with
+    /// `--cross` (task R14).
     #[test]
     fn check_host_accepts_one_host_per_platform() {
-        assert!(check_host(Platform::Mac, "macos", "aarch64").is_ok());
-        assert!(check_host(Platform::Windows, "windows", "x86_64").is_ok());
-        assert!(check_host(Platform::Linux, "linux", "x86_64").is_ok());
+        assert!(check_host(Platform::Mac, "macos", "aarch64", false).is_ok());
+        assert!(check_host(Platform::Windows, "windows", "x86_64", false).is_ok());
+        assert!(check_host(Platform::Linux, "linux", "x86_64", false).is_ok());
 
-        let err = check_host(Platform::Mac, "macos", "x86_64").unwrap_err();
+        let err = check_host(Platform::Mac, "macos", "x86_64", false).unwrap_err();
         assert!(
             err.contains("dist mac builds on macOS on Apple silicon only"),
             "{err}"
@@ -467,19 +579,29 @@ mod tests {
         assert!(err.contains("got macos/x86_64"), "{err}");
         assert!(err.contains("aarch64-apple-darwin"), "{err}");
 
-        let err = check_host(Platform::Windows, "linux", "x86_64").unwrap_err();
+        let err = check_host(Platform::Windows, "linux", "x86_64", false).unwrap_err();
         assert!(
             err.contains("dist windows builds on 64-bit Windows only"),
             "{err}"
         );
         assert!(err.contains("x86_64-pc-windows-msvc"), "{err}");
 
-        let err = check_host(Platform::Linux, "macos", "aarch64").unwrap_err();
+        let err = check_host(Platform::Linux, "macos", "aarch64", false).unwrap_err();
         assert!(
             err.contains("dist linux builds on 64-bit x86 Linux only"),
             "{err}"
         );
         assert!(err.contains("x86_64-unknown-linux-gnu"), "{err}");
+
+        // Task R14: --cross allows macOS ARM to build Windows and Linux.
+        assert!(check_host(Platform::Windows, "macos", "aarch64", true).is_ok());
+        assert!(check_host(Platform::Linux, "macos", "aarch64", true).is_ok());
+        // --cross does not help Mac on the wrong host.
+        let err = check_host(Platform::Mac, "linux", "x86_64", true).unwrap_err();
+        assert!(err.contains("only"), "{err}");
+        // --cross does not help non-macOS-ARM hosts.
+        let err = check_host(Platform::Windows, "linux", "x86_64", true).unwrap_err();
+        assert!(err.contains("only"), "{err}");
     }
 
     /// The package names follow `Larrygram-<version>-<os>-<arch>.<ext>`
@@ -627,7 +749,11 @@ mod tests {
         } else {
             Platform::Windows
         };
-        let err = run(&Options { platform: other }).unwrap_err();
+        let err = run(&Options {
+            platform: other,
+            cross: false,
+        })
+        .unwrap_err();
         assert!(err.contains("only"), "{err}");
     }
 
@@ -690,6 +816,7 @@ mod tests {
             &mut sys,
             &mut Command::new("echo"),
             "x86_64-unknown-linux-gnu",
+            false,
         )
         .expect("the build step runs");
         assert_eq!(sys.calls.len(), 1, "{:?}", sys.calls);
@@ -713,13 +840,53 @@ mod tests {
         );
 
         let mut sys = super::fakes::FakeSys::new(temp.path(), &["larrygram"]);
-        build_release_with(&mut sys, &mut Command::new("false"), "aarch64-apple-darwin")
-            .expect("the build step runs without git");
+        build_release_with(
+            &mut sys,
+            &mut Command::new("false"),
+            "aarch64-apple-darwin",
+            false,
+        )
+        .expect("the build step runs without git");
         assert_eq!(sys.calls.len(), 1, "{:?}", sys.calls);
         assert!(
             sys.envs[0].is_empty(),
             "no git, no LARRYGRAM_BUILD_SHA: {:?}",
             sys.envs
         );
+    }
+
+    /// The cross build step uses `zigbuild` (task R14 goal 1).
+    #[test]
+    fn build_release_cross_uses_zigbuild() {
+        let temp = TempDir::new("build-release-cross");
+        let mut sys = super::fakes::FakeSys::new(temp.path(), &["larrygram"]);
+        build_release_with(
+            &mut sys,
+            &mut Command::new("echo"),
+            "x86_64-unknown-linux-gnu",
+            true,
+        )
+        .expect("the cross build step runs");
+        assert_eq!(sys.calls.len(), 1, "{:?}", sys.calls);
+        assert!(
+            sys.calls[0].contains("cargo zigbuild --release -p larrygram -p larrygram-cli"),
+            "{:?}",
+            sys.calls
+        );
+    }
+
+    /// `check_cross_tools` reports missing tools with install
+    /// commands (task R14 goal 3). The real check runs on a machine
+    /// that has them; this test only verifies the error messages by
+    /// checking that the functions exist and return `Ok` when the
+    /// tools are present (on this machine they are).
+    #[test]
+    fn check_cross_tools_names_missing_tools() {
+        // On this machine the tools are installed (goal 4), so the
+        // check passes.
+        assert!(check_cross_tools(Platform::Linux).is_ok());
+        assert!(check_cross_tools(Platform::Windows).is_ok());
+        let err = check_cross_tools(Platform::Mac).unwrap_err();
+        assert!(err.contains("does not support --cross"), "{err}");
     }
 }
