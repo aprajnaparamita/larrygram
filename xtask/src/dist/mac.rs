@@ -315,7 +315,7 @@ pub fn path_arg(path: &Path) -> String {
 /// the tests pass their own and use a fake [`Sys`], so the whole
 /// pipeline runs on hand-built inputs (task R7 checks).
 pub fn dist_mac(sys: &mut dyn Sys, layout: &Layout, os: &str, arch: &str) -> Result<PathBuf> {
-    super::check_host(super::Platform::Mac, os, arch)?;
+    super::check_host(super::Platform::Mac, os, arch, false)?;
     let root = &layout.root;
     let dist = &layout.dist;
     std::fs::create_dir_all(dist).map_err(|e| format!("cannot create {}: {e}", dist.display()))?;

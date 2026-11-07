@@ -62,12 +62,15 @@ tasks:
                                        --check fails when the committed file is stale
   coverage [--update-ratchet]          run coverage and check thresholds
   layers                               check crate layering rules
-  dist <mac|windows|linux>             build the release package for one
+  dist <mac|windows|linux> [--cross]  build the release package for one
                                        platform under <target dir>/dist
                                        (tasks R7 and R9):
                                        mac     Larrygram-<v>-macos-arm64.dmg
                                        windows Larrygram-<v>-windows-x64.zip
                                        linux   Larrygram-<v>-linux-x64.tar.gz
+                                       --cross cross-build Windows/Linux on macOS
+                                              (task R14; needs zig, cargo-zigbuild,
+                                               cargo-xwin)
   corpus [--verify-only] [--offline d] fetch and verify the test corpus (ADR 0005)
                                        --offline copies from a local dir instead of the network
   scout fetch <csv> [--out d]          fetch and pin the wide corpus of a BigQuery export
@@ -333,9 +336,9 @@ mod tests {
         let err = parse_task(&args(&["dist"])).unwrap_err();
         assert!(err.contains("dist needs a platform"), "{err}");
         let err = parse_task(&args(&["dist", "--bogus"])).unwrap_err();
-        assert!(err.contains("unknown dist platform"), "{err}");
-        let err = parse_task(&args(&["dist", "mac", "extra"])).unwrap_err();
-        assert!(err.contains("dist takes one platform argument"), "{err}");
+        assert!(err.contains("unknown dist argument"), "{err}");
+        let err = parse_task(&args(&["dist", "mac", "--cross"])).unwrap_err();
+        assert!(err.contains("does not support --cross"), "{err}");
     }
 
     /// Valid command lines parse into the matching task.
@@ -386,19 +389,29 @@ mod tests {
         assert!(matches!(
             parse_task(&args(&["dist", "mac"])).unwrap(),
             Task::Dist(dist::Options {
-                platform: dist::Platform::Mac
+                platform: dist::Platform::Mac,
+                cross: false,
             })
         ));
         assert!(matches!(
             parse_task(&args(&["dist", "windows"])).unwrap(),
             Task::Dist(dist::Options {
-                platform: dist::Platform::Windows
+                platform: dist::Platform::Windows,
+                cross: false,
             })
         ));
         assert!(matches!(
             parse_task(&args(&["dist", "linux"])).unwrap(),
             Task::Dist(dist::Options {
-                platform: dist::Platform::Linux
+                platform: dist::Platform::Linux,
+                cross: false,
+            })
+        ));
+        assert!(matches!(
+            parse_task(&args(&["dist", "linux", "--cross"])).unwrap(),
+            Task::Dist(dist::Options {
+                platform: dist::Platform::Linux,
+                cross: true,
             })
         ));
     }
