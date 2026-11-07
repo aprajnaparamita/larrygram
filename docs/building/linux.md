@@ -1,9 +1,9 @@
 # Building the Linux package
 
 How to build the Linux alpha package (task R9). The build runs on a
-64-bit x86 Linux machine; there is no cross-building. The CI build is
-the same command on the `ubuntu-22.04` runner
-(`.github/workflows/release.yml`).
+64-bit x86 Linux machine or, with `--cross`, on an Apple-silicon Mac
+(task R14). The CI build is the same command on the `ubuntu-22.04`
+runner (`.github/workflows/release.yml`).
 
 ## What gets built
 
@@ -30,16 +30,35 @@ The archive is written by the pure-Rust `tar` and `flate2` crates: no
 installer (no `.deb`, AppImage or Flatpak) and no signing (task R9
 decisions).
 
-## Prerequisites
+## Prerequisites (native build)
 
 - 64-bit x86 Linux (x86-64). The command refuses any other host.
 - The Rust toolchain the workspace pins (`rust-toolchain.toml`).
 
-## Build
+## Prerequisites (cross-build, task R14)
+
+- An Apple-silicon Mac (macOS aarch64).
+- The Rust toolchain the workspace pins (`rust-toolchain.toml`), with
+  the `x86_64-unknown-linux-gnu` target (`rustup target add
+  x86_64-unknown-linux-gnu`).
+- `zig`: `brew install zig`.
+- `cargo-zigbuild`: `cargo install cargo-zigbuild --locked`.
+
+## Build (native)
 
 ```sh
 cargo xtask dist linux
 ```
+
+## Build (cross, task R14)
+
+```sh
+cargo xtask dist linux --cross
+```
+
+The cross-build uses `cargo zigbuild` with zig as the C compiler and
+linker, targeting glibc 2.31 or older (Ubuntu 20.04+). The zig
+toolchain provides a glibc sysroot without shipping one.
 
 Then unpack the archive and follow its `INSTALL.txt`: the short
 version for one user is
@@ -73,6 +92,9 @@ the path to the app (task R8).
 The binaries are built on the Ubuntu 22.04 runner, so they need
 glibc 2.35 or newer. That is the oldest Ubuntu GitHub still offers
 (task R9 decision): older glibc, wider reach.
+
+A cross-built binary targets glibc 2.31 or older (task R14), so it
+runs on Ubuntu 20.04 and later.
 
 ## CI
 
