@@ -496,7 +496,15 @@ mod tests {
         let tmp = workspace();
         let layout = Layout::under(tmp.path());
         let mut sys = FakeSys::new(&layout.release_dir(TARGET), &["larrygram", "larrygram-cli"]);
-        let package = dist_linux(&mut sys, &layout, "linux", "x86_64", Some("1700000000"), false).unwrap();
+        let package = dist_linux(
+            &mut sys,
+            &layout,
+            "linux",
+            "x86_64",
+            Some("1700000000"),
+            false,
+        )
+        .unwrap();
 
         assert_eq!(
             package,
@@ -609,7 +617,8 @@ mod tests {
         let tmp = workspace();
         let layout = Layout::under(tmp.path());
         let mut sys = FakeSys::new(&layout.release_dir(TARGET), &["larrygram", "larrygram-cli"]);
-        let err = dist_linux(&mut sys, &layout, "linux", "x86_64", Some("soon"), false).unwrap_err();
+        let err =
+            dist_linux(&mut sys, &layout, "linux", "x86_64", Some("soon"), false).unwrap_err();
         assert!(err.contains("SOURCE_DATE_EPOCH"), "{err}");
         assert!(sys.calls.is_empty(), "{:?}", sys.calls);
     }

@@ -86,12 +86,13 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
             other => {
                 return Err(format!(
                     "unknown dist argument `{other}`; usage: `cargo xtask dist <mac|windows|linux> [--cross]`"
-                ))
+                ));
             }
         }
     }
-    let platform = platform
-        .ok_or_else(|| "dist needs a platform: `cargo xtask dist <mac|windows|linux>`".to_owned())?;
+    let platform = platform.ok_or_else(|| {
+        "dist needs a platform: `cargo xtask dist <mac|windows|linux>`".to_owned()
+    })?;
     if cross && platform == Platform::Mac {
         return Err(
             "dist mac does not support --cross (macOS builds run on this Mac only)".to_owned(),
@@ -239,9 +240,7 @@ pub fn check_cross_tools(platform: Platform) -> Result<()> {
     match platform {
         Platform::Linux => {
             if which("zig").is_none() {
-                return Err(
-                    "cross-build needs zig: `brew install zig`".to_owned(),
-                );
+                return Err("cross-build needs zig: `brew install zig`".to_owned());
             }
             if which("cargo-zigbuild").is_none() {
                 return Err(
@@ -259,9 +258,9 @@ pub fn check_cross_tools(platform: Platform) -> Result<()> {
             }
             Ok(())
         }
-        Platform::Mac => Err(
-            "dist mac does not support --cross (macOS builds run on this Mac only)".to_owned(),
-        ),
+        Platform::Mac => {
+            Err("dist mac does not support --cross (macOS builds run on this Mac only)".to_owned())
+        }
     }
 }
 
@@ -489,8 +488,15 @@ pub fn run(options: &Options) -> Result<()> {
         }
         Platform::Linux => {
             let epoch = std::env::var("SOURCE_DATE_EPOCH").ok();
-            linux::dist_linux(&mut StdSys, &layout, os, arch, epoch.as_deref(), options.cross)
-                .map(|_| ())
+            linux::dist_linux(
+                &mut StdSys,
+                &layout,
+                os,
+                arch,
+                epoch.as_deref(),
+                options.cross,
+            )
+            .map(|_| ())
         }
     }
 }

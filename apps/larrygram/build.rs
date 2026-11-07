@@ -46,14 +46,11 @@ fn main() {
     // Task R14: when cross-building for Windows from a non-Windows
     // host, try to embed the icon with llvm-rc. Skip on failure.
     #[cfg(not(windows))]
+    if let Ok(target_os) = std::env::var("CARGO_CFG_TARGET_OS")
+        && target_os == "windows"
+        && let Err(error) = embed_windows_icon_cross()
     {
-        if let Ok(target_os) = std::env::var("CARGO_CFG_TARGET_OS") {
-            if target_os == "windows" {
-                if let Err(error) = embed_windows_icon_cross() {
-                    eprintln!("cargo:warning=windows icon resource skipped (cross-build): {error}");
-                }
-            }
-        }
+        eprintln!("cargo:warning=windows icon resource skipped (cross-build): {error}");
     }
 
     #[cfg(windows)]
@@ -102,9 +99,7 @@ fn embed_windows_icon_cross() -> Result<(), String> {
     let ico_path = Path::new(&out_dir).join("larrygram.ico");
     std::fs::write(&ico_path, ico)
         .map_err(|error| format!("cannot write {}: {error}", ico_path.display()))?;
-    let ico_name = ico_path
-        .to_str()
-        .ok_or("the .ico path is not valid text")?;
+    let ico_name = ico_path.to_str().ok_or("the .ico path is not valid text")?;
 
     let mut res = winresource::WindowsResource::new();
     res.set_icon(ico_name);
@@ -114,11 +109,12 @@ fn embed_windows_icon_cross() -> Result<(), String> {
     let llvm_bin = Path::new("/opt/homebrew/opt/llvm/bin");
     let rc = llvm_bin.join("llvm-rc");
     let ar = llvm_bin.join("llvm-ar");
-    if rc.is_file() && ar.is_file() {
-        if let (Some(rc_s), Some(ar_s)) = (rc.to_str(), ar.to_str()) {
-            res.set_windres_path(rc_s);
-            res.set_ar_path(ar_s);
-        }
+    if rc.is_file()
+        && ar.is_file()
+        && let (Some(rc_s), Some(ar_s)) = (rc.to_str(), ar.to_str())
+    {
+        res.set_windres_path(rc_s);
+        res.set_ar_path(ar_s);
     }
 
     res.compile()
