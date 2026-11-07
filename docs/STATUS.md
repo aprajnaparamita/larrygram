@@ -120,7 +120,7 @@ Phase 8: binary `.vsd`, `.vss` and `.vst` import, read-only, in `crates/vsd-bina
 | [R11](tasks/R11.md) | implementer | R9, R10 | boundary | merged at `6158ca3` with R12; hand-off gate green at `59834ed` | — |
 | [R12](tasks/R12.md) | implementer | R11 | boundary | merged with R11 at `6158ca3` (the build id fixed at build time and set by `cargo xtask dist`; Windows build tools only on Windows) | — |
 | [R13](tasks/R13.md) | implementer | — | boundary | merged (the alpha manual test checklist page, `docs/testing/alpha-checks.html`, published for the user's pass) | `6faf981` |
-| [R14](tasks/R14.md) | implementer | — | boundary | ready (cross-build the Windows .zip and the Linux .tar.gz on the Mac: cargo-xwin, cargo-zigbuild; user's choice 2026-11-08) | — |
+| [R14](tasks/R14.md) | implementer | — | boundary | merged (`dist windows --cross`, `dist linux --cross`; its ratchet change left out; the master folded the icon step into one path, 06a17ab) | 00eebc8 |
 
 ## Phase 9 task board
 
@@ -399,6 +399,7 @@ Open master items: none (the codegen task is part of the P2-01 plan).
 - P7-54: Background Color finds its design by the background page's name, so renaming the page breaks the recolour.
 - P7-54: the text colour dialog opens on black when the run inherits its colour.
 - P7-54: Panel Classic has no Backgrounds gallery (no control in its layout data); only `tools.backgrounds` reaches it.
+- R14: the Linux build is not pinned to a glibc version; it needs GLIBC_2.30 today (Ubuntu 20.04 and later). Pin `x86_64-unknown-linux-gnu.2.31` if a dependency raises it. The cross icon step looks for LLVM at the Homebrew path only.
 
 - P7-51 (open): the field of a new, still-empty text box stays left-aligned with no margins until its first commit (the scene has no text node for it yet); the field falls back to Selawik where the drawn text uses Carlito, so a wrap can fall on a different word.
 - P7-36 (open, master review 2026-11-05): a curved row's `E` cell stores the `NURBS()` text as a cached value with no `F` (a formula would freeze re-routing through `geometry_is_formula_driven`); a black-box check decides whether Visio needs `F`. The style read uses the connector's own cells, not its master's (the Connector master carries `ShapeRouteStyle` 1); a black-box check decides whether instances inherit it. Value 16 and the directed styles route as right angle (open questions 11 and 12). Three test-only trait impls carry never-run `label`/`apply` bodies.
