@@ -367,6 +367,53 @@ pub(crate) enum Place {
     Paragraph,
 }
 
+/// Which rows a row write lands on (task P7-53): every run of the
+/// text, or the runs a selected text range names.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) enum RunScope {
+    /// Every live row of the section (row 0 when the shape has none):
+    /// the whole text.
+    #[default]
+    All,
+    /// The `Character` rows named by `IX` (task P7-53's range rule):
+    /// each is created when missing, seeded from the run it splits, so
+    /// the write reaches exactly the runs it applies to.
+    Runs(RunRows),
+}
+
+/// The rows one scoped write touches (task P7-53).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct RunRows {
+    /// The rows the write lands on.
+    pub write: Vec<RunRow>,
+    /// The rows a split run's other parts use: created and seeded like
+    /// the written rows, never written themselves (the parts outside
+    /// the range keep the run's old look).
+    pub keep: Vec<RunRow>,
+}
+
+/// One row a scoped write lands on: the `Character` row with `IX` `ix`,
+/// created when missing and seeded from `seed` (the copied run's
+/// effective cells; `None` seeds from the run at row position 0).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RunRow {
+    /// The `IX` of the row to write.
+    pub ix: i32,
+    /// The `IX` of the run to copy when the row is missing, or `None`
+    /// for the run at row position 0.
+    pub seed: Option<i32>,
+}
+
+impl RunScope {
+    /// The named rows, or `None` for the whole text.
+    pub(crate) fn rows(&self) -> Option<&RunRows> {
+        match self {
+            RunScope::All => None,
+            RunScope::Runs(rows) => Some(rows),
+        }
+    }
+}
+
 /// One formatting write on one shape: the place, the cell and the value
 /// (`None` removes the local entry, so the cell inherits again).
 #[derive(Debug, Clone)]
@@ -379,6 +426,17 @@ pub(crate) struct Op {
     pub cell: &'static str,
     /// The value to write, or `None` to restore inheritance.
     pub write: Option<CellWrite>,
+    /// The rows the write lands on (task P7-53): every run of the
+    /// text, or the runs a selected text range names.
+    pub scope: RunScope,
+}
+
+impl Op {
+    /// Scopes the write to the named runs (task P7-53).
+    pub(crate) fn in_scope(mut self, scope: &RunScope) -> Self {
+        self.scope = scope.clone();
+        self
+    }
 }
 
 /// One write of a direct sheet cell.
@@ -388,6 +446,7 @@ pub(crate) fn direct(shape: ShapeId, cell: &'static str, write: CellWrite) -> Op
         place: Place::Direct,
         cell,
         write: Some(write),
+        scope: RunScope::default(),
     }
 }
 
@@ -398,6 +457,7 @@ pub(crate) fn character(shape: ShapeId, cell: &'static str, write: CellWrite) ->
         place: Place::Character,
         cell,
         write: Some(write),
+        scope: RunScope::default(),
     }
 }
 
@@ -408,6 +468,7 @@ pub(crate) fn paragraph(shape: ShapeId, cell: &'static str, write: CellWrite) ->
         place: Place::Paragraph,
         cell,
         write: Some(write),
+        scope: RunScope::default(),
     }
 }
 
@@ -418,6 +479,7 @@ pub(crate) fn remove(shape: ShapeId, place: Place, cell: &'static str) -> Op {
         place,
         cell,
         write: None,
+        scope: RunScope::default(),
     }
 }
 
@@ -500,7 +562,18 @@ impl FormatEdit {
             match op.place {
                 Place::Direct => dirty.push(CellAddress::new(sheet, CellName::new(op.cell))),
                 Place::Character | Place::Paragraph => {
-                    for target in row_targets(&entry.sheet, section_name(op.place)) {
+                    let targets = match op.scope.rows() {
+                        Some(rows) => rows
+                            .write
+                            .iter()
+                            .map(|row| RowTarget {
+                                position: None,
+                                ix: Some(row.ix),
+                            })
+                            .collect(),
+                        None => row_targets(&entry.sheet, section_name(op.place)),
+                    };
+                    for target in targets {
                         dirty.push(CellAddress::in_row(
                             sheet,
                             SectionName::from_static(section_name(op.place)),
@@ -546,7 +619,13 @@ impl FormatEdit {
                 (Place::Character | Place::Paragraph, Some(write)) => {
                     let section = section_name(op.place);
                     let doc = document_mut(ctx, self.session)?;
-                    let rows = ensure_rows(doc, op.shape, section)?;
+                    let rows = match op.scope.rows() {
+                        Some(rows) => {
+                            ensure_run_rows(doc, op.shape, section, &rows.keep)?;
+                            ensure_run_rows(doc, op.shape, section, &rows.write)?
+                        }
+                        None => ensure_rows(doc, op.shape, section)?,
+                    };
                     for target in rows {
                         doc.write_row_cell(
                             sheet,
@@ -573,8 +652,21 @@ impl FormatEdit {
                         .iter_mut()
                         .find(|entry| entry.name.as_str() == section)
                     {
-                        for row in block.rows.iter_mut() {
-                            row.cells.retain(|cell| cell.name.as_str() != op.cell);
+                        match op.scope.rows() {
+                            Some(rows) => {
+                                for row in block.rows.iter_mut() {
+                                    if row.ix.is_some_and(|ix| {
+                                        rows.write.iter().any(|wanted| wanted.ix == ix)
+                                    }) {
+                                        row.cells.retain(|cell| cell.name.as_str() != op.cell);
+                                    }
+                                }
+                            }
+                            None => {
+                                for row in block.rows.iter_mut() {
+                                    row.cells.retain(|cell| cell.name.as_str() != op.cell);
+                                }
+                            }
                         }
                     }
                 }
@@ -696,18 +788,13 @@ fn ensure_rows(
         .iter_mut()
         .find(|entry| entry.name.as_str() == section)
     else {
-        entity
-            .sheet
-            .sections
-            .push(Section::new(SectionName::from_static(section)));
-        let Some(created) = entity.sheet.sections.last_mut() else {
-            return Err(CommandError::failed("the text section could not be added"));
-        };
+        let mut created = Section::new(SectionName::from_static(section));
         let mut row = Row::new();
         // A text run marker names its row by `IX` (ADR 0019 decision
         // 5), so the created row carries the `IX` the markers use.
         row.ix = Some(0);
         created.rows.push(row);
+        entity.sheet.sections.push(created);
         return Ok(vec![RowTarget {
             position: Some(0),
             ix: Some(0),
@@ -736,24 +823,153 @@ fn next_row_ix(block: &Section) -> i32 {
     largest.saturating_add(1).max(0)
 }
 
+/// The rows one scoped write lands on (task P7-53): every named row
+/// exists afterwards, created and seeded when missing.
+fn ensure_run_rows(
+    doc: &mut Document,
+    shape: ShapeId,
+    section: &'static str,
+    rows: &[RunRow],
+) -> Result<Vec<RowTarget>, CommandError> {
+    for row in rows {
+        ensure_run_row(doc, shape, section, *row)?;
+    }
+    Ok(rows
+        .iter()
+        .map(|row| RowTarget {
+            position: None,
+            ix: Some(row.ix),
+        })
+        .collect())
+}
+
+/// One scoped row (task P7-53): the row with `IX` `wanted.ix` exists
+/// afterwards. A missing row is created with that `IX` and seeded with
+/// the effective cells of the run it splits, so the split run keeps
+/// its look when the write changes one cell (the seed read walks the
+/// inheritance chain, ADR 0013; the seed writes are local literals).
+fn ensure_run_row(
+    doc: &mut Document,
+    shape: ShapeId,
+    section: &'static str,
+    wanted: RunRow,
+) -> Result<(), CommandError> {
+    {
+        let Some(entity) = doc.shape_mut(shape) else {
+            return Err(CommandError::failed(format!(
+                "unknown shape id {}",
+                shape.index
+            )));
+        };
+        let mut row = Row::new();
+        row.ix = Some(wanted.ix);
+        match entity
+            .sheet
+            .sections
+            .iter_mut()
+            .find(|entry| entry.name.as_str() == section)
+        {
+            Some(block) => {
+                if block.rows.iter().any(|row| row.ix == Some(wanted.ix)) {
+                    return Ok(());
+                }
+                block.rows.push(row);
+            }
+            None => {
+                let mut created = Section::new(SectionName::from_static(section));
+                created.rows.push(row);
+                entity.sheet.sections.push(created);
+            }
+        }
+    }
+    for (cell, write) in seed_writes(doc, shape, section, wanted.seed) {
+        doc.write_row_cell(
+            SheetRef::Shape(shape),
+            &SectionName::from_static(section),
+            RowTarget {
+                position: None,
+                ix: Some(wanted.ix),
+            },
+            &CellName::new(cell),
+            &write,
+        )
+        .map_err(model_error)?;
+    }
+    Ok(())
+}
+
+/// The seed of a new run row (task P7-53): the effective values of the
+/// run it splits, as local literals. The names are the cells the
+/// renderer reads for a run (`run_style` in `crates/render`); the
+/// lookup resolves every one of them (a missing or unreadable cell
+/// reads as its default, ADR 0059), so the new row keeps the run's
+/// look exactly.
+fn seed_writes(
+    doc: &Document,
+    shape: ShapeId,
+    section: &str,
+    seed: Option<i32>,
+) -> Vec<(&'static str, CellWrite)> {
+    let row = match seed {
+        Some(ix) => RowTarget::by_ix(ix),
+        None => RowTarget::at(0),
+    };
+    let sheet = SheetRef::Shape(shape);
+    let mut reader = CellReader::new(doc);
+    let family = reader
+        .row_text(sheet, section, row, &CellName::new("Font"))
+        .unwrap_or_default();
+    let number = |reader: &mut CellReader<'_>, cell: &str| {
+        reader
+            .row_number(sheet, section, row, &CellName::new(cell))
+            .unwrap_or(0.0)
+    };
+    let boolean = |reader: &mut CellReader<'_>, cell: &str| {
+        reader
+            .row_boolean(sheet, section, row, &CellName::new(cell))
+            .unwrap_or(false)
+    };
+    vec![
+        ("Font", text_write(&family)),
+        ("Size", num(number(&mut reader, "Size"))),
+        ("Style", num(number(&mut reader, "Style"))),
+        ("ColorTrans", num(number(&mut reader, "ColorTrans"))),
+        ("Strikethru", bool_write(boolean(&mut reader, "Strikethru"))),
+        (
+            "DblUnderline",
+            bool_write(boolean(&mut reader, "DblUnderline")),
+        ),
+        (
+            "DoubleStrikethrough",
+            bool_write(boolean(&mut reader, "DoubleStrikethrough")),
+        ),
+        (
+            "Color",
+            color_write(
+                reader
+                    .row_color(sheet, section, row, &CellName::new("Color"))
+                    .unwrap_or(larrygram_model::Color::new(0, 0, 0)),
+            ),
+        ),
+    ]
+}
+
 // ---------------------------------------------------------------------------
 // Reads (the toggles and the format painter)
 // ---------------------------------------------------------------------------
 
-/// The effective number of one row cell (row 0), or `None` when the
-/// shape has no such value.
-fn read_row_number(doc: &Document, shape: ShapeId, section: &str, cell: &str) -> Option<f64> {
+/// The effective number of one row cell, or `None` when the shape has
+/// no such value.
+fn read_row_number(
+    doc: &Document,
+    shape: ShapeId,
+    section: &str,
+    row: RowTarget,
+    cell: &str,
+) -> Option<f64> {
     let mut reader = CellReader::new(doc);
     reader
-        .row_number(
-            SheetRef::Shape(shape),
-            section,
-            RowTarget {
-                position: Some(0),
-                ix: None,
-            },
-            &CellName::new(cell),
-        )
+        .row_number(SheetRef::Shape(shape), section, row, &CellName::new(cell))
         .ok()
 }
 
@@ -765,19 +981,17 @@ fn read_number(doc: &Document, shape: ShapeId, cell: &str) -> Option<f64> {
         .ok()
 }
 
-/// The effective boolean of one row cell (row 0).
-fn read_row_boolean(doc: &Document, shape: ShapeId, section: &str, cell: &str) -> Option<bool> {
+/// The effective boolean of one row cell.
+fn read_row_boolean(
+    doc: &Document,
+    shape: ShapeId,
+    section: &str,
+    row: RowTarget,
+    cell: &str,
+) -> Option<bool> {
     let mut reader = CellReader::new(doc);
     reader
-        .row_boolean(
-            SheetRef::Shape(shape),
-            section,
-            RowTarget {
-                position: Some(0),
-                ix: None,
-            },
-            &CellName::new(cell),
-        )
+        .row_boolean(SheetRef::Shape(shape), section, row, &CellName::new(cell))
         .ok()
 }
 
@@ -896,8 +1110,27 @@ fn format_run(
     label: impl Into<String>,
     build: impl FnOnce(&Document, &[ShapeId]) -> Result<Vec<Op>, CommandError>,
 ) -> Result<Outcome, CommandError> {
+    format_run_scoped(ctx, &RunScope::default(), label, |doc, targets, _scope| {
+        build(doc, targets)
+    })
+}
+
+/// `format_run` for the text formats (task P7-53): the `runs` argument
+/// scopes the write to the `Character` rows a selected text range
+/// names, and a scoped write lands on the shape being edited only (the
+/// range belongs to its text, not to the whole selection).
+fn format_run_scoped(
+    ctx: &mut AppCtx,
+    scope: &RunScope,
+    label: impl Into<String>,
+    build: impl FnOnce(&Document, &[ShapeId], &RunScope) -> Result<Vec<Op>, CommandError>,
+) -> Result<Outcome, CommandError> {
     let verb = label.into();
     let (session, targets, warnings) = selection_targets(ctx)?;
+    let targets = match (scope.rows(), ctx.editing_text) {
+        (Some(_), Some(editing)) => vec![editing],
+        _ => targets,
+    };
     let ops = {
         let doc = ctx
             .documents
@@ -905,7 +1138,7 @@ fn format_run(
             .find(|slot| slot.id == session)
             .map(|slot| &slot.document)
             .ok_or_else(|| CommandError::failed("the document session is gone"))?;
-        build(doc, &targets)?
+        build(doc, &targets, scope)?
     };
     let message = count_message(&verb, targets.len());
     let mut edit = {
@@ -914,6 +1147,75 @@ fn format_run(
     };
     edit.apply(ctx)?;
     Ok(edit_outcome(message, warnings, Box::new(edit)))
+}
+
+/// The rows a text format write is scoped to (task P7-53): the `runs`
+/// and `runs_keep` arguments' entries name the run rows as `IX`
+/// (`"3"`), or as a pair `target:seed` (`"3:0"` seeds a new row from
+/// run `0`, `"3:~"` from the run at row position 0). `runs` names the
+/// rows the write lands on; `runs_keep` names the rows a split run's
+/// other parts use (created and seeded, never written). An absent
+/// `runs` writes every run: the whole text.
+fn run_scope(inv: &Invocation) -> Result<RunScope, CommandError> {
+    let write = scope_rows(inv, "runs")?;
+    let keep = scope_rows(inv, "runs_keep")?;
+    if write.is_empty() && keep.is_empty() {
+        return Ok(RunScope::All);
+    }
+    Ok(RunScope::Runs(RunRows { write, keep }))
+}
+
+/// The run row a scoped read lands on (task P7-53: the toggles read
+/// the run they flip): the written row when it exists, else the run it
+/// will be seeded from.
+fn read_run_row(doc: &Document, shape: ShapeId, scope: &RunScope) -> RowTarget {
+    let Some(row) = scope.rows().and_then(|rows| rows.write.first()) else {
+        return RowTarget::at(0);
+    };
+    let exists = doc.shape(shape).is_some_and(|entry| {
+        entry
+            .sheet
+            .sections
+            .iter()
+            .find(|block| block.name.as_str() == "Character")
+            .is_some_and(|block| block.rows.iter().any(|r| r.ix == Some(row.ix)))
+    });
+    if exists {
+        RowTarget::by_ix(row.ix)
+    } else {
+        match row.seed {
+            Some(seed) => RowTarget::by_ix(seed),
+            None => RowTarget::at(0),
+        }
+    }
+}
+
+/// The rows of one scope argument (`runs` or `runs_keep`).
+fn scope_rows(inv: &Invocation, name: &str) -> Result<Vec<RunRow>, CommandError> {
+    let Some(argument) = inv.args.get(name) else {
+        return Ok(Vec::new());
+    };
+    let crate::ArgValue::List(entries) = argument else {
+        return Err(CommandError::invalid_args(format!("{name} must be a list")));
+    };
+    let mut rows = Vec::new();
+    for entry in entries {
+        let (target, seed) = match entry.split_once(':') {
+            Some((target, "~")) => (target, None),
+            Some((target, seed)) => {
+                let seed = seed.parse::<i32>().map_err(|_| {
+                    CommandError::invalid_args(format!("{name} entry {entry:?} has a bad seed"))
+                })?;
+                (target, Some(seed))
+            }
+            None => (entry.as_str(), None),
+        };
+        let ix = target.trim().parse::<i32>().map_err(|_| {
+            CommandError::invalid_args(format!("{name} entry {entry:?} has a bad IX"))
+        })?;
+        rows.push(RunRow { ix, seed });
+    }
+    Ok(rows)
 }
 
 /// "Bold" / "Bold 3 shapes": the status message and undo label.
@@ -1081,10 +1383,11 @@ fn run_font(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError>
     if family.trim().is_empty() {
         return Err(CommandError::invalid_args("font family must not be empty"));
     }
-    format_run(ctx, "Set font", |_, targets| {
+    let scope = run_scope(inv)?;
+    format_run_scoped(ctx, &scope, "Set font", |_, targets, scope| {
         Ok(targets
             .iter()
-            .map(|shape| character(*shape, "Font", text_write(&family)))
+            .map(|shape| character(*shape, "Font", text_write(&family)).in_scope(scope))
             .collect())
     })
 }
@@ -1093,10 +1396,11 @@ fn run_font(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError>
 fn run_font_size(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError> {
     let points = need_number(inv, &["size", "value"], "font size (points)")?;
     let inches = check_size(points)?;
-    format_run(ctx, "Set font size", |_, targets| {
+    let scope = run_scope(inv)?;
+    format_run_scoped(ctx, &scope, "Set font size", |_, targets, scope| {
         Ok(targets
             .iter()
-            .map(|shape| character(*shape, "Size", num(inches)))
+            .map(|shape| character(*shape, "Size", num(inches)).in_scope(scope))
             .collect())
     })
 }
@@ -1114,20 +1418,20 @@ fn check_size(points: f64) -> Result<f64, CommandError> {
 
 /// `text.font.size.increase` / `format.text.increase_size`: the next
 /// size up the ladder.
-fn run_font_grow(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandError> {
-    step_font_size(ctx, true)
+fn run_font_grow(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError> {
+    step_font_size(ctx, run_scope(inv)?, true)
 }
 
 /// `text.font.size.decrease` / `format.text.decrease_size`: the next
 /// size down the ladder.
-fn run_font_shrink(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandError> {
-    step_font_size(ctx, false)
+fn run_font_shrink(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError> {
+    step_font_size(ctx, run_scope(inv)?, false)
 }
 
 /// Moves every run's size one step up or down the ladder. The step is
 /// taken from the first target's current size (a uniform result over a
 /// mixed selection).
-fn step_font_size(ctx: &mut AppCtx, grow: bool) -> Result<Outcome, CommandError> {
+fn step_font_size(ctx: &mut AppCtx, scope: RunScope, grow: bool) -> Result<Outcome, CommandError> {
     let (session, targets, _warnings) = selection_targets(ctx)?;
     let doc = ctx
         .documents
@@ -1137,7 +1441,15 @@ fn step_font_size(ctx: &mut AppCtx, grow: bool) -> Result<Outcome, CommandError>
         .ok_or_else(|| CommandError::failed("the document session is gone"))?;
     let current = targets
         .first()
-        .and_then(|shape| read_row_number(doc, *shape, "Character", "Size"))
+        .and_then(|shape| {
+            read_row_number(
+                doc,
+                *shape,
+                "Character",
+                read_run_row(doc, *shape, &scope),
+                "Size",
+            )
+        })
         .map_or(DEFAULT_SIZE_PT, inches_to_points);
     let fresh = if grow {
         next_size_up(current)
@@ -1146,10 +1458,10 @@ fn step_font_size(ctx: &mut AppCtx, grow: bool) -> Result<Outcome, CommandError>
     };
     let inches = points_to_inches(fresh);
     let verb = if grow { "Grow font" } else { "Shrink font" };
-    format_run(ctx, verb, |_, targets| {
+    format_run_scoped(ctx, &scope, verb, |_, targets, scope| {
         Ok(targets
             .iter()
-            .map(|shape| character(*shape, "Size", num(inches)))
+            .map(|shape| character(*shape, "Size", num(inches)).in_scope(scope))
             .collect())
     })
 }
@@ -1182,23 +1494,28 @@ fn next_size_down(points: f64) -> f64 {
 }
 
 /// `format.text.bold`: toggles `Style` bit 1 on every run.
-fn run_bold(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandError> {
-    toggle_style(ctx, 1, "Bold")
+fn run_bold(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError> {
+    toggle_style(ctx, run_scope(inv)?, 1, "Bold")
 }
 
 /// `format.text.italic`: toggles `Style` bit 2.
-fn run_italic(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandError> {
-    toggle_style(ctx, 2, "Italic")
+fn run_italic(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError> {
+    toggle_style(ctx, run_scope(inv)?, 2, "Italic")
 }
 
 /// `format.text.underline`: toggles `Style` bit 4.
-fn run_underline(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandError> {
-    toggle_style(ctx, 4, "Underline")
+fn run_underline(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError> {
+    toggle_style(ctx, run_scope(inv)?, 4, "Underline")
 }
 
 /// Flips one `Style` bit of every run (the flip is taken from the first
 /// target).
-fn toggle_style(ctx: &mut AppCtx, bit: i64, label: &str) -> Result<Outcome, CommandError> {
+fn toggle_style(
+    ctx: &mut AppCtx,
+    scope: RunScope,
+    bit: i64,
+    label: &str,
+) -> Result<Outcome, CommandError> {
     let (session, targets, _warnings) = selection_targets(ctx)?;
     let doc = ctx
         .documents
@@ -1208,7 +1525,15 @@ fn toggle_style(ctx: &mut AppCtx, bit: i64, label: &str) -> Result<Outcome, Comm
         .ok_or_else(|| CommandError::failed("the document session is gone"))?;
     let style = targets
         .first()
-        .and_then(|shape| read_row_number(doc, *shape, "Character", "Style"))
+        .and_then(|shape| {
+            read_row_number(
+                doc,
+                *shape,
+                "Character",
+                read_run_row(doc, *shape, &scope),
+                "Style",
+            )
+        })
         .unwrap_or(0.0)
         .round();
     let fresh = if (style as i64) & bit != 0 {
@@ -1216,16 +1541,17 @@ fn toggle_style(ctx: &mut AppCtx, bit: i64, label: &str) -> Result<Outcome, Comm
     } else {
         style + bit as f64
     };
-    format_run(ctx, label, |_, targets| {
+    format_run_scoped(ctx, &scope, label, |_, targets, scope| {
         Ok(targets
             .iter()
-            .map(|shape| character(*shape, "Style", num(fresh)))
+            .map(|shape| character(*shape, "Style", num(fresh)).in_scope(scope))
             .collect())
     })
 }
 
 /// `tools.strikethrough`: toggles the `Strikethru` cell of every run.
-fn run_strikethrough(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandError> {
+fn run_strikethrough(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError> {
+    let scope = run_scope(inv)?;
     let (session, targets, _warnings) = selection_targets(ctx)?;
     let doc = ctx
         .documents
@@ -1235,12 +1561,20 @@ fn run_strikethrough(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, Com
         .ok_or_else(|| CommandError::failed("the document session is gone"))?;
     let on = targets
         .first()
-        .and_then(|shape| read_row_boolean(doc, *shape, "Character", "Strikethru"))
+        .and_then(|shape| {
+            read_row_boolean(
+                doc,
+                *shape,
+                "Character",
+                read_run_row(doc, *shape, &scope),
+                "Strikethru",
+            )
+        })
         .unwrap_or(false);
-    format_run(ctx, "Strikethrough", |_, targets| {
+    format_run_scoped(ctx, &scope, "Strikethrough", |_, targets, scope| {
         Ok(targets
             .iter()
-            .map(|shape| character(*shape, "Strikethru", bool_write(!on)))
+            .map(|shape| character(*shape, "Strikethru", bool_write(!on)).in_scope(scope))
             .collect())
     })
 }
@@ -1248,13 +1582,15 @@ fn run_strikethrough(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, Com
 /// `text.font.color`: the colour of every run.
 fn run_font_color(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError> {
     let color = need_color(inv, &["color", "value"])?;
-    format_run(
+    let scope = run_scope(inv)?;
+    format_run_scoped(
         ctx,
+        &scope,
         format!("Set font color {}", color_name(color)),
-        |_, targets| {
+        |_, targets, scope| {
             Ok(targets
                 .iter()
-                .map(|shape| character(*shape, "Color", color_write(color)))
+                .map(|shape| character(*shape, "Color", color_write(color)).in_scope(scope))
                 .collect())
         },
     )
@@ -1262,13 +1598,19 @@ fn run_font_color(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, Command
 
 /// `format.text_color.use_default`: every run inherits its colour
 /// again.
-fn run_font_color_default(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandError> {
-    format_run(ctx, "Use default font color", |_, targets| {
-        Ok(targets
-            .iter()
-            .map(|shape| remove(*shape, Place::Character, "Color"))
-            .collect())
-    })
+fn run_font_color_default(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError> {
+    let scope = run_scope(inv)?;
+    format_run_scoped(
+        ctx,
+        &scope,
+        "Use default font color",
+        |_, targets, scope| {
+            Ok(targets
+                .iter()
+                .map(|shape| remove(*shape, Place::Character, "Color").in_scope(scope))
+                .collect())
+        },
+    )
 }
 
 /// `format.text.align_left`: `HorzAlign` 0.
@@ -1338,7 +1680,7 @@ fn run_bullets(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandEr
         .ok_or_else(|| CommandError::failed("the document session is gone"))?;
     let on = targets
         .first()
-        .and_then(|shape| read_row_number(doc, *shape, "Paragraph", "Bullet"))
+        .and_then(|shape| read_row_number(doc, *shape, "Paragraph", RowTarget::at(0), "Bullet"))
         .is_some_and(|value| value.round() >= 0.5);
     let fresh = if on { 0.0 } else { 1.0 };
     format_run(ctx, "Bullets", |_, targets| {
@@ -2073,21 +2415,22 @@ fn capture_format(doc: &Document, shape: ShapeId) -> Result<Template, CommandErr
     if let Some(family) = read_row_text(doc, shape, "Character", "Font") {
         out.push((Place::Character, "Font", text_write(&family)));
     }
-    if let Some(size) = read_row_number(doc, shape, "Character", "Size") {
+    if let Some(size) = read_row_number(doc, shape, "Character", RowTarget::at(0), "Size") {
         out.push((Place::Character, "Size", num(size)));
     }
-    if let Some(style) = read_row_number(doc, shape, "Character", "Style") {
+    if let Some(style) = read_row_number(doc, shape, "Character", RowTarget::at(0), "Style") {
         out.push((Place::Character, "Style", num(style)));
     }
-    let strike = read_row_boolean(doc, shape, "Character", "Strikethru").unwrap_or(false);
+    let strike =
+        read_row_boolean(doc, shape, "Character", RowTarget::at(0), "Strikethru").unwrap_or(false);
     out.push((Place::Character, "Strikethru", bool_write(strike)));
     if let Some(color) = read_row_color(doc, shape, "Character", "Color") {
         out.push((Place::Character, "Color", color_write(color)));
     }
-    if let Some(align) = read_row_number(doc, shape, "Paragraph", "HorzAlign") {
+    if let Some(align) = read_row_number(doc, shape, "Paragraph", RowTarget::at(0), "HorzAlign") {
         out.push((Place::Paragraph, "HorzAlign", num(align)));
     }
-    if let Some(bullet) = read_row_number(doc, shape, "Paragraph", "Bullet") {
+    if let Some(bullet) = read_row_number(doc, shape, "Paragraph", RowTarget::at(0), "Bullet") {
         out.push((Place::Paragraph, "Bullet", num(bullet)));
     }
     if let Some(align) = read_number(doc, shape, "VerticalAlign") {
@@ -2129,6 +2472,7 @@ fn retarget(template: &Template, shape: ShapeId) -> Vec<Op> {
             place: *place,
             cell,
             write: Some(write.clone()),
+            scope: RunScope::default(),
         })
         .collect()
 }
@@ -2136,6 +2480,67 @@ fn retarget(template: &Template, shape: ShapeId) -> Vec<Op> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn seed_writes_skips_the_cells_it_cannot_read() {
+        use larrygram_model::{Cell, CellValue, Preserved, Row, Section, Shape};
+        let mut document = Document::new();
+        let mut shape = Shape::new(ShapeId { index: 0 }, 1);
+        let mut block = Section::new(SectionName::from_static("Character"));
+        let mut row = Row::new();
+        row.ix = Some(0);
+        for name in ["Size", "Style", "ColorTrans", "Strikethru"] {
+            row.cells.push(Cell {
+                name: CellName::new(name),
+                formula: None,
+                value: Some(CellValue::Str("junk".to_owned())),
+                unit: larrygram_geom::Unit::Inches,
+                preserved: Preserved::new(),
+            });
+        }
+        row.cells.push(Cell {
+            name: CellName::new("Color"),
+            formula: None,
+            value: Some(CellValue::Str("junk".to_owned())),
+            unit: larrygram_geom::Unit::Inches,
+            preserved: Preserved::new(),
+        });
+        block.rows.push(row);
+        shape.sheet.sections.push(block);
+        let shape = document.add_shape(shape);
+        let writes = seed_writes(&document, shape, "Character", Some(0));
+        // The junk cells resolve to their defaults (ADR 0059): the
+        // seed covers every cell and never panics.
+        assert_eq!(writes.len(), 8, "{writes:?}");
+        assert_eq!(writes[0].0, "Font");
+    }
+
+    #[test]
+    fn next_row_ix_counts_the_claimed_ixs() {
+        let mut block = Section::new(SectionName::from_static("Character"));
+        let mut first = Row::new();
+        first.ix = Some(4);
+        let second = Row::new();
+        block.rows.push(first);
+        block.rows.push(second);
+        assert_eq!(next_row_ix(&block), 5);
+        let empty = Section::new(SectionName::from_static("Character"));
+        assert_eq!(next_row_ix(&empty), 0);
+    }
+
+    #[test]
+    fn ensure_run_rows_rejects_a_stale_shape() {
+        let doc = Document::new();
+        let mut doc = doc;
+        let error = ensure_run_rows(
+            &mut doc,
+            ShapeId { index: 99 },
+            "Character",
+            &[RunRow { ix: 0, seed: None }],
+        )
+        .expect_err("a stale shape is refused");
+        let _ = error;
+    }
     use crate::app::{DocumentSession, Settings};
     use crate::{ArgValue, Args, Source};
     use larrygram_model::{Cell, PageId, Preserved, Shape};

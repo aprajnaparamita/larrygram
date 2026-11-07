@@ -176,6 +176,59 @@ fn literal_of(text: &TextContent) -> String {
         .collect()
 }
 
+/// The runs of a structured text (task P7-53) as `shape.set.text`'s
+/// `run_ixs`/`run_texts` pair: one entry per literal, its `Character`
+/// row `IX` (`-1` for the unmarked run before the first marker).
+/// `None` for a one-run text: the plain `text` argument writes it.
+fn run_args(text: &TextContent) -> Option<(Vec<String>, Vec<String>)> {
+    let mut marked = false;
+    let mut current: i32 = -1;
+    let mut ixs = Vec::new();
+    let mut texts = Vec::new();
+    for part in &text.parts {
+        match part {
+            TextPart::CharRun { ix } => {
+                current = i32::try_from(*ix).unwrap_or(0);
+                marked = true;
+            }
+            TextPart::Text(literal) => {
+                if literal.is_empty() {
+                    continue;
+                }
+                ixs.push(current.to_string());
+                texts.push(literal.clone());
+            }
+            _ => {}
+        }
+    }
+    if !marked {
+        return None;
+    }
+    Some((ixs, texts))
+}
+
+/// The text format commands whose writes land on `Character` rows
+/// (task P7-53): with a text range selected in the editor, their write
+/// reaches that range's runs only.
+fn is_run_format(command: &str) -> bool {
+    matches!(
+        command,
+        "text.font"
+            | "text.font.size"
+            | "text.font.size.increase"
+            | "text.font.size.decrease"
+            | "format.text.increase_size"
+            | "format.text.decrease_size"
+            | "format.text.bold"
+            | "format.text.italic"
+            | "format.text.underline"
+            | "tools.strikethrough"
+            | "text.strike.through"
+            | "text.font.color"
+            | "format.text_color.use_default"
+    )
+}
+
 /// The new text box the Text tool opened (task P7-37 item 1): the shape
 /// `insert.drawing.text_box` created when the box opened, and the
 /// session whose undo group holds the interaction (the insert, the
@@ -2103,6 +2156,19 @@ impl Shell {
                 self.cancel_text_box();
                 return;
             };
+            // The field shows each run's format (task P7-53).
+            if let Some(shape) = self.editor.shape {
+                // The field's points follow the drawn text's (task
+                // P7-41 item 9): inches at the canvas scale.
+                let scale = (96.0 * session.view.zoom / 72.0) as f32;
+                let styles = crate::text_edit::run_styles(
+                    &session.document,
+                    shape,
+                    &self.editor.runs(),
+                    scale,
+                );
+                self.editor.set_styles(styles);
+            }
             canvas::show_text_editor(ui, session, rect, &mut self.editor)
         };
         match action {
@@ -2142,7 +2208,7 @@ impl Shell {
             return;
         }
         if let Some(text) = text
-            && let Some(mut produced) = self.text_commit_intents(shape, &literal_of(text))
+            && let Some(mut produced) = self.text_commit_intents(shape, text)
         {
             intents.append(&mut produced);
         }
@@ -2165,7 +2231,8 @@ impl Shell {
             self.close_group(tracked.session, false);
             return;
         }
-        if let Some(intents) = self.text_commit_intents(Some(tracked.shape), &literal)
+        if let Some(intents) =
+            self.text_commit_intents(Some(tracked.shape), text.unwrap_or(&TextContent::new()))
             && let Err(error) = self.dispatch(&intents)
         {
             self.note_error(error.to_string());
@@ -2333,7 +2400,11 @@ impl Shell {
     /// Presses the editor's shape, then writes its text: one command
     /// pair so the selection cannot drift before the write (the editor
     /// closes on a click that may select another shape).
-    fn text_commit_intents(&self, shape: Option<ShapeId>, literal: &str) -> Option<Vec<Intent>> {
+    fn text_commit_intents(
+        &self,
+        shape: Option<ShapeId>,
+        text: &TextContent,
+    ) -> Option<Vec<Intent>> {
         let shape = shape?;
         let session = self.app.active_document()?;
         let visio_id = session.document.shape(shape)?.visio_id;
@@ -2343,7 +2414,13 @@ impl Shell {
         let command = CommandId::parse("edit.select").ok()?;
         let select = Intent::new(command, Invocation::new(args, Source::Ui));
         let mut args = larrygram_commands::Args::new();
-        args.set("text", ArgValue::Text(literal.to_owned()));
+        args.set("text", ArgValue::Text(literal_of(text)));
+        // A structured text keeps its run markers (task P7-53): the
+        // commit keeps the range formats.
+        if let Some((ixs, texts)) = run_args(text) {
+            args.set("run_ixs", ArgValue::List(ixs));
+            args.set("run_texts", ArgValue::List(texts));
+        }
         let command = CommandId::parse("shape.set.text").ok()?;
         let write = Intent::new(command, Invocation::new(args, Source::Ui));
         Some(vec![select, write])
@@ -3180,6 +3257,40 @@ impl Shell {
         }
     }
 
+    /// The invocation as it dispatches (task P7-53): a text format
+    /// over a selected text range carries the run rows the range
+    /// names, so the write reaches that range only. A bare caret
+    /// (no selection) sends no scope: the format applies to the whole
+    /// text.
+    fn scoped_invocation(&mut self, intent: &Intent) -> Invocation {
+        let mut invocation = intent.invocation.clone();
+        if !is_run_format(intent.command.as_str()) || invocation.args.get("runs").is_some() {
+            return invocation;
+        }
+        let (Some(shape), Some(range)) = (self.editor.shape, self.editor.selected_range()) else {
+            return invocation;
+        };
+        let Some(session) = self.app.active_document() else {
+            return invocation;
+        };
+        let Some(plan) = self.editor.split_for_range(&session.document, shape, range) else {
+            return invocation;
+        };
+        let entry = |(target, seed): &(i32, Option<i32>)| match seed {
+            Some(seed) => format!("{target}:{seed}"),
+            None => format!("{target}:~"),
+        };
+        let runs: Vec<String> = plan.write.iter().map(entry).collect();
+        let keep: Vec<String> = plan.keep.iter().map(entry).collect();
+        if !runs.is_empty() {
+            invocation.args.set("runs", ArgValue::List(runs));
+        }
+        if !keep.is_empty() {
+            invocation.args.set("runs_keep", ArgValue::List(keep));
+        }
+        invocation
+    }
+
     /// Dispatches one intent, answering a `NeedsInput` from an
     /// interactive source through the picker (ADR 0036).
     fn dispatch_intent(
@@ -3208,16 +3319,17 @@ impl Shell {
             }
         }
         let source = intent.invocation.source;
+        let invocation = self.scoped_invocation(intent);
         let first = dispatch_one(
             &self.registry,
             &mut self.app,
             &intent.command,
-            intent.invocation.clone(),
+            invocation.clone(),
         );
         let outcome = match first {
             Ok(outcome) => outcome,
             Err(UiError::Command(CommandError::NeedsInput(needed))) if source.is_interactive() => {
-                match self.ask_picker(&intent.command, &intent.invocation, &needed)? {
+                match self.ask_picker(&intent.command, &invocation, &needed)? {
                     Ask::Again(invocation) => {
                         match dispatch_one(
                             &self.registry,

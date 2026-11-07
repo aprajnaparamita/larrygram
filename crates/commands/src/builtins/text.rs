@@ -127,6 +127,13 @@ fn run_cancel(ctx: &mut AppCtx, _inv: &Invocation) -> Result<Outcome, CommandErr
 }
 
 /// `shape.set.text`: writes the `text` argument as one run.
+///
+/// The `run_ixs` and `run_texts` arguments (two lists of the same
+/// length) write the text as several runs instead (task P7-53): run
+/// `i` carries the `Character` row `IX` `run_ixs[i]` and the literal
+/// `run_texts[i]`, and the commit keeps the run markers. An `IX` of
+/// `-1` writes no marker for that run (it keeps reading the run at row
+/// position 0).
 fn run_set_text(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandError> {
     let text = match inv.args.get("text") {
         Some(crate::ArgValue::Text(text)) => text.clone(),
@@ -139,12 +146,98 @@ fn run_set_text(ctx: &mut AppCtx, inv: &Invocation) -> Result<Outcome, CommandEr
         Some(_) => return Err(CommandError::invalid_args("text must be a string")),
     };
     let (session, shape) = text_target(ctx)?;
+    let content = match run_parts(inv)? {
+        Some(parts) => structured_run(document(ctx, session)?, shape, &parts),
+        None => {
+            let doc = document(ctx, session)?;
+            one_run(doc, shape, &text)
+        }
+    };
     let mut edit = {
         let doc = document_mut(ctx, session)?;
-        TextEdit::new(doc, session, shape, one_run(doc, shape, &text))
+        TextEdit::new(doc, session, shape, content)
     };
     edit.apply(ctx)?;
     Ok(edit_outcome("Wrote shape text", Vec::new(), Box::new(edit)))
+}
+
+/// The active document for reads (the structured-run builder reads the
+/// row markers).
+fn document(ctx: &AppCtx, session: SessionId) -> Result<&Document, CommandError> {
+    ctx.documents
+        .iter()
+        .find(|slot| slot.id == session)
+        .map(|slot| &slot.document)
+        .ok_or_else(|| CommandError::failed("the document session is gone"))
+}
+
+/// The `(IX, literal)` runs of the `run_ixs`/`run_texts` pair, or
+/// `None` when the invocation carries the one-run `text` form.
+fn run_parts(inv: &Invocation) -> Result<Option<Vec<(i32, String)>>, CommandError> {
+    let ixs = match inv.args.get("run_ixs") {
+        Some(crate::ArgValue::List(entries)) => entries.clone(),
+        Some(_) => return Err(CommandError::invalid_args("run_ixs must be a list")),
+        None => return Ok(None),
+    };
+    let texts = match inv.args.get("run_texts") {
+        Some(crate::ArgValue::List(entries)) => entries.clone(),
+        Some(_) => return Err(CommandError::invalid_args("run_texts must be a list")),
+        None => {
+            return Err(CommandError::invalid_args(
+                "run_texts is required with run_ixs",
+            ));
+        }
+    };
+    if ixs.len() != texts.len() {
+        return Err(CommandError::invalid_args(
+            "run_ixs and run_texts must have the same length",
+        ));
+    }
+    let mut parts = Vec::new();
+    for (ix, literal) in ixs.iter().zip(texts.iter()) {
+        let ix = ix.trim().parse::<i32>().map_err(|_| {
+            CommandError::invalid_args(format!("run_ixs entry {ix:?} is not an IX"))
+        })?;
+        parts.push((ix, literal.clone()));
+    }
+    Ok(Some(parts))
+}
+
+/// The multi-run text of the structured form (task P7-53): a
+/// `Character` run marker per run with a real `IX`, then the literal.
+/// The paragraph and tabs markers keep the one-run rule (`shape.set.
+/// text` docs): first-row markers when the shape has rows of that kind.
+fn structured_run(doc: &Document, shape: ShapeId, parts: &[(i32, String)]) -> TextContent {
+    if parts.is_empty() || parts.iter().all(|(_, text)| text.is_empty()) {
+        return TextContent::new();
+    }
+    let mut out = Vec::new();
+    let mut first = true;
+    for (ix, literal) in parts {
+        if literal.is_empty() {
+            continue;
+        }
+        if first {
+            if *ix >= 0 {
+                out.push(TextPart::CharRun {
+                    ix: u32::try_from(*ix).unwrap_or(0),
+                });
+            }
+            if has_rows(doc, shape, "Paragraph") {
+                out.push(TextPart::ParaRun { ix: 0 });
+            }
+            if has_rows(doc, shape, "Tabs") {
+                out.push(TextPart::TabsRun { ix: 0 });
+            }
+            first = false;
+        } else {
+            out.push(TextPart::CharRun {
+                ix: u32::try_from(*ix).unwrap_or(0),
+            });
+        }
+        out.push(TextPart::Text(literal.clone()));
+    }
+    TextContent { parts: out }
 }
 
 /// Whether the shape has text (task P7-29, task P7-40): at least one
@@ -278,6 +371,45 @@ impl Edit for TextEdit {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The structured write re-adds the first-row paragraph and tabs
+    /// markers when the shape has rows of those kinds (task P7-53).
+    #[test]
+    fn structured_run_re_adds_the_paragraph_and_tabs_markers() {
+        use larrygram_model::{
+            Cell, CellName, CellValue, Page, PageId, Row, Section, SectionName, Shape,
+        };
+        let mut document = Document::new();
+        let mut shape = Shape::new(ShapeId { index: 0 }, 1);
+        for section in ["Paragraph", "Tabs"] {
+            let mut block = Section::new(SectionName::from_static(section));
+            let mut row = Row::new();
+            row.ix = Some(0);
+            row.cells = vec![Cell {
+                name: CellName::new("Position"),
+                formula: None,
+                value: Some(CellValue::Number(0.0)),
+                unit: larrygram_geom::Unit::Inches,
+                preserved: Preserved::new(),
+            }];
+            block.rows.push(row);
+            shape.sheet.sections.push(block);
+        }
+        let shape = document.add_shape(shape);
+        let mut page = Page::new(PageId { index: 0 }, 1);
+        page.shapes.push(shape);
+        document.pages.push(page);
+        let parts = structured_run(&document, shape, &[(3, "Hi".to_owned())]);
+        assert_eq!(
+            parts.parts,
+            vec![
+                TextPart::CharRun { ix: 3 },
+                TextPart::ParaRun { ix: 0 },
+                TextPart::TabsRun { ix: 0 },
+                TextPart::Text("Hi".to_owned()),
+            ]
+        );
+    }
     use larrygram_geom::Unit;
     use larrygram_model::{Cell, CellName, CellValue, PageId, Row, Section, SectionName, Shape};
 

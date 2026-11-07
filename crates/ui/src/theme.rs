@@ -117,7 +117,9 @@ pub fn metric_field(theme: &Theme, token: &str, field: &str) -> f64 {
     }
 }
 
-/// Builds the egui font list with Selawik as the proportional UI font.
+/// Builds the egui font list with Selawik as the proportional UI font
+/// and the drawn faces as named families (task P7-53: the text editor
+/// field shows each run's face).
 fn font_definitions() -> FontDefinitions {
     let mut definitions = FontDefinitions::default();
     let faces = [
@@ -129,6 +131,41 @@ fn font_definitions() -> FontDefinitions {
         definitions
             .font_data
             .insert(name.to_owned(), Arc::new(FontData::from_static(bytes)));
+    }
+    // The bundled faces the drawn text uses (their OFL licenses are in
+    // `crates/text/fonts`): one named family per face, so the editor
+    // field can show a run's bold and italic (task P7-53). The face
+    // lists match the source lists' order in `larrygram-text`.
+    for (sources, faces) in [
+        (
+            larrygram_text::CARLITO,
+            &[
+                "Carlito",
+                "Carlito Bold",
+                "Carlito Italic",
+                "Carlito Bold Italic",
+            ][..],
+        ),
+        (
+            larrygram_text::SELAWIK,
+            &[
+                "Selawik Light",
+                "Selawik Semilight",
+                "Selawik",
+                "Selawik Semibold",
+                "Selawik Bold",
+            ][..],
+        ),
+    ] {
+        for (source, face) in sources.iter().zip(faces.iter().copied()) {
+            definitions.font_data.insert(
+                source.name.to_owned(),
+                Arc::new(FontData::from_static(source.bytes)),
+            );
+            definitions
+                .families
+                .insert(FontFamily::Name(face.into()), vec![source.name.to_owned()]);
+        }
     }
 
     let mut proportional = vec![

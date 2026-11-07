@@ -52,6 +52,7 @@ mod surfaces;
 mod text_centered;
 mod text_controls;
 mod text_fixes;
+mod text_format_apply;
 mod unsaved;
 mod windows;
 
