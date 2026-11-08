@@ -1190,6 +1190,42 @@ mod tests {
         );
     }
 
+    /// Every picker's first row label (the sweeps' landmark).
+    #[test]
+    fn every_picker_names_its_first_row() {
+        assert_eq!(
+            first_row(PickerKind::Font),
+            FAMILIES.first().copied().expect("a family")
+        );
+        assert_eq!(first_row(PickerKind::FontSize), "8 pt");
+        assert_eq!(first_row(PickerKind::FontColor), "Use Default");
+        assert_eq!(first_row(PickerKind::FillColor), "No Fill");
+        assert_eq!(first_row(PickerKind::LineColor), "No Line");
+        assert_eq!(first_row(PickerKind::LineWeight), "No Line");
+        assert_eq!(first_row(PickerKind::LinePattern), "No Line");
+        assert_eq!(first_row(PickerKind::LineEnds), "No Line Ends");
+        assert_eq!(
+            first_row(PickerKind::Zoom),
+            ZOOM_PRESETS.first().map_or("100%", |(label, _)| *label)
+        );
+    }
+
+    /// The empty line choices: the weight list's "No Line" and the
+    /// ends list's "No Line Ends" rows dispatch their own commands.
+    #[test]
+    fn the_empty_line_choices_dispatch_their_commands() {
+        let intents = click(PickerKind::LineWeight, "No Line");
+        assert_eq!(intents.len(), 1);
+        assert_eq!(intents[0].command.as_str(), "format.line_color.no_line");
+
+        let intents = click(PickerKind::LineEnds, "No Line Ends");
+        assert_eq!(intents.len(), 1);
+        assert_eq!(
+            intents[0].command.as_str(),
+            "format.line_ends.no_line_ends"
+        );
+    }
+
     #[test]
     fn the_line_picker_dispatches_weight_pattern_and_ends() {
         let intents = click(PickerKind::LineWeight, "1.5 pt");

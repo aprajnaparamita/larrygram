@@ -211,3 +211,60 @@ fn a_background_page_gives_no_size_to_the_dialog_or_the_page() {
         );
     }
 }
+
+/// Clicks the field `name`, selects its text and types `text` (the
+/// `format_dialogs` helpers' rule).
+fn set_field(rig: &mut ShellRig, name: &str, text: &str) {
+    click(rig, Role::TextInput, name);
+    rig.harness()
+        .key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    rig.run();
+    {
+        let root = rig.harness().root();
+        let node = root
+            .query_all_by_role_and_label(Role::TextInput, name)
+            .next()
+            .expect("the field");
+        node.type_text(text);
+    }
+    rig.run();
+}
+
+/// OK writes the typed size to the page and closes the dialog; the
+/// window's close button is a Cancel (task P7-21's dialog).
+#[test]
+fn the_ok_writes_the_size_and_the_close_button_cancels() {
+    for kind in LAYOUTS {
+        // OK applies the typed size.
+        let mut rig = style_rig(kind, true, false);
+        open_page_setup(&mut rig, kind);
+        set_field(&mut rig, "Width", "5");
+        set_field(&mut rig, "Height", "3");
+        click(&mut rig, Role::Button, "OK");
+        assert_eq!(
+            rendered_size(&rig),
+            (5.0, 3.0),
+            "{kind:?}: OK writes the page size"
+        );
+
+        // The window's close button drops the draft.
+        let mut rig = style_rig(kind, true, false);
+        open_page_setup(&mut rig, kind);
+        set_field(&mut rig, "Width", "5");
+        rig.run();
+        {
+            let root = rig.harness().root();
+            let node = root
+                .query_all_by_label("Close window")
+                .next()
+                .unwrap_or_else(|| panic!("{kind:?}: the window's close button"));
+            node.click();
+        }
+        rig.run();
+        assert_eq!(
+            rendered_size(&rig),
+            STYLE_SIZE,
+            "{kind:?}: the close is a Cancel"
+        );
+    }
+}

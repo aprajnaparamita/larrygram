@@ -350,6 +350,72 @@ mod tests {
         }
     }
 
+    /// A stale active page reads as an empty page (the page guard).
+    #[test]
+    fn a_stale_active_page_is_an_empty_page() {
+        let mut app = AppCtx::new(larrygram_commands::Settings::default());
+        let mut doc = larrygram_model::Document::new();
+        doc.add_page("Page-1").expect("page");
+        app.open_document(larrygram_commands::app::DocumentSession::new(
+            doc, None,
+        ));
+        app.active_document_mut().expect("session").active_page =
+            Some(larrygram_model::PageId { index: 9 });
+        assert_eq!(current(&app), SelectionContext::EmptyPage);
+    }
+
+    /// A selected shape whose connector marker is only a begin/end
+    /// record part reads as a connector (ADR 0045's two spellings).
+    #[test]
+    fn a_record_part_marks_the_shape_a_connector() {
+        let mut doc = larrygram_model::Document::new();
+        let page = doc.add_page("Page-1").expect("page");
+        let shape = doc
+            .insert_shape(
+                page,
+                larrygram_model::Shape::new(larrygram_model::ShapeId { index: 0 }, 1),
+                None,
+            )
+            .expect("shape");
+        let mut record = larrygram_model::Connect::new();
+        record.from_sheet = 1;
+        record.from_cell = "PinX".to_owned();
+        record.from_part = larrygram_model::mutate::VIS_END_X;
+        doc.add_connect(page, record).expect("record");
+        let mut app = AppCtx::new(larrygram_commands::Settings::default());
+        app.open_document(larrygram_commands::app::DocumentSession::new(doc, None));
+        app.selection.shapes = vec![shape];
+        app.selection.page = Some(page);
+        assert_eq!(current(&app), SelectionContext::ConnectorSelected);
+    }
+
+    /// Every hit target names its context menu id.
+    #[test]
+    fn every_hit_target_names_its_menu() {
+        let expected = [
+            (HitTarget::Shape, "context.shape"),
+            (HitTarget::Page, "context.page"),
+            (HitTarget::PageTab, "context.page_tab"),
+            (HitTarget::PageTabNavigation, "context.page_tab_navigation"),
+            (HitTarget::TextEditing, "context.text_edit"),
+            (HitTarget::ConnectionPoint, "context.connection_point"),
+            (HitTarget::CommentMark, "context.comment"),
+            (HitTarget::Hyperlink, "context.hyperlink"),
+            (HitTarget::EmbeddedObject, "context.embedded_object"),
+            (HitTarget::WindowTitle, "context.window_title"),
+            (HitTarget::ShapesWindow, "context.shapes_window"),
+            (HitTarget::ShapeDataWindow, "context.shape_data_window"),
+            (HitTarget::SizePositionWindow, "context.size_position_window"),
+            (HitTarget::Shapesheet, "context.shapesheet"),
+            (HitTarget::FullScreen, "context.full_screen"),
+            (HitTarget::MasterEdit, "context.master_edit"),
+            (HitTarget::StencilEdit, "context.stencil_edit"),
+        ];
+        for (target, id) in expected {
+            assert_eq!(target.menu_id(), id);
+        }
+    }
+
     #[test]
     fn current_with_no_document_is_empty_page() {
         let app = AppCtx::new(larrygram_commands::Settings::default());

@@ -441,3 +441,35 @@ fn a_bad_hex_spelling_keeps_the_dialog_open() {
     click(&mut rig, Role::Button, "OK");
     assert_eq!(cell_color(&rig, shape, "FillForegnd"), Some(PICKED));
 }
+
+/// The window's close button is a Cancel: the picked colour is
+/// dropped (task P7-54's dialog rules).
+#[test]
+fn the_colour_dialog_window_close_is_a_cancel() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        select_shape(&mut rig);
+        let shape = rectangle(&rig.shell.borrow().app);
+        open_color_dialog(&mut rig, kind, "fill");
+        set_hex(&mut rig, "#3A7F2C");
+        rig.run();
+        {
+            let root = rig.harness().root();
+            let node = root
+                .query_all_by_label("Close window")
+                .next()
+                .unwrap_or_else(|| panic!("{kind:?}: the window's close button"));
+            node.click();
+        }
+        rig.run();
+        assert!(
+            !has_named(&mut rig, "Hex"),
+            "{kind:?}: the dialog is gone"
+        );
+        assert_eq!(
+            cell_color(&rig, shape, "FillForegnd"),
+            None,
+            "{kind:?}: the close dropped the picked colour"
+        );
+    }
+}
