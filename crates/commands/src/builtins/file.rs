@@ -2070,6 +2070,10 @@ mod tests {
         // A truncated header is not an image, never a panic.
         assert_eq!(image_size(&png_bytes(1, 1)[..20]), None);
         assert_eq!(image_size(&[0xFF, 0xD8, 0xFF]), None);
+        // A JPEG whose segment marker byte is not a marker, and one
+        // whose run of fill bytes runs off the end of the stream.
+        assert_eq!(image_size(&[0xFF, 0xD8, 0x01, 0x00]), None);
+        assert_eq!(image_size(&[0xFF, 0xD8, 0xFF, 0xFF]), None);
         // A JPEG without a frame has no size.
         assert_eq!(image_size(&[0xFF, 0xD8, 0xFF, 0xD9]), None);
     }

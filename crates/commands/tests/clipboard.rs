@@ -287,6 +287,29 @@ fn paste_offsets_each_time_and_pointer_paste_places_the_pin() {
     assert_eq!(ctx.clipboard.pastes, 2, "pointer paste does not advance");
 }
 
+/// An empty fragment is refused by name before any placement (the
+/// pointer has no root pin to move).
+#[test]
+fn a_pointer_paste_of_an_empty_fragment_is_refused() {
+    let (mut ctx, registry, _session, page) = fixture();
+    ctx.clipboard.content = Some(larrygram_commands::clipboard::ClipboardContent {
+        kind: larrygram_commands::clipboard::ClipboardKind::Shapes,
+        shapes: Vec::new(),
+        connects: Vec::new(),
+        source_page: page,
+    });
+    let mut pointer = Args::new();
+    pointer.set("x", ArgValue::Number(5.0));
+    pointer.set("y", ArgValue::Number(6.0));
+    let error = dispatch(&mut ctx, &registry, "edit.paste", pointer).expect_err("no root shape");
+    assert!(
+        error.to_string().contains("the clipboard holds no root shape"),
+        "{error}"
+    );
+    let doc = document(&ctx);
+    assert!(doc.pages[0].shapes.is_empty(), "nothing was pasted");
+}
+
 #[test]
 fn clipboard_argument_and_state_failures() {
     let (mut ctx, registry, _session, page) = fixture();

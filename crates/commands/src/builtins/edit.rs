@@ -2799,6 +2799,45 @@ mod tests {
         edit.apply(&mut ctx).expect("the rescale applies");
     }
 
+    /// `geometry_source` skips what it cannot read: a gone shape, an
+    /// unknown master, a stale rung id and a cyclic master chain (all
+    /// fall back to no geometry rows).
+    #[test]
+    fn geometry_source_skips_what_it_cannot_read() {
+        let (mut ctx, session, _page, _shapes) = fixture(1);
+        let doc = document_mut(&mut ctx, session).expect("doc");
+
+        // A gone shape has no source.
+        assert!(geometry_source(doc, ShapeId { index: 9 }).is_empty());
+
+        // A shape whose master is not in the document.
+        let orphan = doc.add_shape(Shape::new(ShapeId { index: 0 }, 10));
+        if let Some(entity) = doc.shape_mut(orphan) {
+            entity.master = Some(larrygram_model::MasterId { index: 9 });
+        }
+        assert!(geometry_source(doc, orphan).is_empty());
+
+        // A master whose rung id is stale.
+        let instance = doc.add_shape(Shape::new(ShapeId { index: 0 }, 11));
+        if let Some(entity) = doc.shape_mut(instance) {
+            entity.master = Some(larrygram_model::MasterId { index: 0 });
+        }
+        let mut master = larrygram_model::Master::new(larrygram_model::MasterId { index: 0 }, 20);
+        master.shapes = vec![ShapeId { index: 9 }];
+        doc.masters.push(master);
+        assert!(geometry_source(doc, instance).is_empty());
+
+        // A cyclic master chain is walked once and stops.
+        let cyclic = doc.add_shape(Shape::new(ShapeId { index: 0 }, 12));
+        if let Some(entity) = doc.shape_mut(cyclic) {
+            entity.master = Some(larrygram_model::MasterId { index: 1 });
+        }
+        let mut master = larrygram_model::Master::new(larrygram_model::MasterId { index: 1 }, 21);
+        master.shapes = vec![cyclic];
+        doc.masters.push(master);
+        assert!(geometry_source(doc, cyclic).is_empty());
+    }
+
     /// Task P6-18 (the `restore_property` corner): a stale shape id is
     /// one error when there is a row to restore and a no-op when the
     /// edit only has a section to remove (never a panic).

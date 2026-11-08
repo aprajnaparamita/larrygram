@@ -315,6 +315,38 @@ fn a_scoped_write_lands_on_the_named_runs_only() {
     assert_eq!(row_style(&ctx, shape, 0), None, "no other row appears");
 }
 
+/// A scoped run format while the editor is open lands on the shape
+/// being edited, not on the selection (task P7-53's editor rule).
+#[test]
+fn a_scoped_format_while_editing_follows_the_editor() {
+    let (mut ctx, shape) = catalog();
+    // A second shape takes the selection; the editor holds the first.
+    let mut args = text("stencil", "Basic Shapes");
+    args.set("master", ArgValue::Text("Rectangle".to_owned()));
+    args.set("x", ArgValue::Number(6.0));
+    args.set("y", ArgValue::Number(3.0));
+    run(&mut ctx, "insert.shape", args).expect("insert");
+    let other = {
+        let session = ctx.active_document().expect("session");
+        *session
+            .document
+            .page(session.active_page.expect("page"))
+            .expect("page")
+            .shapes
+            .last()
+            .expect("a shape")
+    };
+    ctx.selection.shapes = vec![other];
+    ctx.selection.anchor = Some(other);
+    run(&mut ctx, "shape.set.text", text("text", "World")).expect("text on the selection");
+    ctx.editing_text = Some(shape);
+    let mut args = Args::new();
+    args.set("runs", run_arg(5, None));
+    run(&mut ctx, "format.text.bold", args).expect("bold");
+    assert_eq!(row_style(&ctx, shape, 5), Some(1.0), "the edited shape's run");
+    assert_eq!(row_style(&ctx, other, 5), None, "the selection is untouched");
+}
+
 /// A scoped toggle reads the run it seeds from (the fresh row keeps
 /// the split run's style bit).
 #[test]
