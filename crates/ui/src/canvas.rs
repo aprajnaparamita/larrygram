@@ -2253,4 +2253,91 @@ mod tests {
             other => panic!("not a shape: {other:?}"),
         }
     }
+
+    /// A middle drag pans the view by its delta in page inches (the
+    /// drag never re-rasterizes and never moves the page under the
+    /// pointer twice).
+    #[test]
+    fn a_middle_drag_pans_the_view() {
+        let ctx = Context::default();
+        let mut session = DocumentSession::new(filled_document(), None);
+        let mut cache = CanvasCache::new();
+        // One frame registers the canvas widget (egui 0.37 hit-tests
+        // against the previous pass).
+        frame(&ctx, egui::RawInput::default(), |ui| {
+            show(ui, &mut session, &mut cache).expect("canvas");
+        });
+        let mut input = input_with_pointer(Pos2::new(100.0, 100.0));
+        input.events.push(egui::Event::PointerButton {
+            pos: Pos2::new(100.0, 100.0),
+            button: egui::PointerButton::Middle,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        });
+        frame(&ctx, input, |ui| {
+            show(ui, &mut session, &mut cache).expect("canvas");
+        });
+        let before = session.view.pan;
+        let input = input_with_pointer(Pos2::new(148.0, 124.0));
+        frame(&ctx, input, |ui| {
+            show(ui, &mut session, &mut cache).expect("canvas");
+        });
+        let k = 96.0;
+        assert!(
+            (session.view.pan.x - (before.x + 48.0 / k)).abs() < 1.0e-9
+                && (session.view.pan.y - (before.y + 24.0 / k)).abs() < 1.0e-9,
+            "the drag pans by its delta in inches: {:?}",
+            session.view.pan
+        );
+    }
+
+    /// The zoom input arms: a Ctrl+wheel in pages and in pixels and a
+    /// pinch (`Event::Zoom`) all change the zoom at the pointer.
+    #[test]
+    fn the_wheel_and_pinch_zoom_at_the_pointer() {
+        let ctx = Context::default();
+        let mut session = DocumentSession::new(filled_document(), None);
+        let mut cache = CanvasCache::new();
+        // One frame registers the canvas widget (egui 0.37 hit-tests
+        // against the previous pass).
+        frame(&ctx, egui::RawInput::default(), |ui| {
+            show(ui, &mut session, &mut cache).expect("canvas");
+        });
+        for (event, up) in [
+            (
+                egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Page,
+                    delta: egui::vec2(0.0, -1.0),
+                    phase: egui::TouchPhase::Move,
+                    source: egui::MouseWheelSource::Unknown,
+                    modifiers: egui::Modifiers::CTRL,
+                },
+                false,
+            ),
+            (
+                egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    delta: egui::vec2(0.0, 48.0),
+                    phase: egui::TouchPhase::Move,
+                    source: egui::MouseWheelSource::Unknown,
+                    modifiers: egui::Modifiers::CTRL,
+                },
+                true,
+            ),
+            (egui::Event::Zoom(1.25), true),
+        ] {
+            let before = session.view.zoom;
+            let mut input = input_with_pointer(Pos2::new(200.0, 200.0));
+            input.events.push(event);
+            frame(&ctx, input, |ui| {
+                show(ui, &mut session, &mut cache).expect("canvas");
+            });
+            let after = session.view.zoom;
+            assert!(
+                if up { after > before } else { after < before },
+                "up={up}: the zoom moved {before} -> {after}"
+            );
+        }
+    }
+
 }

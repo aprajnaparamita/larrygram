@@ -1411,4 +1411,39 @@ mod tests {
             1
         );
     }
+
+    /// The arrow keys walk the highlight through every row's paint
+    /// path (the swatches, the transparency rows and the recent
+    /// colours) and Enter picks the highlighted row.
+    #[test]
+    fn the_arrow_keys_highlight_every_row_and_enter_picks() {
+        let out: Rc<RefCell<Vec<Intent>>> = Rc::new(RefCell::new(Vec::new()));
+        let mut harness = Harness::builder()
+            .with_size(egui::vec2(240.0, 600.0))
+            .build_ui({
+                let out = Rc::clone(&out);
+                move |ui| {
+                    // One remembered colour draws the Recent Colors
+                    // swatches (task P7-54).
+                    remember_color(ui.ctx(), (0x3a, 0x7f, 0x2c));
+                    show(
+                        ui,
+                        PickerKind::FillColor,
+                        Source::Test,
+                        egui::Color32::GRAY,
+                        &mut out.borrow_mut(),
+                    );
+                }
+            });
+        harness.run();
+        for _ in 0..40 {
+            harness.key_press(egui::Key::ArrowDown);
+            harness.run();
+        }
+        harness.key_press(egui::Key::Enter);
+        harness.run();
+        let out = out.borrow().clone();
+        assert!(!out.is_empty(), "the highlighted row picked: {out:?}");
+    }
+
 }
