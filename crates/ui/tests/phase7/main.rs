@@ -21,6 +21,7 @@
 
 mod backgrounds;
 mod colors;
+mod collapse;
 mod combo_fixes;
 mod connection_points;
 mod connector_1d;

@@ -1094,6 +1094,33 @@ mod tests {
         }
     }
 
+    /// A typed size with Enter dispatches the size command (the
+    /// field's commit rule).
+    #[test]
+    fn the_size_field_enter_dispatches_the_typed_size() {
+        let (mut harness, out) = harness_of(PickerKind::FontSize);
+        harness.run();
+        {
+            let root = harness.root();
+            let field = root
+                .query_all_by_role_and_label(Role::TextInput, "Size")
+                .next()
+                .expect("the Size field");
+            field.click();
+            field.type_text("14");
+        }
+        harness.run();
+        harness.key_press(egui::Key::Enter);
+        harness.run();
+        let out = out.borrow().clone();
+        let typed = out
+            .iter()
+            .find(|intent| intent.invocation.args.number("size") == Some(14.0))
+            .expect("the typed size dispatched");
+        assert_eq!(typed.command.as_str(), "text.font.size");
+        assert_eq!(typed.invocation.args.number("value"), Some(14.0));
+    }
+
     /// Task P7-51 item 5: the Size field's buffer clears when the
     /// popup closes without a choice (a new popup session starts
     /// empty).
