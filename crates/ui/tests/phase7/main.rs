@@ -20,8 +20,8 @@
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
 mod backgrounds;
-mod colors;
 mod collapse;
+mod colors;
 mod combo_fixes;
 mod connection_points;
 mod connector_1d;

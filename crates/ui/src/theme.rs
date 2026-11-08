@@ -812,5 +812,4 @@ mod tests {
         assert_eq!(corner_radius(-2.0), egui::CornerRadius::same(0));
         assert_eq!(corner_radius(f64::NAN), egui::CornerRadius::same(0));
     }
-
 }

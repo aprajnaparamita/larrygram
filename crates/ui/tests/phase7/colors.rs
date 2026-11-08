@@ -462,10 +462,7 @@ fn the_colour_dialog_window_close_is_a_cancel() {
             node.click();
         }
         rig.run();
-        assert!(
-            !has_named(&mut rig, "Hex"),
-            "{kind:?}: the dialog is gone"
-        );
+        assert!(!has_named(&mut rig, "Hex"), "{kind:?}: the dialog is gone");
         assert_eq!(
             cell_color(&rig, shape, "FillForegnd"),
             None,

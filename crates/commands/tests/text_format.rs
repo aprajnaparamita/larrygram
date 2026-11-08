@@ -343,8 +343,16 @@ fn a_scoped_format_while_editing_follows_the_editor() {
     let mut args = Args::new();
     args.set("runs", run_arg(5, None));
     run(&mut ctx, "format.text.bold", args).expect("bold");
-    assert_eq!(row_style(&ctx, shape, 5), Some(1.0), "the edited shape's run");
-    assert_eq!(row_style(&ctx, other, 5), None, "the selection is untouched");
+    assert_eq!(
+        row_style(&ctx, shape, 5),
+        Some(1.0),
+        "the edited shape's run"
+    );
+    assert_eq!(
+        row_style(&ctx, other, 5),
+        None,
+        "the selection is untouched"
+    );
 }
 
 /// A scoped toggle reads the run it seeds from (the fresh row keeps

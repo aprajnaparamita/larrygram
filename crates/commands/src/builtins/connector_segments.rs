@@ -700,11 +700,13 @@ mod tests {
         // Formula-driven geometry belongs to recalc (ADR 0056).
         let (mut ctx, page, _target, connector) = fixture();
         {
-            let doc = &mut ctx
-                .active_document_mut()
-                .expect("session")
-                .document;
-            *doc.shape_mut(connector).expect("connector").sheet.sections.get_mut(0).expect("geometry") = {
+            let doc = &mut ctx.active_document_mut().expect("session").document;
+            *doc.shape_mut(connector)
+                .expect("connector")
+                .sheet
+                .sections
+                .get_mut(0)
+                .expect("geometry") = {
                 let mut geometry = Section::new(SectionName::from_static("Geometry"));
                 for (ix, (kind, x, y)) in [("MoveTo", 0.0, 0.0), ("LineTo", 2.0, 0.0)]
                     .into_iter()
@@ -815,9 +817,7 @@ mod tests {
         let (mut doc, group) = {
             let session = ctx.active_document().expect("session");
             let mut doc = session.document.clone();
-            let group = doc
-                .insert_shape(_page, plain_shape(), None)
-                .expect("group");
+            let group = doc.insert_shape(_page, plain_shape(), None).expect("group");
             (doc, group)
         };
         // The connector enters the group: one level of chain.

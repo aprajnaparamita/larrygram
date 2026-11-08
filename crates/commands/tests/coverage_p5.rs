@@ -238,8 +238,9 @@ fn a_glue_to_a_broken_target_keeps_the_end_and_warns() {
     dispatch(&mut ctx, &registry, "connector.glue_end", glue_args(3, 4))
         .expect("the glue keeps its point");
     assert!(
-        ctx.warnings.iter().any(|warning| warning
-            .contains("no resolvable glue; its path is unchanged")),
+        ctx.warnings
+            .iter()
+            .any(|warning| warning.contains("no resolvable glue; its path is unchanged")),
         "{:?}",
         ctx.warnings
     );

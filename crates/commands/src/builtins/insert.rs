@@ -1375,12 +1375,22 @@ mod tests {
         let target_points = [(0, Point::new(0.0, 0.0))];
         let source_points = [(1, Point::new(1.0, 0.0))];
         assert_eq!(
-            nearest_target_index(&target_points, Transform::identity(), &source_points, broken),
+            nearest_target_index(
+                &target_points,
+                Transform::identity(),
+                &source_points,
+                broken
+            ),
             None,
             "a non-finite source point glues to nothing"
         );
         assert_eq!(
-            nearest_target_index(&target_points, broken, &source_points, Transform::identity()),
+            nearest_target_index(
+                &target_points,
+                broken,
+                &source_points,
+                Transform::identity()
+            ),
             None,
             "a non-finite target point glues to nothing"
         );
@@ -1390,5 +1400,4 @@ mod tests {
             "a non-finite source point drops nowhere"
         );
     }
-
 }

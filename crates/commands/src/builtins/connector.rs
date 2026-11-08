@@ -4334,8 +4334,12 @@ mod tests {
         // present and non-zero keep the page's value away, one missing
         // lets it through.
         let mut own = one_d(3, (0.0, 0.0), (2.0, 0.0), false);
-        own.sheet.cells.push(cell(style_cells::SHAPE_ROUTE_STYLE, 1.0));
-        own.sheet.cells.push(cell(style_cells::CON_LINE_ROUTE_EXT, 3.0));
+        own.sheet
+            .cells
+            .push(cell(style_cells::SHAPE_ROUTE_STYLE, 1.0));
+        own.sheet
+            .cells
+            .push(cell(style_cells::CON_LINE_ROUTE_EXT, 3.0));
         let doc = {
             let mut doc = Document::new();
             let page = doc.add_page("Page-1").expect("page");
@@ -4551,8 +4555,9 @@ mod tests {
         let page = doc.add_page("Page-1").expect("page");
         let line = insert(&mut doc, page, shape);
         translate_one_d(&mut doc, line, 1.0, 0.0).expect("move");
-        let rows = doc.shape(line).expect("line").sheet.sections[0].rows.clone();
+        let rows = doc.shape(line).expect("line").sheet.sections[0]
+            .rows
+            .clone();
         assert_eq!(rows.len(), 2, "the curve keeps its rows: {rows:?}");
     }
-
 }

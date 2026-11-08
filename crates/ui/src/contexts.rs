@@ -356,9 +356,7 @@ mod tests {
         let mut app = AppCtx::new(larrygram_commands::Settings::default());
         let mut doc = larrygram_model::Document::new();
         doc.add_page("Page-1").expect("page");
-        app.open_document(larrygram_commands::app::DocumentSession::new(
-            doc, None,
-        ));
+        app.open_document(larrygram_commands::app::DocumentSession::new(doc, None));
         app.active_document_mut().expect("session").active_page =
             Some(larrygram_model::PageId { index: 9 });
         assert_eq!(current(&app), SelectionContext::EmptyPage);
@@ -405,7 +403,10 @@ mod tests {
             (HitTarget::WindowTitle, "context.window_title"),
             (HitTarget::ShapesWindow, "context.shapes_window"),
             (HitTarget::ShapeDataWindow, "context.shape_data_window"),
-            (HitTarget::SizePositionWindow, "context.size_position_window"),
+            (
+                HitTarget::SizePositionWindow,
+                "context.size_position_window",
+            ),
             (HitTarget::Shapesheet, "context.shapesheet"),
             (HitTarget::FullScreen, "context.full_screen"),
             (HitTarget::MasterEdit, "context.master_edit"),

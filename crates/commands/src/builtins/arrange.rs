@@ -1514,7 +1514,10 @@ mod tests {
             Some("select two or more shapes")
         );
         ctx.active = None;
-        assert_eq!(can_ungroup(&ctx).reason.as_deref(), Some("no open document"));
+        assert_eq!(
+            can_ungroup(&ctx).reason.as_deref(),
+            Some("no open document")
+        );
     }
 
     /// The galleries' `value` argument is text (the programmatic
@@ -1531,10 +1534,7 @@ mod tests {
             run_align_box(&mut ctx, &inv).expect_err("align"),
             run_position(&mut ctx, &inv).expect_err("position"),
         ] {
-            assert!(
-                error.to_string().contains("value must be text"),
-                "{error}"
-            );
+            assert!(error.to_string().contains("value must be text"), "{error}");
             assert!(
                 !matches!(error, CommandError::NeedsInput(_)),
                 "no dialog request: {error:?}"

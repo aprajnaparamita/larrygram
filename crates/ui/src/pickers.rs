@@ -1247,10 +1247,7 @@ mod tests {
 
         let intents = click(PickerKind::LineEnds, "No Line Ends");
         assert_eq!(intents.len(), 1);
-        assert_eq!(
-            intents[0].command.as_str(),
-            "format.line_ends.no_line_ends"
-        );
+        assert_eq!(intents[0].command.as_str(), "format.line_ends.no_line_ends");
     }
 
     #[test]
@@ -1445,5 +1442,4 @@ mod tests {
         let out = out.borrow().clone();
         assert!(!out.is_empty(), "the highlighted row picked: {out:?}");
     }
-
 }

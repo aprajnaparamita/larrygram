@@ -303,7 +303,9 @@ fn a_pointer_paste_of_an_empty_fragment_is_refused() {
     pointer.set("y", ArgValue::Number(6.0));
     let error = dispatch(&mut ctx, &registry, "edit.paste", pointer).expect_err("no root shape");
     assert!(
-        error.to_string().contains("the clipboard holds no root shape"),
+        error
+            .to_string()
+            .contains("the clipboard holds no root shape"),
         "{error}"
     );
     let doc = document(&ctx);

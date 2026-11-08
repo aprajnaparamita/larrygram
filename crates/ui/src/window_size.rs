@@ -245,5 +245,4 @@ mod tests {
         assert_eq!(size, Vec2::new(536.0, 335.0));
         assert!((size.x / size.y - 1.6).abs() < 0.02);
     }
-
 }
