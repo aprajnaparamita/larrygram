@@ -867,6 +867,18 @@ mod tests {
     }
 
     #[test]
+    fn active_tool_names_cover_every_tool() {
+        assert_eq!(ActiveTool::Pointer.name(), "Pointer");
+        assert_eq!(ActiveTool::Rectangle.name(), "Rectangle");
+        assert_eq!(ActiveTool::Ellipse.name(), "Ellipse");
+        assert_eq!(ActiveTool::Line.name(), "Line");
+        assert_eq!(ActiveTool::Connector.name(), "Connector");
+        assert_eq!(ActiveTool::Text.name(), "Text");
+        assert_eq!(ActiveTool::TextBlock.name(), "Text Block");
+        assert_eq!(ActiveTool::ConnectionPoint.name(), "Connection Point");
+    }
+
+    #[test]
     fn settings_default_to_panel_modern_and_first_run_state() {
         // New stores default to Panel Modern (ADR 0061, task P7-09),
         // and a fresh install has not seen the welcome wizard (ADR
@@ -1336,6 +1348,19 @@ mod tests {
         fn revert(&mut self, _ctx: &mut AppCtx) -> Result<(), CommandError> {
             Err(CommandError::failed("revert failed"))
         }
+    }
+
+    /// The edit applies cleanly and only its revert fails, so the
+    /// partial-revert walk can meet it mid-group (its label names the
+    /// failure the undo menu would show).
+    #[test]
+    fn a_revert_fails_edit_applies_and_names_itself() {
+        let mut ctx = AppCtx::new(Settings::default());
+        let mut edit = RevertFailsEdit;
+        assert_eq!(edit.label(), "revert fails");
+        edit.apply(&mut ctx).expect("the edit applies");
+        let error = edit.revert(&mut ctx).expect_err("the revert fails");
+        assert_eq!(error.to_string(), "revert failed");
     }
 
     /// Task P7-48 item 9: a partial revert never marks the drawing
