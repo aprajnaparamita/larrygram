@@ -3304,6 +3304,10 @@ mod phase3_tests {
             DEFAULT_PAGE_SIZE,
             "an unknown page gets the default pair"
         );
+        // A link that names no style ends the chain: the default pair.
+        let (mut doc, page) = page_with_style(Vec::new(), Vec::new());
+        doc.pages[0].preserved.attributes[0].value = "8".to_owned();
+        assert_eq!(doc.page_size(page), DEFAULT_PAGE_SIZE);
     }
 
     #[test]
@@ -3322,6 +3326,23 @@ mod phase3_tests {
         let (mut doc, page) = page_with_style(Vec::new(), vec![inherited_cell("LineWeight")]);
         doc.stylesheet.styles[0].line_style = Some(7);
         assert_eq!(doc.page_size(page), DEFAULT_PAGE_SIZE);
+    }
+
+    #[test]
+    fn page_size_follows_a_text_style_chain() {
+        // The page links a text style with no size; that style's own
+        // text-style link names the style that has one.
+        let (mut doc, page) = page_with_style(Vec::new(), Vec::new());
+        doc.pages[0].preserved.attributes[0].name.local = "TextStyle".to_owned();
+        doc.stylesheet.styles[0].text_style = Some(9);
+        let mut sized = crate::style::Style::new(StyleId { index: 1 });
+        sized.visio_id = 9;
+        sized.sheet.cells = vec![
+            number_cell("PageWidth", 10.0),
+            number_cell("PageHeight", 6.0),
+        ];
+        doc.stylesheet.styles.push(sized);
+        assert_eq!(doc.page_size(page), (10.0, 6.0));
     }
 
     #[test]
@@ -3857,6 +3878,21 @@ mod phase3_tests {
         let shape = shape_with_properties(&mut doc, vec![first, named]);
         let sheet = &doc.shape(shape).expect("shape").sheet;
         assert_eq!(find_property_row(sheet, "Row_1"), Some(1));
+
+        // A deleted row never matches, by name or by position; the
+        // live row after it still does.
+        let mut doc = Document::new();
+        let mut gone = property_row(Some("Cost"), Vec::new());
+        gone.preserved.attributes.push(crate::raw::XmlAttribute {
+            name: crate::raw::QName::local("Del"),
+            value: "1".to_owned(),
+        });
+        let live = property_row(Some("Price"), Vec::new());
+        let shape = shape_with_properties(&mut doc, vec![gone, live]);
+        let sheet = &doc.shape(shape).expect("shape").sheet;
+        assert_eq!(find_property_row(sheet, "Cost"), None);
+        assert_eq!(find_property_row(sheet, "Row_1"), None);
+        assert_eq!(find_property_row(sheet, "Price"), Some(1));
 
         // A sheet without the section resolves nothing.
         let empty = crate::sheet::Sheet::new();
