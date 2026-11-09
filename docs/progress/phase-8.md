@@ -7,8 +7,8 @@ the only place libvisio-derived code may live, AGENTS.md section 5),
 with the MS-CFB container, the chunk and pointer layer, and the four
 domain modules that map records into the Phase 1 model. The model is
 the one the `.vsdx` reader produces (ADR 0070), so the writer needs no
-changes. Started 2026-10-23 (P8-01), closed 2026-10-26. The master
-tags `phase-8` after this merges.
+changes. Started 2026-10-23 (P8-01), closed 2026-10-26; the gate
+waited for Phase 7's and passed on 2026-11-09 (tag `phase-8`).
 
 ## What was built
 
@@ -285,6 +285,20 @@ their job numbers); the coverage measurement above ran as job 87, and
 the P8-14 hand-off gate is recorded in its Result. The full gate
 (`cargo xtask gate` with wasm and fuzz) runs in the master's full
 check after the merge, as every phase's does.
+
+The phase gate (2026-11-09) is the master's full check on `main` at
+`5cb9069`, shared with the Phase 7 gate: codegen, names, parity, fmt,
+clippy, test, doc, coverage, deny, layers, wasm and fuzz all green with
+the corpus tests required. `larrygram-vsd-binary` then measured 12 016
+of 12 020 lines (99.97%), inside the tolerance of its 100.0 ratchet,
+which stays (`docs/progress/phase-7.md` has the full table). Since the
+phase closed, the Phase 7 work changed how the app uses the importer,
+not the importer: Save As of a `.vsd` suggests the `.vsdx` name, and
+`.vsd` pictures are still not drawn (a known alpha gap).
+
+Before the tag: R6 removes the Microsoft sample goldens P8-13 found
+(`tdf76829-datetime-format*.png`) from history. P8-17 removed them
+from the tree, so this gate's tree is already clean.
 
 ## Decisions made during the phase
 

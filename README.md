@@ -2,7 +2,7 @@
 
 A clean-room, open-source diagramming app in pure Rust that aims to read and write Microsoft Visio files (.vsdx, with read-only .vsd import).
 
-> **Status: alpha in preparation, Phase 7 of 9 done; the Phase 8 gate is next.** The app opens, renders, edits and saves `.vsdx` files, and opens `.vsd`, `.vss` and `.vst` files read-only (save them as `.vsdx`). You can draw shapes and connectors, glue and re-route them, type and format text, format fills and lines, set page backgrounds, and undo all of it. ShapeSheet formulas are evaluated as you edit. The window uses the Panel Modern (command bar) or Panel Classic (menus and toolbars) layout. It is not ready for real work: visual fidelity is approximate, pictures are not drawn, most of the 2016/365 command set is still stubbed and the control channel is not built.
+> **Status: alpha in preparation, Phases 7 and 8 of 9 done.** The app opens, renders, edits and saves `.vsdx` files, and opens `.vsd`, `.vss` and `.vst` files read-only (save them as `.vsdx`). You can draw shapes and connectors, glue and re-route them, type and format text, format fills and lines, set page backgrounds, and undo all of it. ShapeSheet formulas are evaluated as you edit. The window uses the Panel Modern (command bar) or Panel Classic (menus and toolbars) layout. It is not ready for real work: visual fidelity is approximate, pictures are not drawn, most of the 2016/365 command set is still stubbed and the control channel is not built.
 
 ## Build status
 
@@ -65,11 +65,11 @@ These are the numbers from the `5cb9069` full gate.
   - `cargo xtask dist` packages for macOS, Windows and Linux, the last two cross-built on the Mac.
 
   Phase report: [docs/progress/phase-7.md](docs/progress/phase-7.md).
-- **Binary `.vsd` import** (Phase 8, gate next), in `crates/vsd-binary`: the compound file reader with its decompression, chunks, shapes and geometry, text, styles, pages, masters and the document properties. The app and the CLI open `.vsd`, `.vss` and `.vst` files read-only and save them as `.vsdx`; the importer is compared against libvisio file by file. Pictures in `.vsd` files are not imported yet. Phase report: [docs/progress/phase-8.md](docs/progress/phase-8.md).
+- **Binary `.vsd` import** (Phase 8), in `crates/vsd-binary`: the compound file reader with its decompression, chunks, shapes and geometry, text, styles, pages, masters and the document properties. The app and the CLI open `.vsd`, `.vss` and `.vst` files read-only and save them as `.vsdx`; the importer is compared against libvisio file by file. Pictures in `.vsd` files are not imported yet. Phase report: [docs/progress/phase-8.md](docs/progress/phase-8.md).
 
 ## Next
 
-The Phase 8 gate, then a history clean-up (R6), then the first alpha packages for macOS, Windows and Linux on GitHub Releases. Phase 9 (the control channel and MCP) follows the alpha.
+A history clean-up (R6), then the first alpha packages for macOS, Windows and Linux on GitHub Releases. Phase 9 (the control channel and MCP) follows the alpha.
 
 The live task board is [docs/STATUS.md](docs/STATUS.md). Phase reports are in [docs/progress/](docs/progress/). Command coverage against the command bar is in [docs/parity/controls.md](docs/parity/controls.md).
 
@@ -89,7 +89,7 @@ Drawing pictures (inserted images and the bitmaps in `.vsd` and `.vsdx` files), 
 | 5 | Editing core | done |
 | 6 | ShapeSheet engine (core subset) | done |
 | 7 | Panel Modern and Panel Classic layouts, the Larrygram rename, the welcome wizard | done |
-| 8 | Binary .vsd import (read-only) | in progress |
+| 8 | Binary .vsd import (read-only) | done |
 | 9 | Control channel and MCP | paused |
 
 Out of scope for the alpha: visual fidelity, data linking, containers/lists beyond preservation, VBA/macros, coauthoring, printing, writing .vsd, large stencil libraries.
