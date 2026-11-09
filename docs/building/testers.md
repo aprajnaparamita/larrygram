@@ -8,7 +8,7 @@ system's warnings, and report a bug. Our own words throughout.
 ## Which build to download
 
 Go to the repository's **Releases** page on GitHub and pick the newest
-`v*` **pre-release**. It carries three packages; take the one for your
+`v*` release. It carries three packages; take the one for your
 system:
 
 | System | Package |
@@ -17,13 +17,12 @@ system:
 | 64-bit Windows | `Larrygram-<version>-windows-x64.zip` |
 | 64-bit x86 Linux | `Larrygram-<version>-linux-x64.tar.gz` |
 
-The first tag for testers is announced by the maintainer once the
-pending repository history rewrite (task R6) is done; do not treat an
-earlier tag as final, because that rewrite moves it.
+The first build for testers is `v1.0.0-alpha.1` (2026-11-09):
+[its release page](https://github.com/aprajnaparamita/larrygram/releases/tag/v1.0.0-alpha.1).
 
 ## Check the download
 
-Every pre-release carries a `SHA256SUMS` file with the checksum of
+Every release carries a `SHA256SUMS` file with the checksum of
 each package. Check yours against it before opening anything.
 
 - **macOS** (Terminal, in the folder with the downloads):

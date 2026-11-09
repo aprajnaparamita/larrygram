@@ -2,7 +2,19 @@
 
 A clean-room, open-source diagramming app in pure Rust that aims to read and write Microsoft Visio files (.vsdx, with read-only .vsd import).
 
-> **Status: alpha in preparation, Phases 7 and 8 of 9 done.** The app opens, renders, edits and saves `.vsdx` files, and opens `.vsd`, `.vss` and `.vst` files read-only (save them as `.vsdx`). You can draw shapes and connectors, glue and re-route them, type and format text, format fills and lines, set page backgrounds, and undo all of it. ShapeSheet formulas are evaluated as you edit. The window uses the Panel Modern (command bar) or Panel Classic (menus and toolbars) layout. It is not ready for real work: visual fidelity is approximate, pictures are not drawn, most of the 2016/365 command set is still stubbed and the control channel is not built.
+> **Status: alpha, Phases 7 and 8 of 9 done; the first alpha, 1.0.0-alpha.1, is out.** The app opens, renders, edits and saves `.vsdx` files, and opens `.vsd`, `.vss` and `.vst` files read-only (save them as `.vsdx`). You can draw shapes and connectors, glue and re-route them, type and format text, format fills and lines, set page backgrounds, and undo all of it. ShapeSheet formulas are evaluated as you edit. The window uses the Panel Modern (command bar) or Panel Classic (menus and toolbars) layout. It is not ready for real work: visual fidelity is approximate, pictures are not drawn, most of the 2016/365 command set is still stubbed and the control channel is not built.
+
+## Download
+
+The first alpha, **1.0.0-alpha.1**, is on the [release page](https://github.com/aprajnaparamita/larrygram/releases/tag/v1.0.0-alpha.1). It is a build for testers: unsigned, and not ready for real work.
+
+| System | Package |
+|---|---|
+| macOS on Apple silicon | [Larrygram-1.0.0-alpha.1-macos-arm64.dmg](https://github.com/aprajnaparamita/larrygram/releases/download/v1.0.0-alpha.1/Larrygram-1.0.0-alpha.1-macos-arm64.dmg) |
+| Windows 10 and 11, 64-bit | [Larrygram-1.0.0-alpha.1-windows-x64.zip](https://github.com/aprajnaparamita/larrygram/releases/download/v1.0.0-alpha.1/Larrygram-1.0.0-alpha.1-windows-x64.zip) |
+| Linux x86-64 (glibc 2.30 or later) | [Larrygram-1.0.0-alpha.1-linux-x64.tar.gz](https://github.com/aprajnaparamita/larrygram/releases/download/v1.0.0-alpha.1/Larrygram-1.0.0-alpha.1-linux-x64.tar.gz) |
+
+Check your download against [`SHA256SUMS`](https://github.com/aprajnaparamita/larrygram/releases/download/v1.0.0-alpha.1/SHA256SUMS). The [tester guide](docs/building/testers.md) explains how to open an unsigned build and how to report a bug.
 
 ## Build status
 
@@ -69,7 +81,7 @@ These are the numbers from the `de3b2a3` full gate.
 
 ## Next
 
-A history clean-up (R6), then the first alpha packages for macOS, Windows and Linux on GitHub Releases. Phase 9 (the control channel and MCP) follows the alpha.
+Testers' reports on the alpha, then Phase 9: the control channel and MCP.
 
 The live task board is [docs/STATUS.md](docs/STATUS.md). Phase reports are in [docs/progress/](docs/progress/). Command coverage against the command bar is in [docs/parity/controls.md](docs/parity/controls.md).
 

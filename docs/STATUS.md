@@ -2,7 +2,7 @@
 
 Task board. Only the master agent edits this file, on `main`.
 
-- Current phase: **the alpha release** (Phase 7 and Phase 8 closed 2026-11-09; R6 done, waiting for the user's force-push of `main` and the tags). The user's manual retest of the alpha build passed (2026-11-09). Then the packages on GitHub Releases and the website deploy.
+- Current phase: **the alpha is out** (`v1.0.0-alpha.1`, published 2026-11-09 on GitHub Releases from `a73ed9c`: the macOS `.dmg`, the cross-built Windows `.zip` and Linux `.tar.gz`, and `SHA256SUMS`). Phase 7 and Phase 8 closed 2026-11-09; R6 done and force-pushed. The user's manual retest passed. Next: the website deploy, testers' reports, then Phase 9.
 - Phase 6 goal: ShapeSheet engine, core subset (KICKOFF.md). Exit: resizing master-based shapes from the corpus recomputes geometry correctly for supported functions; the phase report gives the agreement rate with cached values.
 - Phase 5 goal: editing core (KICKOFF.md). Exit: a user can build a 10-shape flowchart with connected shapes across two pages, save it, reopen it and keep editing.
 - Phase 8 complete (2026-11-09, report: [progress/phase-8.md](progress/phase-8.md), tag `phase-8`; the same full check at `de3b2a3`).
