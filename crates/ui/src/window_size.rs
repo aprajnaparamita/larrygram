@@ -236,4 +236,13 @@ mod tests {
         assert_eq!(rect.center(), screen.center());
         assert!(screen.contains_rect(rect));
     }
+
+    /// A narrow room takes the room: the width cap is the app window
+    /// less the margins, even under the minimum.
+    #[test]
+    fn the_width_shrinks_under_the_minimum_into_a_narrow_room() {
+        let size = WIZARD.size(Vec2::new(600.0, 1000.0));
+        assert_eq!(size, Vec2::new(536.0, 335.0));
+        assert!((size.x / size.y - 1.6).abs() < 0.02);
+    }
 }

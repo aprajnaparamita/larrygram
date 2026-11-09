@@ -1094,6 +1094,33 @@ mod tests {
         }
     }
 
+    /// A typed size with Enter dispatches the size command (the
+    /// field's commit rule).
+    #[test]
+    fn the_size_field_enter_dispatches_the_typed_size() {
+        let (mut harness, out) = harness_of(PickerKind::FontSize);
+        harness.run();
+        {
+            let root = harness.root();
+            let field = root
+                .query_all_by_role_and_label(Role::TextInput, "Size")
+                .next()
+                .expect("the Size field");
+            field.click();
+            field.type_text("14");
+        }
+        harness.run();
+        harness.key_press(egui::Key::Enter);
+        harness.run();
+        let out = out.borrow().clone();
+        let typed = out
+            .iter()
+            .find(|intent| intent.invocation.args.number("size") == Some(14.0))
+            .expect("the typed size dispatched");
+        assert_eq!(typed.command.as_str(), "text.font.size");
+        assert_eq!(typed.invocation.args.number("value"), Some(14.0));
+    }
+
     /// Task P7-51 item 5: the Size field's buffer clears when the
     /// popup closes without a choice (a new popup session starts
     /// empty).
@@ -1188,6 +1215,39 @@ mod tests {
             intents[0].invocation.args.number("transparency"),
             Some(50.0)
         );
+    }
+
+    /// Every picker's first row label (the sweeps' landmark).
+    #[test]
+    fn every_picker_names_its_first_row() {
+        assert_eq!(
+            first_row(PickerKind::Font),
+            FAMILIES.first().copied().expect("a family")
+        );
+        assert_eq!(first_row(PickerKind::FontSize), "8 pt");
+        assert_eq!(first_row(PickerKind::FontColor), "Use Default");
+        assert_eq!(first_row(PickerKind::FillColor), "No Fill");
+        assert_eq!(first_row(PickerKind::LineColor), "No Line");
+        assert_eq!(first_row(PickerKind::LineWeight), "No Line");
+        assert_eq!(first_row(PickerKind::LinePattern), "No Line");
+        assert_eq!(first_row(PickerKind::LineEnds), "No Line Ends");
+        assert_eq!(
+            first_row(PickerKind::Zoom),
+            ZOOM_PRESETS.first().map_or("100%", |(label, _)| *label)
+        );
+    }
+
+    /// The empty line choices: the weight list's "No Line" and the
+    /// ends list's "No Line Ends" rows dispatch their own commands.
+    #[test]
+    fn the_empty_line_choices_dispatch_their_commands() {
+        let intents = click(PickerKind::LineWeight, "No Line");
+        assert_eq!(intents.len(), 1);
+        assert_eq!(intents[0].command.as_str(), "format.line_color.no_line");
+
+        let intents = click(PickerKind::LineEnds, "No Line Ends");
+        assert_eq!(intents.len(), 1);
+        assert_eq!(intents[0].command.as_str(), "format.line_ends.no_line_ends");
     }
 
     #[test]
@@ -1347,5 +1407,39 @@ mod tests {
             colors.iter().filter(|entry| **entry == (0, 3, 0)).count(),
             1
         );
+    }
+
+    /// The arrow keys walk the highlight through every row's paint
+    /// path (the swatches, the transparency rows and the recent
+    /// colours) and Enter picks the highlighted row.
+    #[test]
+    fn the_arrow_keys_highlight_every_row_and_enter_picks() {
+        let out: Rc<RefCell<Vec<Intent>>> = Rc::new(RefCell::new(Vec::new()));
+        let mut harness = Harness::builder()
+            .with_size(egui::vec2(240.0, 600.0))
+            .build_ui({
+                let out = Rc::clone(&out);
+                move |ui| {
+                    // One remembered colour draws the Recent Colors
+                    // swatches (task P7-54).
+                    remember_color(ui.ctx(), (0x3a, 0x7f, 0x2c));
+                    show(
+                        ui,
+                        PickerKind::FillColor,
+                        Source::Test,
+                        egui::Color32::GRAY,
+                        &mut out.borrow_mut(),
+                    );
+                }
+            });
+        harness.run();
+        for _ in 0..40 {
+            harness.key_press(egui::Key::ArrowDown);
+            harness.run();
+        }
+        harness.key_press(egui::Key::Enter);
+        harness.run();
+        let out = out.borrow().clone();
+        assert!(!out.is_empty(), "the highlighted row picked: {out:?}");
     }
 }

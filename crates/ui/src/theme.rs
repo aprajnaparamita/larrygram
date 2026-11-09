@@ -802,4 +802,14 @@ mod tests {
         assert_eq!(font_size(f64::NAN), FALLBACK_FONT_SIZE);
         assert_eq!(font_size(f64::INFINITY), FALLBACK_FONT_SIZE);
     }
+
+    /// A corner radius clamps into the `u8` range and sanitises a
+    /// non-finite pixel count.
+    #[test]
+    fn corner_radius_clamps_and_sanitises() {
+        assert_eq!(corner_radius(5.0), egui::CornerRadius::same(5));
+        assert_eq!(corner_radius(300.0), egui::CornerRadius::same(255));
+        assert_eq!(corner_radius(-2.0), egui::CornerRadius::same(0));
+        assert_eq!(corner_radius(f64::NAN), egui::CornerRadius::same(0));
+    }
 }

@@ -1366,4 +1366,38 @@ mod tests {
             "{error}"
         );
     }
+
+    /// The pair search skips the points that map to a non-finite page
+    /// point: a broken transform never picks a neighbour.
+    #[test]
+    fn the_nearest_pair_skips_non_finite_points() {
+        let broken = Transform::translate(Point::new(f64::NAN, 0.0));
+        let target_points = [(0, Point::new(0.0, 0.0))];
+        let source_points = [(1, Point::new(1.0, 0.0))];
+        assert_eq!(
+            nearest_target_index(
+                &target_points,
+                Transform::identity(),
+                &source_points,
+                broken
+            ),
+            None,
+            "a non-finite source point glues to nothing"
+        );
+        assert_eq!(
+            nearest_target_index(
+                &target_points,
+                broken,
+                &source_points,
+                Transform::identity()
+            ),
+            None,
+            "a non-finite target point glues to nothing"
+        );
+        assert_eq!(
+            nearest_source_index(&source_points, broken, Point::new(0.0, 0.0)),
+            None,
+            "a non-finite source point drops nowhere"
+        );
+    }
 }

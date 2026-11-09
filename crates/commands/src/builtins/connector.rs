@@ -4284,4 +4284,280 @@ mod tests {
             2
         );
     }
+
+    /// The facts the route reads: `size_cells` on a shape without
+    /// sizes, `direct_number` on a non-number cell, `row_direction`
+    /// with and without a matching row, and `inherits_style`'s
+    /// own-cell read.
+    #[test]
+    fn the_route_facts_read_only_what_they_can() {
+        // A shape whose sizes are not numbers counts as 1.0 x 1.0.
+        let mut text = Shape::new(ShapeId { index: 0 }, 2);
+        for name in ["Width", "Height"] {
+            text.sheet.cells.push(Cell {
+                name: CellName::new(name),
+                formula: None,
+                value: Some(CellValue::Str("wide".to_owned())),
+                unit: larrygram_geom::Unit::Unitsless,
+                preserved: Preserved::new(),
+            });
+        }
+        let mut doc = Document::new();
+        let page = doc.add_page("Page-1").expect("page");
+        let text = insert(&mut doc, page, text);
+        assert_eq!(size_cells(&doc, text), (1.0, 1.0));
+
+        // A non-number cell reads as nothing.
+        let text = doc.shape(text).expect("text shape");
+        assert_eq!(direct_number(text, "Width"), None);
+        assert_eq!(direct_number(text, "Missing"), None);
+
+        // A row direction: the matching row's finite non-zero
+        // direction scales by the rung's box.
+        let mut row = Row::new();
+        row.row_type = Some("Connection".to_owned());
+        row.ix = Some(3);
+        row.cells = vec![cell("DirX", 1.0), cell("DirY", 0.0)];
+        let mut sections = vec![Section::new(SectionName::from_static("Connection"))];
+        sections[0].rows.push(row);
+        assert_eq!(
+            row_direction(&sections, 3, 2.0, 3.0),
+            Some(Point::new(2.0, 0.0))
+        );
+        assert_eq!(
+            row_direction(&sections, 4, 2.0, 3.0),
+            None,
+            "a row that is not there has no direction"
+        );
+
+        // `inherits_style` reads the connector's own style cells: both
+        // present and non-zero keep the page's value away, one missing
+        // lets it through.
+        let mut own = one_d(3, (0.0, 0.0), (2.0, 0.0), false);
+        own.sheet
+            .cells
+            .push(cell(style_cells::SHAPE_ROUTE_STYLE, 1.0));
+        own.sheet
+            .cells
+            .push(cell(style_cells::CON_LINE_ROUTE_EXT, 3.0));
+        let doc = {
+            let mut doc = Document::new();
+            let page = doc.add_page("Page-1").expect("page");
+            insert(&mut doc, page, own);
+            doc
+        };
+        assert!(
+            !inherits_style(&doc, ShapeId { index: 0 }),
+            "the connector styles itself"
+        );
+        let mut doc = Document::new();
+        let page = doc.add_page("Page-1").expect("page");
+        let plain = insert(&mut doc, page, one_d(4, (0.0, 0.0), (2.0, 0.0), false));
+        assert!(
+            inherits_style(&doc, plain),
+            "an absent style cell inherits the page's"
+        );
+    }
+
+    /// `connection_direction` walks the master rungs: a rung without
+    /// `Connection` rows is skipped, and none with rows answers nothing.
+    #[test]
+    fn connection_direction_walks_the_master_rungs() {
+        use larrygram_model::{Master, MasterId};
+        let pointed = |visio_id: i32| {
+            let mut shape = shape_at(visio_id, 2.0, 2.0, 2.0, 1.0);
+            let mut connection = Section::new(SectionName::from_static("Connection"));
+            let mut row = Row::new();
+            row.row_type = Some("Connection".to_owned());
+            row.ix = Some(0);
+            row.cells = vec![
+                cell("X", 1.0),
+                cell("Y", 1.0),
+                cell("DirX", 1.0),
+                cell("DirY", 0.0),
+            ];
+            connection.rows.push(row);
+            shape.sheet.sections.push(connection);
+            shape
+        };
+        let mut doc = Document::new();
+        let page = doc.add_page("Page-1").expect("page");
+        // The chain holds a rowless rung before the pointed one (master
+        // A's rung is an instance of master B): the walk skips the
+        // first and answers the second's direction.
+        let rowed = doc.add_shape(pointed(6));
+        let mut master_b = Master::new(MasterId { index: 1 }, 7);
+        master_b.name_u = "Pointed".to_owned();
+        master_b.shapes = vec![rowed];
+        let master_b = doc.add_master(master_b).expect("master B");
+        let mut rung = shape_at(5, 2.0, 2.0, 2.0, 1.0);
+        rung.master = Some(master_b);
+        let rowless = doc.add_shape(rung);
+        let mut master = Master::new(MasterId { index: 0 }, 5);
+        master.name_u = "Mixed".to_owned();
+        master.shapes = vec![rowless];
+        let master = doc.add_master(master).expect("master");
+        let instance = doc
+            .instantiate_master(master, page, Point::new(5.0, 2.0), None)
+            .expect("instance");
+        assert_eq!(
+            connection_direction(&doc, instance, 0),
+            Some(Point::new(1.0, 0.0)),
+            "the rowed rung's direction, scaled by the instance"
+        );
+        assert_eq!(
+            connection_direction(&doc, instance, 5),
+            None,
+            "a row index no rung holds"
+        );
+
+        // A master without rows anywhere answers nothing.
+        let mut doc = Document::new();
+        let page = doc.add_page("Page-1").expect("page");
+        let rowless = doc.add_shape(shape_at(5, 2.0, 2.0, 2.0, 1.0));
+        let mut master = Master::new(MasterId { index: 1 }, 7);
+        master.name_u = "Bare".to_owned();
+        master.shapes = vec![rowless];
+        let master = doc.add_master(master).expect("master");
+        let instance = doc
+            .instantiate_master(master, page, Point::new(5.0, 2.0), None)
+            .expect("instance");
+        assert_eq!(connection_direction(&doc, instance, 0), None);
+    }
+
+    /// The route snapshot skips the shape it cannot see: a gone shape
+    /// captures nothing and a restore onto it changes nothing.
+    #[test]
+    fn the_route_snapshot_skips_a_gone_shape() {
+        let (mut ctx, _session, _page, connector, _left, _right) = fixture();
+        let doc = &ctx.active_document().expect("session").document;
+        let empty = PathRows::capture(doc, ShapeId { index: 9 });
+        assert!(
+            empty.geometry.is_empty() && empty.cells.is_empty(),
+            "a gone shape captures nothing"
+        );
+        let before = PathRows::capture(doc, connector);
+        let sheet = doc.shape(connector).expect("connector").sheet.clone();
+        empty.restore(
+            &mut ctx.active_document_mut().expect("session").document,
+            ShapeId { index: 9 },
+        );
+        let doc = &ctx.active_document().expect("session").document;
+        assert_eq!(
+            doc.shape(connector).expect("connector").sheet,
+            sheet,
+            "a restore onto a gone shape touches nothing"
+        );
+        let after = PathRows::capture(doc, connector);
+        assert_eq!(before.cells.len(), after.cells.len());
+    }
+
+    /// The glue clear skips an item whose connector is gone or not a
+    /// connector (a replayed delete): its sheet is never written.
+    #[test]
+    fn the_clear_edit_skips_a_connector_that_is_gone() {
+        let (mut ctx, session, _page, _connector, left, _right) = fixture();
+        let sheet = ctx
+            .active_document()
+            .expect("session")
+            .document
+            .shape(left)
+            .expect("plain shape")
+            .sheet
+            .clone();
+        let mut edit = GlueClearEdit {
+            session,
+            items: vec![ClearedConnector {
+                connector: left,
+                ends: vec![(End::Begin, Point::new(1.0, 2.0))],
+                old_sheet: Sheet::default(),
+            }],
+        };
+        edit.apply(&mut ctx).expect("the skip applies cleanly");
+        assert_eq!(
+            ctx.active_document()
+                .expect("session")
+                .document
+                .shape(left)
+                .expect("plain shape")
+                .sheet,
+            sheet,
+            "a plain shape has no glue formulas to clear"
+        );
+    }
+
+    /// A 1-D move whose page is gone (a replayed edit) still moves its
+    /// shape: only the record pass is skipped.
+    #[test]
+    fn a_one_d_move_apply_skips_a_gone_page() {
+        let mut doc = Document::new();
+        let page = doc.add_page("Page-1").expect("page");
+        let line = insert(&mut doc, page, one_d(1, (0.0, 0.0), (2.0, 0.0), false));
+        let old_sheet = doc.shape(line).expect("line").sheet.clone();
+        let mut ctx = AppCtx::new(Settings::default());
+        let index = ctx.open_document(DocumentSession::new(doc, None));
+        let session = ctx.documents.get(index).expect("session").id;
+        let mut edit = OneDMoveEdit {
+            session,
+            page: PageId { index: 9 },
+            dx: 1.0,
+            dy: 0.0,
+            items: vec![MovedOneD {
+                shape: line,
+                visio_id: 1,
+                freed: vec![End::Begin],
+                old_sheet,
+            }],
+            old_connects: Vec::new(),
+            dirty: Vec::new(),
+        };
+        edit.apply(&mut ctx).expect("the move applies");
+        let moved = ctx
+            .active_document()
+            .expect("session")
+            .document
+            .shape(line)
+            .expect("line")
+            .sheet
+            .cells
+            .iter()
+            .find(|cell| cell.name.as_str() == "BeginX")
+            .and_then(|cell| cell.value.clone())
+            .expect("BeginX");
+        assert_eq!(moved, CellValue::Number(1.0), "the path moved");
+    }
+
+    /// A moved curve whose NURBS row carries no control-point data
+    /// keeps its rows: the data block is optional (task P7-36 item 2).
+    #[test]
+    fn a_moved_curve_without_control_points_keeps_its_rows() {
+        let mut shape = one_d(1, (0.0, 0.0), (2.0, 0.0), false);
+        let mut geometry = Section::new(SectionName::from_static("Geometry"));
+        let mut move_to = Row::new();
+        move_to.row_type = Some("MoveTo".to_owned());
+        move_to.ix = Some(0);
+        move_to.cells = vec![cell("X", 0.0), cell("Y", 0.0)];
+        geometry.rows.push(move_to);
+        let mut nurbs = Row::new();
+        nurbs.row_type = Some("NurbsTo".to_owned());
+        nurbs.ix = Some(1);
+        nurbs.cells = vec![
+            cell("X", 2.0),
+            cell("Y", 0.0),
+            cell("A", 0.0),
+            cell("B", 1.0),
+            cell("C", 0.0),
+            cell("D", 1.0),
+        ];
+        geometry.rows.push(nurbs);
+        shape.sheet.sections = vec![geometry];
+        let mut doc = Document::new();
+        let page = doc.add_page("Page-1").expect("page");
+        let line = insert(&mut doc, page, shape);
+        translate_one_d(&mut doc, line, 1.0, 0.0).expect("move");
+        let rows = doc.shape(line).expect("line").sheet.sections[0]
+            .rows
+            .clone();
+        assert_eq!(rows.len(), 2, "the curve keeps its rows: {rows:?}");
+    }
 }

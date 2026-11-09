@@ -185,6 +185,122 @@ fn corrupt_connector_transform(ctx: &mut AppCtx, page: PageId) {
     }
 }
 
+/// A box whose transform maps every point through infinity: the pin
+/// minus the local pin overflows.
+fn overflow_box(visio_id: i32) -> Shape {
+    let mut shape = box_shape(visio_id, 0.0);
+    for cell in &mut shape.sheet.cells {
+        match cell.name.as_str() {
+            "PinX" => cell.value = Some(CellValue::Number(1.7e308)),
+            "LocPinX" => cell.value = Some(CellValue::Number(-1.7e308)),
+            _ => {}
+        }
+    }
+    shape
+}
+
+/// A connector whose ends cannot be read (a text `EndX`) and whose
+/// transform overflows: the route only ever sees non-finite points.
+fn broken_connector(visio_id: i32) -> Shape {
+    let mut shape = connector_shape(visio_id, 3.0);
+    for cell in &mut shape.sheet.cells {
+        match cell.name.as_str() {
+            "PinX" => cell.value = Some(CellValue::Number(1.7e308)),
+            "LocPinX" => cell.value = Some(CellValue::Number(-1.7e308)),
+            _ => {}
+        }
+    }
+    for name in ["BeginX", "BeginY", "EndX", "EndY"] {
+        shape.sheet.cells.push(Cell {
+            name: CellName::new(name),
+            formula: None,
+            value: Some(CellValue::Str("no point".to_owned())),
+            unit: larrygram_geom::Unit::Inches,
+            preserved: Preserved::new(),
+        });
+    }
+    // A routable 1-D shape (ADR 0084 rule 1's `ObjType` flag).
+    shape.sheet.cells.push(number_cell("ObjType", 2.0));
+    shape
+}
+
+/// A glue that resolves nowhere keeps the end where it was: the cached
+/// `V` must stay finite (the model refuses a non-finite endpoint), and
+/// the re-route leaves the path alone with one warning.
+#[test]
+fn a_glue_to_a_broken_target_keeps_the_end_and_warns() {
+    let (mut ctx, registry, page) = fixture();
+    ctx.active_document_mut()
+        .expect("session")
+        .document
+        .insert_shape(page, overflow_box(4), None)
+        .expect("insert");
+    dispatch(&mut ctx, &registry, "connector.glue_end", glue_args(3, 4))
+        .expect("the glue keeps its point");
+    assert!(
+        ctx.warnings
+            .iter()
+            .any(|warning| warning.contains("no resolvable glue; its path is unchanged")),
+        "{:?}",
+        ctx.warnings
+    );
+}
+
+/// A draw glued to a target that resolves nowhere fails with the
+/// route's own error: no path connects the points.
+#[test]
+fn a_draw_glued_to_a_broken_target_reports_the_route_error() {
+    let (mut ctx, registry, page) = fixture();
+    ctx.active_document_mut()
+        .expect("session")
+        .document
+        .insert_shape(page, overflow_box(4), None)
+        .expect("insert");
+    let error = dispatch(
+        &mut ctx,
+        &registry,
+        "connector.draw",
+        Args::new()
+            .with("stencil", ArgValue::Text("Basic Flowchart".to_owned()))
+            .with("master", ArgValue::Text("Connector".to_owned()))
+            .with("x", ArgValue::Number(3.0))
+            .with("y", ArgValue::Number(4.5))
+            .with("begin_target", ArgValue::Integer(4))
+            .with("begin_point", ArgValue::Integer(0))
+            .with("end_x", ArgValue::Number(5.0))
+            .with("end_y", ArgValue::Number(1.0)),
+    )
+    .expect_err("non-finite route");
+    assert!(
+        error.to_string().contains("cannot route connector"),
+        "{error}"
+    );
+}
+
+/// A forced re-route of a free connector that cannot route reports the
+/// route error (the pass's contract: a style change may fail by name).
+#[test]
+fn a_forced_reroute_of_a_free_broken_connector_reports_its_route_error() {
+    let (mut ctx, registry, page) = fixture();
+    ctx.active_document_mut()
+        .expect("session")
+        .document
+        .insert_shape(page, broken_connector(4), None)
+        .expect("insert");
+    select(&mut ctx, page, &[4]);
+    let error = dispatch(
+        &mut ctx,
+        &registry,
+        "connector.style",
+        Args::new().with("style", ArgValue::Text("straight".to_owned())),
+    )
+    .expect_err("non-finite route");
+    assert!(
+        error.to_string().contains("cannot route connector"),
+        "{error}"
+    );
+}
+
 #[test]
 fn a_route_error_is_reported_by_reroute_all_and_never_panics() {
     let (mut ctx, registry, page) = fixture();

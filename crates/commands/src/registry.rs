@@ -313,6 +313,7 @@ pub fn dispatch(
 mod tests {
     use super::*;
     use crate::app::Settings;
+    use crate::undo::Edit;
     use crate::{ArgValue, Args, Source};
 
     fn meta(id: &'static str) -> CommandMeta {
@@ -593,6 +594,81 @@ mod tests {
         fn revert(&mut self, _ctx: &mut AppCtx) -> Result<(), CommandError> {
             Ok(())
         }
+    }
+
+    /// The group test's edit honours the [`crate::undo::Edit`] contract
+    /// on every arm.
+    #[test]
+    fn the_noop_edit_applies_reverts_and_names_itself() {
+        let mut ctx = AppCtx::new(Settings::default());
+        let mut edit = NoopEdit;
+        assert_eq!(edit.label(), "noop");
+        edit.apply(&mut ctx).expect("the edit applies");
+        edit.revert(&mut ctx).expect("the edit reverts");
+    }
+
+    /// A command that produces an undoable edit, for the dispatch
+    /// paths that must land it somewhere.
+    struct EditCommand;
+
+    impl Command for EditCommand {
+        fn meta(&self) -> &CommandMeta {
+            static META: std::sync::OnceLock<CommandMeta> = std::sync::OnceLock::new();
+            META.get_or_init(|| {
+                let mut meta = meta("file.save");
+                meta.status = CommandStatus::Implemented;
+                meta
+            })
+        }
+
+        fn enabled(&self, _ctx: &AppCtx) -> Enabled {
+            Enabled::yes()
+        }
+
+        fn execute(
+            &self,
+            _ctx: &mut AppCtx,
+            _invocation: &Invocation,
+        ) -> Result<Outcome, CommandError> {
+            let mut outcome = Outcome::message("staged");
+            outcome.edit = Some(Box::new(NoopEdit));
+            Ok(outcome)
+        }
+    }
+
+    /// ADR 0040: an undoable edit that arrives when every document is
+    /// closed is dropped with one warning, never lost silently.
+    #[test]
+    fn an_edit_with_no_open_document_is_dropped_with_a_warning() {
+        let mut registry = Registry::new();
+        registry.register(Box::new(EditCommand)).expect("register");
+        let id = CommandId::parse("file.save").expect("id");
+        let mut ctx = AppCtx::new(Settings::default());
+        dispatch(&registry, &mut ctx, &id, Invocation::empty(Source::Control))
+            .expect("the command runs");
+        assert!(
+            ctx.warnings
+                .iter()
+                .any(|line| line.contains("an undoable edit with no open document was dropped")),
+            "{:?}",
+            ctx.warnings
+        );
+    }
+
+    /// `replace` latches a stand-in onto an id the registry has never
+    /// held (task P7-21's test-rig seam): the vacant branch inserts it.
+    #[test]
+    fn replace_latches_a_command_onto_an_unheld_id() {
+        let mut registry = Registry::new();
+        registry.replace(RealCommand::new("file.save", true));
+        assert_eq!(registry.len(), 1);
+        let id = CommandId::parse("file.save").expect("id");
+        assert_eq!(registry.status(&id), CommandStatus::Implemented);
+        let mut ctx = AppCtx::new(Settings::default());
+        let outcome = registry
+            .execute(&id, &mut ctx, Invocation::empty(Source::Test))
+            .expect("execute");
+        assert_eq!(outcome.message.as_deref(), Some("ran file.save"));
     }
 
     /// ADR 0040, amendment 2026-11-03: a programmatic source never sees

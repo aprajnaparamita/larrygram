@@ -717,10 +717,28 @@ fn export_writes_every_page_or_reports_the_failure() {
         &mut ctx,
         "file.export",
         Args::new()
-            .with("path", ArgValue::Path(file))
+            .with("path", ArgValue::Path(file.clone()))
             .with("out", ArgValue::Path(PathBuf::from("/no/such/dir/pages"))),
     )
     .expect_err("unwritable");
+    assert!(
+        error.to_string().starts_with("cannot write output: "),
+        "{error}"
+    );
+
+    // A page file that cannot be written (its name is taken by a
+    // directory) is the same failure, after the pages before it.
+    let blocked = temp_dir().join("blocked");
+    std::fs::create_dir_all(blocked.join("page-1.svg")).expect("block the page file");
+    let error = run(
+        &mut ctx,
+        "file.export",
+        Args::new()
+            .with("path", ArgValue::Path(file))
+            .with("out", ArgValue::Path(blocked))
+            .with("format", ArgValue::Text("svg".into())),
+    )
+    .expect_err("unwritable page");
     assert!(
         error.to_string().starts_with("cannot write output: "),
         "{error}"

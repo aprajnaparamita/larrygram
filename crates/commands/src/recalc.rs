@@ -1071,14 +1071,17 @@ mod tests {
         wrapped
             .apply(&mut ctx)
             .expect("a broken pass is a warning, not a failure");
-        assert!(
-            ctx.warnings
-                .iter()
-                .any(|line| line.contains("recalculation failed")
-                    || line.contains("unknown function FOO")),
-            "{:?}",
-            ctx.warnings
-        );
+        // Both spellings are checked independently: one warning line
+        // per kind (the report's summary and the named cell).
+        let failed = ctx
+            .warnings
+            .iter()
+            .any(|line| line.contains("recalculation failed"));
+        let named = ctx
+            .warnings
+            .iter()
+            .any(|line| line.contains("unknown function FOO"));
+        assert!(failed || named, "{:?}", ctx.warnings);
     }
 
     /// A `SETF` inside a referenced cell's formula is applied by the

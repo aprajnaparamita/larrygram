@@ -1241,5 +1241,14 @@ mod tests {
             let error = run_set_text_block(&mut ctx, &inv).expect_err("bad argument");
             assert!(error.to_string().contains(want), "{error}");
         }
+
+        // A whole number is a number (the control channel's Integer
+        // spelling): the write lands on the named cell.
+        let inv = Invocation::new(
+            crate::Args::new().with("x", crate::ArgValue::Integer(2)),
+            Source::Test,
+        );
+        run_set_text_block(&mut ctx, &inv).expect("a whole number");
+        assert_eq!(value_of(&ctx, shape, "TxtPinX"), 2.0);
     }
 }

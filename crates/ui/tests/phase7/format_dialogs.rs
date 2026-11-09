@@ -747,3 +747,81 @@ fn the_dialog_entries_disable_without_a_selection() {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// The Line dialog's Apply and the windows' close buttons (task P7-28).
+// ---------------------------------------------------------------------------
+
+/// Apply keeps the Line dialog open for the next field; Cancel drops
+/// the later draft and closes it (goal 2's Apply and Cancel).
+#[test]
+fn the_line_dialog_apply_keeps_the_dialog_and_cancel_drops_the_draft() {
+    for kind in LAYOUTS {
+        let mut rig = shell_rig(kind);
+        select_shape(&mut rig);
+        let shape = rectangle(&rig.shell.borrow().app);
+        open_line_dialog(&mut rig, kind);
+        set_field(&mut rig, "Line weight", "6");
+        click(&mut rig, Role::Button, "Apply");
+        assert_eq!(
+            cell_number(&rig, shape, "LineWeight"),
+            Some(6.0 / 72.0),
+            "{kind:?}: Apply applies"
+        );
+        assert!(
+            has(&mut rig, Role::Button, "Apply"),
+            "{kind:?}: Apply keeps the dialog open"
+        );
+        set_field(&mut rig, "Line weight", "3");
+        click(&mut rig, Role::Button, "Cancel");
+        assert!(
+            !has(&mut rig, Role::Button, "Apply"),
+            "{kind:?}: Cancel closes the dialog"
+        );
+        assert_eq!(
+            cell_number(&rig, shape, "LineWeight"),
+            Some(6.0 / 72.0),
+            "{kind:?}: the applied step stands"
+        );
+    }
+}
+
+/// The dialogs' window close button is a Cancel: the draft is dropped
+/// and the dialog closes (both dialogs, both layouts).
+#[test]
+fn the_dialog_window_close_is_a_cancel() {
+    for kind in LAYOUTS {
+        for (open, field) in [
+            (
+                open_fill_dialog as fn(&mut ShellRig, LayoutKind),
+                "Fill transparency",
+            ),
+            (open_line_dialog, "Line weight"),
+        ] {
+            let mut rig = shell_rig(kind);
+            select_shape(&mut rig);
+            let shape = rectangle(&rig.shell.borrow().app);
+            open(&mut rig, kind);
+            set_field(&mut rig, field, "50");
+            rig.run();
+            {
+                let root = rig.harness().root();
+                let node = root
+                    .query_all_by_label("Close window")
+                    .next()
+                    .unwrap_or_else(|| panic!("{kind:?}: the window's close button"));
+                node.click();
+            }
+            rig.run();
+            assert!(
+                !has(&mut rig, Role::Button, "OK"),
+                "{kind:?} {field}: the dialog is gone"
+            );
+            assert!(
+                cell_number(&rig, shape, "FillForegndTrans").is_none()
+                    && cell_number(&rig, shape, "LineWeight").is_none(),
+                "{kind:?} {field}: the close dropped the draft"
+            );
+        }
+    }
+}

@@ -110,6 +110,67 @@ fn fixture() -> (AppCtx, Registry, ShapeId) {
     (ctx, registry, id)
 }
 
+/// Undo of an edit to an inherited Shape Data value on a shape with no
+/// local rows removes the whole local section the write created (task
+/// P6-18's exact restore).
+#[test]
+fn undo_of_an_inherited_value_removes_the_section_it_created() {
+    let mut doc = Document::new();
+    let rung = shape_with(vec![prop_row(
+        "Mastered",
+        Some(CellValue::Number(3.0)),
+        GeomUnit::Inches,
+    )]);
+    let rung = doc.add_shape(rung);
+    let mut master = Master::new(MasterId { index: 0 }, 1);
+    master.shapes = vec![rung];
+    doc.masters.push(master);
+    // The instance has no local `Property` section at all.
+    let mut shape = Shape::new(ShapeId { index: 0 }, 2);
+    shape.master = Some(MasterId { index: 0 });
+    let id = doc.add_shape(shape);
+    let page = doc.add_page("Page-1").expect("page");
+    if let Some(entry) = doc.pages.get_mut(page.index as usize) {
+        entry.shapes.push(id);
+    }
+    let mut ctx = AppCtx::new(Settings::default());
+    ctx.open_document(DocumentSession::new(doc, None));
+    ctx.selection.shapes = vec![id];
+    ctx.selection.anchor = Some(id);
+    let registry = registry().expect("the registry builds");
+
+    dispatch(
+        &mut ctx,
+        &registry,
+        "data.set.property",
+        value_args("Mastered", "7"),
+    )
+    .expect("the edit runs");
+    {
+        let session = ctx.active_document().expect("document");
+        let entity = session.document.shape(id).expect("shape");
+        assert!(
+            entity
+                .sheet
+                .sections
+                .iter()
+                .any(|section| section.name.as_str() == "Property"),
+            "the write created the local section"
+        );
+    }
+    dispatch(&mut ctx, &registry, "edit.undo", Args::new()).expect("undo");
+    let session = ctx.active_document().expect("document");
+    let entity = session.document.shape(id).expect("shape");
+    assert!(
+        !entity
+            .sheet
+            .sections
+            .iter()
+            .any(|section| section.name.as_str() == "Property"),
+        "the undo removes the section it created"
+    );
+}
+
 /// The `value` argument set of one `row`.
 fn value_args(row: &str, value: &str) -> Args {
     Args::new()

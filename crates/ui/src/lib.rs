@@ -180,6 +180,10 @@ mod tests {
             message: "too large".into(),
         };
         assert_eq!(render.to_string(), "render error: too large");
+        let geometry = UiError::Geometry {
+            message: "singular".into(),
+        };
+        assert_eq!(geometry.to_string(), "geometry error: singular");
         assert_eq!(UiError::NotImplemented.to_string(), "not implemented yet");
     }
 

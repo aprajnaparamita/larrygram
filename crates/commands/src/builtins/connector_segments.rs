@@ -544,3 +544,322 @@ fn required_finite(args: &Args, name: &str) -> Result<f64, CommandError> {
         Some(_) => need_finite(args, name, name),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::{DocumentSession, Settings};
+    use larrygram_model::{Cell, Preserved, Row, Section, SectionName, Shape};
+
+    fn cell(name: &str, value: f64) -> Cell {
+        Cell {
+            name: CellName::new(name),
+            formula: Some(format!("{value}")),
+            value: Some(CellValue::Number(value)),
+            unit: larrygram_geom::Unit::Inches,
+            preserved: Preserved::new(),
+        }
+    }
+
+    fn formula_cell(name: &str, text: &str, value: f64) -> Cell {
+        Cell {
+            name: CellName::new(name),
+            formula: Some(text.to_owned()),
+            value: Some(CellValue::Number(value)),
+            unit: larrygram_geom::Unit::Inches,
+            preserved: Preserved::new(),
+        }
+    }
+
+    fn flip(name: &str) -> Cell {
+        Cell {
+            name: CellName::new(name),
+            formula: Some("0".to_owned()),
+            value: Some(CellValue::Bool(false)),
+            unit: larrygram_geom::Unit::Unitsless,
+            preserved: Preserved::new(),
+        }
+    }
+
+    /// A 1-D shape whose geometry is the given `MoveTo`/`LineTo` rows.
+    /// `x_formula` makes every row's X a computing formula (the recalc
+    /// geometry of ADR 0056).
+    fn connector_shape(rows: &[(&'static str, f64, f64)], x_formula: Option<&str>) -> Shape {
+        let mut shape = Shape::new(ShapeId { index: 0 }, 0);
+        shape.sheet.cells = vec![
+            cell("BeginX", 0.0),
+            cell("BeginY", 0.0),
+            cell("EndX", 2.0),
+            cell("EndY", 0.0),
+            cell("PinX", 1.0),
+            cell("PinY", 0.0),
+            cell("Width", 2.0),
+            cell("Height", 0.0),
+            cell("LocPinX", 1.0),
+            cell("LocPinY", 0.0),
+            cell("Angle", 0.0),
+            cell("ObjType", 2.0),
+            flip("FlipX"),
+            flip("FlipY"),
+        ];
+        let mut geometry = Section::new(SectionName::from_static("Geometry"));
+        for (ix, (kind, x, y)) in rows.iter().enumerate() {
+            let mut row = Row::new();
+            row.row_type = Some((*kind).to_owned());
+            row.ix = Some(i32::try_from(ix).unwrap_or(0));
+            row.cells = match x_formula {
+                Some(text) => vec![formula_cell("X", text, *x), cell("Y", *y)],
+                None => vec![cell("X", *x), cell("Y", *y)],
+            };
+            geometry.rows.push(row);
+        }
+        shape.sheet.sections.push(geometry);
+        shape
+    }
+
+    /// A plain (2-D) shape.
+    fn plain_shape() -> Shape {
+        let mut shape = Shape::new(ShapeId { index: 0 }, 0);
+        shape.sheet.cells = vec![
+            cell("PinX", 5.0),
+            cell("PinY", 0.0),
+            cell("Width", 1.0),
+            cell("Height", 1.0),
+            cell("LocPinX", 0.5),
+            cell("LocPinY", 0.5),
+            cell("Angle", 0.0),
+            flip("FlipX"),
+            flip("FlipY"),
+        ];
+        shape
+    }
+
+    /// A document with a plain target and a two-point connector, in a
+    /// context with that document active.
+    fn fixture() -> (AppCtx, PageId, ShapeId, ShapeId) {
+        let mut doc = Document::new();
+        let page = doc.add_page("Page-1").expect("page");
+        let target = doc.insert_shape(page, plain_shape(), None).expect("target");
+        let connector = doc
+            .insert_shape(
+                page,
+                connector_shape(&[("MoveTo", 0.0, 0.0), ("LineTo", 2.0, 0.0)], None),
+                None,
+            )
+            .expect("connector");
+        let mut ctx = AppCtx::new(Settings::default());
+        ctx.open_document(DocumentSession::new(doc, None));
+        (ctx, page, target, connector)
+    }
+
+    /// One begin-end record: the connector's begin glued to the
+    /// target's connection row `ix`.
+    fn record(connector_visio: i32, target_visio: i32, ix: usize) -> Connect {
+        let mut connect = Connect::new();
+        connect.from_sheet = connector_visio;
+        connect.from_cell = "BeginX".to_owned();
+        connect.from_part = mutate::VIS_BEGIN;
+        connect.to_sheet = target_visio;
+        connect.to_cell = format!("Connections.X{}", ix + 1);
+        connect.to_part = mutate::VIS_CONNECTION_POINT + i32::try_from(ix).unwrap_or(0);
+        connect
+    }
+
+    fn visio_of(doc: &Document, shape: ShapeId) -> i32 {
+        doc.shape(shape).expect("shape").visio_id
+    }
+
+    /// The reroute controls act on connectors only; a selection of
+    /// plain shapes is refused by name.
+    #[test]
+    fn the_reroute_controls_need_a_connector_in_the_selection() {
+        let (mut ctx, page, target, connector) = fixture();
+        {
+            let session = ctx.active_document().expect("session");
+            assert!(session.document.is_connector(connector));
+            assert!(!session.document.is_connector(target));
+        }
+        ctx.selection.page = Some(page);
+        ctx.selection.shapes = vec![target];
+        let error = selected_connectors(&ctx).expect_err("no connector");
+        assert!(
+            error.to_string().contains("no connector in the selection"),
+            "{error}"
+        );
+
+        ctx.selection.shapes = vec![connector];
+        let targets = selected_connectors(&ctx).expect("connectors");
+        assert_eq!(targets, vec![connector]);
+    }
+
+    /// A kept route exists only for a straight stored path a fresh
+    /// route could not improve on: recalc-owned geometry and a path
+    /// too short to hold an interior are left alone.
+    #[test]
+    fn kept_route_leaves_what_it_cannot_keep_alone() {
+        // Formula-driven geometry belongs to recalc (ADR 0056).
+        let (mut ctx, page, _target, connector) = fixture();
+        {
+            let doc = &mut ctx.active_document_mut().expect("session").document;
+            *doc.shape_mut(connector)
+                .expect("connector")
+                .sheet
+                .sections
+                .get_mut(0)
+                .expect("geometry") = {
+                let mut geometry = Section::new(SectionName::from_static("Geometry"));
+                for (ix, (kind, x, y)) in [("MoveTo", 0.0, 0.0), ("LineTo", 2.0, 0.0)]
+                    .into_iter()
+                    .enumerate()
+                {
+                    let mut row = Row::new();
+                    row.row_type = Some(kind.to_owned());
+                    row.ix = Some(i32::try_from(ix).unwrap_or(0));
+                    row.cells = vec![formula_cell("X", "Width*0.5", x), cell("Y", y)];
+                    geometry.rows.push(row);
+                }
+                geometry
+            };
+        }
+        let doc = &ctx.active_document().expect("session").document;
+        let mut warnings = Vec::new();
+        assert!(
+            kept_route(doc, page, connector, &[None, None], &mut warnings).is_none(),
+            "recalc owns the geometry"
+        );
+
+        // A one-point path has no interior to keep.
+        let mut doc = Document::new();
+        let page = doc.add_page("Page-1").expect("page");
+        let connector = doc
+            .insert_shape(page, connector_shape(&[("MoveTo", 0.0, 0.0)], None), None)
+            .expect("connector");
+        let mut warnings = Vec::new();
+        assert!(
+            kept_route(&doc, page, connector, &[None, None], &mut warnings).is_none(),
+            "a single point is not a route"
+        );
+    }
+
+    /// A glued end that resolves to a non-finite point leaves the route
+    /// to the fresh pass (`None`, the same warning rule as the pass).
+    #[test]
+    fn kept_route_refuses_a_glue_it_cannot_resolve() {
+        let mut doc = Document::new();
+        let page = doc.add_page("Page-1").expect("page");
+        // A target whose connection point maps through a non-finite
+        // transform (the pin minus the local pin overflows to
+        // infinity): the glue resolves nowhere.
+        let mut target = plain_shape();
+        for entry in &mut target.sheet.cells {
+            match entry.name.as_str() {
+                "PinX" => {
+                    entry.formula = Some(format!("{}", 1.0e308));
+                    entry.value = Some(CellValue::Number(1.0e308));
+                }
+                "LocPinX" => {
+                    entry.formula = Some(format!("{}", -1.0e308));
+                    entry.value = Some(CellValue::Number(-1.0e308));
+                }
+                _ => {}
+            }
+        }
+        let mut section = Section::new(SectionName::from_static("Connection"));
+        let mut row = Row::new();
+        row.row_type = Some("Connection".to_owned());
+        row.ix = Some(0);
+        row.cells = vec![cell("X", 0.0), cell("Y", 0.0)];
+        section.rows.push(row);
+        target.sheet.sections.push(section);
+        let target = doc.insert_shape(page, target, None).expect("target");
+        let connector = doc
+            .insert_shape(
+                page,
+                connector_shape(&[("MoveTo", 0.0, 0.0), ("LineTo", 2.0, 0.0)], None),
+                None,
+            )
+            .expect("connector");
+        let (target_visio, connector_visio) = (visio_of(&doc, target), visio_of(&doc, connector));
+        let mut warnings = Vec::new();
+        let record = record(connector_visio, target_visio, 0);
+        assert!(
+            kept_route(&doc, page, connector, &[Some(record), None], &mut warnings).is_none(),
+            "an unresolvable glue keeps nothing: {warnings:?}"
+        );
+    }
+
+    /// The stored path reads only straight finite points: a row that
+    /// maps to a non-finite page point is not a polyline.
+    #[test]
+    fn polyline_refuses_a_non_finite_point() {
+        let mut doc = Document::new();
+        let page = doc.add_page("Page-1").expect("page");
+        let connector = doc
+            .insert_shape(
+                page,
+                connector_shape(&[("MoveTo", 0.0, 0.0), ("LineTo", 2.0, 0.0)], None),
+                None,
+            )
+            .expect("connector");
+        let broken = Transform::translate(Point::new(f64::NAN, 0.0));
+        assert!(
+            polyline(&doc, connector, broken).is_none(),
+            "a non-finite point is not a polyline"
+        );
+        assert!(polyline(&doc, connector, Transform::identity()).is_some());
+    }
+
+    /// The page transform composes the parent chain and refuses a cycle
+    /// by name (never a panic or a hang).
+    #[test]
+    fn page_transform_walks_the_chain_and_refuses_a_cycle() {
+        let (ctx, _page, _target, connector) = fixture();
+        let (mut doc, group) = {
+            let session = ctx.active_document().expect("session");
+            let mut doc = session.document.clone();
+            let group = doc.insert_shape(_page, plain_shape(), None).expect("group");
+            (doc, group)
+        };
+        // The connector enters the group: one level of chain.
+        if let Some(entry) = doc.shape_mut(connector) {
+            entry.parent = Some(group);
+        }
+        if let Some(entry) = doc.shape_mut(group) {
+            entry.children.push(connector);
+        }
+        page_transform(&doc, connector).expect("the chain walks");
+
+        // The group's parent is the connector: a cycle.
+        if let Some(entry) = doc.shape_mut(group) {
+            entry.parent = Some(connector);
+        }
+        let error = page_transform(&doc, connector).expect_err("cycle");
+        assert!(
+            error.to_string().contains("cyclic shape parent chain"),
+            "{error}"
+        );
+    }
+
+    /// A segment edit on a plain shape carries only its row cells: the
+    /// 1-D endpoint cells belong to connectors.
+    #[test]
+    fn a_segment_edit_on_a_plain_shape_carries_no_endpoint_cells() {
+        let (ctx, _page, target, connector) = fixture();
+        let session = ctx.active_document().expect("session");
+        let (doc, id) = (session.document.clone(), session.id);
+        let points = vec![Point::new(0.0, 0.0), Point::new(1.0, 1.0)];
+
+        let plain = SegmentEdit::new(&doc, id, target, points.clone()).expect("plain");
+        assert_eq!(
+            plain.dirty_cells().len(),
+            2 * points.len(),
+            "one X and one Y per point, no endpoint cells"
+        );
+
+        let one_d = SegmentEdit::new(&doc, id, connector, points).expect("connector");
+        assert!(
+            one_d.dirty_cells().len() > plain.dirty_cells().len(),
+            "a 1-D path write refreshes the endpoint cells too"
+        );
+    }
+}

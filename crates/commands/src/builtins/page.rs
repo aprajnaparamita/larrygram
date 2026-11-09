@@ -1271,6 +1271,24 @@ mod tests {
     use super::*;
     use larrygram_model::Document;
 
+    /// A rollback whose session is gone (a replayed edit after a
+    /// close) changes nothing and never panics.
+    #[test]
+    fn rollback_design_skips_a_gone_session() {
+        let mut ctx = AppCtx::new(crate::app::Settings::default());
+        let index = ctx.open_document(crate::app::DocumentSession::new(Document::new(), None));
+        let stale = ctx.documents.get(index).expect("session").id;
+        ctx.close_document(index);
+        rollback_design(
+            &mut ctx,
+            stale,
+            PageId { index: 0 },
+            Some(PageId { index: 1 }),
+            Some(PageId { index: 2 }),
+        );
+        assert!(ctx.documents.is_empty(), "nothing to roll back");
+    }
+
     #[test]
     fn page_label_falls_back_to_the_number() {
         let mut page = Page::new(PageId { index: 0 }, 1);

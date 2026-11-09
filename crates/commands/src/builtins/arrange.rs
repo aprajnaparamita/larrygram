@@ -1502,6 +1502,46 @@ mod tests {
         assert!(move_cell_edit(&doc, session, "Move", &target, 0.0, f64::NAN).is_err());
     }
 
+    /// The enabled predicates name why the command is greyed out: one
+    /// shape is too few to group, and a selection without a document
+    /// cannot ungroup (task P7-08's reasons).
+    #[test]
+    fn the_group_predicates_name_their_reasons() {
+        let (mut ctx, _session, _page, id) = context();
+        ctx.selection.shapes = vec![id];
+        assert_eq!(
+            has_two_or_more(&ctx).reason.as_deref(),
+            Some("select two or more shapes")
+        );
+        ctx.active = None;
+        assert_eq!(
+            can_ungroup(&ctx).reason.as_deref(),
+            Some("no open document")
+        );
+    }
+
+    /// The galleries' `value` argument is text (the programmatic
+    /// contract): any other kind is one invalid-argument error and no
+    /// dialog request.
+    #[test]
+    fn the_galleries_value_argument_must_be_text() {
+        let (mut ctx, _session, _page, _id) = context();
+        let inv = Invocation::new(
+            crate::Args::new().with("value", crate::ArgValue::Flag(true)),
+            Source::Test,
+        );
+        for error in [
+            run_align_box(&mut ctx, &inv).expect_err("align"),
+            run_position(&mut ctx, &inv).expect_err("position"),
+        ] {
+            assert!(error.to_string().contains("value must be text"), "{error}");
+            assert!(
+                !matches!(error, CommandError::NeedsInput(_)),
+                "no dialog request: {error:?}"
+            );
+        }
+    }
+
     /// Criterion 6 (task P6-07): `GroupEdit` and `UngroupEdit` write
     /// cells (the re-based pins and the new group), so they report them.
     #[test]

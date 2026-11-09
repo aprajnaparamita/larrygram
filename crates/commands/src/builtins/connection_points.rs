@@ -654,6 +654,189 @@ impl Edit for PointEdit {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use larrygram_model::{Cell, Preserved, Shape};
+
+    fn cell(name: &str, value: Option<f64>, formula: Option<&str>) -> Cell {
+        Cell {
+            name: CellName::new(name),
+            formula: formula.map(str::to_owned),
+            value: value.map(CellValue::Number),
+            unit: larrygram_geom::Unit::Inches,
+            preserved: Preserved::new(),
+        }
+    }
+
+    /// A connector (1-D) shape: the endpoint cells, `BeginX` optional.
+    fn connector_at(begin_x: Option<Cell>) -> Shape {
+        let mut shape = Shape::new(ShapeId { index: 0 }, 0);
+        let mut cells = vec![
+            cell("PinX", Some(1.0), None),
+            cell("PinY", Some(1.0), None),
+            cell("Width", Some(2.0), None),
+            cell("Height", Some(0.0), None),
+            cell("EndX", Some(2.0), None),
+            cell("EndY", Some(0.0), None),
+            cell("BeginY", Some(0.0), None),
+        ];
+        if let Some(begin_x) = begin_x {
+            cells.push(begin_x);
+        }
+        shape.sheet.cells = cells;
+        shape
+    }
+
+    /// A target and one connector, no records yet. `insert_shape`
+    /// assigns the Visio ids, so the tests read them back.
+    fn fixture(begin_x: Option<Cell>) -> (Document, PageId, ShapeId, ShapeId) {
+        let mut doc = Document::new();
+        let page = doc.add_page("Page-1").expect("page");
+        let mut target = Shape::new(ShapeId { index: 0 }, 0);
+        target.sheet.cells = vec![
+            cell("PinX", Some(5.0), None),
+            cell("PinY", Some(1.0), None),
+            cell("Width", Some(1.0), None),
+            cell("Height", Some(1.0), None),
+        ];
+        let target = doc.insert_shape(page, target, None).expect("target");
+        let connector = doc
+            .insert_shape(page, connector_at(begin_x), None)
+            .expect("connector");
+        (doc, page, target, connector)
+    }
+
+    /// One `Connect` record for one connector end naming the target's
+    /// connection row `ix` (the `Connections.X<ix+1>` spelling).
+    fn record(connector_visio: i32, from_cell: &str, target_visio: i32, ix: usize) -> Connect {
+        let mut connect = Connect::new();
+        connect.from_sheet = connector_visio;
+        connect.from_cell = from_cell.to_owned();
+        connect.from_part = if from_cell.starts_with("End") {
+            mutate::VIS_END
+        } else {
+            mutate::VIS_BEGIN
+        };
+        connect.to_sheet = target_visio;
+        connect.to_cell = format!("Connections.X{}", ix + 1);
+        connect.to_part = mutate::VIS_CONNECTION_POINT + i32::try_from(ix).unwrap_or(0);
+        connect
+    }
+
+    fn visio_of(doc: &Document, shape: ShapeId) -> i32 {
+        doc.shape(shape).expect("shape").visio_id
+    }
+
+    /// A gone page and a dangling record leave the file alone (the
+    /// stale-page and stale-shape guards).
+    #[test]
+    fn renumber_and_reglue_skips_what_it_cannot_see() {
+        let (mut doc, page, target, connector) = fixture(None);
+        let (target_visio, connector_visio) = (visio_of(&doc, target), visio_of(&doc, connector));
+        doc.add_connect(page, record(connector_visio, "BeginX", target_visio, 1))
+            .expect("record");
+        renumber_and_reglue(&mut doc, PageId { index: 9 }, target_visio, 0)
+            .expect("a gone page is a no-op");
+        assert_eq!(
+            doc.page(page).expect("page").connects[0].to_cell,
+            "Connections.X2",
+            "a gone page rewrites nothing"
+        );
+
+        // A dangling record (no connector shape) has nothing to write
+        // but its record still moves down.
+        let (mut doc, page, target, _connector) = fixture(None);
+        let target_visio = visio_of(&doc, target);
+        doc.add_connect(page, record(99, "BeginX", target_visio, 1))
+            .expect("record");
+        renumber_and_reglue(&mut doc, page, target_visio, 0).expect("renumber");
+        let connect = &doc.page(page).expect("page").connects[0];
+        assert_eq!(connect.to_cell, "Connections.X1");
+        assert_eq!(connect.to_part, mutate::VIS_CONNECTION_POINT);
+    }
+
+    /// An end glued to a row below the deleted one keeps its row: only
+    /// the record and the `PAR(PNT(…))` formulas move down.
+    #[test]
+    fn an_end_record_renumbers_its_end_formulas() {
+        let begin_x = cell(
+            "BeginX",
+            Some(1.0),
+            Some("PAR(PNT(Sheet.7!Connections.X2,Sheet.7!Connections.Y2))"),
+        );
+        let (mut doc, page, target, connector) = fixture(Some(begin_x));
+        let (target_visio, connector_visio) = (visio_of(&doc, target), visio_of(&doc, connector));
+        doc.add_connect(page, record(connector_visio, "BeginX", target_visio, 1))
+            .expect("record");
+        renumber_and_reglue(&mut doc, page, target_visio, 0).expect("renumber");
+        let formula = doc
+            .shape(connector)
+            .expect("connector")
+            .sheet
+            .cells
+            .iter()
+            .find(|cell| cell.name.as_str() == "BeginX")
+            .and_then(|cell| cell.formula.clone());
+        assert_eq!(
+            formula.as_deref(),
+            Some("PAR(PNT(Sheet.7!Connections.X1,Sheet.7!Connections.Y1))"),
+            "the end follows its row down"
+        );
+    }
+
+    /// `renumber_end_formulas` skips the ends it cannot read: a gone
+    /// connector, a cell that is missing, a cell with no formula and a
+    /// formula that names no later row.
+    #[test]
+    fn renumber_end_formulas_skips_what_it_cannot_read() {
+        // A gone connector: nothing to rewrite.
+        let (mut doc, _page, _target, _connector) = fixture(None);
+        renumber_end_formulas(&mut doc, ShapeId { index: 9 }, End::Begin, 1).expect("no-op");
+
+        // A shape without the end cells: nothing to rewrite.
+        let (mut doc, _page, target, _connector) = fixture(None);
+        renumber_end_formulas(&mut doc, target, End::End, 1).expect("no cells");
+        assert!(doc.shape(target).is_some(), "the shape stays");
+
+        // A cell with no formula is left as it is.
+        let value_only = cell("BeginX", Some(1.0), None);
+        let (mut doc, _page, _target, connector) = fixture(Some(value_only));
+        renumber_end_formulas(&mut doc, connector, End::Begin, 1).expect("no formula");
+
+        // A formula that names no later row (the deleted row's own) is
+        // the re-glue's job, not the renumber's.
+        let own_row = cell(
+            "BeginX",
+            Some(1.0),
+            Some("PAR(PNT(Sheet.7!Connections.X1,Sheet.7!Connections.Y1))"),
+        );
+        let (mut doc, _page, _target, connector) = fixture(Some(own_row));
+        renumber_end_formulas(&mut doc, connector, End::Begin, 1).expect("own row");
+        let formula = doc
+            .shape(connector)
+            .expect("connector")
+            .sheet
+            .cells
+            .iter()
+            .find(|cell| cell.name.as_str() == "BeginX")
+            .and_then(|cell| cell.formula.clone());
+        assert_eq!(
+            formula.as_deref(),
+            Some("PAR(PNT(Sheet.7!Connections.X1,Sheet.7!Connections.Y1))"),
+            "the deleted row's own formula is the re-glue's job"
+        );
+    }
+
+    /// `glue_ends` answers nothing to snapshot when the page is gone.
+    #[test]
+    fn glue_ends_on_a_gone_page_names_nothing() {
+        let (doc, page, target, connector) = fixture(None);
+        let (target_visio, connector_visio) = (visio_of(&doc, target), visio_of(&doc, connector));
+        let mut doc = doc;
+        doc.add_connect(page, record(connector_visio, "BeginX", target_visio, 1))
+            .expect("record");
+        let (visio, touched) = glue_ends(&doc, PageId { index: 9 }, target_visio);
+        assert_eq!(visio, target_visio);
+        assert!(touched.is_empty(), "a gone page glues nothing");
+    }
 
     /// The row-number rewriter moves down only the numbers above the
     /// deleted row, and reports whether anything changed.

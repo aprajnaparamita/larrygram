@@ -918,6 +918,28 @@ mod tests {
         assert!(!stack.can_undo(), "the stack is consistent");
     }
 
+    /// The undo menu reads a step's own label through `Edit::label`:
+    /// one `FailsOnceEdit` past its failure undoes under its own name.
+    #[test]
+    fn a_step_reports_its_label_through_the_undo() {
+        let log = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let (mut ctx, _session) = app_with_session();
+        let mut stack = UndoStack::new(UndoStack::DEFAULT_CAPACITY);
+        let mut edit = FailsOnceEdit {
+            mark: 'x',
+            log: log.clone(),
+            failed: std::sync::Arc::new(std::sync::Mutex::new(true)),
+        };
+        edit.apply(&mut ctx).expect("apply");
+        stack.push(Box::new(edit));
+        assert_eq!(
+            stack.undo(&mut ctx).expect("undo").as_deref(),
+            Some("fails once"),
+            "the step names itself"
+        );
+        assert_eq!(&*log.lock().expect("log"), "", "the revert popped the mark");
+    }
+
     /// A failure at the very first revert keeps every collected edit
     /// as the one group step (task P7-41 item 6).
     #[test]
