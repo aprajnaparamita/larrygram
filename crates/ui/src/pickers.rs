@@ -434,6 +434,9 @@ fn font_size(ui: &mut Ui, nav: &mut Nav, source: Source, out: &mut Vec<Intent>) 
             .accessible_name("Size");
         if edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
             typed = buffer.trim().parse::<f64>().ok();
+            // The field's Enter is its own commit: it never also
+            // picks the highlighted row.
+            nav.enter = false;
         }
     });
     if let Some(points) = typed {
@@ -1094,7 +1097,7 @@ mod tests {
         }
     }
 
-    /// A typed size with Enter dispatches the size command (the
+    /// A typed size with Enter dispatches the size command, once (the
     /// field's commit rule).
     #[test]
     fn the_size_field_enter_dispatches_the_typed_size() {
@@ -1119,6 +1122,8 @@ mod tests {
             .expect("the typed size dispatched");
         assert_eq!(typed.command.as_str(), "text.font.size");
         assert_eq!(typed.invocation.args.number("value"), Some(14.0));
+        // The same Enter does not also pick the highlighted row.
+        assert_eq!(out.len(), 1, "one dispatch: {out:?}");
     }
 
     /// Task P7-51 item 5: the Size field's buffer clears when the
