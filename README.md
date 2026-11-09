@@ -2,11 +2,11 @@
 
 A clean-room, open-source diagramming app in pure Rust that aims to read and write Microsoft Visio files (.vsdx, with read-only .vsd import).
 
-> **Status: pre-alpha, Phase 6 of 9 done; Phases 7 and 8 in progress.** The app opens, renders, edits and saves `.vsdx` files: you can draw, move, connect and type into shapes across pages, undo it, save, reopen and keep editing. ShapeSheet formulas are evaluated: edits recalculate dependent cells, and resizing a master-based shape recomputes its geometry. The Panel Modern and Panel Classic layouts are built and tested but not yet drawn by the app, and the `.vsd` importer reads the corpus files but the app cannot open them yet. It is not ready for real work: visual fidelity is approximate and the control channel is not built.
+> **Status: alpha in preparation, Phase 7 of 9 done; the Phase 8 gate is next.** The app opens, renders, edits and saves `.vsdx` files, and opens `.vsd`, `.vss` and `.vst` files read-only (save them as `.vsdx`). You can draw shapes and connectors, glue and re-route them, type and format text, format fills and lines, set page backgrounds, and undo all of it. ShapeSheet formulas are evaluated as you edit. The window uses the Panel Modern (command bar) or Panel Classic (menus and toolbars) layout. It is not ready for real work: visual fidelity is approximate, pictures are not drawn, most of the 2016/365 command set is still stubbed and the control channel is not built.
 
 ## Build status
 
-Last full gate on `main`: **green, 2026-10-25** (commit `a09fc18`, late Phase 7 and 8: the `.vsd` fidelity work, the wide-corpus sweeps, the rejected-package fixes and the macOS `.dmg` tooling). Every merge batch passes the quick gate with the corpus tests first. The gate runs locally, on one machine, through a queue (`tools/gate-queue/`); there is no hosted CI.
+Last full gate on `main`: **green, 2026-11-09** (commit `5cb9069`, the Phase 7 gate). Every merge batch passes the quick gate with the corpus tests first. The gate runs locally, on one machine, through a queue (`tools/gate-queue/`); there is no hosted CI.
 
 | Step | Result |
 |---|---|
@@ -21,14 +21,14 @@ Line coverage per crate (`cargo xtask coverage`):
 | Crate | Coverage | Crate | Coverage |
 |---|---:|---|---:|
 | geom | 100.0% | text | 99.3% |
-| shapesheet | 97.0% | commands | 98.4% |
-| model | 99.7% | vsdx | 98.2% |
-| ui-spec | 99.6% | larrygram-cli | 97.8% |
-| render | 98.5% | ui | 97.8% |
-| vsd-binary | 100.0% | larrygram-web | 77.9% |
-| larrygram (desktop) | 80.5% | | |
+| shapesheet | 97.1% | commands | 98.6% |
+| model | 99.7% | vsdx | 98.4% |
+| ui-spec | 99.6% | larrygram-cli | 97.5% |
+| render | 98.5% | ui | 97.2% |
+| vsd-binary | 100.0% | larrygram-web | 78.5% |
+| larrygram (desktop) | 85.5% | control | 98.4% |
 
-These are the numbers from the `dcbaca7` full gate. `control` has no code yet (Phase 9).
+These are the numbers from the `5cb9069` full gate.
 
 ## What works today
 
@@ -55,27 +55,27 @@ These are the numbers from the `dcbaca7` full gate. `control` has no code yet (P
   - every edit recalculates inside its undo step, missing values are filled in on open, and the Shape Data pane edits values (`data.set.property`).
 
   Against the values Visio saved in the 15 corpus files, the engine agrees on all 5 184 cells it can compute (100.0%). Resizing a master-based shape recomputes its geometry. Phase report: [docs/progress/phase-6.md](docs/progress/phase-6.md).
-- **Panel layouts and the welcome wizard** (Phase 7, in progress). The app is renamed to Larrygram. Built and tested, waiting for the shell integration (task P7-09):
-  - the layout format v2 loader with its cross-checks, the curated Panel Modern and Panel Classic layouts, and an adapter that converts the 2016 and 365 layouts;
-  - the Panel Modern widgets: tabs, groups, every control kind, the quick access toolbar and the File view;
-  - the Panel Classic widgets: menu bar, toolbars and context menus;
-  - selection contexts that pick the right-click menu and the contextual tabs;
-  - theme tokens on egui, with Selawik as the UI font;
-  - the icon pipeline: an open-licensed icon set (Tabler), rasterised and cached;
-  - the two-page welcome wizard.
+- **Panel layouts and the app** (Phase 7). The app is renamed to Larrygram and draws its window from layout data:
+  - Panel Modern (tabs, groups, the command bar, the quick access toolbar and the File view) and Panel Classic (menu bars, docked and floating toolbars, context menus), switchable at run time; the 2016 and 365 layouts load through an adapter;
+  - the welcome wizard, the About window, one theme for both layouts, and the Tabler icon set;
+  - formatting: fonts, sizes, styles and alignment on the selected text, Fill and Line dialogs, a custom colour dialog, Format Painter, transparency, Page Setup and page backgrounds;
+  - text: the Text Block tool, text boxes, in-place editing that matches the drawn text, and inherited master text;
+  - connectors that follow Visio's glue rules: right-angle, straight and curved routes that clear the shapes, end and segment drags, the reroute options and the Connection Point tool;
+  - files: recent files, Save As, and Save / Don't Save / Cancel on close and quit;
+  - `cargo xtask dist` packages for macOS, Windows and Linux, the last two cross-built on the Mac.
 
-  Until P7-09 lands, the app keeps the Panel (2016 data) layout as the default.
-- **Binary `.vsd` import** (Phase 8, in progress), in `crates/vsd-binary`: the compound file reader with its decompression, chunks, shapes and geometry, text, styles, pages, masters and the document properties. `import` reads all five corpus `.vsd` files into documents. Not yet done: opening a `.vsd` in the app (P8-09), connectors (the connect records are not mapped yet), and the libvisio parity report (P8-08, P8-10).
+  Phase report: [docs/progress/phase-7.md](docs/progress/phase-7.md).
+- **Binary `.vsd` import** (Phase 8, gate next), in `crates/vsd-binary`: the compound file reader with its decompression, chunks, shapes and geometry, text, styles, pages, masters and the document properties. The app and the CLI open `.vsd`, `.vss` and `.vst` files read-only and save them as `.vsdx`; the importer is compared against libvisio file by file. Pictures in `.vsd` files are not imported yet. Phase report: [docs/progress/phase-8.md](docs/progress/phase-8.md).
 
 ## Next
 
-P7-09 builds the window from the active layout (Panel Modern becomes the default) and opens the welcome wizard on first launch. P8-09 then opens `.vsd` files in the app, and P8-10 compares the importer against libvisio.
+The Phase 8 gate, then a history clean-up (R6), then the first alpha packages for macOS, Windows and Linux on GitHub Releases. Phase 9 (the control channel and MCP) follows the alpha.
 
 The live task board is [docs/STATUS.md](docs/STATUS.md). Phase reports are in [docs/progress/](docs/progress/). Command coverage against the command bar is in [docs/parity/controls.md](docs/parity/controls.md).
 
 ## What does not work yet
 
-Functions outside the core set (their cells keep the stored value), the document and master sheets in formulas, opening `.vsd` files in the app, the Panel Modern and Panel Classic layouts in the app window, the MCP/control channel, and most command-bar commands (they are listed but stubbed).
+Drawing pictures (inserted images and the bitmaps in `.vsd` and `.vsdx` files), functions outside the core set (their cells keep the stored value), the document and master sheets in formulas, the MCP/control channel, and most of the 2016/365 command set (listed but stubbed; see the parity table).
 
 ## Plan (alpha MVP)
 
@@ -88,7 +88,7 @@ Functions outside the core set (their cells keep the stored value), the document
 | 4 | App shell, switchable 2016/365 panes | done |
 | 5 | Editing core | done |
 | 6 | ShapeSheet engine (core subset) | done |
-| 7 | Panel Modern and Panel Classic layouts, the Larrygram rename, the welcome wizard | in progress |
+| 7 | Panel Modern and Panel Classic layouts, the Larrygram rename, the welcome wizard | done |
 | 8 | Binary .vsd import (read-only) | in progress |
 | 9 | Control channel and MCP | paused |
 

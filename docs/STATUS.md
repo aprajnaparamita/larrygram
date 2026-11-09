@@ -2,9 +2,10 @@
 
 Task board. Only the master agent edits this file, on `main`.
 
-- Current phase: **7 and 8 side by side** (the boundary closed on 2026-10-24: R1, P7-00, R4 and R5 (`67adffd`, the image loaders) done). Wave 1 and wave A launch: twelve workers; P7-16 and P8-08 start when the first two finish
+- Current phase: **the Phase 8 gate** (every Phase 7 and 8 task merged; Phase 7 closed 2026-11-09). Then R6 (the history purge, master-run; the user force-pushes), then the alpha release.
 - Phase 6 goal: ShapeSheet engine, core subset (KICKOFF.md). Exit: resizing master-based shapes from the corpus recomputes geometry correctly for supported functions; the phase report gives the agreement rate with cached values.
 - Phase 5 goal: editing core (KICKOFF.md). Exit: a user can build a 10-shape flowchart with connected shapes across two pages, save it, reopen it and keep editing.
+- Phase 7 complete (2026-11-09, report: [progress/phase-7.md](progress/phase-7.md), tag `phase-7`; full check green at `5cb9069`, ratchet raised).
 - Phase 6 complete (2026-10-24, report: [progress/phase-6.md](progress/phase-6.md), tag `phase-6`).
 - Phase 5 complete (2026-10-21, report: [progress/phase-5.md](progress/phase-5.md), tag `phase-5`).
 - Phase 4 complete (2026-10-18, report: [progress/phase-4.md](progress/phase-4.md), tag `phase-4`).

@@ -6,7 +6,9 @@ data-driven surfaces: four layout kinds load from `ui-spec/`, switch at run time
 and every control dispatches its command through the one registry.
 The phase also carried the product rename (Larrygram, ADR 0067's brand
 art), the welcome wizard and the About window. Started 2026-10-24,
-closed 2026-10-25.
+first closed 2026-10-25. The gate was then held for the user's manual
+passes of the app (P7-15 to P7-55, below) and passed on 2026-11-09
+(tag `phase-7`).
 
 ## What was built
 
@@ -153,3 +155,67 @@ Per-crate checks this change triggers, all green: `cargo test` and
 
 Coverage at the hand-off gate: every crate at or above its threshold
 and its `coverage.toml` ratchet (the ratchet table is the master's).
+
+## After P7-14: the app, and the user's manual passes
+
+The first report stopped at P7-14, when the layouts were built and
+tested but not yet drawn by the app. The gate was held while the shell
+took them over and the user tested the app by hand (passes on
+2026-10-31, 2026-11-02 and 2026-11-05); each pass became tasks, and
+every task below is merged.
+
+| Area | Content | Tasks |
+|---|---|---|
+| Wizard, About, design | The welcome wizard and the About window in the app; one base theme and design language for both layouts; the UI review's defects. | P7-15..P7-18 |
+| Interaction | Whole Shapes tiles, splitters with remembered widths, zoom-aware handles, full screen; menu hints, panes, layout radio items, Options. | P7-19, P7-22, P7-23 |
+| Commands | 33 commands from stub to implemented, then the format and arrange commands, the pickers, Page Setup, Format Painter, the Fill and Line dialogs and the Format Shape window (ADR 0083). | P7-20, P7-21, P7-24, P7-28 |
+| Text | The Text Block tool, text boxes as shapes, the editor matching the drawn text, inherited text (`Document::effective_text`), formats that keep the editor open and apply to the selected run only. | P7-25, P7-26, P7-29, P7-37, P7-40, P7-41, P7-48, P7-51, P7-53 |
+| Connectors | The connector spec and ADR 0084: the 1-D connector master with Visio's glue formulas, one endpoint resolution in `geom`, routes that clear both shapes, end and segment drags, the Connection Point tool, the reroute options and the three line styles. | P7-30..P7-36, P7-39, P7-49, P7-50 |
+| Files | One dirty rule; close and quit ask Save / Don't Save / Cancel; an untitled save adopts its path; recent files open directly; Save As always asks. | P7-42, P7-46, P7-47, P7-52 |
+| Pages | One page-size resolver; the custom colour dialog; the Backgrounds gallery and Background Color. | P7-27, P7-54 |
+| Shapes and panes | Our masters centre their text; 240-point panes; the Shape Data value field fills its row. | P7-44, P7-45 |
+| Tooling | `cargo xtask screenshots` for the website; `cargo xtask dist` for macOS, Windows and Linux, with `--cross` on the Mac (ADR 0085); the build id; the alpha test checklist. | P7-38, P7-43, R9..R14 |
+| Coverage | Tests only, to bring `commands` and `ui` back over their ratchet. | P7-55 |
+
+The control parity table (`docs/parity/controls.md`) now counts 303
+implemented placements across the two Fluent-data layouts (1 514 stub,
+27 out of scope).
+
+Open at the gate, carried in `docs/STATUS.md` under "Deferred minor
+findings": the review minors of P7-15 onward, the `bitmaps2.vsd`
+rendering gap, and the unreachable guard arms P7-55 listed.
+
+## The phase gate (2026-11-09)
+
+The full check on `main` at `5cb9069` (corpus tests required) was
+green in 13m46s: codegen, names, parity, fmt, clippy, test, doc,
+coverage, deny, layers, wasm and fuzz all passed. The merge gate at
+the same commit was green too.
+
+| Crate | Lines | Covered | % | Phase 6 ratchet | Phase 7 ratchet |
+|---|---:|---:|---:|---:|---:|
+| larrygram | 1 112 | 951 | 85.5 | 80.0 | 85.5 |
+| larrygram-cli | 1 390 | 1 355 | 97.5 | 96.7 | 97.4 |
+| larrygram-commands | 21 146 | 20 857 | 98.6 | 98.4 | 98.6 |
+| larrygram-control | 1 430 | 1 407 | 98.4 | — | 98.3 |
+| larrygram-geom | 3 416 | 3 416 | 100.0 | 100.0 | 100.0 |
+| larrygram-model | 12 471 | 12 429 | 99.7 | 99.7 | 99.7 |
+| larrygram-render | 7 830 | 7 709 | 98.5 | 98.5 | 98.5 |
+| larrygram-shapesheet | 6 816 | 6 617 | 97.1 | 96.9 | 97.0 |
+| larrygram-text | 1 767 | 1 754 | 99.3 | 98.8 | 99.2 |
+| larrygram-ui | 30 847 | 29 981 | 97.2 | 97.0 | 97.1 |
+| larrygram-ui-spec | 3 939 | 3 923 | 99.6 | 99.4 | 99.5 |
+| larrygram-vsd-binary | 12 020 | 12 016 | 100.0 | 100.0 | 100.0 |
+| larrygram-vsdx | 8 324 | 8 190 | 98.4 | 98.2 | 98.3 |
+| larrygram-web | 144 | 113 | 78.5 | 77.8 | 78.4 |
+| larrygram-xtask | 16 078 | 15 075 | 93.8 | 93.4 | 93.7 |
+
+Each Phase 7 ratchet is the exact value rounded down, and never below
+the Phase 6 one. Three crates measure a little under their kept
+ratchet and pass inside the gate's 0.05 tolerance: model 99.66
+(ratchet 99.7), render 98.45 (98.5) and vsd-binary 99.97 (100.0).
+They stay where they are: tests come back up, the ratchet does not
+come down. `control` has its first ratchet, and the xtask row is now
+keyed by its package name, `larrygram-xtask` (the old `xtask` key
+matched no package, so the gate never applied it).
+
