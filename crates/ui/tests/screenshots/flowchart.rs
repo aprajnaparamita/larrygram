@@ -1,6 +1,6 @@
 //! The Phase 5 exit-test flowchart (task P7-38 goal 1: "copy the
 //! flowchart build from `apps/larrygram/tests/flowchart.rs` into the
-//! test target"): ten shapes over two pages and five glued connectors,
+//! test target"): ten shapes over two pages and eight glued connectors,
 //! built through real command dispatches in the full shell. The labels
 //! are this task's own short process labels; the Process shape at
 //! (2, 7) says "Review order" (the `text-editing` shot).
@@ -47,6 +47,13 @@ fn insert_shape(rig: &mut Rig, master: &str, x: f64, y: f64) -> i32 {
     run(rig, "insert.shape", args);
     anchor_visio_id(rig)
 }
+
+/// The file-order index of each side's connection point on the
+/// flowchart masters (bottom, right, top, left).
+const BOTTOM: usize = 0;
+const RIGHT: usize = 1;
+const TOP: usize = 2;
+const LEFT: usize = 3;
 
 /// One connection-row `IX` of `target` (`index` into the file-order
 /// point list, `None` = the last point): the glue `point` argument's
@@ -134,16 +141,21 @@ pub struct Flowchart {
     pub shapes: Vec<ShapeRef>,
 }
 
-/// Builds the 10-shape, two-page, five-connector flowchart (the
+/// Builds the 10-shape, two-page, eight-connector flowchart (the
 /// `apps/larrygram/tests/flowchart.rs` build, minus that test's
-/// save/reopen assertions), then labels every shape with this task's
-/// own short process labels.
+/// save/reopen assertions, plus the connectors that join every
+/// shape), then labels every shape with this task's own short
+/// process labels.
 ///
-/// Page one: Terminator -> Process -> Decision -> Process, the
-/// Decision's second exit and the final Terminator beside the flow;
-/// page two: Process -> Decision -> Process and a Terminator. Three
-/// connectors are drawn with `connector.draw` and two with
-/// `insert.shape` + `connector.glue_begin`/`connector.glue_end`.
+/// Page one: Terminator -> Process -> Decision -> Process ->
+/// Terminator down the middle, the Decision's second exit to the
+/// right; page two: Process -> Decision -> Terminator, the
+/// Decision's second exit to the right. The flow runs bottom point to
+/// top point and the side exits right point to left point, so no
+/// route doubles back around a shape. Five connectors are drawn with
+/// `connector.draw` and three with `insert.shape` +
+/// `connector.glue_begin`/`connector.glue_end`; the first and last of
+/// page one use dynamic glue.
 pub fn build_flowchart(rig: &mut Rig) -> Flowchart {
     // Every x sits `DX` right of the exit-test drawing's, so the flow
     // stands near the middle of the page (the shots crop around its
@@ -173,7 +185,7 @@ pub fn build_flowchart(rig: &mut Rig) -> Flowchart {
         shapes.push(ShapeRef { visio_id });
     }
 
-    // Page one: three connectors.
+    // Page one: five connectors.
     draw_connector(
         rig,
         4.0 + DX,
@@ -181,8 +193,8 @@ pub fn build_flowchart(rig: &mut Rig) -> Flowchart {
         Some((shapes[0].visio_id, None)),
         Some((shapes[1].visio_id, None)),
     );
-    let begin_point = point_ix(rig, shapes[1].visio_id, None);
-    let end_point = point_ix(rig, shapes[2].visio_id, Some(0));
+    let begin_point = point_ix(rig, shapes[1].visio_id, Some(BOTTOM));
+    let end_point = point_ix(rig, shapes[2].visio_id, Some(TOP));
     draw_connector(
         rig,
         4.0 + DX,
@@ -196,15 +208,31 @@ pub fn build_flowchart(rig: &mut Rig) -> Flowchart {
         4.0,
         (
             shapes[2].visio_id,
-            Some(point_ix(rig, shapes[2].visio_id, None)),
+            Some(point_ix(rig, shapes[2].visio_id, Some(RIGHT))),
         ),
         (
             shapes[3].visio_id,
-            Some(point_ix(rig, shapes[3].visio_id, None)),
+            Some(point_ix(rig, shapes[3].visio_id, Some(LEFT))),
         ),
     );
+    let begin_point = point_ix(rig, shapes[2].visio_id, Some(BOTTOM));
+    let end_point = point_ix(rig, shapes[4].visio_id, Some(TOP));
+    draw_connector(
+        rig,
+        2.0 + DX,
+        4.0,
+        Some((shapes[2].visio_id, Some(begin_point))),
+        Some((shapes[4].visio_id, Some(end_point))),
+    );
+    glued_connector(
+        rig,
+        2.0 + DX,
+        2.0,
+        (shapes[4].visio_id, None),
+        (shapes[5].visio_id, None),
+    );
 
-    // Page two: four shapes and two connectors.
+    // Page two: four shapes and three connectors.
     run(
         rig,
         "page.add",
@@ -227,19 +255,38 @@ pub fn build_flowchart(rig: &mut Rig) -> Flowchart {
         6.0,
         Some((
             shapes[6].visio_id,
-            Some(point_ix(rig, shapes[6].visio_id, Some(0))),
+            Some(point_ix(rig, shapes[6].visio_id, Some(BOTTOM))),
         )),
         Some((
             shapes[7].visio_id,
-            Some(point_ix(rig, shapes[7].visio_id, None)),
+            Some(point_ix(rig, shapes[7].visio_id, Some(TOP))),
         )),
     );
     glued_connector(
         rig,
         4.0 + DX,
         4.0,
-        (shapes[7].visio_id, None),
-        (shapes[8].visio_id, None),
+        (
+            shapes[7].visio_id,
+            Some(point_ix(rig, shapes[7].visio_id, Some(RIGHT))),
+        ),
+        (
+            shapes[8].visio_id,
+            Some(point_ix(rig, shapes[8].visio_id, Some(LEFT))),
+        ),
+    );
+    draw_connector(
+        rig,
+        2.0 + DX,
+        4.0,
+        Some((
+            shapes[7].visio_id,
+            Some(point_ix(rig, shapes[7].visio_id, Some(BOTTOM))),
+        )),
+        Some((
+            shapes[9].visio_id,
+            Some(point_ix(rig, shapes[9].visio_id, Some(TOP))),
+        )),
     );
 
     Flowchart { shapes }
