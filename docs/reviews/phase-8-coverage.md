@@ -26,9 +26,9 @@ G=/Users/dara/larrygram/tools/gate-queue/gateq
 $G submit P8-12 --skip codegen,names,parity,fmt,clippy,test,doc,deny,layers
 ```
 
-Job 87 at `3768d10ec7` (current `main`), **GREEN**, 10m42s (coverage
+Job 87 at `4eeb2ee90a` (current `main`), **GREEN**, 10m42s (coverage
 step 552.6s); full log
-`/Volumes/Dara/larrygram/gates/logs/P8-12-3768d10ec7-20261025-165908.log`.
+`/Volumes/Dara/larrygram/gates/logs/P8-12-4eeb2ee90a-20261025-165908.log`.
 The coverage step is `cargo llvm-cov --workspace --all-features
 --json --summary-only --output-path target/llvm-cov-summary.json`.
 Per-file, per-line and per-branch detail came from the same profile
@@ -77,7 +77,7 @@ Reading the numbers:
 | larrygram-web | 144 | 113 | 78.5% | — | 77.8 | +0.7 |
 | larrygram-control | 0 | 0 | n/a | 50 | — | placeholder |
 
-Ratchet column: `[ratchet]` in `coverage.toml` as of `3768d10ec7`.
+Ratchet column: `[ratchet]` in `coverage.toml` as of `4eeb2ee90a`.
 Delta is the measured percentage minus the ratchet, on the exact
 fraction (the table prints one decimal).
 
@@ -93,7 +93,7 @@ fraction (the table prints one decimal).
   against 98.4), render (98.5077 against 98.5), model (99.7154),
   geom (exactly 100.0). One or two lost lines in any of these fail
   the next phase's gate.
-- Movement since the Phase 7 audit's measurement (`d9c77ec0f5`):
+- Movement since the Phase 7 audit's measurement (`bed7feff64`):
   `larrygram-vsd-binary` 9946 to 10720 lines (P8-15 rewrote much of
   the importer), `larrygram-model` +57 (`Shape::is_guide`, the
   repeated-cell policies), `larrygram-vsdx` +39 (the guide attribute
@@ -185,7 +185,7 @@ behaviour:
 Severity follows the role file: blocker (below threshold or
 ratchet), major (a critical path no test reaches, or a contract no
 test asserts), minor (defensive, line-table, or a narrow gap).
-Line numbers are from `3768d10ec7`; "arm" means a branch inside a
+Line numbers are from `4eeb2ee90a`; "arm" means a branch inside a
 covered line (`?` early return, `else`, a match arm).
 
 ### Blocker
@@ -374,7 +374,7 @@ Notes for the update pass (the file is master-owned):
 
 ## Appendix: unentered branches by file
 
-llvm-cov regions no run enters, at `3768d10ec7`. A `?` mark is the
+llvm-cov regions no run enters, at `4eeb2ee90a`. A `?` mark is the
 early-return arm of a `?` or `ok()?` on that line; `}` marks the end
 of a never-entered `else` or match block. Full extraction:
 `target/llvm-cov-export.json` in the worktree.

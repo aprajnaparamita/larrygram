@@ -142,7 +142,7 @@ gateq submit P7-14 --quick  (first run, RED: one old name in this
 gateq submit P7-14 --quick  GREEN at e7d106d93d (4m15s)
 
 gateq submit P7-14 --skip wasm,fuzz  (the hand-off gate, after a
-  clean rebase onto `main` at 7d27a56) GREEN at feb41bf614 (10m40s)
+  clean rebase onto `main` at f5fc9e1) GREEN at 9c323f0f9a (10m40s)
   PASS  codegen, names, parity, fmt, clippy, test, doc, coverage,
         deny, layers
   SKIP  wasm, fuzz (the queue's worker policy, AGENTS.md section 7)
@@ -187,7 +187,7 @@ rendering gap, and the unreachable guard arms P7-55 listed.
 
 ## The phase gate (2026-11-09)
 
-The full check on `main` at `5cb9069` (corpus tests required) was
+The full check on `main` at `de3b2a3` (corpus tests required) was
 green in 13m46s: codegen, names, parity, fmt, clippy, test, doc,
 coverage, deny, layers, wasm and fuzz all passed. The merge gate at
 the same commit was green too.

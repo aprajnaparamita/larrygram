@@ -6,7 +6,7 @@ A clean-room, open-source diagramming app in pure Rust that aims to read and wri
 
 ## Build status
 
-Last full gate on `main`: **green, 2026-11-09** (commit `5cb9069`, the Phase 7 gate). Every merge batch passes the quick gate with the corpus tests first. The gate runs locally, on one machine, through a queue (`tools/gate-queue/`); there is no hosted CI.
+Last full gate on `main`: **green, 2026-11-09** (commit `de3b2a3`, the Phase 7 gate). Every merge batch passes the quick gate with the corpus tests first. The gate runs locally, on one machine, through a queue (`tools/gate-queue/`); there is no hosted CI.
 
 | Step | Result |
 |---|---|
@@ -28,7 +28,7 @@ Line coverage per crate (`cargo xtask coverage`):
 | vsd-binary | 100.0% | larrygram-web | 78.5% |
 | larrygram (desktop) | 85.5% | control | 98.4% |
 
-These are the numbers from the `5cb9069` full gate.
+These are the numbers from the `de3b2a3` full gate.
 
 ## What works today
 

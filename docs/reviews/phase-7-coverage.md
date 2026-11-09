@@ -24,9 +24,9 @@ G=/Users/dara/larrygram/tools/gate-queue/gateq
 $G submit P7-12 --skip codegen,names,parity,fmt,clippy,test,doc,deny,layers
 ```
 
-Job 77 at `d9c77ec0f5` (current `main`), **GREEN**, 13m10s (coverage
+Job 77 at `bed7feff64` (current `main`), **GREEN**, 13m10s (coverage
 step 709.5s); full log
-`/Volumes/Dara/larrygram/gates/logs/P7-12-d9c77ec0f5-20261025-153114.log`.
+`/Volumes/Dara/larrygram/gates/logs/P7-12-bed7feff64-20261025-153114.log`.
 The coverage step is `cargo llvm-cov --workspace --all-features
 --json --summary-only --output-path target/llvm-cov-summary.json`.
 Per-file and per-line detail came from the same profile data in the
@@ -66,7 +66,7 @@ gate's coverage step exactly (`larrygram-ui` 18 476/18 935,
 | larrygram | 396 | 338 | 85.4% | 50 | 80.0 | +5.4 |
 | larrygram-control | 0 | 0 | n/a | 50 | — | placeholder |
 
-Ratchet column: `[ratchet]` in `coverage.toml` as of `d9c77ec0f5`.
+Ratchet column: `[ratchet]` in `coverage.toml` as of `bed7feff64`.
 Deltas are the measured percentage minus the ratchet, one decimal
 place.
 
@@ -157,7 +157,7 @@ reading the 97.6%: it bounds what the sweeps can ever fail on.
 Severity follows the role file: blocker (below threshold or
 ratchet), major (a critical path no test reaches, or a contract no
 test asserts), minor (defensive, line-table, or a narrow gap).
-Line numbers are from `d9c77ec0f5`.
+Line numbers are from `bed7feff64`.
 
 ### Blocker
 

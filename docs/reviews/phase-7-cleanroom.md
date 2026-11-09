@@ -1,7 +1,7 @@
 # Phase 7 clean-room and licence audit
 
 - Task: P7-13, role `cleanroom-auditor`
-- Diff audited: `git diff phase-6..main` (`812d307..d9c77ec`), 713 files,
+- Diff audited: `git diff phase-6..main` (`812d307..bed7fef`), 713 files,
   +66,720/-7,429 in total; the Phase 7 part (assets, `ui-spec` data, the
   brand art, the UI text and the Phase 7 docs) = about 627 files,
   +40,512/-7,055. The interleaved Phase 8 work (`crates/vsd-binary`,

@@ -257,7 +257,7 @@ id table in `chunks.rs`).
 
 ## Coverage
 
-The P8-12 measurement (job 87 at `3768d10ec7`; per-crate numbers in
+The P8-12 measurement (job 87 at `4eeb2ee90a`; per-crate numbers in
 that report). `larrygram-vsd-binary` measures 99.9627% against its
 100.0 ratchet and passes within the gate's 0.05 tolerance; the
 ratchet proposal is the master's call.
@@ -287,7 +287,7 @@ the P8-14 hand-off gate is recorded in its Result. The full gate
 check after the merge, as every phase's does.
 
 The phase gate (2026-11-09) is the master's full check on `main` at
-`5cb9069`, shared with the Phase 7 gate: codegen, names, parity, fmt,
+`de3b2a3`, shared with the Phase 7 gate: codegen, names, parity, fmt,
 clippy, test, doc, coverage, deny, layers, wasm and fuzz all green with
 the corpus tests required. `larrygram-vsd-binary` then measured 12 016
 of 12 020 lines (99.97%), inside the tolerance of its 100.0 ratchet,

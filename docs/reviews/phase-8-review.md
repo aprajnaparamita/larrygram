@@ -1,7 +1,7 @@
 # Phase 8 review: binary `.vsd` import
 
 - Task: P8-11 (reviewer), 2026-10-25
-- Scope: everything Phase 8 merged into `main` through `3768d10` —
+- Scope: everything Phase 8 merged into `main` through `4eeb2ee` —
   `crates/vsd-binary` (all modules), the Phase 8 changes in `crates/model`,
   `crates/vsdx`, `crates/render`, `crates/commands`, `crates/ui` and
   `apps/larrygram-cli`, the parity harness and the test suites.
