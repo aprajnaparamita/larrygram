@@ -74,7 +74,7 @@ Phase 7: Panel and Classic layouts, the Larrygram rename and the welcome wizard.
 | [P7-52](tasks/P7-52.md) | implementer | — | I | merged (a recent file opens directly; the Save As fix is on main: `file.save_as` with no path always asks, it used to re-save a saved drawing silently) | 2b98103 |
 | [P7-53](tasks/P7-53.md) | implementer | — | I | merged (a format keeps the editor selection, applies to the selected range only, and the commit keeps the runs; whole text at a bare caret; the editor field shows each run's format) | 176d20a |
 | [P7-54](tasks/P7-54.md) | implementer | — | I | merged (custom colour dialog in both layouts; the Backgrounds gallery with Solid Tint, Soft Gradient and Light Grid; Background Color) | 22c84bb |
-| [P7-55](tasks/P7-55.md) | test-engineer | — | I | ready (tests only: commands back to >= 98.4%, ui back to >= 97.0%; the full check at bc08d72 measured 98.3% and 96.9%) | — |
+| [P7-55](tasks/P7-55.md) | test-engineer | — | I | merged (tests only; hand-off coverage commands 98.6%, ui 97.2%; master fixed the Size field Enter double dispatch it pinned) | e5b8ff7 |
 | [P7-42](tasks/P7-42.md) | implementer | P7-37 | I | merged with P7-46 (one derived dirty rule; close and quit ask Save / Don't Save / Cancel; Cmd/Ctrl+Q, the close button and the macOS app-menu Quit take one walk; the title marker; hand-off gate green at `3ff85e9`) | `2c0468a` |
 | [P7-46](tasks/P7-46.md) | implementer | P7-42 | I | merged with P7-42 (NSTerminateNow with nothing changed, NSTerminateLater answered by the walk; a quit during Close is kept; serial hook tests; no quit on the web) | `2c0468a` |
 | [P7-47](tasks/P7-47.md) | implementer | P7-42, P7-46 | I | merged (an untitled save adopts the picked path and records it as recent; hand-off gate green at `3a6b148`) | `6d6fce8` |
@@ -403,6 +403,7 @@ Open master items: none (the codegen task is part of the P2-01 plan).
 - P7-53: the B/I/U and alignment checked states read row 0, not the run under the caret, so after a range format the mark can disagree with the selected run.
 - P7-53: `text.cancel` after a range format leaves the new run rows in the sheet (unrendered; undo removes them one by one).
 - P7-53: `theme::font_definitions` pairs the face names with `larrygram_text::CARLITO`/`SELAWIK` by list order; a reorder there mislabels the faces silently.
+- P7-55: several `?` arms and `#[non_exhaustive]` wildcards in commands cannot be reached by tests (listed in the P7-55 Result); remove the dead guards or accept them as the coverage floor.
 
 - P7-51 (open): the field of a new, still-empty text box stays left-aligned with no margins until its first commit (the scene has no text node for it yet); the field falls back to Selawik where the drawn text uses Carlito, so a wrap can fall on a different word.
 - P7-36 (open, master review 2026-11-05): a curved row's `E` cell stores the `NURBS()` text as a cached value with no `F` (a formula would freeze re-routing through `geometry_is_formula_driven`); a black-box check decides whether Visio needs `F`. The style read uses the connector's own cells, not its master's (the Connector master carries `ShapeRouteStyle` 1); a black-box check decides whether instances inherit it. Value 16 and the directed styles route as right angle (open questions 11 and 12). Three test-only trait impls carry never-run `label`/`apply` bodies.
