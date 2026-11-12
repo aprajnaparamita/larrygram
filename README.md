@@ -4,6 +4,14 @@ A clean-room, open-source diagramming app in pure Rust that aims to read and wri
 
 > **Status: alpha, Phases 7 and 8 of 9 done; the first alpha, 1.0.0-alpha.1, is out.** The app opens, renders, edits and saves `.vsdx` files, and opens `.vsd`, `.vss` and `.vst` files read-only (save them as `.vsdx`). You can draw shapes and connectors, glue and re-route them, type and format text, format fills and lines, set page backgrounds, and undo all of it. ShapeSheet formulas are evaluated as you edit. The window uses the Panel Modern (command bar) or Panel Classic (menus and toolbars) layout. It is not ready for real work: visual fidelity is approximate, pictures are not drawn, most of the 2016/365 command set is still stubbed and the control channel is not built.
 
+## Reviewed by Fable 5.2
+
+> **On 2026-11-13, Anthropic's new Fable 5.2 model did a full design and security review of Larrygram.** It covered the file readers, saving, crash safety, the release builds and the planned agent control channel, and reported 14 findings. Each finding now has a task on the [hardening board](docs/STATUS.md#hardening-task-board-the-2026-11-13-design-and-security-review), and the first fix is merged.
+
+- **Done:** release builds use the exact dependency versions in `Cargo.lock` (`--locked`), with the release profile written out, and the [tester guide](docs/building/testers.md) says plainly what the unsigned-build steps turn off.
+- **Next:** limits on how much a drawing can make the `.vsdx` reader build, saves that never leave a half-written file, size checks before a file is read, and the design for crash recovery and autosave.
+- **Phase 9:** AI agents attached to the app are read-only by default; writes are an opt-in, limited to folders you choose.
+
 ## Download
 
 The first alpha, **1.0.0-alpha.1**, is on the [release page](https://github.com/aprajnaparamita/larrygram/releases/tag/v1.0.0-alpha.1). It is a build for testers: unsigned, and not ready for real work.
