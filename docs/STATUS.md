@@ -2,7 +2,8 @@
 
 Task board. Only the master agent edits this file, on `main`.
 
-- Current phase: **the alpha is out** (`v1.0.0-alpha.1`, published 2026-11-09 on GitHub Releases from `a73ed9c`: the macOS `.dmg`, the cross-built Windows `.zip` and Linux `.tar.gz`, and `SHA256SUMS`). Phase 7 and Phase 8 closed 2026-11-09; R6 done and force-pushed. The user's manual retest passed. Next: the website deploy, testers' reports, then Phase 9.
+- Current phase: **the alpha is out** (`v1.0.0-alpha.1`, published 2026-11-09 on GitHub Releases from `a73ed9c`: the macOS `.dmg`, the cross-built Windows `.zip` and Linux `.tar.gz`, and `SHA256SUMS`). Phase 7 and Phase 8 closed 2026-11-09; R6 done and force-pushed. The user's manual retest passed. The website points at the release (deployed 2026-11-10). Next (2026-11-13): the hardening tasks from the design and security review (board below): H1, H2 and P9-17 ready, H3 done; Phase 9 wave A starts when P9-17 and H2 are merged.
+- User decisions (2026-11-13, the review): attached agents are read-only by default, and writes are an explicit opt-in limited to directories the user allowed; signing and notarisation come after the alpha (beta); autosave is approved (recovery copies in the user's data directory).
 - Phase 6 goal: ShapeSheet engine, core subset (KICKOFF.md). Exit: resizing master-based shapes from the corpus recomputes geometry correctly for supported functions; the phase report gives the agreement rate with cached values.
 - Phase 5 goal: editing core (KICKOFF.md). Exit: a user can build a 10-shape flowchart with connected shapes across two pages, save it, reopen it and keep editing.
 - Phase 8 complete (2026-11-09, report: [progress/phase-8.md](progress/phase-8.md), tag `phase-8`; the same full check at `de3b2a3`).
@@ -124,26 +125,50 @@ Phase 8: binary `.vsd`, `.vss` and `.vst` import, read-only, in `crates/vsd-bina
 | [R13](tasks/R13.md) | implementer | — | boundary | merged (the alpha manual test checklist page, `docs/testing/alpha-checks.html`, published for the user's pass) | `20d1276` |
 | [R14](tasks/R14.md) | implementer | — | boundary | merged (`dist windows --cross`, `dist linux --cross`; its ratchet change left out; the master folded the icon step into one path, daa34c0) | 63f5dae |
 
+## Hardening task board (the 2026-11-13 design and security review)
+
+The review (`/Volumes/Dara/larrygram/review-2026-11-13-prompt.md`, outside the repository because it carries a memory-exhaustion repro) looked at `main` at `b61f083`. Its findings F1 to F14 map to the rows below. Batches: A and the Phase 9 amendment (P9-17) now and in parallel; B after A, beside Phase 9 where crate ownership allows; D later. Task files for B and D are written when their batch opens.
+
+| Task | Role | Depends on | Batch | State | Merge |
+|---|---|---|---|---|---|
+| [H1](tasks/H1.md) | implementer | — | A | ready (F1: XML node and attribute budgets across the package, from the corpus; regression tests, a fuzz seed, the repro re-measured) | — |
+| [H2](tasks/H2.md) | implementer | — | A | ready (F2, F4: `write_atomic` and `read_capped` in `commands`, used by every save, export and open and by the save dialog; ADR 0086; must merge before P9-03 and P9-08) | — |
+| [H3](tasks/H3.md) | master | — | A | done (F7: `--locked` release builds, an explicit `[profile.release]`, the tester guide says the bypass steps turn a protection off) | `0ee50aa` |
+| H4 | implementer | H1 | B | planned (F1, F13: share the namespace URI and prefix in `QName` (`Arc<str>` or an interner); ADR 0012 amendment; re-measure; then decide on keeping unmapped parts as raw bytes) | — |
+| H5 | implementer | — | B | planned (F3.1: `clippy::indexing_slicing` in `model`) | — |
+| H6 | implementer | P9-05 | B | planned (F3.1: the same in `render`, after P9-05 adds `region.rs`) | — |
+| H7 | implementer | — | B | planned (F3.1: the same in `text`) | — |
+| H8 | implementer | — | B | planned (F3.1: the same in `geom`) | — |
+| H9 | implementer | P9-03 | B | planned (F3.1: the same in `commands`, after P9-03, which owns the crate). `ui` stays to the panic boundary | — |
+| H10 | architect | H2 | B | planned (F3.2, F3.3: ADRs for a panic boundary around command dispatch and the frame's document work, and for autosave and recovery (approved); writes the implementation tasks H11 and H12, scheduled around P9-03 and P9-10, which own `commands`, `shell.rs` and the app) | — |
+| H13 | implementer | — | B | planned (F5: timed fuzz runs per target at idle priority through the gate queue, crashes into regression tests; a weekly `cargo deny check advisories` while GitHub Actions is locked. Short fuzz runs were done by hand in P1-08, P6-02 and P8-10, never on a schedule) | — |
+| H14 | test-engineer | — | B | planned (F14: a synthetic macro-enabled package saved as `.vsdx`: does the macro part or content type pass through? Strip with a warning or refuse, or close with no change. Also F1's `.vsd` peak-memory check on a dense file) | — |
+| H15 | architect | P9-16 | D | planned (F6: open and render on a worker thread, with progress and cancel; wasm has no threads. Until then P9-17's remote render budget holds) | — |
+| H16 | implementer | — | D | planned (F12: behaviour-preserving splits of the largest files, `crates/ui/src/shell.rs` first, each when no other task owns the file) | — |
+
+Not scheduled: signing, notarisation and a signed checksum file or build attestation (F7) wait for the beta (user decision 2026-11-13). F13's larger change (unmapped parts as raw bytes until save) waits for H4's measurement. The batch review sketched in `BATCH-proposed.md` is separate and still worth doing.
+
 ## Phase 9 task board
 
 | Task | Role | Depends on | Wave | State | Merge |
 |---|---|---|---|---|---|
 | [P9-01](tasks/P9-01.md) | architect | — | plan | merged (the plan, ADRs 0075–0082, the `crates/control` stubs, task files P9-02 to P9-16) | 36b9b31 |
-| [P9-02](tasks/P9-02.md) | implementer | P9-01, R7 | A | waiting (the wire: JSON-RPC, framing, serve, protocol; Phase 9 starts after the Phase 7 and 8 gates, R6, the manual test and the .dmg) | — |
-| [P9-03](tasks/P9-03.md) | implementer | P9-01, R7 | A | waiting (the registry: argument schemas, remote access, new commands; Phase 9 starts after the Phase 7 and 8 gates, R6, the manual test and the .dmg) | — |
-| [P9-04](tasks/P9-04.md) | implementer | P9-01, R7 | A | waiting (document inspection; Phase 9 starts after the Phase 7 and 8 gates, R6, the manual test and the .dmg) | — |
-| [P9-05](tasks/P9-05.md) | implementer | P9-01, R7 | A | waiting (render to PNG, page regions; Phase 9 starts after the Phase 7 and 8 gates, R6, the manual test and the .dmg) | — |
-| [P9-06](tasks/P9-06.md) | implementer | P9-01, R7 | A | waiting (the socket, the token, the inbox; Phase 9 starts after the Phase 7 and 8 gates, R6, the manual test and the .dmg) | — |
-| [P9-07](tasks/P9-07.md) | implementer | P9-01, R7 | A | waiting (the MCP server; Phase 9 starts after the Phase 7 and 8 gates, R6, the manual test and the .dmg) | — |
-| [P9-08](tasks/P9-08.md) | implementer | P9-03, P9-04, P9-05 | B | waiting (the executor, arguments and policy; Phase 9 starts after the Phase 7 and 8 gates, R6, the manual test and the .dmg) | — |
-| [P9-09](tasks/P9-09.md) | implementer | P9-02, P9-06, P9-07, P9-08 | C | waiting (the CLI front: serve, mcp, attach; Phase 9 starts after the Phase 7 and 8 gates, R6, the manual test and the .dmg) | — |
-| [P9-10](tasks/P9-10.md) | implementer | P9-03, P9-06, P9-08 | C | waiting (attaching the desktop app; Phase 9 starts after the Phase 7 and 8 gates, R6, the manual test and the .dmg) | — |
-| [P9-11](tasks/P9-11.md) | test-engineer | P9-09, P9-10 | D | waiting (protocol tests, fuzz, the end-to-end MCP flowchart; Phase 9 starts after the Phase 7 and 8 gates, R6, the manual test and the .dmg) | — |
-| [P9-12](tasks/P9-12.md) | implementer | P9-09, P9-10 | D | waiting (docs/agents.md and docs/control-protocol.md; Phase 9 starts after the Phase 7 and 8 gates, R6, the manual test and the .dmg) | — |
-| [P9-13](tasks/P9-13.md) | reviewer | P9-11, P9-12 | E | waiting (the Phase 9 review; Phase 9 starts after the Phase 7 and 8 gates, R6, the manual test and the .dmg) | — |
-| [P9-14](tasks/P9-14.md) | coverage-auditor | P9-11, P9-12 | E | waiting (the Phase 9 coverage audit; Phase 9 starts after the Phase 7 and 8 gates, R6, the manual test and the .dmg) | — |
-| [P9-15](tasks/P9-15.md) | cleanroom-auditor | P9-11, P9-12 | E | waiting (the Phase 9 clean-room audit; Phase 9 starts after the Phase 7 and 8 gates, R6, the manual test and the .dmg) | — |
-| [P9-16](tasks/P9-16.md) | implementer | P9-13, P9-14, P9-15 | F | waiting (the fixes, the report, the user's MCP client check; Phase 9 starts after the Phase 7 and 8 gates, R6, the manual test and the .dmg) | — |
+| [P9-17](tasks/P9-17.md) | architect | P9-01 | amend | ready (the 2026-11-13 review, F8 to F11: attached sessions read-only by default, writes opt-in inside user-allowed directories, no overwrite on the caller's flag alone, the policy opens files itself, headless defaults, MCP annotations, the runtime directory checks, a remote render budget, a remote call log; ADR 0081 amended, the stubs and the P9 task files updated) | — |
+| [P9-02](tasks/P9-02.md) | implementer | P9-01, P9-17 | A | waiting (the wire: JSON-RPC, framing, serve, protocol; Phase 9 implementation starts when P9-17 is merged) | — |
+| [P9-03](tasks/P9-03.md) | implementer | P9-01, P9-17, H2 | A | waiting (the registry: argument schemas, remote access, new commands; Phase 9 implementation starts when P9-17 is merged) | — |
+| [P9-04](tasks/P9-04.md) | implementer | P9-01, P9-17 | A | waiting (document inspection; Phase 9 implementation starts when P9-17 is merged) | — |
+| [P9-05](tasks/P9-05.md) | implementer | P9-01, P9-17 | A | waiting (render to PNG, page regions; Phase 9 implementation starts when P9-17 is merged) | — |
+| [P9-06](tasks/P9-06.md) | implementer | P9-01, P9-17 | A | waiting (the socket, the token, the inbox; Phase 9 implementation starts when P9-17 is merged) | — |
+| [P9-07](tasks/P9-07.md) | implementer | P9-01, P9-17 | A | waiting (the MCP server; Phase 9 implementation starts when P9-17 is merged) | — |
+| [P9-08](tasks/P9-08.md) | implementer | P9-03, P9-04, P9-05, P9-17, H2 | B | waiting (the executor, arguments and policy; Phase 9 implementation starts when P9-17 is merged) | — |
+| [P9-09](tasks/P9-09.md) | implementer | P9-02, P9-06, P9-07, P9-08 | C | waiting (the CLI front: serve, mcp, attach; Phase 9 implementation starts when P9-17 is merged) | — |
+| [P9-10](tasks/P9-10.md) | implementer | P9-03, P9-06, P9-08 | C | waiting (attaching the desktop app; Phase 9 implementation starts when P9-17 is merged) | — |
+| [P9-11](tasks/P9-11.md) | test-engineer | P9-09, P9-10 | D | waiting (protocol tests, fuzz, the end-to-end MCP flowchart; Phase 9 implementation starts when P9-17 is merged) | — |
+| [P9-12](tasks/P9-12.md) | implementer | P9-09, P9-10 | D | waiting (docs/agents.md and docs/control-protocol.md; Phase 9 implementation starts when P9-17 is merged) | — |
+| [P9-13](tasks/P9-13.md) | reviewer | P9-11, P9-12 | E | waiting (the Phase 9 review; Phase 9 implementation starts when P9-17 is merged) | — |
+| [P9-14](tasks/P9-14.md) | coverage-auditor | P9-11, P9-12 | E | waiting (the Phase 9 coverage audit; Phase 9 implementation starts when P9-17 is merged) | — |
+| [P9-15](tasks/P9-15.md) | cleanroom-auditor | P9-11, P9-12 | E | waiting (the Phase 9 clean-room audit; Phase 9 implementation starts when P9-17 is merged) | — |
+| [P9-16](tasks/P9-16.md) | implementer | P9-13, P9-14, P9-15 | F | waiting (the fixes, the report, the user's MCP client check; Phase 9 implementation starts when P9-17 is merged) | — |
 
 ## Phase 6 task board
 
