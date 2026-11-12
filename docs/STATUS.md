@@ -127,7 +127,7 @@ Phase 8: binary `.vsd`, `.vss` and `.vst` import, read-only, in `crates/vsd-bina
 
 ## Hardening task board (the 2026-11-13 design and security review)
 
-The review (`/Volumes/Dara/larrygram/review-2026-11-13-prompt.md`, outside the repository because it carries a memory-exhaustion repro) looked at `main` at `b61f083`. Its findings F1 to F14 map to the rows below. Batches: A and the Phase 9 amendment (P9-17) now and in parallel; B after A, beside Phase 9 where crate ownership allows; D later. Task files for B and D are written when their batch opens.
+The review (`/Volumes/Dara/larrygram/review-2026-11-13-prompt.md`, outside the repository because it carries a memory-exhaustion repro) looked at `main` at `b61f083`. Its findings F1 to F14 map to the rows below. Batches: A (H1, H2, H10) and the Phase 9 amendment (P9-17) now and in parallel; B after A, beside Phase 9 where crate ownership allows; D later. Task files for B and D are written when their batch opens.
 
 | Task | Role | Depends on | Batch | State | Merge |
 |---|---|---|---|---|---|
@@ -140,7 +140,7 @@ The review (`/Volumes/Dara/larrygram/review-2026-11-13-prompt.md`, outside the r
 | H7 | implementer | — | B | planned (F3.1: the same in `text`) | — |
 | H8 | implementer | — | B | planned (F3.1: the same in `geom`) | — |
 | H9 | implementer | P9-03 | B | planned (F3.1: the same in `commands`, after P9-03, which owns the crate). `ui` stays to the panic boundary | — |
-| H10 | architect | H2 | B | planned (F3.2, F3.3: ADRs for a panic boundary around command dispatch and the frame's document work, and for autosave and recovery (approved); writes the implementation tasks H11 and H12, scheduled around P9-03 and P9-10, which own `commands`, `shell.rs` and the app) | — |
+| [H10](tasks/H10.md) | architect | — | A | ready (F3.2, F3.3: ADR 0087 for a panic boundary around command dispatch and the frame's document work, ADR 0088 for autosave and recovery (approved); writes the implementation tasks H11 and H12, scheduled around P9-03 and P9-10, which own `commands`, `shell.rs` and the app. Moved into batch A: testers have the alpha and losing work hurts most) | — |
 | H13 | implementer | — | B | planned (F5: timed fuzz runs per target at idle priority through the gate queue, crashes into regression tests; a weekly `cargo deny check advisories` while GitHub Actions is locked. Short fuzz runs were done by hand in P1-08, P6-02 and P8-10, never on a schedule) | — |
 | H14 | test-engineer | — | B | planned (F14: a synthetic macro-enabled package saved as `.vsdx`: does the macro part or content type pass through? Strip with a warning or refuse, or close with no change. Also F1's `.vsd` peak-memory check on a dense file) | — |
 | H15 | architect | P9-16 | D | planned (F6: open and render on a worker thread, with progress and cancel; wasm has no threads. Until then P9-17's remote render budget holds) | — |
