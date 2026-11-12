@@ -170,6 +170,7 @@ pub fn build_release_with(
     let args = [
         subcommand,
         "--release",
+        "--locked",
         "-p",
         "larrygram",
         "-p",
@@ -223,6 +224,7 @@ pub fn build_release_xwin(sys: &mut dyn Sys, git: &mut Command, target: &str) ->
         "xwin",
         "build",
         "--release",
+        "--locked",
         "-p",
         "larrygram",
         "-p",
@@ -827,7 +829,7 @@ mod tests {
         .expect("the build step runs");
         assert_eq!(sys.calls.len(), 1, "{:?}", sys.calls);
         assert!(
-            sys.calls[0].contains("cargo build --release -p larrygram -p larrygram-cli"),
+            sys.calls[0].contains("cargo build --release --locked -p larrygram -p larrygram-cli"),
             "{:?}",
             sys.calls
         );
@@ -875,7 +877,8 @@ mod tests {
         .expect("the cross build step runs");
         assert_eq!(sys.calls.len(), 1, "{:?}", sys.calls);
         assert!(
-            sys.calls[0].contains("cargo zigbuild --release -p larrygram -p larrygram-cli"),
+            sys.calls[0]
+                .contains("cargo zigbuild --release --locked -p larrygram -p larrygram-cli"),
             "{:?}",
             sys.calls
         );

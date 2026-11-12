@@ -569,7 +569,7 @@ mod tests {
         assert_eq!(sys.calls.len(), 1, "{:?}", sys.calls);
         assert!(
             sys.calls[0].contains(
-                "build --release -p larrygram -p larrygram-cli --target x86_64-unknown-linux-gnu"
+                "build --release --locked -p larrygram -p larrygram-cli --target x86_64-unknown-linux-gnu"
             ),
             "{:?}",
             sys.calls

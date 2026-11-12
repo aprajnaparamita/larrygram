@@ -26,6 +26,21 @@ unreachable = "deny"
 # Parser crates (vsdx, vsd-binary, shapesheet) also deny `indexing_slicing` at their crate root.
 dbg_macro = "warn"
 
+[profile.release]
+# The shipped profile, written out so it is a decision and not a default
+# (the 2026-11-13 review, F7). These are cargo's release defaults.
+# `panic = "unwind"` is required: the planned panic boundary (task H10)
+# catches panics with `catch_unwind`. Overflow checks stay off until
+# that boundary exists, because a checked overflow would end the app
+# instead of wrapping; revisit them with H10.
+opt-level = 3
+debug = false
+lto = false
+codegen-units = 16
+panic = "unwind"
+overflow-checks = false
+incremental = false
+
 [profile.dev]
 # Keep debug builds reasonably fast for the UI.
 opt-level = 1

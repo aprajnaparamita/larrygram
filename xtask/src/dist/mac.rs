@@ -770,7 +770,7 @@ mod tests {
         let calls = sys.calls.join("\n");
         assert!(
             calls.contains(
-                "build --release -p larrygram -p larrygram-cli --target aarch64-apple-darwin"
+                "build --release --locked -p larrygram -p larrygram-cli --target aarch64-apple-darwin"
             ),
             "{calls}"
         );

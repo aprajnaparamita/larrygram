@@ -62,6 +62,12 @@ operating system warns on the first launch. That is expected.
   confirm. From then on the app opens normally; a newer build may ask
   once more.
 
+  These steps turn off a macOS protection for this one app: because
+  the alpha is not signed, macOS cannot check who made it. Do them
+  only for a package you downloaded from the official release page
+  and checked against `SHA256SUMS` (above). Signed builds are planned
+  for the beta.
+
   On macOS 14 (Sonoma) and earlier there is a shorter way:
   right-click (or Control-click) the app, choose **Open**, then
   **Open** in the dialog.
@@ -73,12 +79,16 @@ operating system warns on the first launch. That is expected.
   ```
 
   This deletes the "downloaded from the internet" mark that makes
-  macOS check the app, so it opens without the prompt.
+  macOS check the app, so macOS skips its check for Larrygram
+  entirely. The same rule applies: only for the official, checked
+  package.
 
 - **Windows**: unpack the zip anywhere (for example
   `%LOCALAPPDATA%\Larrygram`) and run `larrygram.exe`. Windows
   Defender SmartScreen may say it protected you: click **More info**,
-  then **Run anyway**.
+  then **Run anyway**. That turns SmartScreen's protection off for
+  this file, so do it only for a package from the official release
+  page that matches `SHA256SUMS`.
 
 - **Linux**: the package is not an installer; unpack it and follow the
   `INSTALL.txt` inside. The short version for one user:
